@@ -8,7 +8,7 @@ import {
     IconUsers,
 } from '@tabler/icons-react';
 import { type FC } from 'react';
-// import { useIntercom } from 'react-use-intercom';
+import { useIntercom } from 'react-use-intercom';
 import useHealth from '../../hooks/health/useHealth';
 import LargeMenuItem from '../common/LargeMenuItem';
 import MantineIcon from '../common/MantineIcon';

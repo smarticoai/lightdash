@@ -17,7 +17,7 @@ export const jwtStrategy = ({
         true,
         async (token, done) => {
 
-            const x: JwtPayload = jwt.verify(token,lightdashConfig.lightdashSecret);
+            const x: JwtPayload = jwt.verify(token,lightdashConfig.lightdashSecret) as JwtPayload; 
 
             try {
                 const user = await userService.loginWithPersonalAccessToken(
