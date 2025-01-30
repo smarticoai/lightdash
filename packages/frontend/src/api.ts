@@ -7,17 +7,22 @@ import {
 } from '@lightdash/common';
 import { spanToTraceHeader, startSpan } from '@sentry/react';
 import fetch from 'isomorphic-fetch';
+import { smrIsEmbeddedMode } from './utils/smarticoUtils';
 
 export const BASE_API_URL =
     import.meta.env.VITEST === 'true'
         ? `http://test.lightdash/`
         : import.meta.env.BASE_URL;
 
-const defaultHeaders = {
+const defaultHeaders: any = {
     'Content-Type': 'application/json',
     [LightdashRequestMethodHeader]: RequestMethod.WEB_APP,
     [LightdashVersionHeader]: __APP_VERSION__,
 };
+
+if (smrIsEmbeddedMode()) {
+    defaultHeaders.JWT = 'token ' + window.location.hash.split('token=')[1];
+}
 
 const handleError = (err: any): ApiError => {
     if (err.error?.statusCode && err.error?.name) {

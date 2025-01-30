@@ -1223,6 +1223,7 @@ export class ProjectService extends BaseService {
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const emailStatus = await this.emailModel.getPrimaryEmailStatus(
@@ -2032,6 +2033,7 @@ export class ProjectService extends BaseService {
                             {
                                 organizationUuid,
                                 userUuid: user.userUuid,
+                                user
                             },
                         );
 
@@ -2723,6 +2725,7 @@ export class ProjectService extends BaseService {
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const emailStatus = await this.emailModel.getPrimaryEmailStatus(
@@ -3194,6 +3197,7 @@ export class ProjectService extends BaseService {
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const allExploreSummaries = explores.reduce<SummaryExplore[]>(
@@ -3358,6 +3362,7 @@ export class ProjectService extends BaseService {
                         {
                             organizationUuid: project.organizationUuid,
                             userUuid: user.userUuid,
+                            user
                         },
                     );
 
@@ -4449,6 +4454,7 @@ export class ProjectService extends BaseService {
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const emailStatus = await this.emailModel.getPrimaryEmailStatus(

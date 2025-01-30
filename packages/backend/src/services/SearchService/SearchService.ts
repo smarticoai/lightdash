@@ -149,6 +149,7 @@ export class SearchService extends BaseService {
                         {
                             organizationUuid,
                             userUuid: user.userUuid,
+                            user
                         },
                     );
                 filteredFields = results.fields.filter(

@@ -7,6 +7,7 @@ import {
     setUser,
 } from '@sentry/react';
 import { useEffect, useState } from 'react';
+import { smrMode } from '../../utils/smarticoUtils';
 
 const useSentry = (
     sentryConfig: HealthState['sentry'] | undefined,
@@ -15,6 +16,11 @@ const useSentry = (
     const [isSentryLoaded, setIsSentryLoaded] = useState(false);
 
     useEffect(() => {
+
+        if (smrMode()) {
+            return;
+        }
+
         if (sentryConfig && !isSentryLoaded && sentryConfig.frontend.dsn) {
             init({
                 dsn: sentryConfig.frontend.dsn,

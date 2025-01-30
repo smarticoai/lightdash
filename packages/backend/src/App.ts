@@ -63,6 +63,7 @@ import {
 import { UtilProviderMap, UtilRepository } from './utils/UtilRepository';
 import { VERSION } from './version';
 import PrometheusMetrics from './prometheus';
+import { jwtStrategy } from './controllers/authentication/strategies/jwtStrategy';
 
 // We need to override this interface to have our user typing
 declare global {
@@ -566,6 +567,7 @@ export default class App {
         const userService = this.serviceRepository.getUserService();
 
         passport.use(apiKeyPassportStrategy({ userService }));
+        passport.use(jwtStrategy({ userService }));
         passport.use(
             localPassportStrategy({
                 userService,

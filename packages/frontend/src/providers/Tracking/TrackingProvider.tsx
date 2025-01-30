@@ -20,6 +20,7 @@ import {
     type TrackingData,
 } from './types';
 import useTracking from './useTracking';
+import { smrMode } from '../../utils/smarticoUtils';
 
 const TrackingProviderMain: FC<React.PropsWithChildren<TrackingData>> = ({
     rudder,
@@ -87,6 +88,10 @@ const TrackingProviderMain: FC<React.PropsWithChildren<TrackingData>> = ({
     const page = useCallback(
         (rudderPageEvent: PageData): void => {
             const newPageContext = getLightdashPageProperties(rudderPageEvent);
+
+            if (smrMode()) {
+                return;
+            }
             rudderAnalytics?.page(
                 rudderPageEvent.category,
                 rudderPageEvent.name,
@@ -102,6 +107,9 @@ const TrackingProviderMain: FC<React.PropsWithChildren<TrackingData>> = ({
 
     const track = useCallback(
         ({ name, properties = {} }: EventData): void => {
+            if (smrMode()) {
+                return;
+            }
             rudderAnalytics?.track(
                 `${LIGHTDASH_APP_NAME}.${name}`,
                 properties,

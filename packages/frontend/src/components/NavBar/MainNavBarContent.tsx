@@ -14,6 +14,7 @@ import ProjectSwitcher from './ProjectSwitcher';
 import SettingsMenu from './SettingsMenu';
 import UserCredentialsSwitcher from './UserCredentialsSwitcher';
 import UserMenu from './UserMenu';
+import { smrMode } from '../../utils/smarticoUtils';
 
 type Props = {
     activeProjectUuid: string | undefined;
@@ -67,9 +68,11 @@ export const MainNavBarContent: FC<Props> = ({
                         <NotificationsMenu projectUuid={activeProjectUuid} />
                     )}
 
-                    <HelpMenu />
+                    {!smrMode() &&
+                        <HelpMenu />
+                    }
 
-                    {!isLoadingActiveProject && activeProjectUuid && (
+                    {!isLoadingActiveProject && activeProjectUuid && !smrMode() && (
                         <HeadwayMenuItem projectUuid={activeProjectUuid} />
                     )}
 

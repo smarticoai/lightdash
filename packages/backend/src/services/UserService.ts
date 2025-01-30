@@ -1269,9 +1269,9 @@ export class UserService extends BaseService {
         }
     }
 
-    async loginWithPersonalAccessToken(token: string): Promise<SessionUser> {
+    async loginWithPersonalAccessToken(token: string, noHash: boolean = false): Promise<SessionUser> {
         const results =
-            await this.userModel.findSessionUserByPersonalAccessToken(token);
+            await this.userModel.findSessionUserByPersonalAccessToken(token, true);
         if (results === undefined) {
             throw new AuthorizationError();
         }

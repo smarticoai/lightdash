@@ -5,6 +5,7 @@ import { IntercomProvider } from 'react-use-intercom';
 import { Intercom } from '../components/Intercom';
 import useSentry from '../hooks/thirdPartyServices/useSentry';
 import useApp from './App/useApp';
+import { smrMode } from '../utils/smarticoUtils';
 
 const usePylon = () => {
     const { user, health } = useApp();
@@ -126,10 +127,10 @@ const ThirdPartyServicesEnabledProvider: FC<React.PropsWithChildren<{}>> = ({
 
     return (
         <IntercomProvider
-            appId={health.data?.intercom.appId || ''}
-            shouldInitialize={!!health.data?.intercom.appId}
-            apiBase={health.data?.intercom.apiBase || ''}
-            autoBoot
+            appId={smrMode() ? '' : health.data?.intercom.appId || ''}
+            shouldInitialize={smrMode() ? false : !!health.data?.intercom.appId}
+            apiBase={smrMode() ? '' : health.data?.intercom.apiBase || ''}
+            autoBoot={!smrMode()}
         >
             <PostHogProvider
                 apiKey={health.data?.posthog?.projectApiKey || ''}

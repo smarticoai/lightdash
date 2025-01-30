@@ -8,10 +8,11 @@ import {
     IconUsers,
 } from '@tabler/icons-react';
 import { type FC } from 'react';
-import { useIntercom } from 'react-use-intercom';
+// import { useIntercom } from 'react-use-intercom';
 import useHealth from '../../hooks/health/useHealth';
 import LargeMenuItem from '../common/LargeMenuItem';
 import MantineIcon from '../common/MantineIcon';
+import { smrMode } from '../../utils/smarticoUtils';
 
 const HelpMenu: FC = () => {
     const health = useHealth();
@@ -33,6 +34,7 @@ const HelpMenu: FC = () => {
                 </Button>
             </Menu.Target>
 
+            {!smrMode() &&
             <Menu.Dropdown>
                 {isCloudCustomer && (
                     <LargeMenuItem
@@ -78,6 +80,7 @@ const HelpMenu: FC = () => {
                     icon={IconMessageCircle2}
                 />
             </Menu.Dropdown>
+            }
         </Menu>
     );
 };

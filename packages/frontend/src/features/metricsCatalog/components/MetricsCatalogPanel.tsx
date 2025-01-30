@@ -39,6 +39,7 @@ import {
 import { type MetricCatalogView } from '../types';
 import { MetricChartUsageModal } from './MetricChartUsageModal';
 import { MetricsTable } from './MetricsTable';
+import { smrMode } from '../../../utils/smarticoUtils';
 
 const LOCAL_STORAGE_KEY = 'metrics-catalog-learn-more-popover-closed';
 
@@ -385,6 +386,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                         <Text color="gray.8" weight={600} size="xl">
                             Metrics Catalog
                         </Text>
+                        {!smrMode() &&
                         <Tooltip
                             variant="xs"
                             label="This feature is in beta. We're actively testing and improving it—your feedback is welcome!"
@@ -418,6 +420,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                                 Beta
                             </Badge>
                         </Tooltip>
+                        }
                     </Group>
                     <Text color="gray.6" size="sm" weight={400}>
                         Browse all Metrics & KPIs across this project

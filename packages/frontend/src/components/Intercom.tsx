@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { useIntercom } from 'react-use-intercom';
 import useApp from '../providers/App/useApp';
+import { smrMode } from '../utils/smarticoUtils';
 
 const LOCATIONS_WITH_INTERCOM = ['/welcome', '/register', '/login', '/invite'];
 
@@ -13,6 +14,9 @@ export const Intercom: React.FC = () => {
     const { pathname } = useLocation();
 
     useEffect(() => {
+        if (smrMode()) {
+            return;
+        }
         if (
             LOCATIONS_WITH_INTERCOM.some((locationWithIntercom) =>
                 pathname.includes(locationWithIntercom),
@@ -29,6 +33,9 @@ export const Intercom: React.FC = () => {
     }, [pathname, update]);
 
     useEffect(() => {
+        if (smrMode()) {
+            return;
+        }        
         if (health.data?.mode && health.data.mode !== LightdashMode.DEMO) {
             update(
                 user.data

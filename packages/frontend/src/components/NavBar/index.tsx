@@ -16,6 +16,7 @@ import { BANNER_HEIGHT, NAVBAR_HEIGHT } from '../common/Page/constants';
 import { DashboardExplorerBanner } from './DashboardExplorerBanner';
 import { MainNavBarContent } from './MainNavBarContent';
 import { PreviewBanner } from './PreviewBanner';
+import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
 
 enum NavBarMode {
     DEFAULT = 'default',
@@ -86,6 +87,10 @@ const NavBar = memo(() => {
                 );
         }
     };
+
+    if (smrIsEmbeddedMode()) {
+        return null;
+    }
 
     return (
         <MantineProvider inherit theme={{ colorScheme: 'dark' }}>

@@ -280,6 +280,7 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         // We keep errors in the list of explores
@@ -534,6 +535,7 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         if (catalogSearch.searchQuery) {
@@ -586,6 +588,7 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         if (!doesExploreMatchRequiredAttributes(explore, userAttributes)) {
@@ -745,6 +748,7 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const paginatedCatalog = await this.searchCatalog(
@@ -950,6 +954,7 @@ export class CatalogService<
             (await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             }));
 
         const explores = await this.projectModel.findExploresFromCache(
@@ -1191,6 +1196,7 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const allCatalogMetrics = await this.catalogModel.search({
@@ -1252,6 +1258,7 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
+                user
             });
 
         const catalogDimensions = await this.catalogModel.search({

@@ -123,7 +123,7 @@ export class UserController extends BaseController {
      * @param req express request
      * @param passcode the one-time passcode sent to the user's primary email
      */
-    @Middlewares([isAuthenticated])
+    @Middlewares([allowApiKeyAuthentication,isAuthenticated])
     @Get('/me/email/status')
     @OperationId('GetEmailVerificationStatus')
     async getEmailVerificationStatus(
@@ -232,7 +232,7 @@ export class UserController extends BaseController {
     /**
      * Get user warehouse credentials
      */
-    @Middlewares([isAuthenticated])
+    @Middlewares([allowApiKeyAuthentication,isAuthenticated])
     @Get('/warehouseCredentials')
     @OperationId('getWarehouseCredentials')
     async getWarehouseCredentials(@Request() req: express.Request): Promise<{

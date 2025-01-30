@@ -1,5 +1,6 @@
 import {
     CreateUserAttribute,
+    SessionUser,
     UserAttribute,
     UserAttributeValueMap,
 } from '@lightdash/common';
@@ -31,6 +32,7 @@ export class UserAttributesModel {
     async getAttributeValuesForOrgMember(filters: {
         organizationUuid: string;
         userUuid: string;
+        user: SessionUser;
     }): Promise<UserAttributeValueMap> {
         const attributeValues = await this.database(UserAttributesTable)
             .leftJoin(
@@ -150,10 +152,13 @@ export class UserAttributesModel {
 
         // combine group, user and default values
         return attributeValues.reduce<UserAttributeValueMap>((acc, row) => {
+            const sessionValue = filters.user?.userAttributes ? filters.user.userAttributes[row.name] as any : null;
             const userValue: string | undefined = userValuesMap[row.name];
             const groupValues: string[] = groupValuesMap[row.name] ?? [];
             let finalValues: string[];
-            if (userValue) {
+            if (sessionValue) {
+                finalValues = [sessionValue, ...groupValues];
+            } else if (userValue) {
                 finalValues = [userValue, ...groupValues];
             } else if (groupValues.length > 0) {
                 finalValues = groupValues;

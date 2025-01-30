@@ -2,6 +2,7 @@ import express from 'express';
 import passport from 'passport';
 import { lightdashConfig } from '../config/lightdashConfig';
 import {
+    allowApiKeyAuthentication,
     getLoginHint,
     getOidcRedirectURL,
     initiateOktaOpenIdLogin,
@@ -28,7 +29,7 @@ apiV1Router.get('/livez', async (req, res, next) => {
     });
 });
 
-apiV1Router.get('/health', async (req, res, next) => {
+apiV1Router.get('/health', allowApiKeyAuthentication, async (req, res, next) => {
     req.services
         .getHealthService()
         .getHealthState(req.user)

@@ -21,6 +21,7 @@ import VerifyEmailForm from '../components/RegisterForms/VerifyEmailForm';
 import { useEmailStatus } from '../hooks/useEmailVerification';
 import useApp from '../providers/App/useApp';
 import LightdashLogo from '../svgs/lightdash-black.svg';
+import { smrMode } from '../utils/smarticoUtils';
 
 const VerificationSuccess: FC<{
     isOpen: boolean;
@@ -76,6 +77,7 @@ const VerifyEmailPage: FC = () => {
                 <Card p="xl" radius="xs" withBorder shadow="xs">
                     <VerifyEmailForm />
                 </Card>
+                {!smrMode() &&
                 <Text color="gray.6" ta="center" px="xs">
                     You need to verify your email to get access to Lightdash. If
                     you need help, you can{' '}
@@ -83,6 +85,7 @@ const VerifyEmailPage: FC = () => {
                         chat to support here.
                     </Anchor>
                 </Text>
+                }
                 {data && (
                     <VerificationSuccess
                         isOpen={data.isVerified}
