@@ -46,7 +46,13 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
     if (!lightdashConfig.auth.pat.enabled) {
         throw new AuthorizationError('Personal access tokens are disabled');
     }
-    passport.authenticate('headerapikey', { session: false })(req, res, next);
+    passport.authenticate('headerapikey', { session: false }, (err: unknown, user: null) => {
+        if (err) {
+            return next(); // If authentication fails, proceed without user
+        }
+        req.user = user || undefined; // Set user if authenticated, else null
+        return next();
+    })(req, res, next);
 };
 
 export const storeOIDCRedirect: RequestHandler = (req, res, next) => {

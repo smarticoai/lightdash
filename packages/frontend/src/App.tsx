@@ -57,7 +57,7 @@ const App = () => (
             <MantineProvider>
                 <RouterProvider router={router} />
             </MantineProvider>
-            <ReactQueryDevtools initialIsOpen={false} />
+            {/* <ReactQueryDevtools initialIsOpen={false} /> */}
         </ReactQueryProvider>
     </>
 );

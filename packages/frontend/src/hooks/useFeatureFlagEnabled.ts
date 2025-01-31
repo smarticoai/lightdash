@@ -12,7 +12,7 @@ import { lightdashApi } from '../api';
  * of our FeatureFlags enum.
  */
 export const useFeatureFlagEnabled = (featureFlag: FeatureFlags) =>
-    useFeatureFlagEnabledPosthog(featureFlag) === true;
+    useFeatureFlagEnabledPosthog(featureFlag) === true || true;
 
 /**
  * Use our own endpoint to get the feature flag from multiple sources.

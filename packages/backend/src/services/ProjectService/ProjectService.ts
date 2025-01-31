@@ -18,6 +18,7 @@ import {
     convertCustomMetricToDbt,
     countCustomDimensionsInMetricQuery,
     countTotalFilterRules,
+    CreateBigqueryCredentials,
     createDimensionWithGranularity,
     CreateJob,
     CreateProject,
@@ -426,6 +427,7 @@ export class ProjectService extends BaseService {
     private async getWarehouseCredentials(
         projectUuid: string,
         userUuid: string,
+        user?: SessionUser
     ) {
         let credentials =
             await this.projectModel.getWarehouseCredentialsForProject(
@@ -457,6 +459,10 @@ export class ProjectService extends BaseService {
             }
             userWarehouseCredentialsUuid = userWarehouseCredentials.uuid;
         }
+        if (user?.userAttributes?.bq_project_id) {
+            (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as any;
+        }
+
         return {
             ...credentials,
             userWarehouseCredentialsUuid,
@@ -1216,7 +1222,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
             explore.warehouse,
         );
         const userAttributes =
@@ -2024,6 +2030,7 @@ export class ProjectService extends BaseService {
                             await this.getWarehouseCredentials(
                                 projectUuid,
                                 user.userUuid,
+                                user
                             ),
                             explore.warehouse,
                         );
@@ -2253,7 +2260,7 @@ export class ProjectService extends BaseService {
         });
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
         );
         this.logger.debug(`Run query against warehouse`);
         const queryTags: RunQueryTags = {
@@ -2303,7 +2310,7 @@ export class ProjectService extends BaseService {
         });
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, userUuid),
+            await this.getWarehouseCredentials(projectUuid, userUuid, user),
         );
         this.logger.debug(`Stream query against warehouse`);
         const queryTags: RunQueryTags = {
@@ -2454,6 +2461,7 @@ export class ProjectService extends BaseService {
         const warehouseCredentials = await this.getWarehouseCredentials(
             projectUuid,
             userUuid,
+            user
         );
         // Apply limit and pivot to the SQL query
         const pivotedSql = ProjectService.applyPivotToSqlQuery({
@@ -2718,7 +2726,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
             explore.warehouse,
         );
         const userAttributes =
@@ -3478,6 +3486,7 @@ export class ProjectService extends BaseService {
         const credentials = await this.getWarehouseCredentials(
             projectUuid,
             user.userUuid,
+            user
         );
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
@@ -3530,6 +3539,7 @@ export class ProjectService extends BaseService {
         const credentials = await this.getWarehouseCredentials(
             projectUuid,
             user.userUuid,
+            user
         );
 
         let catalog: WarehouseTablesCatalog | null = null;
@@ -3580,6 +3590,7 @@ export class ProjectService extends BaseService {
         const credentials = await this.getWarehouseCredentials(
             projectUuid,
             user.userUuid,
+            user
         );
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
@@ -4503,7 +4514,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
             explore.warehouse,
         );
 
@@ -4537,7 +4548,7 @@ export class ProjectService extends BaseService {
     ) {
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
             explore.warehouse,
         );
 
@@ -4932,7 +4943,7 @@ export class ProjectService extends BaseService {
         }
         const { warehouseClient } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
         );
         const virtualView = await this.projectModel.createVirtualView(
             projectUuid,
@@ -5020,7 +5031,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
         );
 
         const updatedExplore = await this.projectModel.updateVirtualView(

@@ -64,6 +64,7 @@ import SpaceActionModal from '../SpaceActionModal';
 import { ActionType } from '../SpaceActionModal/types';
 import { DashboardRefreshButton } from './DashboardRefreshButton';
 import ShareLinkButton from './ShareLinkButton';
+import { smrMode } from '../../../utils/smarticoUtils';
 
 type DashboardHeaderProps = {
     spaces?: SpaceSummary[];
@@ -383,7 +384,7 @@ const DashboardHeader = ({
                         </Tooltip>
                     )}
 
-                    {userCanExportData && !isFullscreen && (
+                    {userCanExportData && !isFullscreen && !smrMode() && (
                         <ShareLinkButton url={`${window.location.href}`} />
                     )}
 

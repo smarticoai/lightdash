@@ -61,11 +61,11 @@ export const wrapSentryTransaction = <T>(
             attributes: context,
         },
         async (span, end) => {
-            Logger.debug(
-                `Starting sentry transaction ${
-                    span?.spanContext().spanId
-                } "${name}" with context: ${JSON.stringify(context)}`,
-            );
+            // Logger.debug(
+            //     `Starting sentry transaction ${
+            //         span?.spanContext().spanId
+            //     } "${name}" with context: ${JSON.stringify(context)}`,
+            // );
 
             try {
                 return await funct(span);
@@ -78,11 +78,11 @@ export const wrapSentryTransaction = <T>(
                 Sentry.captureException(error);
                 throw error;
             } finally {
-                Logger.debug(
-                    `End sentry transaction ${
-                        span?.spanContext().spanId
-                    } "${name}", took: ${Date.now() - startTime}ms`,
-                );
+                // Logger.debug(
+                //     `End sentry transaction ${
+                //         span?.spanContext().spanId
+                //     } "${name}", took: ${Date.now() - startTime}ms`,
+                // );
                 end();
             }
         },

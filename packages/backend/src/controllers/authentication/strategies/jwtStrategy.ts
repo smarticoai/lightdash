@@ -17,14 +17,14 @@ export const jwtStrategy = ({
         true,
         async (token, done) => {
 
-            const x: JwtPayload = jwt.verify(token,lightdashConfig.lightdashSecret) as JwtPayload; 
+            const jwtDecoded: JwtPayload = jwt.verify(token,lightdashConfig.lightdashSecret) as JwtPayload; 
 
             try {
                 const user = await userService.loginWithPersonalAccessToken(
-                    x.auth_token,
+                    jwtDecoded.auth_token,
                     true
                 );
-                user.userAttributes = x;
+                user.userAttributes = jwtDecoded;
                 return done(null, user);
             } catch (error) {
                 console.error('Error in jwtStrategy', error);
