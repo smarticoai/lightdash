@@ -319,6 +319,7 @@ export class CatalogService<
     async indexCatalog(
         projectUuid: string,
         explores: (Explore | ExploreError)[],
+        userUuid: string | undefined,
     ) {
         const exploresWithCachedExploreUuid =
             await this.projectModel.getCachedExploresWithUuid(
@@ -326,9 +327,13 @@ export class CatalogService<
                 explores,
             );
 
+        const projectYamlTags = await this.tagsModel.getYamlTags(projectUuid);
+
         return this.catalogModel.indexCatalog(
             projectUuid,
             exploresWithCachedExploreUuid,
+            projectYamlTags,
+            userUuid,
         );
     }
 
@@ -392,11 +397,13 @@ export class CatalogService<
                                 tagUuid: prevCatalogTagUuid,
                                 createdByUserUuid: prevCreatedByUserUuid,
                                 createdAt: prevCreatedAt,
+                                taggedViaYaml: prevTaggedViaYaml,
                             }) => ({
                                 catalog_search_uuid: currentCatalogSearchUuid,
                                 tag_uuid: prevCatalogTagUuid,
                                 created_by_user_uuid: prevCreatedByUserUuid,
                                 created_at: prevCreatedAt,
+                                is_from_yaml: prevTaggedViaYaml,
                             }),
                         );
                     }
@@ -855,6 +862,7 @@ export class CatalogService<
             user,
             catalogSearchUuid,
             tagUuid,
+            false,
         );
     }
 

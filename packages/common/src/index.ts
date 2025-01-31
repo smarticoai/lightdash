@@ -111,6 +111,13 @@ import {
 import { type UserWarehouseCredentials } from './types/userWarehouseCredentials';
 import { type ValidationResponse } from './types/validation';
 
+import type {
+    ApiAiConversationMessages,
+    ApiAiConversationResponse,
+    ApiAiConversations,
+    DecodedEmbed,
+    EmbedUrl,
+} from './ee';
 import { type AnyType } from './types/any';
 import { type ApiGetSpotlightTableConfig } from './types/api/spotlight';
 import {
@@ -156,13 +163,13 @@ import { formatItemValue } from './utils/formatting';
 import { getItemId, getItemLabelWithoutTableName } from './utils/item';
 
 dayjs.extend(utc);
-
 export * from './authorization/index';
 export * from './authorization/types';
 export * from './compiler/exploreCompiler';
 export * from './compiler/filtersCompiler';
 export * from './compiler/translator';
 export * from './dbt/validation';
+export * from './ee/index';
 export * from './pivotTable/pivotQueryResults';
 export { default as lightdashDbtYamlSchema } from './schemas/json/lightdash-dbt-2.0.json';
 export { default as lightdashProjectConfigSchema } from './schemas/json/lightdash-project-config-1.0.json';
@@ -238,6 +245,7 @@ export * from './types/userAttributes';
 export * from './types/userWarehouseCredentials';
 export * from './types/validation';
 export * from './types/warehouse';
+export * from './utils/accessors';
 export * from './utils/additionalMetrics';
 export * from './utils/api';
 export { default as assertUnreachable } from './utils/assertUnreachable';
@@ -386,6 +394,8 @@ export const SEED_ORG_2_ADMIN_EMAIL = {
 export const SEED_ORG_2_ADMIN_PASSWORD = {
     password: 'demo_password!',
 };
+
+export const SEED_EMBED_SECRET = 'zU3h50saDOO20czNFNRok';
 
 export const SEED_PROJECT = {
     project_uuid: '3675b69e-8324-4110-bdca-059031aa8da3',
@@ -679,6 +689,8 @@ type ApiResults =
     | ValidationResponse[]
     | ChartHistory
     | ChartVersion
+    | EmbedUrl
+    | DecodedEmbed
     | Array<GitRepo>
     | PullRequestCreated
     | GitIntegrationConfiguration
@@ -698,6 +710,9 @@ type ApiResults =
     | ApiAiGetDashboardSummaryResponse['results']
     | ApiCatalogMetadataResults
     | ApiCatalogAnalyticsResults
+    | ApiAiConversations['results']
+    | ApiAiConversationMessages['results']
+    | ApiAiConversationResponse['results']
     | ApiPromotionChangesResponse['results']
     | ApiWarehouseTableFields['results']
     | ApiTogglePinnedItem['results']
@@ -735,7 +750,8 @@ export type ApiErrorDetail = {
     statusCode: number;
     message: string;
     data: { [key: string]: string };
-    id?: string;
+    sentryTraceId?: string;
+    sentryEventId?: string;
 };
 export type ApiError = {
     status: 'error';
@@ -1000,15 +1016,14 @@ export const getAxisName = ({
     series?: Series[];
     itemsMap: ItemsMap | undefined;
 }): string | undefined => {
-    const defaultItem = itemsMap
-        ? itemsMap[(series || [])[0]?.encode[axisReference].field]
-        : undefined;
+    const itemIndex = (series || [])[0]?.encode[axisReference].field;
+    const defaultItem = itemsMap && itemIndex ? itemsMap[itemIndex] : undefined;
     const dateGroupName = defaultItem
         ? getDateGroupLabel(defaultItem)
         : undefined;
     const fallbackSeriesName: string | undefined =
         series && series.length === 1
-            ? series[0].name ||
+            ? series[0]?.name ||
               (defaultItem && getItemLabelWithoutTableName(defaultItem))
             : undefined;
 

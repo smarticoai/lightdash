@@ -7,6 +7,7 @@ import {
     ApiError,
     LightdashError,
     LightdashMode,
+    SessionServiceAccount,
     LightdashVersionHeader,
     SessionUser,
     UnexpectedServerError,
@@ -43,7 +44,7 @@ import {
     oneLoginPassportStrategy,
     OpenIDClientOktaStrategy,
 } from './controllers/authentication';
-import { errorHandler } from './errors';
+import { errorHandler, scimErrorHandler } from './errors';
 import { RegisterRoutes } from './generated/routes';
 import apiSpec from './generated/swagger.json';
 import Logger from './logging/logger';
@@ -75,6 +76,7 @@ declare global {
          */
         interface Request {
             services: ServiceRepository;
+            serviceAccount?: SessionServiceAccount;
             /**
              * @deprecated Clients should be used inside services. This will be removed soon.
              */
@@ -119,6 +121,7 @@ const slackBotFactory = (context: {
     analytics: LightdashAnalytics;
     serviceRepository: ServiceRepository;
     models: ModelRepository;
+    clients: ClientRepository;
 }) =>
     new SlackBot({
         lightdashConfig: context.lightdashConfig,
@@ -127,7 +130,7 @@ const slackBotFactory = (context: {
         unfurlService: context.serviceRepository.getUnfurlService(),
     });
 
-type AppArguments = {
+export type AppArguments = {
     lightdashConfig: LightdashConfig;
     port: string | number;
     environment?: 'production' | 'development';
@@ -519,6 +522,7 @@ export default class App {
 
         // Errors
         Sentry.setupExpressErrorHandler(expressApp);
+        expressApp.use(scimErrorHandler); // SCIM error check before general error handler
         expressApp.use(
             (error: Error, req: Request, res: Response, _: NextFunction) => {
                 const errorResponse = errorHandler(error);
@@ -553,7 +557,13 @@ export default class App {
                         name: errorResponse.name,
                         message: errorResponse.message,
                         data: errorResponse.data,
-                        id:
+                        sentryTraceId:
+                            // Only return the Sentry trace ID for unexpected server errors
+                            errorResponse.statusCode === 500
+                                ? Sentry.getActiveSpan()?.spanContext().traceId
+                                : undefined,
+                        sentryEventId:
+                            // Only return the Sentry event ID for unexpected server errors
                             errorResponse.statusCode === 500
                                 ? Sentry.lastEventId()
                                 : undefined,
@@ -624,6 +634,7 @@ export default class App {
             analytics: this.analytics,
             serviceRepository: this.serviceRepository,
             models: this.models,
+            clients: this.clients,
         });
         await slackBot.start(expressApp);
     }

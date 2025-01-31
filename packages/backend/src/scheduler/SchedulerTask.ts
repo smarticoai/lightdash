@@ -63,6 +63,7 @@ import {
     UploadMetricGsheetPayload,
     ValidateProjectPayload,
     VizColumn,
+    type RunQueryTags,
     type SchedulerIndexCatalogJobPayload,
 } from '@lightdash/common';
 import { instance } from 'apache-arrow/visitor/typecomparator';
@@ -86,6 +87,7 @@ import {
     getNotificationChannelErrorBlocks,
 } from '../clients/Slack/SlackMessageBlocks';
 import { LightdashConfig } from '../config/parseConfig';
+import { AiService } from '../ee/services/AiService/AiService';
 import Logger from '../logging/logger';
 import type { CatalogService } from '../services/CatalogService/CatalogService';
 import { CsvService } from '../services/CsvService/CsvService';
@@ -102,7 +104,7 @@ import { ValidationService } from '../services/ValidationService/ValidationServi
 import { EncryptionUtil } from '../utils/EncryptionUtil/EncryptionUtil';
 import { SchedulerClient } from './SchedulerClient';
 
-type SchedulerTaskArguments = {
+export type SchedulerTaskArguments = {
     lightdashConfig: LightdashConfig;
     analytics: LightdashAnalytics;
     csvService: CsvService;
@@ -122,14 +124,6 @@ type SchedulerTaskArguments = {
     encryptionUtil: EncryptionUtil;
 };
 
-type RunQueryTags = {
-    project_uuid?: string;
-    user_uuid?: string;
-    organization_uuid?: string;
-    chart_uuid?: string;
-    dashboard_uuid?: string;
-    explore_name?: string;
-};
 export default class SchedulerTask {
     protected readonly lightdashConfig: LightdashConfig;
 
@@ -1179,6 +1173,7 @@ export default class SchedulerTask {
                 user_uuid: payload.userUuid,
                 organization_uuid: payload.organizationUuid,
                 explore_name: payload.exploreId,
+                query_context: QueryExecutionContext.GSHEETS,
             };
 
             const { rows } = await this.projectService.runMetricQuery({
@@ -1640,6 +1635,10 @@ export default class SchedulerTask {
                 throw new Error('Missing gdriveId');
             }
 
+            const tabName = isSchedulerGsheetsOptions(scheduler.options)
+                ? scheduler.options.tabName
+                : undefined;
+
             await this.schedulerService.logSchedulerJob({
                 task: 'uploadGsheets',
                 schedulerUuid,
@@ -1734,11 +1733,11 @@ export default class SchedulerTask {
                         maxColumnLimit:
                             this.lightdashConfig.pivotTable.maxColumnLimit,
                     });
-
                     await this.googleDriveClient.appendCsvToSheet(
                         refreshToken,
                         gdriveId,
                         pivotedResults,
+                        tabName,
                     );
                 } else {
                     await this.googleDriveClient.appendToSheet(
@@ -1747,7 +1746,7 @@ export default class SchedulerTask {
                         rows,
                         itemMap,
                         showTableNames,
-                        undefined,
+                        tabName,
                         chart.tableConfig.columnOrder,
                         customLabels,
                         getHiddenTableFields(chart.chartConfig),
@@ -1850,7 +1849,7 @@ export default class SchedulerTask {
                             chart.chartConfig.config,
                         );
 
-                        const tabName =
+                        const chartTabName =
                             await this.googleDriveClient.createNewTab(
                                 refreshToken,
                                 gdriveId,
@@ -1881,7 +1880,7 @@ export default class SchedulerTask {
                                 refreshToken,
                                 gdriveId,
                                 pivotedResults,
-                                tabName,
+                                chartTabName,
                             );
                         } else {
                             await this.googleDriveClient.appendToSheet(
@@ -1890,7 +1889,7 @@ export default class SchedulerTask {
                                 rows,
                                 itemMap,
                                 showTableNames,
-                                tabName,
+                                chartTabName,
                                 chart.tableConfig.columnOrder,
                                 customLabels,
                                 getHiddenTableFields(chart.chartConfig),
@@ -1978,11 +1977,20 @@ export default class SchedulerTask {
                 console.warn(
                     `Disabling Google sheets scheduler with non-retryable error: ${e}`,
                 );
+
                 await this.schedulerService.setSchedulerEnabled(
                     user!, // This error from gdriveClient happens after user initialized
                     schedulerUuid,
                     false,
                 );
+
+                if (user?.email) {
+                    await this.emailClient.sendGoogleSheetsErrorNotificationEmail(
+                        user.email,
+                        scheduler?.name || 'Unknown',
+                        deliveryUrl,
+                    );
+                }
                 return; // Do not cascade error
             }
             throw e; // Cascade error to it can be retried by graphile
@@ -2249,6 +2257,7 @@ export default class SchedulerTask {
                     await this.catalogService.indexCatalog(
                         payload.projectUuid,
                         payload.explores,
+                        payload.userUuid,
                     );
 
                 await this.catalogService.migrateCatalogItemTags(

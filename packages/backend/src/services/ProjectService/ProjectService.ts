@@ -111,7 +111,6 @@ import {
     UpdateVirtualViewPayload,
     UserAttributeValueMap,
     UserWarehouseCredentials,
-    VizAggregationOptions,
     VizColumn,
     WarehouseClient,
     WarehouseCredentials,
@@ -119,6 +118,7 @@ import {
     WarehouseTableSchema,
     WarehouseTypes,
     type ApiCreateProjectResults,
+    type RunQueryTags,
     type SemanticLayerConnectionUpdate,
     type Tag,
 } from '@lightdash/common';
@@ -179,15 +179,6 @@ import {
     exploreHasFilteredAttribute,
     getFilteredExplore,
 } from '../UserAttributesService/UserAttributeUtils';
-
-type RunQueryTags = {
-    project_uuid?: string;
-    user_uuid?: string;
-    organization_uuid?: string;
-    chart_uuid?: string;
-    dashboard_uuid?: string;
-    explore_name?: string;
-};
 
 type ProjectServiceArguments = {
     lightdashConfig: LightdashConfig;
@@ -469,7 +460,7 @@ export class ProjectService extends BaseService {
         };
     }
 
-    private async _getWarehouseClient(
+    async _getWarehouseClient(
         projectUuid: string,
         credentials: CreateWarehouseCredentials,
         snowflakeVirtualWarehouse?: string,
@@ -530,6 +521,7 @@ export class ProjectService extends BaseService {
         const prevCatalogItemsWithTags =
             await this.catalogModel.getCatalogItemsWithTags(projectUuid, {
                 onlyTagged: true, // We only need the tagged catalog items
+                includeYamlTags: false, // we don't need the yaml tags as they are being recreated by the indexCatalog job
             });
 
         const prevCatalogItemsWithIcons =
@@ -748,6 +740,21 @@ export class ProjectService extends BaseService {
                         );
                     }
 
+                    const lightdashProjectConfig =
+                        await adapter.getLightdashProjectConfig();
+
+                    await this.replaceYamlTags(
+                        user,
+                        newProjectUuid,
+                        // Create util to generate categories from lightdashProjectConfig - this is used as well in deploy.ts
+                        Object.entries(
+                            lightdashProjectConfig.spotlight?.categories || {},
+                        ).map(([key, category]) => ({
+                            yamlReference: key,
+                            name: category.label,
+                            color: category.color ?? 'gray',
+                        })),
+                    );
                     await this.saveExploresToCacheAndIndexCatalog(
                         user.userUuid,
                         newProjectUuid,
@@ -962,6 +969,22 @@ export class ProjectService extends BaseService {
                     async () => {
                         try {
                             const explores = await adapter.compileAllExplores();
+                            const lightdashProjectConfig =
+                                await adapter.getLightdashProjectConfig();
+
+                            await this.replaceYamlTags(
+                                user,
+                                projectUuid,
+                                // TODO: Create util to generate categories from lightdashProjectConfig - this is used as well in deploy.ts
+                                Object.entries(
+                                    lightdashProjectConfig.spotlight
+                                        ?.categories || {},
+                                ).map(([key, category]) => ({
+                                    yamlReference: key,
+                                    name: category.label,
+                                    color: category.color ?? 'gray',
+                                })),
+                            );
                             await this.saveExploresToCacheAndIndexCatalog(
                                 user.userUuid,
                                 projectUuid,
@@ -1324,6 +1347,7 @@ export class ProjectService extends BaseService {
             project_uuid: projectUuid,
             user_uuid: user.userUuid,
             explore_name: exploreName,
+            query_context: context,
         };
 
         return this.runQueryAndFormatRows({
@@ -1405,6 +1429,7 @@ export class ProjectService extends BaseService {
             user_uuid: user.userUuid,
             chart_uuid: chartUuid,
             explore_name: savedChart.tableName,
+            query_context: context,
         };
 
         const { cacheMetadata, rows, fields } =
@@ -1532,6 +1557,7 @@ export class ProjectService extends BaseService {
             chart_uuid: chartUuid,
             dashboard_uuid: dashboardUuid,
             explore_name: explore.name,
+            query_context: context,
         };
 
         const exploreDimensions = getDimensions(explore);
@@ -1623,6 +1649,7 @@ export class ProjectService extends BaseService {
             project_uuid: projectUuid,
             user_uuid: user.userUuid,
             explore_name: exploreName,
+            query_context: context,
         };
 
         const explore = await this.getExplore(
@@ -1801,6 +1828,7 @@ export class ProjectService extends BaseService {
                     user_uuid: user.userUuid,
                     chart_uuid: chartUuid,
                     explore_name: exploreId,
+                    query_context: context,
                 };
 
                 return this.runMetricQuery({
@@ -1817,7 +1845,7 @@ export class ProjectService extends BaseService {
         );
     }
 
-    private async getResultsFromCacheOrWarehouse({
+    async getResultsFromCacheOrWarehouse({
         projectUuid,
         context,
         warehouseClient,
@@ -1831,7 +1859,7 @@ export class ProjectService extends BaseService {
         warehouseClient: WarehouseClient;
         query: AnyType;
         metricQuery: MetricQuery;
-        queryTags: RunQueryTags;
+        queryTags: Omit<RunQueryTags, 'query_context'>; // We already have context in the context parameter
         invalidateCache?: boolean;
     }): Promise<{
         rows: Record<string, AnyType>[];
@@ -1979,7 +2007,7 @@ export class ProjectService extends BaseService {
         exploreName: string;
         csvLimit: number | null | undefined;
         context: QueryExecutionContext;
-        queryTags: RunQueryTags;
+        queryTags: Omit<RunQueryTags, 'query_context'>; // We already have context in the context parameter
         invalidateCache?: boolean;
         explore?: Explore;
         granularity?: DateGranularity;
@@ -2266,6 +2294,7 @@ export class ProjectService extends BaseService {
         const queryTags: RunQueryTags = {
             organization_uuid: organizationUuid,
             user_uuid: user.userUuid,
+            query_context: QueryExecutionContext.SQL_RUNNER,
         };
 
         // enforce limit for current SQL queries as it may crash server. We are working on a new SQL runner that supports streaming
@@ -2316,6 +2345,7 @@ export class ProjectService extends BaseService {
         const queryTags: RunQueryTags = {
             organization_uuid: organizationUuid,
             user_uuid: userUuid,
+            query_context: context,
         };
 
         const columns: VizColumn[] = [];
@@ -2493,6 +2523,7 @@ export class ProjectService extends BaseService {
         const queryTags: RunQueryTags = {
             organization_uuid: organizationUuid,
             user_uuid: userUuid,
+            query_context: context,
         };
 
         const columns: VizColumn[] = [];
@@ -2505,65 +2536,81 @@ export class ProjectService extends BaseService {
         )(
             `${this.lightdashConfig.siteUrl}/api/v1/projects/${projectUuid}/sqlRunner/results`,
             async (writer) => {
-                await warehouseClient.streamQuery(
-                    pivotedSql,
-                    async ({ rows, fields }) => {
-                        if (!groupByColumns || groupByColumns.length === 0) {
-                            rows.forEach(writer);
-                            return;
-                        }
-
-                        // columns appears unused
-                        if (!columns.length) {
-                            // Get column types from first row of results
-                            columns.push(
-                                ...Object.keys(fields).map((fieldName) => ({
-                                    reference: fieldName,
-                                    type: fields[fieldName].type,
-                                })),
-                            );
-                        }
-
-                        rows.forEach((row) => {
-                            // Write rows to file in order of row_index. This is so that we can pivot the data later
-                            if (currentRowIndex !== row.row_index) {
-                                if (currentTransformedRow) {
-                                    writer(currentTransformedRow);
-                                }
-                                currentTransformedRow = {
-                                    [indexColumn.reference]:
-                                        row[indexColumn.reference],
-                                };
-                                currentRowIndex = row.row_index;
+                try {
+                    await warehouseClient.streamQuery(
+                        pivotedSql,
+                        async ({ rows, fields }) => {
+                            if (
+                                !groupByColumns ||
+                                groupByColumns.length === 0
+                            ) {
+                                rows.forEach(writer);
+                                return;
                             }
-                            // Suffix the value column with the group by columns to avoid collisions.
-                            // E.g. if we have a row with the value 1 and the group by columns are ['a', 'b'],
-                            // then the value column will be 'value_1_a_b'
-                            const valueSuffix = groupByColumns
-                                ?.map((col) => row[col.reference])
-                                .join('_');
-                            valuesColumns.forEach((col) => {
-                                const valueColumnReference = `${col.reference}_${col.aggregation}_${valueSuffix}`;
-                                valuesColumnData.set(valueColumnReference, {
-                                    referenceField: col.reference, // The original y field name
-                                    pivotColumnName: valueColumnReference, // The pivoted y field name and agg eg amount_avg_false
-                                    aggregation: col.aggregation,
-                                    pivotValues: groupByColumns?.map((c) => ({
-                                        referenceField: c.reference,
-                                        value: row[c.reference],
+
+                            // columns appears unused
+                            if (!columns.length) {
+                                // Get column types from first row of results
+                                columns.push(
+                                    ...Object.keys(fields).map((fieldName) => ({
+                                        reference: fieldName,
+                                        type: fields[fieldName].type,
                                     })),
+                                );
+                            }
+
+                            rows.forEach((row) => {
+                                // Write rows to file in order of row_index. This is so that we can pivot the data later
+                                if (currentRowIndex !== row.row_index) {
+                                    if (currentTransformedRow) {
+                                        writer(currentTransformedRow);
+                                    }
+                                    currentTransformedRow = {
+                                        [indexColumn.reference]:
+                                            row[indexColumn.reference],
+                                    };
+                                    currentRowIndex = row.row_index;
+                                }
+                                // Suffix the value column with the group by columns to avoid collisions.
+                                // E.g. if we have a row with the value 1 and the group by columns are ['a', 'b'],
+                                // then the value column will be 'value_1_a_b'
+                                const valueSuffix = groupByColumns
+                                    ?.map((col) => row[col.reference])
+                                    .join('_');
+                                valuesColumns.forEach((col) => {
+                                    const valueColumnReference = `${col.reference}_${col.aggregation}_${valueSuffix}`;
+                                    valuesColumnData.set(valueColumnReference, {
+                                        referenceField: col.reference, // The original y field name
+                                        pivotColumnName: valueColumnReference, // The pivoted y field name and agg eg amount_avg_false
+                                        aggregation: col.aggregation,
+                                        pivotValues: groupByColumns?.map(
+                                            (c) => ({
+                                                referenceField: c.reference,
+                                                value: row[c.reference],
+                                            }),
+                                        ),
+                                    });
+                                    currentTransformedRow =
+                                        currentTransformedRow ?? {};
+                                    currentTransformedRow[
+                                        valueColumnReference
+                                    ] =
+                                        row[
+                                            `${col.reference}_${col.aggregation}`
+                                        ];
                                 });
-                                currentTransformedRow =
-                                    currentTransformedRow ?? {};
-                                currentTransformedRow[valueColumnReference] =
-                                    row[`${col.reference}_${col.aggregation}`];
                             });
-                        });
-                    },
-                    {
-                        tags: queryTags,
-                    },
-                );
+                        },
+                        {
+                            tags: queryTags,
+                        },
+                    );
+                } catch (error) {
+                    this.logger.error(
+                        `Error running pivot query: ${error}\nSQL: ${pivotedSql}`,
+                    );
+                    throw error;
+                }
                 // Write the last row
                 if (currentTransformedRow) {
                     writer(currentTransformedRow);
@@ -2793,6 +2840,7 @@ export class ProjectService extends BaseService {
             user_uuid: user.userUuid,
             project_uuid: projectUuid,
             explore_name: explore.name,
+            query_context: QueryExecutionContext.FILTER_AUTOCOMPLETE,
         };
         const { rows } = await warehouseClient.runQuery(query, queryTags);
         await sshTunnel.disconnect();
@@ -2837,7 +2885,10 @@ export class ProjectService extends BaseService {
         user: Pick<SessionUser, 'userUuid'>,
         projectUuid: string,
         requestMethod: RequestMethod,
-    ): Promise<(Explore | ExploreError)[]> {
+    ): Promise<{
+        explores: (Explore | ExploreError)[];
+        adapter: ProjectAdapter;
+    }> {
         // Checks that project exists
         const project = await this.projectModel.get(projectUuid);
 
@@ -2982,7 +3033,8 @@ export class ProjectService extends BaseService {
                     ),
                 },
             });
-            return explores;
+
+            return { explores, adapter };
         } catch (e) {
             if (!(e instanceof LightdashError)) {
                 Sentry.captureException(e);
@@ -3141,10 +3193,28 @@ export class ProjectService extends BaseService {
                     job.jobUuid,
                     JobStepType.COMPILING,
                     async () => {
-                        const explores = await this.refreshAllTables(
+                        const { explores, adapter } =
+                            await this.refreshAllTables(
+                                user,
+                                projectUuid,
+                                requestMethod,
+                            );
+
+                        const lightdashProjectConfig =
+                            await adapter.getLightdashProjectConfig();
+
+                        await this.replaceYamlTags(
                             user,
                             projectUuid,
-                            requestMethod,
+                            // TODO: Create util to generate categories from lightdashProjectConfig - this is used as well in deploy.ts
+                            Object.entries(
+                                lightdashProjectConfig.spotlight?.categories ||
+                                    {},
+                            ).map(([key, category]) => ({
+                                yamlReference: key,
+                                name: category.label,
+                                color: category.color ?? 'gray',
+                            })),
                         );
                         await this.saveExploresToCacheAndIndexCatalog(
                             user.userUuid,
@@ -3573,6 +3643,7 @@ export class ProjectService extends BaseService {
     async getWarehouseFields(
         user: SessionUser,
         projectUuid: string,
+        queryContext: QueryExecutionContext,
         tableName?: string,
         schemaName?: string,
     ): Promise<WarehouseTableSchema> {
@@ -3602,6 +3673,7 @@ export class ProjectService extends BaseService {
             organization_uuid: user.organizationUuid,
             project_uuid: projectUuid,
             user_uuid: user.userUuid,
+            query_context: queryContext,
         };
         let database = ProjectService.getWarehouseDatabase(credentials);
         if (!database) {
@@ -4531,6 +4603,7 @@ export class ProjectService extends BaseService {
             project_uuid: projectUuid,
             user_uuid: user.userUuid,
             explore_name: exploreName,
+            query_context: QueryExecutionContext.CALCULATE_TOTAL,
         };
 
         const { rows } = await warehouseClient.runQuery(query, queryTags);
@@ -4565,6 +4638,7 @@ export class ProjectService extends BaseService {
             project_uuid: projectUuid,
             user_uuid: user.userUuid,
             explore_name: explore.name,
+            query_context: QueryExecutionContext.CALCULATE_TOTAL,
         };
 
         const { rows, cacheMetadata } =
@@ -5129,7 +5203,7 @@ export class ProjectService extends BaseService {
 
         if (
             user.ability.cannot(
-                'create',
+                'manage',
                 subject('Tags', {
                     projectUuid,
                     organizationUuid,
@@ -5144,6 +5218,7 @@ export class ProjectService extends BaseService {
             name,
             color,
             created_by_user_uuid: user.userUuid,
+            yaml_reference: null,
         });
 
         this.analytics.track({
@@ -5172,7 +5247,7 @@ export class ProjectService extends BaseService {
 
         if (
             user.ability.cannot(
-                'delete',
+                'manage',
                 subject('Tags', {
                     projectUuid: tag.projectUuid,
                     organizationUuid,
@@ -5202,7 +5277,7 @@ export class ProjectService extends BaseService {
 
         if (
             user.ability.cannot(
-                'update',
+                'manage',
                 subject('Tags', {
                     projectUuid: tag.projectUuid,
                     organizationUuid,
@@ -5230,5 +5305,39 @@ export class ProjectService extends BaseService {
         }
 
         return this.tagsModel.list(projectUuid);
+    }
+
+    async replaceYamlTags(
+        user: SessionUser,
+        projectUuid: string,
+        yamlTags: (Pick<Tag, 'name' | 'color'> & {
+            yamlReference: NonNullable<Tag['yamlReference']>;
+        })[],
+    ) {
+        const { organizationUuid } = await this.projectModel.getSummary(
+            projectUuid,
+        );
+
+        if (
+            user.ability.cannot(
+                'manage',
+                subject('Tags', {
+                    projectUuid,
+                    organizationUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        const yamlTagsIn = yamlTags.map((tag) => ({
+            project_uuid: projectUuid,
+            name: tag.name,
+            color: tag.color,
+            created_by_user_uuid: user.userUuid, // we always pass the userUuid although when updating a tag it's going to be ignored
+            yaml_reference: tag.yamlReference,
+        }));
+
+        return this.tagsModel.replaceYamlTags(projectUuid, yamlTagsIn);
     }
 }

@@ -29,7 +29,7 @@ import {
     type LightdashProjectConfig,
 } from '@lightdash/common';
 import { WarehouseClient } from '@lightdash/warehouses';
-import { promises as fs } from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import Logger from '../logging/logger';
 import { CachedWarehouse, DbtClient, ProjectAdapter } from '../types';
@@ -79,7 +79,7 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
         return undefined;
     }
 
-    private async getLightdashProjectConfig(): Promise<LightdashProjectConfig> {
+    public async getLightdashProjectConfig(): Promise<LightdashProjectConfig> {
         if (!this.dbtProjectDir) {
             return {
                 spotlight: DEFAULT_SPOTLIGHT_CONFIG,
@@ -141,10 +141,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
             ) as DbtRawModelNode[];
             Logger.info(`Filtered models ${models.length}`);
         } else {
-            Logger.info(`Manifest models ${manifest.nodes.length}`);
+            const nodes = Object.values(manifest.nodes);
+            Logger.info(`Manifest models ${nodes.length}`);
             // If selector is not provided, we use all the models from the manifest
             // models with invalid metadata will compile to failed Explores
-            models = Object.values(manifest.nodes).filter(
+            models = nodes.filter(
                 (node: AnyType) => node.resource_type === 'model' && node.meta, // check that node.meta exists
             ) as DbtRawModelNode[];
             Logger.info(`Filtered models ${models.length}`);
