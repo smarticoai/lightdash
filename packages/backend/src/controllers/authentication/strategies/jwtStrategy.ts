@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /// <reference path="../../../@types/passport-openidconnect.d.ts" />
 /// <reference path="../../../@types/express-session.d.ts" />
 import jwt, { Secret, JwtPayload } from 'jsonwebtoken';
