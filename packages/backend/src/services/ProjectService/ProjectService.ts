@@ -530,11 +530,15 @@ export class ProjectService extends BaseService {
         const prevMetricTreeEdges =
             await this.catalogModel.getAllMetricsTreeEdges(projectUuid);
 
-        await this.projectModel.saveExploresToCache(projectUuid, explores);
+        const { cachedExploreUuids } =
+            await this.projectModel.saveExploresToCache(projectUuid, explores);
+
+        this.logger.info(
+            `Saved ${cachedExploreUuids.length} explores to cache for project ${projectUuid}`,
+        );
 
         await this.schedulerClient.indexCatalog({
             projectUuid,
-            explores,
             userUuid,
             prevCatalogItemsWithTags,
             prevCatalogItemsWithIcons,
@@ -705,8 +709,7 @@ export class ProjectService extends BaseService {
             const { adapter, sshTunnel } = await this.jobModel.tryJobStep(
                 jobUuid,
                 JobStepType.TESTING_ADAPTOR,
-                async () =>
-                    ProjectService.testProjectAdapter(createProject, user),
+                async () => this.testProjectAdapter(createProject, user),
             );
 
             const explores = await this.jobModel.tryJobStep(
@@ -714,7 +717,9 @@ export class ProjectService extends BaseService {
                 JobStepType.COMPILING,
                 async () => {
                     try {
-                        return await adapter.compileAllExplores();
+                        // There's no project yet, so we don't track
+                        const trackingParams = undefined;
+                        return await adapter.compileAllExplores(trackingParams);
                     } finally {
                         await adapter.destroy();
                         await sshTunnel.disconnect();
@@ -740,8 +745,14 @@ export class ProjectService extends BaseService {
                         );
                     }
 
+                    const trackingParams = {
+                        projectUuid: newProjectUuid,
+                        organizationUuid: user.organizationUuid,
+                        userUuid: user.userUuid,
+                    };
+
                     const lightdashProjectConfig =
-                        await adapter.getLightdashProjectConfig();
+                        await adapter.getLightdashProjectConfig(trackingParams);
 
                     await this.replaceYamlTags(
                         user,
@@ -957,7 +968,7 @@ export class ProjectService extends BaseService {
                 job.jobUuid,
                 JobStepType.TESTING_ADAPTOR,
                 async () =>
-                    ProjectService.testProjectAdapter(
+                    this.testProjectAdapter(
                         updatedProject as UpdateProject,
                         user,
                     ),
@@ -968,9 +979,18 @@ export class ProjectService extends BaseService {
                     JobStepType.COMPILING,
                     async () => {
                         try {
-                            const explores = await adapter.compileAllExplores();
+                            const trackingParams = {
+                                projectUuid,
+                                organizationUuid: user.organizationUuid,
+                                userUuid: user.userUuid,
+                            };
+                            const explores = await adapter.compileAllExplores(
+                                trackingParams,
+                            );
                             const lightdashProjectConfig =
-                                await adapter.getLightdashProjectConfig();
+                                await adapter.getLightdashProjectConfig(
+                                    trackingParams,
+                                );
 
                             await this.replaceYamlTags(
                                 user,
@@ -1028,7 +1048,7 @@ export class ProjectService extends BaseService {
         }
     }
 
-    private static async testProjectAdapter(
+    private async testProjectAdapter(
         data: UpdateProject,
         _user: Pick<SessionUser, 'userUuid' | 'organizationUuid'>,
     ): Promise<{
@@ -1045,6 +1065,8 @@ export class ProjectService extends BaseService {
                 onWarehouseCatalogChange: () => {},
             },
             data.dbtVersion || DefaultSupportedDbtVersion,
+            undefined,
+            this.analytics,
         );
         try {
             await adapter.test();
@@ -1121,6 +1143,8 @@ export class ProjectService extends BaseService {
                 },
             },
             project.dbtVersion || DefaultSupportedDbtVersion,
+            undefined,
+            this.analytics,
         );
         return { adapter, sshTunnel };
     }
@@ -2899,7 +2923,12 @@ export class ProjectService extends BaseService {
         );
         const packages = await adapter.getDbtPackages();
         try {
-            const explores = await adapter.compileAllExplores();
+            const trackingParams = {
+                projectUuid,
+                organizationUuid: project.organizationUuid,
+                userUuid: user.userUuid,
+            };
+            const explores = await adapter.compileAllExplores(trackingParams);
             this.analytics.track({
                 event: 'project.compiled',
                 userId: user.userUuid,
@@ -3198,9 +3227,15 @@ export class ProjectService extends BaseService {
                                 projectUuid,
                                 requestMethod,
                             );
-
+                        const trackingParams = {
+                            projectUuid,
+                            organizationUuid,
+                            userUuid: user.userUuid,
+                        };
                         const lightdashProjectConfig =
-                            await adapter.getLightdashProjectConfig();
+                            await adapter.getLightdashProjectConfig(
+                                trackingParams,
+                            );
 
                         await this.replaceYamlTags(
                             user,
@@ -5227,6 +5262,7 @@ export class ProjectService extends BaseService {
                 name,
                 projectId: projectUuid,
                 organizationId: organizationUuid,
+                context: 'ui',
             },
         });
 
@@ -5337,6 +5373,20 @@ export class ProjectService extends BaseService {
             yaml_reference: tag.yamlReference,
         }));
 
-        return this.tagsModel.replaceYamlTags(projectUuid, yamlTagsIn);
+        const { yamlTagsToCreateOrUpdate } =
+            await this.tagsModel.replaceYamlTags(projectUuid, yamlTagsIn);
+
+        yamlTagsToCreateOrUpdate.forEach((name) => {
+            this.analytics.track({
+                event: 'category.created',
+                userId: user.userUuid,
+                properties: {
+                    name,
+                    projectId: projectUuid,
+                    organizationId: organizationUuid,
+                    context: 'yaml',
+                },
+            });
+        });
     }
 }
