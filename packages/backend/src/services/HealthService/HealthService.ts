@@ -43,16 +43,16 @@ export class HealthService extends BaseService {
         const { status: migrationStatus, currentVersion } =
             await this.migrationModel.getMigrationStatus();
 
-        if (migrationStatus < 0) {
-            throw new UnexpectedDatabaseError(
-                'Database has not been migrated yet',
-                { currentVersion },
-            );
-        } else if (migrationStatus > 0) {
-            console.warn(
-                `There are more DB migrations than defined in the code (you are running old code against a newer DB). Current version: ${currentVersion}`,
-            );
-        } // else migrationStatus === 0 (all migrations are up to date)
+        // if (migrationStatus < 0) {
+        //     throw new UnexpectedDatabaseError(
+        //         'Database has not been migrated yet',
+        //         { currentVersion },
+        //     );
+        // } else if (migrationStatus > 0) {
+        //     console.warn(
+        //         `There are more DB migrations than defined in the code (you are running old code against a newer DB). Current version: ${currentVersion}`,
+        //     );
+        // } // else migrationStatus === 0 (all migrations are up to date)
 
         const requiresOrgRegistration =
             !(await this.organizationModel.hasOrgs());

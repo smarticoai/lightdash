@@ -29,10 +29,6 @@ export class FeatureFlagModel {
     }
 
     public async get(args: FeatureFlagLogicArgs): Promise<FeatureFlag> {
-        return {
-            id: args.featureFlagId,
-            enabled: true,
-        };
         const handler = this.featureFlagHandlers[args.featureFlagId];
         if (!handler) {
             throw new Error(
