@@ -5,6 +5,7 @@ FROM node:20-bookworm-slim AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+RUN npm install -g corepack@latest && corepack enable
 RUN corepack enable pnpm
 RUN corepack prepare pnpm@latest --activate
 RUN pnpm config set store-dir /pnpm/store
@@ -166,6 +167,7 @@ FROM node:20-bookworm-slim as prod
 
 ENV NODE_ENV production
 ENV PATH="$PNPM_HOME:$PATH"
+RUN npm install -g corepack@latest && corepack enable
 RUN corepack enable pnpm
 RUN corepack prepare pnpm@latest --activate
 RUN pnpm config set store-dir /pnpm/store

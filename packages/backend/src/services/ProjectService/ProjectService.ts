@@ -451,7 +451,7 @@ export class ProjectService extends BaseService {
             userWarehouseCredentialsUuid = userWarehouseCredentials.uuid;
         }
         if (user?.userAttributes?.bq_project_id) {
-            (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as any;
+            (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as any as string;
         }
 
         return {
@@ -2339,7 +2339,7 @@ export class ProjectService extends BaseService {
         });
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, userUuid),
         );
         this.logger.debug(`Stream query against warehouse`);
         const queryTags: RunQueryTags = {
@@ -2491,7 +2491,6 @@ export class ProjectService extends BaseService {
         const warehouseCredentials = await this.getWarehouseCredentials(
             projectUuid,
             userUuid,
-            user
         );
         // Apply limit and pivot to the SQL query
         const pivotedSql = ProjectService.applyPivotToSqlQuery({
