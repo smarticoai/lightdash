@@ -26,6 +26,7 @@ import { useFlashMessages } from '../hooks/useFlashMessages';
 import useApp from '../providers/App/useApp';
 import useTracking from '../providers/Tracking/useTracking';
 import LightdashLogo from '../svgs/lightdash-black.svg';
+import { smrIsEmbeddedMode } from '../utils/smarticoUtils';
 
 const registerQuery = async (data: CreateUserArgs) =>
     lightdashApi<LightdashUser>({
@@ -135,6 +136,7 @@ const Register: FC = () => {
                     </Title>
                     {logins}
                 </Card>
+                {!smrIsEmbeddedMode() &&
                 <Text color="gray.6" ta="center">
                     By creating an account, you agree to
                     <br />
@@ -153,6 +155,7 @@ const Register: FC = () => {
                         Terms of Service.
                     </Anchor>
                 </Text>
+                }
             </Stack>
         </Page>
     );

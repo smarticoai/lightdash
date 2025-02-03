@@ -30,6 +30,7 @@ import { useInviteLink } from '../hooks/useInviteLink';
 import useApp from '../providers/App/useApp';
 import useTracking from '../providers/Tracking/useTracking';
 import LightdashLogo from '../svgs/lightdash-black.svg';
+import { smrIsEmbeddedMode } from '../utils/smarticoUtils';
 
 interface WelcomeCardProps {
     email: string | undefined;
@@ -231,6 +232,7 @@ const Invite: FC = () => {
                             </Title>
                             {logins}
                         </Card>
+                        {!smrIsEmbeddedMode() &&
                         <Text color="gray.6" ta="center">
                             By creating an account, you agree to
                             <br />
@@ -249,6 +251,7 @@ const Invite: FC = () => {
                                 Terms of Service.
                             </Anchor>
                         </Text>
+                        }
                     </>
                 ) : (
                     <WelcomeCard

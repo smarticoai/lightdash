@@ -7,6 +7,7 @@ import MantineIcon from '../common/MantineIcon';
 import MantineLinkButton from '../common/MantineLinkButton';
 import ResourceView from '../common/ResourceView';
 import { ResourceViewType } from '../common/ResourceView/types';
+import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
 
 interface Props {
     pinnedItems: PinnedItems;
@@ -62,6 +63,7 @@ const PinnedItemsPanel: FC<Props> = ({ pinnedItems, isEnabled }) => {
                         relevant content!
                     </Text>
                 </Group>
+                {!smrIsEmbeddedMode() &&
                 <MantineLinkButton
                     href="https://docs.lightdash.com/guides/pinning/"
                     target="_blank"
@@ -71,6 +73,7 @@ const PinnedItemsPanel: FC<Props> = ({ pinnedItems, isEnabled }) => {
                 >
                     View docs
                 </MantineLinkButton>
+                }
             </Group>
         </Card>
     ) : null;

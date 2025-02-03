@@ -14,6 +14,7 @@ import {
     ChartSourceType,
     ChartSummary,
     CompiledDimension,
+    CompiledTable,
     ContentType,
     convertCustomMetricToDbt,
     countCustomDimensionsInMetricQuery,
@@ -3408,6 +3409,16 @@ export class ProjectService extends BaseService {
                     organizationUuid,
                 });
                 const explore = exploresMap[exploreName];
+
+                // SMR-START
+                if (explore.tables && user.userAttributes?.bq_project_id) {
+                    const bqProjectId: string = user.userAttributes.bq_project_id as any as string;
+                    for (const [, compiledTable] of Object.entries(explore.tables)) {
+                        compiledTable.database = bqProjectId;
+                        compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
+                    }
+                }
+                // SMR-END
 
                 if (!explore) {
                     throw new NotExistsError(
