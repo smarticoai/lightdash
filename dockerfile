@@ -166,6 +166,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 FROM node:20-bookworm-slim AS prod
 
 ENV NODE_ENV=production
+ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN npm install -g corepack@latest && corepack enable
 RUN corepack enable pnpm
