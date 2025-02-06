@@ -193,7 +193,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # COPY --from=prod-builder  /usr/local/dbt1.6 /usr/local/dbt1.6
 # COPY --from=prod-builder  /usr/local/dbt1.7 /usr/local/dbt1.7
 # COPY --from=prod-builder  /usr/local/dbt1.8 /usr/local/dbt1.8
-# COPY --from=prod-builder  /usr/local/dbt1.9 /usr/local/dbt1.9
+COPY --from=prod-builder  /usr/local/dbt1.9 /usr/local/dbt1.9
 COPY --from=prod-builder /usr/app /usr/app
 
 # RUN ln -s /usr/local/dbt1.4/bin/dbt /usr/local/bin/dbt \
