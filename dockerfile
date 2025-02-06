@@ -5,9 +5,9 @@ FROM node:20-bookworm-slim AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN npm install -g corepack@latest && corepack enable
+RUN npm i -g corepack@latest 
 RUN corepack enable pnpm
-RUN corepack prepare pnpm@9.15.4 --activate
+RUN corepack prepare pnpm@9.15.5 --activate
 RUN pnpm config set store-dir /pnpm/store
 
 WORKDIR /usr/app
@@ -168,9 +168,9 @@ FROM node:20-bookworm-slim AS prod
 ENV NODE_ENV=production
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN npm install -g corepack@latest && corepack enable
+RUN npm i -g corepack@latest 
 RUN corepack enable pnpm
-RUN corepack prepare pnpm@9.15.4 --activate
+RUN corepack prepare pnpm@9.15.5 --activate
 RUN pnpm config set store-dir /pnpm/store
 
 WORKDIR /usr/app
