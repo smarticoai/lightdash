@@ -3698,6 +3698,7 @@ export class ProjectService extends BaseService {
         queryContext: QueryExecutionContext,
         tableName?: string,
         schemaName?: string,
+        databaseName?: string,
     ): Promise<WarehouseTableSchema> {
         const { organizationUuid } = await this.projectModel.getSummary(
             projectUuid,
@@ -3727,7 +3728,9 @@ export class ProjectService extends BaseService {
             user_uuid: user.userUuid,
             query_context: queryContext,
         };
-        let database = ProjectService.getWarehouseDatabase(credentials);
+
+        let database =
+            databaseName ?? ProjectService.getWarehouseDatabase(credentials);
         if (!database) {
             throw new NotFoundError(
                 'Database not found in warehouse credentials',
