@@ -14,6 +14,7 @@ import {
     CompiledDimension,
     CompiledTable,
     ContentType,
+    CreateBigqueryCredentials,
     CreateJob,
     CreateProject,
     CreateProjectMember,
@@ -459,7 +460,7 @@ export class ProjectService extends BaseService {
             userWarehouseCredentialsUuid = userWarehouseCredentials.uuid;
         }
         if (user?.userAttributes?.bq_project_id) {
-            (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as any as string;
+            (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as unknown as string;
         }
 
         return {
@@ -3419,7 +3420,7 @@ export class ProjectService extends BaseService {
 
                 // SMR-START
                 if (explore.tables && user.userAttributes?.bq_project_id) {
-                    const bqProjectId: string = user.userAttributes.bq_project_id as any as string;
+                    const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
                     for (const [, compiledTable] of Object.entries(explore.tables)) {
                         compiledTable.database = bqProjectId;
                         compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
