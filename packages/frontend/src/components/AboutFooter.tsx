@@ -30,6 +30,7 @@ import {
     FOOTER_MARGIN,
     PAGE_CONTENT_WIDTH,
 } from './common/Page/constants';
+import { smrMode } from '../utils/smarticoUtils';
 
 const AboutFooter: FC<{ minimal?: boolean; maxWidth?: number }> = ({
     minimal,
@@ -41,6 +42,10 @@ const AboutFooter: FC<{ minimal?: boolean; maxWidth?: number }> = ({
         healthState.data?.latest.version &&
         healthState.data.version !== healthState.data.latest.version &&
         healthState.data?.mode === LightdashMode.DEFAULT;
+
+    if (smrMode()) {
+        return null;
+    }
 
     return (
         <TrackSection name={SectionName.PAGE_FOOTER}>
