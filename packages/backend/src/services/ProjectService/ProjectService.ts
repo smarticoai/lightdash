@@ -1242,6 +1242,9 @@ export class ProjectService extends BaseService {
             timezone,
         });
 
+        // SMR-DEBUG, log the query
+        // console.log(buildQueryResult)
+
         return buildQueryResult;
     }
 
@@ -2830,6 +2833,10 @@ export class ProjectService extends BaseService {
             userAttributes,
             this.lightdashConfig.query.timezone || 'UTC',
         );
+
+        // SMR-DEBUG, lookup query for filters
+        // console.log('query', query);
+
         // Add a cache_autocomplete prefix to the query hash to avoid collisions with the results cache
         const queryHashKey = metricQuery.timezone
             ? `${projectUuid}.cache_autocomplete.${query}.${metricQuery.timezone}`
