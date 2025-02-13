@@ -909,6 +909,7 @@ export class ProjectModel {
         const cachedExplores = await this.findExploresFromCache(projectUuid, [
             tableName,
         ]);
+        
         return cachedExplores[tableName];
     }
 

@@ -3,6 +3,7 @@ import {
     ApiChartAsCodeListResponse,
     ApiDashboardAsCodeListResponse,
     ChartAsCode,
+    ChartSummary,
     CreateSavedChart,
     currentVersion,
     DashboardAsCode,
@@ -13,6 +14,7 @@ import {
     ForbiddenError,
     friendlyName,
     NotFoundError,
+    Project,
     PromotionAction,
     PromotionChanges,
     SavedChartDAO,
@@ -29,6 +31,7 @@ import { SpaceModel } from '../../models/SpaceModel';
 import { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { BaseService } from '../BaseService';
 import { PromoteService } from '../PromoteService/PromoteService';
+import { hasViewAccessToSpace } from '../SpaceService/SpaceService';
 
 type CoderServiceArguments = {
     lightdashConfig: LightdashConfig;
@@ -260,6 +263,49 @@ export class CoderService extends BaseService {
             : [];
     }
 
+    private async filterPrivateContent<
+        T extends
+            | DashboardDAO
+            | SavedChartDAO
+            | (ChartSummary & { updatedAt: Date })
+            | Pick<
+                  DashboardDAO,
+                  'uuid' | 'name' | 'spaceUuid' | 'description' | 'slug'
+              >,
+    >(
+        user: SessionUser,
+        project: Project,
+        content: T[],
+        spaces: Omit<SpaceSummary, 'userAccess'>[],
+    ): Promise<T[]> {
+        if (
+            user.ability.can(
+                'manage',
+                subject('Project', {
+                    projectUuid: project.projectUuid,
+                    organizationUuid: project.organizationUuid,
+                }),
+            )
+        ) {
+            // User is an admin, return all content
+            return content;
+        }
+        const spacesAccess = await this.spaceModel.getUserSpacesAccess(
+            user.userUuid,
+            spaces.map((s) => s.uuid),
+        );
+
+        return content.filter((c) => {
+            const space = spaces.find((s) => s.uuid === c.spaceUuid);
+            if (!space) return false;
+            return hasViewAccessToSpace(
+                user,
+                space,
+                spacesAccess[space.uuid] ?? [],
+            );
+        });
+    }
+
     /* 
     @param dashboardIds: Dashboard ids can be uuids or slugs, if undefined return all dashboards, if [] we return no dashboards
     @returns: DashboardAsCode[]
@@ -275,18 +321,18 @@ export class CoderService extends BaseService {
             throw new NotFoundError(`Project ${projectUuid} not found`);
         }
 
-        // TODO allow more than just admins
-        // Filter dashboards based on user permissions (from private spaces)
         if (
             user.ability.cannot(
                 'manage',
-                subject('Project', {
+                subject('ContentAsCode', {
                     projectUuid: project.projectUuid,
                     organizationUuid: project.organizationUuid,
                 }),
             )
         ) {
-            throw new ForbiddenError();
+            throw new ForbiddenError(
+                'You are not allowed to download dashboards',
+            );
         }
 
         const slugs = await this.convertIdsToSlugs('dashboard', dashboardIds);
@@ -309,14 +355,24 @@ export class CoderService extends BaseService {
             projectUuid,
             slugs,
         });
+        const spaceUuids = dashboardSummaries.map((chart) => chart.spaceUuid);
+        // get all spaces to map  spaceSlug
+        const spaces = await this.spaceModel.find({ spaceUuids });
 
+        const dashboardSummariesWithAccess = await this.filterPrivateContent(
+            user,
+            project,
+            dashboardSummaries,
+            spaces,
+        );
         const maxResults = this.lightdashConfig.contentAsCode.maxDownloads;
         const offsetIndex = offset || 0;
         const newOffset = Math.min(
             offsetIndex + maxResults,
-            dashboardSummaries.length,
+            dashboardSummariesWithAccess.length,
         );
-        const limitedDashboardSummaries = dashboardSummaries.slice(
+
+        const limitedDashboardSummaries = dashboardSummariesWithAccess.slice(
             offsetIndex,
             newOffset,
         );
@@ -334,16 +390,20 @@ export class CoderService extends BaseService {
                 )}`,
             );
         }
-        // get all spaces to map  spaceSlug
-        const spaceUuids = dashboards.map((dashboard) => dashboard.spaceUuid);
-        const spaces = await this.spaceModel.find({ spaceUuids });
+
+        const dashboardsWithAccess = await this.filterPrivateContent(
+            user,
+            project,
+            dashboards,
+            spaces,
+        );
 
         return {
-            dashboards: dashboards.map((dashboard) =>
+            dashboards: dashboardsWithAccess.map((dashboard) =>
                 CoderService.transformDashboard(dashboard, spaces),
             ),
             missingIds,
-            total: dashboardSummaries.length,
+            total: dashboardSummariesWithAccess.length,
             offset: newOffset,
         };
     }
@@ -359,18 +419,17 @@ export class CoderService extends BaseService {
             throw new NotFoundError(`Project ${projectUuid} not found`);
         }
 
-        // TODO allow more than just admins
         // Filter charts based on user permissions (from private spaces)
         if (
             user.ability.cannot(
                 'manage',
-                subject('Project', {
+                subject('ContentAsCode', {
                     projectUuid: project.projectUuid,
                     organizationUuid: project.organizationUuid,
                 }),
             )
         ) {
-            throw new ForbiddenError();
+            throw new ForbiddenError('You are not allowed to download charts');
         }
 
         const slugs = await this.convertIdsToSlugs('chart', chartIds);
@@ -398,23 +457,30 @@ export class CoderService extends BaseService {
 
         // Apply offset and limit to chart summaries
         const offsetIndex = offset || 0;
+        const spaceUuids = chartSummaries.map((chart) => chart.spaceUuid);
+        // get all spaces to map  spaceSlug
+        const spaces = await this.spaceModel.find({ spaceUuids });
+        const chartsSummariesWithAccess = await this.filterPrivateContent(
+            user,
+            project,
+            chartSummaries,
+            spaces,
+        );
         const newOffset = Math.min(
             offsetIndex + maxResults,
-            chartSummaries.length,
+            chartsSummariesWithAccess.length,
         );
-        const limitedChartSummaries = chartSummaries.slice(
+        const limitedChartSummaries = chartsSummariesWithAccess.slice(
             offsetIndex,
             newOffset,
         );
+
         const chartPromises = limitedChartSummaries.map((chart) =>
             this.savedChartModel.get(chart.uuid),
         );
         const charts = await Promise.all(chartPromises);
         const missingIds = CoderService.getMissingIds(chartIds, charts);
 
-        // get all spaces to map  spaceSlug
-        const spaceUuids = charts.map((chart) => chart.spaceUuid);
-        const spaces = await this.spaceModel.find({ spaceUuids });
         // get all spaces to map  dashboardSlug
         const dashboardUuids = charts.reduce<string[]>((acc, chart) => {
             if (chart.dashboardUuid) {
@@ -431,7 +497,7 @@ export class CoderService extends BaseService {
                 CoderService.transformChart(chart, spaces, dashboards),
             ),
             missingIds,
-            total: chartSummaries.length,
+            total: chartsSummariesWithAccess.length,
             offset: newOffset,
         };
     }
@@ -442,14 +508,12 @@ export class CoderService extends BaseService {
         slug: string,
         chartAsCode: ChartAsCode,
     ) {
-        // TODO handle permissions in spaces
-        // TODO allow more than just admins
         const project = await this.projectModel.get(projectUuid);
 
         if (
             user.ability.cannot(
                 'manage',
-                subject('Project', {
+                subject('ContentAsCode', {
                     projectUuid: project.projectUuid,
                     organizationUuid: project.organizationUuid,
                 }),
@@ -614,7 +678,24 @@ export class CoderService extends BaseService {
             projectUuid,
         });
 
-        if (space !== undefined) return { space, created: false };
+        if (space !== undefined) {
+            const spacesAccess = await this.spaceModel.getUserSpacesAccess(
+                user.userUuid,
+                [space.uuid],
+            );
+            if (
+                hasViewAccessToSpace(
+                    user,
+                    space,
+                    spacesAccess[space.uuid] ?? [],
+                )
+            ) {
+                return { space, created: false };
+            }
+            throw new ForbiddenError(
+                "You don't have access to a private space",
+            );
+        }
 
         console.info(`Creating new public space with slug ${spaceSlug}`);
         const newSpace = await this.spaceModel.createSpace(
@@ -642,15 +723,12 @@ export class CoderService extends BaseService {
         slug: string,
         dashboardAsCode: DashboardAsCode,
     ): Promise<PromotionChanges> {
-        // TODO handle permissions in spaces
-        // TODO allow more than just admins
-
         const project = await this.projectModel.get(projectUuid);
 
         if (
             user.ability.cannot(
                 'manage',
-                subject('Project', {
+                subject('ContentAsCode', {
                     projectUuid: project.projectUuid,
                     organizationUuid: project.organizationUuid,
                 }),

@@ -154,9 +154,11 @@ interface TrackingProviderProps extends TrackingData {
     enabled?: boolean;
 }
 
-export const TrackingProvider: FC<
-    React.PropsWithChildren<TrackingProviderProps>
-> = ({ children, enabled = true, ...rest }) => {
+const TrackingProvider: FC<React.PropsWithChildren<TrackingProviderProps>> = ({
+    children,
+    enabled = true,
+    ...rest
+}) => {
     if (enabled) {
         return (
             <TrackingProviderMain {...rest}>{children}</TrackingProviderMain>
@@ -205,3 +207,5 @@ export const TrackSection: FC<React.PropsWithChildren<SectionData>> = memo(
         );
     },
 );
+
+export default TrackingProvider;

@@ -711,6 +711,89 @@
                 "enum": ["some", "all", "none"],
                 "type": "string"
             },
+            "CommonEmbedJwtContent": {
+                "properties": {
+                    "canExportPagePdf": {
+                        "type": "boolean"
+                    },
+                    "canDateZoom": {
+                        "type": "boolean"
+                    },
+                    "canExportImages": {
+                        "type": "boolean"
+                    },
+                    "canExportCsv": {
+                        "type": "boolean"
+                    },
+                    "dashboardFiltersInteractivity": {
+                        "properties": {
+                            "allowedFilters": {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            "enabled": {
+                                "anyOf": [
+                                    {
+                                        "$ref": "#/components/schemas/FilterInteractivityValues"
+                                    },
+                                    {
+                                        "type": "boolean"
+                                    }
+                                ]
+                            }
+                        },
+                        "required": ["enabled"],
+                        "type": "object"
+                    },
+                    "isPreview": {
+                        "type": "boolean"
+                    },
+                    "projectUuid": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["dashboard"],
+                        "nullable": false
+                    }
+                },
+                "required": ["type"],
+                "type": "object"
+            },
+            "EmbedJwtContentDashboardUuid": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/CommonEmbedJwtContent"
+                    },
+                    {
+                        "properties": {
+                            "dashboardUuid": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["dashboardUuid"],
+                        "type": "object"
+                    }
+                ]
+            },
+            "EmbedJwtContentDashboardSlug": {
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/CommonEmbedJwtContent"
+                    },
+                    {
+                        "properties": {
+                            "dashboardSlug": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["dashboardSlug"],
+                        "type": "object"
+                    }
+                ]
+            },
             "CreateEmbedJwt": {
                 "properties": {
                     "expiresIn": {
@@ -735,55 +818,14 @@
                         "type": "object"
                     },
                     "content": {
-                        "properties": {
-                            "canExportPagePdf": {
-                                "type": "boolean"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/EmbedJwtContentDashboardUuid"
                             },
-                            "canDateZoom": {
-                                "type": "boolean"
-                            },
-                            "canExportImages": {
-                                "type": "boolean"
-                            },
-                            "canExportCsv": {
-                                "type": "boolean"
-                            },
-                            "dashboardFiltersInteractivity": {
-                                "properties": {
-                                    "allowedFilters": {
-                                        "items": {
-                                            "type": "string"
-                                        },
-                                        "type": "array"
-                                    },
-                                    "enabled": {
-                                        "anyOf": [
-                                            {
-                                                "$ref": "#/components/schemas/FilterInteractivityValues"
-                                            },
-                                            {
-                                                "type": "boolean"
-                                            }
-                                        ]
-                                    }
-                                },
-                                "required": ["enabled"],
-                                "type": "object"
-                            },
-                            "isPreview": {
-                                "type": "boolean"
-                            },
-                            "dashboardUuid": {
-                                "type": "string"
-                            },
-                            "type": {
-                                "type": "string",
-                                "enum": ["dashboard"],
-                                "nullable": false
+                            {
+                                "$ref": "#/components/schemas/EmbedJwtContentDashboardSlug"
                             }
-                        },
-                        "required": ["dashboardUuid", "type"],
-                        "type": "object"
+                        ]
                     }
                 },
                 "required": ["content"],
@@ -1756,7 +1798,14 @@
                         "format": "double"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "groupLabel": {
                         "type": "string",
@@ -2146,7 +2195,14 @@
                         "$ref": "#/components/schemas/CompactOrAlias"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "table": {
                         "type": "string"
@@ -3604,7 +3660,14 @@
                         "format": "double"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "groupLabel": {
                         "type": "string",
@@ -3733,7 +3796,14 @@
                         "format": "double"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "groupLabel": {
                         "type": "string",
@@ -3939,6 +4009,9 @@
                         "type": "string"
                     },
                     "ymlPath": {
+                        "type": "string"
+                    },
+                    "databricksCompute": {
                         "type": "string"
                     },
                     "warehouse": {
@@ -4167,7 +4240,14 @@
                         "format": "double"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "groupLabel": {
                         "type": "string",
@@ -4249,7 +4329,14 @@
                         "format": "double"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "groupLabel": {
                         "type": "string",
@@ -6810,29 +6897,8 @@
                 "required": ["results", "status"],
                 "type": "object"
             },
-            "FileChanges": {
-                "properties": {
-                    "diff": {
-                        "type": "string"
-                    },
-                    "yml": {
-                        "type": "string"
-                    },
-                    "file": {
-                        "type": "string"
-                    }
-                },
-                "required": ["diff", "yml", "file"],
-                "type": "object"
-            },
             "PullRequestCreated": {
                 "properties": {
-                    "files": {
-                        "items": {
-                            "$ref": "#/components/schemas/FileChanges"
-                        },
-                        "type": "array"
-                    },
                     "prUrl": {
                         "type": "string"
                     },
@@ -9398,6 +9464,21 @@
                     },
                     "httpPath": {
                         "type": "string"
+                    },
+                    "compute": {
+                        "items": {
+                            "properties": {
+                                "httpPath": {
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": ["httpPath", "name"],
+                            "type": "object"
+                        },
+                        "type": "array"
                     }
                 },
                 "required": ["type", "database", "serverHostName", "httpPath"],
@@ -12054,7 +12135,14 @@
                         "format": "double"
                     },
                     "format": {
-                        "$ref": "#/components/schemas/Format"
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Format"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ]
                     },
                     "groupLabel": {
                         "type": "string",
@@ -12794,6 +12882,9 @@
                     },
                     "targetDatabase": {
                         "$ref": "#/components/schemas/SupportedDbtAdapter"
+                    },
+                    "databricksCompute": {
+                        "type": "string"
                     },
                     "ymlPath": {
                         "type": "string"
@@ -14649,7 +14740,7 @@
     },
     "info": {
         "title": "Lightdash API",
-        "version": "0.1480.3",
+        "version": "0.1492.1",
         "description": "Open API documentation for all public Lightdash API endpoints. # Authentication Before you get started, you might need to create a Personal Access Token to authenticate via the API. You can create a token by following this guide: https://docs.lightdash.com/references/personal_tokens\n",
         "license": {
             "name": "MIT"
@@ -20678,64 +20769,6 @@
                     {
                         "in": "path",
                         "name": "projectUuid",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ]
-            }
-        },
-        "/api/v1/projects/{projectUuid}/git-integration/pull-requests/chart/{chartUuid}/fields": {
-            "get": {
-                "operationId": "CreatePullRequestForChartFields",
-                "responses": {
-                    "200": {
-                        "description": "Success",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "results": {
-                                            "$ref": "#/components/schemas/PullRequestCreated"
-                                        },
-                                        "status": {
-                                            "type": "string",
-                                            "enum": ["ok"],
-                                            "nullable": false
-                                        }
-                                    },
-                                    "required": ["results", "status"],
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "default": {
-                        "description": "Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ApiErrorPayload"
-                                }
-                            }
-                        }
-                    }
-                },
-                "tags": ["Git Integration"],
-                "security": [],
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "projectUuid",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    {
-                        "in": "path",
-                        "name": "chartUuid",
                         "required": true,
                         "schema": {
                             "type": "string"

@@ -1,14 +1,17 @@
 import {
+    assertUnreachable,
     DashboardTileTypes,
     FilterInteractivityValues,
-    assertUnreachable,
     getFilterInteractivityValue,
+    getItemId,
     isFilterInteractivityEnabled,
     type ApiChartAndResults,
     type ApiError,
     type Dashboard,
     type DashboardFilterInteractivityOptions,
+    type DashboardFilterRule,
     type DashboardFilters,
+    type FilterOperator,
     type InteractivityOptions,
 } from '@lightdash/common';
 import { ActionIcon, Box, Flex, Tooltip } from '@mantine/core';
@@ -25,6 +28,7 @@ import React, {
 } from 'react';
 import { Responsive, WidthProvider, type Layout } from 'react-grid-layout';
 import { useParams } from 'react-router';
+import { v4 as uuidv4 } from 'uuid';
 import { lightdashApi } from '../../api';
 import ActiveFilters from '../../components/DashboardFilter/ActiveFilters';
 import {
@@ -179,6 +183,7 @@ const DashboardFilter: FC<{
     }, [dashboardFilters, filterInteractivityOptions]);
 
     const setDashboardTiles = useDashboardContext((c) => c.setDashboardTiles);
+    const projectUuid = useDashboardContext((c) => c.projectUuid);
 
     useEffect(() => {
         setDashboardFilters(allowedFilters);
@@ -197,7 +202,6 @@ const DashboardFilter: FC<{
     const handlePopoverClose = useCallback(() => {
         setPopoverId(undefined);
     }, []);
-    const { projectUuid } = useParams<{ projectUuid: string }>();
 
     // FIXME fieldsWithSuggestions is required
     return (
@@ -329,12 +333,83 @@ const DashboardHeader: FC<{
     );
 };
 
-const EmbedDashboard: FC<{ embedToken: string }> = ({ embedToken }) => {
-    const { projectUuid } = useParams<{ projectUuid: string }>();
+type EmbedDashboardProps = {
+    filters?: SdkFilter[];
+};
+
+const EmbedDashboard: FC<EmbedDashboardProps> = ({ filters }) => {
+    const projectUuid = useDashboardContext((c) => c.projectUuid);
+    const setDashboardFilters = useDashboardContext(
+        (c) => c.setDashboardFilters,
+    );
+    const allFilterableFieldsMap = useDashboardContext(
+        (c) => c.allFilterableFieldsMap,
+    );
+
+    const sdkDashboardFilters = useMemo(() => {
+        const dimensionFilters = filters
+            ?.map((filter) => {
+                const fieldId = getItemId({
+                    table: filter.model,
+                    name: filter.field,
+                });
+
+                const field = allFilterableFieldsMap[fieldId];
+
+                if (!field) {
+                    console.warn(`Field ${filter.field} not found`, filter);
+                    console.warn(
+                        `Here are all the fields:`,
+                        allFilterableFieldsMap,
+                    );
+                    return null;
+                }
+
+                const dashboardFilter: DashboardFilterRule = {
+                    id: uuidv4(),
+                    label: filter.field,
+                    target: {
+                        fieldId,
+                        tableName: filter.model,
+                    },
+                    operator: filter.operator,
+                    values: Array.isArray(filter.value)
+                        ? filter.value
+                        : [filter.value],
+                    tileTargets: {},
+                };
+                return dashboardFilter;
+            })
+            .filter((filter) => filter !== null);
+
+        if (!dimensionFilters) {
+            return undefined;
+        }
+
+        return {
+            dimensions: dimensionFilters,
+            metrics: [],
+            tableCalculations: [],
+        };
+    }, [filters, allFilterableFieldsMap]);
+
+    useEffect(() => {
+        if (sdkDashboardFilters) {
+            setDashboardFilters(sdkDashboardFilters);
+        }
+    }, [sdkDashboardFilters, setDashboardFilters]);
+
+    const { embedToken } = useEmbed();
+
+    if (!embedToken) {
+        throw new Error('Embed token is required');
+    }
+
     const { data: dashboard, error: dashboardError } = useEmbedDashboard(
         projectUuid,
         embedToken,
     );
+
     const setEmbedDashboard = useDashboardContext((c) => c.setEmbedDashboard);
     useEffect(() => {
         if (dashboard) {
@@ -479,9 +554,28 @@ const EmbedDashboard: FC<{ embedToken: string }> = ({ embedToken }) => {
     );
 };
 
-const EmbedDashboardPage: FC = () => {
+export type SdkFilter = {
+    model: string;
+    field: string;
+    operator: FilterOperator;
+    value: unknown | unknown[];
+};
+
+type Props = {
+    projectUuid?: string;
+    filters?: SdkFilter[];
+};
+
+const EmbedDashboardPage: FC<Props> = ({
+    projectUuid: projectUuidFromProps,
+    filters,
+}) => {
+    const { projectUuid: projectUuidFromParams } = useParams<{
+        projectUuid: string;
+    }>();
     const { embedToken } = useEmbed();
-    const { projectUuid } = useParams<{ projectUuid: string }>();
+
+    const projectUuid = projectUuidFromProps ?? projectUuidFromParams;
 
     if (!embedToken) {
         return (
@@ -496,7 +590,7 @@ const EmbedDashboardPage: FC = () => {
 
     return (
         <DashboardProvider embedToken={embedToken} projectUuid={projectUuid}>
-            <EmbedDashboard embedToken={embedToken} />
+            <EmbedDashboard filters={filters} />
         </DashboardProvider>
     );
 };

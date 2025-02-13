@@ -51,11 +51,11 @@ import { DashboardSchedulersModal } from '../../../features/scheduler';
 import { getSchedulerUuidFromUrlParams } from '../../../features/scheduler/utils';
 import { useFeatureFlagEnabled } from '../../../hooks/useFeatureFlagEnabled';
 import { useProject } from '../../../hooks/useProject';
+import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 import AddTileButton from '../../DashboardTiles/AddTileButton';
-import { Can } from '../Authorization';
 import MantineIcon from '../MantineIcon';
 import PageHeader from '../Page/PageHeader';
 import {
@@ -80,6 +80,7 @@ type DashboardHeaderProps = {
     hasNewSemanticLayerChart: boolean;
     isEditMode: boolean;
     isSaving: boolean;
+    isFullScreenFeatureEnabled?: boolean;
     isFullscreen: boolean;
     isPinned: boolean;
     oldestCacheTime?: Date;
@@ -106,6 +107,7 @@ const DashboardHeader = ({
     hasNewSemanticLayerChart,
     isEditMode,
     isSaving,
+    isFullScreenFeatureEnabled,
     isFullscreen,
     isPinned,
     oldestCacheTime,
@@ -245,7 +247,12 @@ const DashboardHeader = ({
                         <Popover.Dropdown maw={500}>
                             <Stack spacing="xs">
                                 {dashboard.description && (
-                                    <Text fz="xs" color="gray.7" fw={500}>
+                                    <Text
+                                        fz="xs"
+                                        color="gray.7"
+                                        fw={500}
+                                        style={{ whiteSpace: 'pre-line' }}
+                                    >
                                         {dashboard.description}
                                     </Text>
                                 )}
@@ -365,30 +372,32 @@ const DashboardHeader = ({
                         />
                     )}
 
-                    {!isEditMode && document.fullscreenEnabled && (
-                        <Tooltip
-                            label={
-                                isFullscreen
-                                    ? 'Exit Fullscreen Mode'
-                                    : 'Enter Fullscreen Mode'
-                            }
-                            withinPortal
-                            position="bottom"
-                        >
-                            <ActionIcon
-                                variant="default"
-                                onClick={onToggleFullscreen}
+                    {!isEditMode &&
+                        document.fullscreenEnabled &&
+                        isFullScreenFeatureEnabled && (
+                            <Tooltip
+                                label={
+                                    isFullscreen
+                                        ? 'Exit Fullscreen Mode'
+                                        : 'Enter Fullscreen Mode'
+                                }
+                                withinPortal
+                                position="bottom"
                             >
-                                <MantineIcon
-                                    icon={
-                                        isFullscreen
-                                            ? IconArrowsMinimize
-                                            : IconArrowsMaximize
-                                    }
-                                />
-                            </ActionIcon>
-                        </Tooltip>
-                    )}
+                                <ActionIcon
+                                    variant="default"
+                                    onClick={onToggleFullscreen}
+                                >
+                                    <MantineIcon
+                                        icon={
+                                            isFullscreen
+                                                ? IconArrowsMinimize
+                                                : IconArrowsMaximize
+                                        }
+                                    />
+                                </ActionIcon>
+                            </Tooltip>
+                        )}
 
                     {!!userCanManageDashboard && !isFullscreen && (
                         <Tooltip
