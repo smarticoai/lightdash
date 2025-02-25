@@ -254,11 +254,13 @@ export * from './utils/charts';
 export * from './utils/conditionalFormatting';
 export * from './utils/convertToDbt';
 export * from './utils/dashboard';
+export * from './utils/dbt';
 export * from './utils/email';
 export * from './utils/fields';
 export * from './utils/filters';
 export * from './utils/formatting';
 export * from './utils/github';
+export * from './utils/i18n';
 export * from './utils/item';
 export * from './utils/loadLightdashProjectConfig';
 export * from './utils/metricsExplorer';
@@ -1174,6 +1176,24 @@ export function formatRows(
             };
         }
 
+        return resultRow;
+    });
+}
+
+export function rowsWithoutFormatting(rows: { [col: string]: AnyType }[]) {
+    return rows.map((row) => {
+        const resultRow: ResultRow = {};
+        const columnNames = Object.keys(row || {});
+
+        for (const columnName of columnNames) {
+            const value = row[columnName];
+            resultRow[columnName] = {
+                value: {
+                    raw: value,
+                    formatted: null,
+                },
+            };
+        }
         return resultRow;
     });
 }

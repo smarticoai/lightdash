@@ -1,3 +1,356 @@
+# [0.1517.0](https://github.com/lightdash/lightdash/compare/0.1516.0...0.1517.0) (2025-02-25)
+
+
+### Features
+
+* sdk i18n ([#13809](https://github.com/lightdash/lightdash/issues/13809)) ([ac4b8a7](https://github.com/lightdash/lightdash/commit/ac4b8a7c0bf021a3122021a82f8de30432505f28))
+
+# [0.1516.0](https://github.com/lightdash/lightdash/compare/0.1515.0...0.1516.0) (2025-02-25)
+
+
+### Features
+
+* override tiles' filters if dashboard ones target similar ([#13790](https://github.com/lightdash/lightdash/issues/13790)) ([b5f67e4](https://github.com/lightdash/lightdash/commit/b5f67e4f6ad42b268d3cfc32ecc9aff47f3e2ba6))
+
+# [0.1515.0](https://github.com/lightdash/lightdash/compare/0.1514.2...0.1515.0) (2025-02-24)
+
+
+### Features
+
+* Support between and not between filter for numeric fields ([#13757](https://github.com/lightdash/lightdash/issues/13757)) ([832f527](https://github.com/lightdash/lightdash/commit/832f527e8f50f7946deb60341ce2331c04008ca0))
+
+## [0.1514.2](https://github.com/lightdash/lightdash/compare/0.1514.1...0.1514.2) (2025-02-24)
+
+
+### Bug Fixes
+
+* Support slash in dbt selector ([#13792](https://github.com/lightdash/lightdash/issues/13792)) ([e85dd8c](https://github.com/lightdash/lightdash/commit/e85dd8c0f159d28ed76d3ddcd12411ae31df9ac3))
+
+## [0.1514.1](https://github.com/lightdash/lightdash/compare/0.1514.0...0.1514.1) (2025-02-24)
+
+
+### Bug Fixes
+
+* **frontend:** disable drag when filter popover is open ([#13799](https://github.com/lightdash/lightdash/issues/13799)) ([180f4de](https://github.com/lightdash/lightdash/commit/180f4ded1abdf96c18947985ee4ffcc9372f6ba9))
+
+# [0.1514.0](https://github.com/lightdash/lightdash/compare/0.1513.0...0.1514.0) (2025-02-24)
+
+
+### Features
+
+* redirect legacy SQL Runner URLs to new page ([#13794](https://github.com/lightdash/lightdash/issues/13794)) ([9c02669](https://github.com/lightdash/lightdash/commit/9c02669be0a94c7469861f872e89810cd7329550))
+
+# [0.1513.0](https://github.com/lightdash/lightdash/compare/0.1512.2...0.1513.0) (2025-02-24)
+
+
+### Features
+
+* support Postgres client and root certificates ([#13785](https://github.com/lightdash/lightdash/issues/13785)) ([1627785](https://github.com/lightdash/lightdash/commit/16277855d8bdb4af614a51828d95af1597e8252d))
+
+## [0.1512.2](https://github.com/lightdash/lightdash/compare/0.1512.1...0.1512.2) (2025-02-21)
+
+
+### Bug Fixes
+
+* add dimension button overlap issue ([#13759](https://github.com/lightdash/lightdash/issues/13759)) ([0c9ba5e](https://github.com/lightdash/lightdash/commit/0c9ba5e2331d246406201b71ff2792d2d1681286))
+* add placeholder and add '(current)' to current project ([#13726](https://github.com/lightdash/lightdash/issues/13726)) ([3d2de1e](https://github.com/lightdash/lightdash/commit/3d2de1e814b35512bb0741cab06b829978d8033e))
+
+## [0.1512.1](https://github.com/lightdash/lightdash/compare/0.1512.0...0.1512.1) (2025-02-21)
+
+
+### Bug Fixes
+
+* hide toasts in SDK ([#13787](https://github.com/lightdash/lightdash/issues/13787)) ([71cba77](https://github.com/lightdash/lightdash/commit/71cba7790aa415d02dc8f7b0413c179d5dd225fb))
+
+# [0.1512.0](https://github.com/lightdash/lightdash/compare/0.1511.2...0.1512.0) (2025-02-21)
+
+
+### Features
+
+* sdk localize ([#13739](https://github.com/lightdash/lightdash/issues/13739)) ([6bcd447](https://github.com/lightdash/lightdash/commit/6bcd447a9c91f6f2bcfacb573f03e621a0e2f486))
+
+## [0.1511.2](https://github.com/lightdash/lightdash/compare/0.1511.1...0.1511.2) (2025-02-21)
+
+
+### Bug Fixes
+
+* bad double scroll in sdk dashboards ([#13786](https://github.com/lightdash/lightdash/issues/13786)) ([c4e8719](https://github.com/lightdash/lightdash/commit/c4e871954d122114ea10f80ce4ca704807ab64dc))
+
+## [0.1511.1](https://github.com/lightdash/lightdash/compare/0.1511.0...0.1511.1) (2025-02-21)
+
+
+### Bug Fixes
+
+* CLI commands (specifically `lightdash generate`) fail when `version: 2` is missing, even when it's not required ([#13783](https://github.com/lightdash/lightdash/issues/13783)) ([c99794e](https://github.com/lightdash/lightdash/commit/c99794e02cf0f63de8e78bbc5ef63a332642352c))
+
+# [0.1511.0](https://github.com/lightdash/lightdash/compare/0.1510.1...0.1511.0) (2025-02-21)
+
+
+### Features
+
+* conditional formatting against another field and with another field's values ([#13766](https://github.com/lightdash/lightdash/issues/13766)) ([9ba44b5](https://github.com/lightdash/lightdash/commit/9ba44b5a340284c0f9ca8a383ce522ed342a52fe))
+
+## [0.1510.1](https://github.com/lightdash/lightdash/compare/0.1510.0...0.1510.1) (2025-02-21)
+
+
+### Bug Fixes
+
+* fix formatted undefined and log query results ([#13784](https://github.com/lightdash/lightdash/issues/13784)) ([ed23b36](https://github.com/lightdash/lightdash/commit/ed23b36b4a4fdcb444084ba1d1479e0500340400))
+
+# [0.1510.0](https://github.com/lightdash/lightdash/compare/0.1509.2...0.1510.0) (2025-02-21)
+
+
+### Features
+
+* format rows frontend ([#13768](https://github.com/lightdash/lightdash/issues/13768)) ([469a726](https://github.com/lightdash/lightdash/commit/469a726eb2d7ade278a198ed5a69b3bce033aac2))
+
+## [0.1509.2](https://github.com/lightdash/lightdash/compare/0.1509.1...0.1509.2) (2025-02-21)
+
+
+### Bug Fixes
+
+* **frontend:** Series disappear when manually sorting them ([#13779](https://github.com/lightdash/lightdash/issues/13779)) ([878f43f](https://github.com/lightdash/lightdash/commit/878f43fb6cf3b5407c0bfeaf6793947439108992))
+
+## [0.1509.1](https://github.com/lightdash/lightdash/compare/0.1509.0...0.1509.1) (2025-02-20)
+
+
+### Bug Fixes
+
+* editor project access ([#13767](https://github.com/lightdash/lightdash/issues/13767)) ([f445f20](https://github.com/lightdash/lightdash/commit/f445f207784da974cb9aaee52bbefe820fbe6dac))
+
+# [0.1509.0](https://github.com/lightdash/lightdash/compare/0.1508.1...0.1509.0) (2025-02-20)
+
+
+### Features
+
+* add filter dashboard to on pie charts ([#13756](https://github.com/lightdash/lightdash/issues/13756)) ([b583679](https://github.com/lightdash/lightdash/commit/b583679de12228b29156d2fa5db181331fb647bd))
+
+## [0.1508.1](https://github.com/lightdash/lightdash/compare/0.1508.0...0.1508.1) (2025-02-20)
+
+
+### Bug Fixes
+
+* fix tabs search multiple results ([#13763](https://github.com/lightdash/lightdash/issues/13763)) ([cd783d8](https://github.com/lightdash/lightdash/commit/cd783d89cf32429b6eaa68961258dfc4ac8e0aca))
+
+# [0.1508.0](https://github.com/lightdash/lightdash/compare/0.1507.3...0.1508.0) (2025-02-20)
+
+
+### Features
+
+* allow conditional formatting for string dimensions ([#13761](https://github.com/lightdash/lightdash/issues/13761)) ([88dea79](https://github.com/lightdash/lightdash/commit/88dea79711dfac507384a997763db6cbe9c7ab2f))
+
+## [0.1507.3](https://github.com/lightdash/lightdash/compare/0.1507.2...0.1507.3) (2025-02-20)
+
+
+### Bug Fixes
+
+* set signed cookie on login of headless browser ([#13723](https://github.com/lightdash/lightdash/issues/13723)) ([85bc1ad](https://github.com/lightdash/lightdash/commit/85bc1adad69b46070f8dd7976cf6ffde7b1780dc))
+
+## [0.1507.2](https://github.com/lightdash/lightdash/compare/0.1507.1...0.1507.2) (2025-02-19)
+
+
+### Bug Fixes
+
+* reload metrics catalog on index catalog complete ([#13742](https://github.com/lightdash/lightdash/issues/13742)) ([7b0967e](https://github.com/lightdash/lightdash/commit/7b0967e10cf0be58106d8755e246e80f5a5c80b0))
+
+## [0.1507.1](https://github.com/lightdash/lightdash/compare/0.1507.0...0.1507.1) (2025-02-19)
+
+
+### Bug Fixes
+
+* **ai:** date filtering ([#13743](https://github.com/lightdash/lightdash/issues/13743)) ([7a2418d](https://github.com/lightdash/lightdash/commit/7a2418d0180cfc8867823976dcb45c59c14a6060))
+
+# [0.1507.0](https://github.com/lightdash/lightdash/compare/0.1506.2...0.1507.0) (2025-02-19)
+
+
+### Bug Fixes
+
+* **backend:** Validate custom metrics' filters ([#13741](https://github.com/lightdash/lightdash/issues/13741)) ([1d911e0](https://github.com/lightdash/lightdash/commit/1d911e0ca07ec2eeee08cdd4465635e4ecff9f26))
+
+
+### Features
+
+* filter dashboard tabs search ([#13736](https://github.com/lightdash/lightdash/issues/13736)) ([47d5996](https://github.com/lightdash/lightdash/commit/47d5996bba200a17e5127b5d60f1edeb51d0eb2a))
+
+## [0.1506.2](https://github.com/lightdash/lightdash/compare/0.1506.1...0.1506.2) (2025-02-19)
+
+
+### Bug Fixes
+
+* **cli:** "do you want to overwrite column description?" question formatting ([#13719](https://github.com/lightdash/lightdash/issues/13719)) ([d351322](https://github.com/lightdash/lightdash/commit/d3513221c6f07558d6d158ad1c4ad1ff926f0bb4))
+
+## [0.1506.1](https://github.com/lightdash/lightdash/compare/0.1506.0...0.1506.1) (2025-02-18)
+
+
+### Bug Fixes
+
+* use sessionStorage instead of localStorage for SDK routes ([#13740](https://github.com/lightdash/lightdash/issues/13740)) ([cb1ea0a](https://github.com/lightdash/lightdash/commit/cb1ea0a19820ac23660eeac2a3d4c03bd27b0d78))
+
+# [0.1506.0](https://github.com/lightdash/lightdash/compare/0.1505.3...0.1506.0) (2025-02-18)
+
+
+### Features
+
+* allow custom format metrics and table calculations in the UI ([#13725](https://github.com/lightdash/lightdash/issues/13725)) ([fe8361c](https://github.com/lightdash/lightdash/commit/fe8361c913861e1fab9b1d2f7c1ee3bbe1ce97a5))
+
+## [0.1505.3](https://github.com/lightdash/lightdash/compare/0.1505.2...0.1505.3) (2025-02-18)
+
+
+### Bug Fixes
+
+* GitHub login UI changes ([#13718](https://github.com/lightdash/lightdash/issues/13718)) ([931a7b0](https://github.com/lightdash/lightdash/commit/931a7b05a76da777a7cc185460542ead95e50213))
+
+## [0.1505.2](https://github.com/lightdash/lightdash/compare/0.1505.1...0.1505.2) (2025-02-18)
+
+
+### Bug Fixes
+
+* always force slug when creating chart or dashboard ([#13714](https://github.com/lightdash/lightdash/issues/13714)) ([7d3359b](https://github.com/lightdash/lightdash/commit/7d3359be7a9760b3841bbfee3e066a15d160789c))
+
+## [0.1505.1](https://github.com/lightdash/lightdash/compare/0.1505.0...0.1505.1) (2025-02-18)
+
+
+### Bug Fixes
+
+* process new lines in results ([#13703](https://github.com/lightdash/lightdash/issues/13703)) ([0a2bebb](https://github.com/lightdash/lightdash/commit/0a2bebb78646c3e3123a61c2931dff8230839277))
+
+# [0.1505.0](https://github.com/lightdash/lightdash/compare/0.1504.0...0.1505.0) (2025-02-18)
+
+
+### Features
+
+* GitHub login full flow ([#13701](https://github.com/lightdash/lightdash/issues/13701)) ([b106bce](https://github.com/lightdash/lightdash/commit/b106bce16e9f5a10e946cbea264bf1bf62691cc0))
+
+# [0.1504.0](https://github.com/lightdash/lightdash/compare/0.1503.0...0.1504.0) (2025-02-17)
+
+
+### Features
+
+* remove legacy sql runner page ([#13695](https://github.com/lightdash/lightdash/issues/13695)) ([a882052](https://github.com/lightdash/lightdash/commit/a882052d876db1f45c261c0489a2b4ab1442358b))
+
+# [0.1503.0](https://github.com/lightdash/lightdash/compare/0.1502.1...0.1503.0) (2025-02-14)
+
+
+### Bug Fixes
+
+* **frontend:** added contrast text color for selected tiles. ([#13605](https://github.com/lightdash/lightdash/issues/13605)) ([be8154a](https://github.com/lightdash/lightdash/commit/be8154abcd078830b7ac441278b21fb45da39648))
+
+
+### Features
+
+* allow tab and enter to navigate/apply categories ([#13522](https://github.com/lightdash/lightdash/issues/13522)) ([1a71150](https://github.com/lightdash/lightdash/commit/1a711507b18bb0962be2c9b9b8b388d905c4eee2))
+
+## [0.1502.1](https://github.com/lightdash/lightdash/compare/0.1502.0...0.1502.1) (2025-02-14)
+
+
+### Bug Fixes
+
+* user attribute error on e2e ([#13694](https://github.com/lightdash/lightdash/issues/13694)) ([9be2ba8](https://github.com/lightdash/lightdash/commit/9be2ba840fa3a6969d28c9d3c909d9b0bac7350a))
+
+# [0.1502.0](https://github.com/lightdash/lightdash/compare/0.1501.2...0.1502.0) (2025-02-14)
+
+
+### Features
+
+* add way to copy slug from dashboard page ([#13691](https://github.com/lightdash/lightdash/issues/13691)) ([780e1bc](https://github.com/lightdash/lightdash/commit/780e1bc6f2978ff8065e239b9f99331ed80e639d))
+
+## [0.1501.2](https://github.com/lightdash/lightdash/compare/0.1501.1...0.1501.2) (2025-02-14)
+
+
+### Bug Fixes
+
+* batch insert when running validator ([#13692](https://github.com/lightdash/lightdash/issues/13692)) ([d3a1867](https://github.com/lightdash/lightdash/commit/d3a186739e9153a2e18c0e92fc8a224081c1872d))
+
+## [0.1501.1](https://github.com/lightdash/lightdash/compare/0.1501.0...0.1501.1) (2025-02-14)
+
+
+### Bug Fixes
+
+* formatting in treesinglenodeactions ([#13693](https://github.com/lightdash/lightdash/issues/13693)) ([58c3f22](https://github.com/lightdash/lightdash/commit/58c3f22985b17d1ec1ad0b8c32813b518aefdfd8))
+
+# [0.1501.0](https://github.com/lightdash/lightdash/compare/0.1500.0...0.1501.0) (2025-02-14)
+
+
+### Features
+
+* validate custom dimension sql before saving/updating ([#13683](https://github.com/lightdash/lightdash/issues/13683)) ([35ca351](https://github.com/lightdash/lightdash/commit/35ca35195a0ee144f613eccc00a7b950c610dc77))
+
+# [0.1500.0](https://github.com/lightdash/lightdash/compare/0.1499.0...0.1500.0) (2025-02-13)
+
+
+### Features
+
+* add get org member by email endpoint ([#13673](https://github.com/lightdash/lightdash/issues/13673)) ([127e799](https://github.com/lightdash/lightdash/commit/127e799d03fcf2284de84034283afc4cf16a5951))
+
+# [0.1499.0](https://github.com/lightdash/lightdash/compare/0.1498.0...0.1499.0) (2025-02-13)
+
+
+### Bug Fixes
+
+* assert filter type ([#13679](https://github.com/lightdash/lightdash/issues/13679)) ([9c0ea65](https://github.com/lightdash/lightdash/commit/9c0ea652ba71e05fb94bd88b475a5affa75d2254))
+* wait for markdown tiles before screenshot ([#13676](https://github.com/lightdash/lightdash/issues/13676)) ([0e7315c](https://github.com/lightdash/lightdash/commit/0e7315c94ba1b6cbfc8bb3cc19d902ff3fab6663))
+
+
+### Features
+
+* allow duplicating markdown tiles ([#13678](https://github.com/lightdash/lightdash/issues/13678)) ([bd750cd](https://github.com/lightdash/lightdash/commit/bd750cd4cfb5e3b8e30ca5cecbf6dd7111df4198))
+
+# [0.1498.0](https://github.com/lightdash/lightdash/compare/0.1497.1...0.1498.0) (2025-02-13)
+
+
+### Features
+
+* **frontend:** Make dbt write back YAML generator work even if you're not connected to GitHub ([#13675](https://github.com/lightdash/lightdash/issues/13675)) ([49b0f67](https://github.com/lightdash/lightdash/commit/49b0f67540d325f56a13f5b46d97680f38235bd5))
+
+## [0.1497.1](https://github.com/lightdash/lightdash/compare/0.1497.0...0.1497.1) (2025-02-13)
+
+
+### Bug Fixes
+
+* disable write back on error ([#13665](https://github.com/lightdash/lightdash/issues/13665)) ([713c8b1](https://github.com/lightdash/lightdash/commit/713c8b1889a3fa2c4e1501700ed3e7c8142fa7af))
+
+# [0.1497.0](https://github.com/lightdash/lightdash/compare/0.1496.3...0.1497.0) (2025-02-13)
+
+
+### Features
+
+* apply user attributes to sql from ([#13663](https://github.com/lightdash/lightdash/issues/13663)) ([bd8aa00](https://github.com/lightdash/lightdash/commit/bd8aa007189a744d00b51de00ef7a432c91d6c18))
+
+## [0.1496.3](https://github.com/lightdash/lightdash/compare/0.1496.2...0.1496.3) (2025-02-13)
+
+
+### Bug Fixes
+
+* disable custom metric write back if not github ([#13672](https://github.com/lightdash/lightdash/issues/13672)) ([ec51ad9](https://github.com/lightdash/lightdash/commit/ec51ad9a12f16fe436650ff29335c1ae7bd6769e))
+
+## [0.1496.2](https://github.com/lightdash/lightdash/compare/0.1496.1...0.1496.2) (2025-02-13)
+
+
+### Bug Fixes
+
+* **frontend:** conditionally render custom metric write back modal to avoid renderind `undefined` and errors in console ([#13661](https://github.com/lightdash/lightdash/issues/13661)) ([a484b9e](https://github.com/lightdash/lightdash/commit/a484b9e20a7bae4ef12c4ff97a6d957db731c40d))
+
+## [0.1496.1](https://github.com/lightdash/lightdash/compare/0.1496.0...0.1496.1) (2025-02-13)
+
+
+### Bug Fixes
+
+* sdk markdown styles ([#13664](https://github.com/lightdash/lightdash/issues/13664)) ([fda6182](https://github.com/lightdash/lightdash/commit/fda6182a3836e80d30c902c877a2bb2258b3c4c8))
+
+# [0.1496.0](https://github.com/lightdash/lightdash/compare/0.1495.1...0.1496.0) (2025-02-13)
+
+
+### Features
+
+* **backend:** Update message in Pull Request for write back to say don't change stuff ([#13660](https://github.com/lightdash/lightdash/issues/13660)) ([8acac60](https://github.com/lightdash/lightdash/commit/8acac601d738bdac4f2ff57f8e190a7ceede4c26))
+
+## [0.1495.1](https://github.com/lightdash/lightdash/compare/0.1495.0...0.1495.1) (2025-02-13)
+
+
+### Bug Fixes
+
+* unify confirmation modal write back ([#13630](https://github.com/lightdash/lightdash/issues/13630)) ([54cac74](https://github.com/lightdash/lightdash/commit/54cac74c7966cc80bbc18d6cd0a15ac42c604303))
+
 # [0.1495.0](https://github.com/lightdash/lightdash/compare/0.1494.0...0.1495.0) (2025-02-12)
 
 

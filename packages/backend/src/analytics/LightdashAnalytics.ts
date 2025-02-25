@@ -210,6 +210,7 @@ type MetricQueryExecutionProperties = {
     tableCalculationsPercentFormatCount: number;
     tableCalculationsCurrencyFormatCount: number;
     tableCalculationsNumberFormatCount: number;
+    tableCalculationCustomFormatCount: number;
     filtersCount: number;
     sortsCount: number;
     hasExampleMetric: boolean;
@@ -218,6 +219,7 @@ type MetricQueryExecutionProperties = {
     additionalMetricsPercentFormatCount: number;
     additionalMetricsCurrencyFormatCount: number;
     additionalMetricsNumberFormatCount: number;
+    additionalMetricsCustomFormatCount: number;
     numFixedWidthBinCustomDimensions: number;
     numFixedBinsBinCustomDimensions: number;
     numCustomRangeBinCustomDimensions: number;
@@ -611,6 +613,7 @@ type ProjectSearch = BaseTrack & {
         sqlChartsResultsCount: number;
         tablesResultsCount: number;
         fieldsResultsCount: number;
+        dashboardTabsResultsCount: number;
     };
 };
 type DashboardUpdateMultiple = BaseTrack & {
@@ -1122,6 +1125,18 @@ export type WriteBackEvent = BaseTrack & {
     };
 };
 
+export type WriteBackErrorEvent = BaseTrack & {
+    event: 'write_back.error';
+    userId: string;
+    properties: {
+        name: string;
+        organizationId: string;
+        projectId: string;
+        context: QueryExecutionContext;
+        error: string;
+    };
+};
+
 type CreateTagEvent = BaseTrack & {
     event: 'category.created';
     userId: string;
@@ -1229,6 +1244,7 @@ type TypedEvent =
     | VirtualViewEvent
     | GithubInstallEvent
     | WriteBackEvent
+    | WriteBackErrorEvent
     | SchedulerTimezoneUpdateEvent
     | CreateTagEvent
     | CategoriesAppliedEvent

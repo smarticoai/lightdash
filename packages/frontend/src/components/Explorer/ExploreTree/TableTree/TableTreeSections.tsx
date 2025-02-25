@@ -23,6 +23,8 @@ import { useFeatureFlagEnabled } from '../../../../hooks/useFeatureFlagEnabled';
 import { useProject } from '../../../../hooks/useProject';
 import useApp from '../../../../providers/App/useApp';
 import useExplorerContext from '../../../../providers/Explorer/useExplorerContext';
+import useTracking from '../../../../providers/Tracking/useTracking';
+import { EventName } from '../../../../types/Events';
 import DocumentationHelpButton from '../../../DocumentationHelpButton';
 import MantineIcon from '../../../common/MantineIcon';
 import { TreeProvider } from './Tree/TreeProvider';
@@ -55,6 +57,7 @@ const TableTreeSections: FC<Props> = ({
 }) => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const { user } = useApp();
+    const { track } = useTracking();
     const canManageCustomSql = user.data?.ability?.can(
         'manage',
         subject('CustomSql', {
@@ -123,7 +126,7 @@ const TableTreeSections: FC<Props> = ({
 
     const isGithubProject =
         project?.dbtConnection.type === DbtProjectType.GITHUB;
-    const { data: gitIntegration } = useGitIntegration(projectUuid);
+    const { data: gitIntegration } = useGitIntegration();
     const isCustomSqlEnabled = useFeatureFlagEnabled(
         FeatureFlags.CustomSQLEnabled,
     );
@@ -322,19 +325,37 @@ const TableTreeSections: FC<Props> = ({
                             }}
                         />
                     </Group>
-
-                    <Tooltip label="Write back custom metrics">
-                        <ActionIcon
-                            onClick={() => {
-                                toggleAdditionalMetricWriteBackModal({
-                                    items: allAdditionalMetrics || [],
-                                    multiple: true,
-                                });
-                            }}
-                        >
-                            <MantineIcon icon={IconCode} />
-                        </ActionIcon>
-                    </Tooltip>
+                    {isCustomSqlEnabled && (
+                        <Tooltip label="Write back custom metrics">
+                            <ActionIcon
+                                onClick={() => {
+                                    if (
+                                        projectUuid &&
+                                        user.data?.organizationUuid
+                                    ) {
+                                        track({
+                                            name: EventName.WRITE_BACK_FROM_CUSTOM_METRIC_HEADER_CLICKED,
+                                            properties: {
+                                                userId: user.data.userUuid,
+                                                projectId: projectUuid,
+                                                organizationId:
+                                                    user.data.organizationUuid,
+                                                customMetricsCount:
+                                                    allAdditionalMetrics?.length ||
+                                                    0,
+                                            },
+                                        });
+                                    }
+                                    toggleAdditionalMetricWriteBackModal({
+                                        items: allAdditionalMetrics || [],
+                                        multiple: true,
+                                    });
+                                }}
+                            >
+                                <MantineIcon icon={IconCode} />
+                            </ActionIcon>
+                        </Tooltip>
+                    )}
                 </Group>
             ) : null}
 

@@ -1,6 +1,7 @@
 import { subject } from '@casl/ability';
 import {
     DashboardSearchResult,
+    DashboardTabResult,
     FieldSearchResult,
     ForbiddenError,
     isTableErrorSearchResult,
@@ -80,6 +81,9 @@ export class SearchService extends BaseService {
         const spaceUuids = [
             ...new Set([
                 ...results.dashboards.map((dashboard) => dashboard.spaceUuid),
+                ...results.dashboardTabs.map(
+                    (dashboardTab) => dashboardTab.spaceUuid,
+                ),
                 ...results.sqlCharts.map((sqlChart) => sqlChart.spaceUuid),
                 ...results.savedCharts.map(
                     (savedChart) => savedChart.spaceUuid,
@@ -104,7 +108,8 @@ export class SearchService extends BaseService {
             item:
                 | DashboardSearchResult
                 | SpaceSearchResult
-                | SavedChartSearchResult,
+                | SavedChartSearchResult
+                | DashboardTabResult,
         ) => {
             const spaceUuid: string =
                 'spaceUuid' in item ? item.spaceUuid : item.uuid;
@@ -185,6 +190,9 @@ export class SearchService extends BaseService {
             results.dashboards.map(filterItem),
         );
 
+        const hasDashboardTabAccess = await Promise.all(
+            results.dashboardTabs.map(filterItem),
+        );
         const hasSavedChartAccess = await Promise.all(
             results.savedCharts.map(filterItem),
         );
@@ -207,6 +215,9 @@ export class SearchService extends BaseService {
             fields: filteredFields,
             dashboards: results.dashboards.filter(
                 (_, index) => hasDashboardAccess[index],
+            ),
+            dashboardTabs: results.dashboardTabs.filter(
+                (_, index) => hasDashboardTabAccess[index],
             ),
             savedCharts: results.savedCharts.filter(
                 (_, index) => hasSavedChartAccess[index],
@@ -241,6 +252,7 @@ export class SearchService extends BaseService {
                     filteredResults.semanticViewerCharts.length,
                 tablesResultsCount: filteredResults.tables.length,
                 fieldsResultsCount: filteredResults.fields.length,
+                dashboardTabsResultsCount: filteredResults.dashboardTabs.length,
             },
         });
 

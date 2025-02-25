@@ -12,6 +12,7 @@ import {
     isSummable,
     type ConditionalFormattingConfig,
     type ConditionalFormattingMinMaxMap,
+    type ConditionalFormattingRowFields,
     type ItemsMap,
     type PivotData,
     type ResultRow,
@@ -33,6 +34,7 @@ import last from 'lodash/last';
 import { readableColor } from 'polished';
 import React, { useCallback, useEffect, useMemo, useRef, type FC } from 'react';
 import { getDecimalPrecision } from '../../../hooks/tableVisualization/getDataAndColumns';
+import { formatCellContent } from '../../../hooks/useColumns';
 import { getColorFromRange, isHexCodeColor } from '../../../utils/colorUtils';
 import { getConditionalRuleLabel } from '../Filters/FilterInputs/utils';
 import Table from '../LightTable';
@@ -202,9 +204,7 @@ const PivotTable: FC<PivotTableProps> = ({
                     },
                     {
                         id: col.fieldId,
-                        cell: (info) => {
-                            return info.getValue()?.value?.formatted || '-';
-                        },
+                        cell: (info) => formatCellContent(info.getValue()),
                         meta: {
                             item: item,
                             type: col.columnType,
@@ -404,7 +404,6 @@ const PivotTable: FC<PivotTableProps> = ({
                                 #
                             </Table.CellHead>
                         )}
-
                         {/* renders the title labels */}
                         {data.titleFields[headerRowIndex].map(
                             (titleField, titleFieldIndex) => {
@@ -441,7 +440,6 @@ const PivotTable: FC<PivotTableProps> = ({
                                 );
                             },
                         )}
-
                         {/* renders the header values or labels */}
                         {headerValues.map((headerValue, headerColIndex) => {
                             const isLabel = headerValue.type === 'label';
@@ -465,11 +463,10 @@ const PivotTable: FC<PivotTableProps> = ({
                                 >
                                     {isLabel
                                         ? getFieldLabel(headerValue.fieldId)
-                                        : headerValue.value.formatted}
+                                        : formatCellContent(headerValue)}
                                 </Table.CellHead>
                             ) : null;
                         })}
-
                         {/* render the total label */}
                         {hasRowTotals
                             ? data.rowTotalFields?.[headerRowIndex].map(
@@ -511,6 +508,23 @@ const PivotTable: FC<PivotTableProps> = ({
                     const row = rows[rowIndex];
                     if (!row) return null;
 
+                    const rowFields = row
+                        .getVisibleCells()
+                        .reduce<ConditionalFormattingRowFields>((acc, cell) => {
+                            const meta = cell.column.columnDef.meta;
+                            if (meta?.item) {
+                                const cellValue = cell.getValue() as
+                                    | ResultRow[0]
+                                    | undefined;
+
+                                acc[getItemId(meta.item)] = {
+                                    field: meta.item,
+                                    value: cellValue?.value?.raw,
+                                };
+                            }
+                            return acc;
+                        }, {});
+
                     const toggleExpander = row.getToggleExpandedHandler();
 
                     return (
@@ -542,6 +556,7 @@ const PivotTable: FC<PivotTableProps> = ({
                                         value: value?.raw,
                                         minMaxMap,
                                         conditionalFormattings,
+                                        rowFields,
                                     });
 
                                 const conditionalFormattingColor =
@@ -558,6 +573,7 @@ const PivotTable: FC<PivotTableProps> = ({
                                         getConditionalFormattingDescription(
                                             item,
                                             conditionalFormattingConfig,
+                                            rowFields,
                                             getConditionalRuleLabel,
                                         );
 

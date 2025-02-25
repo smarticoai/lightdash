@@ -12,6 +12,7 @@ import {
     ReactQueryProvider,
     ThirdPartyServicesProvider,
     TrackingProvider,
+    type LanguageMap,
     type SdkFilter,
 } from '@lightdash/frontend';
 import { FC, PropsWithChildren, useEffect, useState } from 'react';
@@ -24,6 +25,7 @@ type Props = {
         fontFamily?: string;
     };
     filters?: SdkFilter[];
+    contentOverrides?: LanguageMap;
 };
 
 const decodeJWT = (token: string) => {
@@ -49,7 +51,7 @@ const persistInstanceUrl = (instanceUrl: string) => {
         instanceUrl = `${instanceUrl}/`;
     }
 
-    localStorage.setItem(
+    sessionStorage.setItem(
         LIGHTDASH_SDK_INSTANCE_URL_LOCAL_STORAGE_KEY,
         instanceUrl,
     );
@@ -70,6 +72,7 @@ const SdkProviders: FC<
                         chartFont: styles?.fontFamily,
                     },
                 }}
+                notificationsLimit={0}
             >
                 <AppProvider>
                     <FullscreenProvider enabled={false}>
@@ -98,6 +101,7 @@ const Dashboard: FC<Props> = ({
     instanceUrl,
     styles,
     filters,
+    contentOverrides,
 }) => {
     const [token, setToken] = useState<string | null>(null);
     const [projectUuid, setProjectUuid] = useState<string | null>(null);
@@ -140,21 +144,21 @@ const Dashboard: FC<Props> = ({
 
     return (
         <SdkProviders styles={styles}>
-            <EmbedProvider embedToken={token}>
-                <div
-                    style={{
+            <EmbedProvider
+                embedToken={token}
+                projectUuid={projectUuid}
+                filters={filters}
+                contentOverrides={contentOverrides}
+            >
+                <EmbedDashboard
+                    containerStyles={{
                         width: '100%',
                         height: '100%',
                         position: 'relative',
                         overflow: 'auto',
                         backgroundColor: styles?.backgroundColor,
                     }}
-                >
-                    <EmbedDashboard
-                        projectUuid={projectUuid}
-                        filters={filters}
-                    />
-                </div>
+                />
             </EmbedProvider>
         </SdkProviders>
     );
