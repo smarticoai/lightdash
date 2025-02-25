@@ -835,7 +835,7 @@ export class EmbedService extends BaseService {
                 initialFieldId,
                 search,
                 limit,
-                filters,
+                filters
             });
 
         const { rows, cacheMetadata } = await this._getEmbedResults({

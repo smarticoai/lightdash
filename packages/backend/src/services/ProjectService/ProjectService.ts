@@ -2800,6 +2800,7 @@ export class ProjectService extends BaseService {
         search,
         limit,
         filters,
+        user
     }: {
         projectUuid: string;
         table: string;
@@ -2807,6 +2808,7 @@ export class ProjectService extends BaseService {
         search: string;
         limit: number;
         filters: AndFilterGroup | undefined;
+        user?: SessionUser;
     }) {
         if (limit > this.lightdashConfig.query.maxLimit) {
             throw new ParameterError(
@@ -2820,7 +2822,7 @@ export class ProjectService extends BaseService {
         );
 
         // SMR-START
-        if (explore && explore.tables && user.userAttributes?.bq_project_id) {
+        if (explore && explore.tables && user?.userAttributes?.bq_project_id) {
             const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
             for (const [, compiledTable] of Object.entries(explore.tables)) {
                 compiledTable.database = bqProjectId;
@@ -2932,6 +2934,7 @@ export class ProjectService extends BaseService {
                 search,
                 limit,
                 filters,
+                user
             });
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
