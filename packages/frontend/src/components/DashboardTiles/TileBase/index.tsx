@@ -37,6 +37,7 @@ import {
     TileTitleLink,
     TitleWrapper,
 } from './TileBase.styles';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 
 type Props<T> = {
     isEditMode: boolean;
@@ -188,7 +189,7 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
                                         <Text
                                             component={TileTitleLink}
                                             ref={titleRef}
-                                            href={titleHref}
+                                            href={smrIsEmbeddedMode() ? undefined : titleHref}
                                             $hovered={titleHovered}
                                             target="_blank"
                                             className="non-draggable"
