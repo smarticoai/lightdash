@@ -1,18 +1,16 @@
+/* eslint-disable no-await-in-loop */
 import { subject } from '@casl/ability';
 import {
     AdditionalMetric,
-    AnyType,
     ApiGithubDbtWritePreview,
-    DbtModelNode,
+    CustomDimension,
     DbtProjectType,
-    DimensionType,
-    findAndUpdateModelNodes,
+    DbtSchemaEditor,
     ForbiddenError,
     friendlyName,
     getErrorMessage,
     GitIntegrationConfiguration,
     isUserWithOrg,
-    lightdashDbtYamlSchema,
     ParameterError,
     ParseError,
     PullRequestCreated,
@@ -23,8 +21,6 @@ import {
     UnexpectedServerError,
     VizColumn,
 } from '@lightdash/common';
-import Ajv from 'ajv';
-import * as yaml from 'js-yaml';
 import { nanoid } from 'nanoid';
 import {
     LightdashAnalytics,
@@ -66,30 +62,6 @@ type GithubProps = {
     installationId?: string; // For github requests using the installation id as a bot
     mainBranch: string;
     quoteChar: `"` | `'`;
-};
-// TODO move this to common and refactor cli
-type YamlColumnMeta = {
-    dimension?: {
-        type?: DimensionType;
-    };
-};
-
-type YamlColumn = {
-    name: string;
-    description?: string;
-    meta?: YamlColumnMeta;
-};
-
-export type YamlModel = {
-    name: string;
-    description?: string;
-    columns?: YamlColumn[];
-    meta?: AnyType;
-};
-
-export type YamlSchema = {
-    version?: number;
-    models?: DbtModelNode[];
 };
 
 export class GitIntegrationService extends BaseService {
@@ -142,25 +114,6 @@ export class GitIntegrationService extends BaseService {
             enabled: !!installationId,
             installationId,
         };
-    }
-
-    private static async loadYamlSchema(content: AnyType): Promise<YamlSchema> {
-        const schemaFile = yaml.load(content);
-
-        const ajvCompiler = new Ajv({ coerceTypes: true });
-
-        const validate = ajvCompiler.compile<YamlSchema>(
-            lightdashDbtYamlSchema,
-        );
-        if (schemaFile === undefined) {
-            return {
-                version: 2,
-            };
-        }
-        if (!validate(schemaFile)) {
-            throw new ParseError(`Not valid schema ${validate}`);
-        }
-        return schemaFile;
     }
 
     static async createBranch({
@@ -287,87 +240,111 @@ Affected charts:
             token,
         });
 
-        const yamlSchema = await GitIntegrationService.loadYamlSchema(
-            fileContent,
-        );
+        const yamlSchema = new DbtSchemaEditor(fileContent);
 
-        if (!yamlSchema.models)
-            throw new Error(`Models not found ${yamlSchema}`);
+        if (!yamlSchema.hasModels()) {
+            throw new Error(`No models found in ${fileName}`);
+        }
 
         return { yamlSchema, fileName, fileContent, fileSha };
     }
 
-    async updateFileForCustomMetrics({
+    async updateFile({
         owner,
         repo,
         path,
         projectUuid,
-        customMetrics,
         token,
         branch,
-        quoteChar = `'`,
+        quoteChar,
+        fields,
+        type,
     }: {
         owner: string;
         repo: string;
         path: string;
         projectUuid: string;
-        customMetrics: AdditionalMetric[] | undefined;
         branch: string;
         token: string;
         quoteChar?: `"` | `'`;
-    }): Promise<void> {
-        if (customMetrics === undefined || customMetrics?.length === 0)
-            throw new Error('No custom metrics found');
-        const tables = [
-            ...new Set(customMetrics.map((metric) => metric.table)),
-        ];
+    } & (
+        | {
+              type: 'customDimensions';
+              fields: CustomDimension[];
+          }
+        | {
+              type: 'customMetrics';
+              fields: AdditionalMetric[];
+          }
+    )): Promise<void> {
+        const fieldsType =
+            type === 'customDimensions' ? 'custom dimension' : 'custom metric';
 
-        const fileNames = await tables.reduce<Promise<string[]>>(
-            async (accPromise, table) => {
-                const acc = await accPromise;
-                const customMetricsForTable = customMetrics.filter(
-                    (metric) => metric.table === table,
-                );
-                const { yamlSchema, fileName, fileSha } =
-                    await this.getYamlForTable({
-                        table,
-                        path,
-                        owner,
-                        repo,
-                        branch,
-                        token,
-                        projectUuid,
-                    });
-                const updatedModels = findAndUpdateModelNodes(
-                    yamlSchema.models!,
-                    customMetricsForTable,
-                );
+        if (fields === undefined || fields?.length === 0)
+            throw new Error(`No custom ${fieldsType}s found`);
+        const tables = [...new Set(fields.map((item) => item.table))];
 
-                const updatedYml = yaml.dump(
-                    { ...yamlSchema, models: updatedModels },
-                    {
-                        quotingType: quoteChar,
-                    },
-                );
-
-                const fileUpdated = await updateFile({
+        for (const table of tables) {
+            const fieldsForTable = fields.filter(
+                (item) => item.table === table,
+            );
+            const { yamlSchema, fileName, fileSha } =
+                await this.getYamlForTable({
+                    table,
+                    path,
                     owner,
                     repo,
-                    fileName,
-                    content: updatedYml,
-                    fileSha,
-                    branchName: branch,
+                    branch,
                     token,
-                    message: `Updated file ${fileName} with ${customMetricsForTable?.length} custom metrics from table ${table}`,
+                    projectUuid,
                 });
-                Logger.debug(
-                    `Successfully updated file ${fileName} in ${owner}/${repo} (branch: ${branch})`,
-                );
 
-                return [...acc, fileName];
-            },
-            Promise.resolve([]),
-        );
+            if (!yamlSchema.hasModels()) {
+                throw new Error(`No models found in ${fileName}`);
+            }
+
+            let updatedYml: string;
+            if (type === 'customDimensions') {
+                const warehouseCredentials =
+                    await this.projectModel.getWarehouseCredentialsForProject(
+                        projectUuid,
+                    );
+                const warehouseClient =
+                    this.projectModel.getWarehouseClientFromCredentials(
+                        warehouseCredentials,
+                    );
+                updatedYml = yamlSchema
+                    .addCustomDimensions(
+                        fieldsForTable as CustomDimension[],
+                        warehouseClient,
+                    )
+                    .toString({
+                        quoteChar,
+                    });
+            } else if (type === 'customMetrics') {
+                updatedYml = yamlSchema
+                    .addCustomMetrics(fieldsForTable as AdditionalMetric[])
+                    .toString({
+                        quoteChar,
+                    });
+            } else {
+                throw new ParameterError(`Unknown type: ${type}`);
+            }
+
+            await updateFile({
+                owner,
+                repo,
+                fileName,
+                content: updatedYml,
+                fileSha,
+                branchName: branch,
+                token,
+                message: `Updated file ${fileName} with ${fieldsForTable?.length} custom ${fieldsType} from table ${table}`,
+            });
+            Logger.debug(
+                `Successfully updated file ${fileName} in ${owner}/${repo} (branch: ${branch})`,
+            );
+        }
     }
 
     async getProjectRepo(projectUuid: string) {
@@ -454,14 +431,25 @@ Affected charts:
         return githubProps;
     }
 
-    async createPullRequestForCustomMetrics(
+    async createPullRequest(
         user: SessionUser,
         projectUuid: string,
-        customMetrics: AdditionalMetric[],
         quoteChar: `"` | `'`,
+        args:
+            | {
+                  type: 'customDimensions';
+                  fields: CustomDimension[];
+              }
+            | {
+                  type: 'customMetrics';
+                  fields: AdditionalMetric[];
+              },
     ): Promise<PullRequestCreated> {
-        if (customMetrics.length === 0)
-            throw new ParseError('Missing custom metrics');
+        const { type, fields } = args;
+        const typeName =
+            type === 'customDimensions' ? 'custom dimension' : 'custom metric';
+
+        if (fields.length === 0) throw new ParseError(`Missing ${typeName}s`);
 
         if (
             user.ability.cannot(
@@ -482,19 +470,19 @@ Affected charts:
         );
 
         await GitIntegrationService.createBranch(githubProps);
-        const updatedFiles = await this.updateFileForCustomMetrics({
+        await this.updateFile({
             ...githubProps,
-            customMetrics,
+            ...args,
             projectUuid,
             quoteChar,
         });
 
-        const customMetricInfo =
-            customMetrics.length === 1
-                ? `\`${customMetrics[0].name}\` custom metric`
-                : `${customMetrics.length} custom metrics`;
+        const fieldsInfo =
+            fields.length === 1
+                ? `\`${fields[0].name}\` ${typeName}`
+                : `${fields.length} ${typeName}s`;
         const eventProperties: WriteBackEvent['properties'] = {
-            name: customMetricInfo,
+            name: fieldsInfo,
             projectId: projectUuid,
             organizationId: user.organizationUuid!,
             context: QueryExecutionContext.EXPLORE,
@@ -502,12 +490,11 @@ Affected charts:
         try {
             const pullRequest = await createPullRequest({
                 ...githubProps,
-                title: `Adds ${customMetricInfo}`,
-                body: `Created by Lightdash, this pull request adds ${customMetricInfo} to the dbt model.
-
+                title: `Adds ${fieldsInfo}`,
+                body: `Created by Lightdash, this pull request adds ${fieldsInfo} to the dbt model.
 Triggered by user ${user.firstName} ${user.lastName} (${user.email})
 
-> ⚠️ **Note: Do not change the \`label\` or \`id\` of your metrics in this pull request.** Your custom metric(s) _will not be replaced_ with YAML metrics if you change the \`label\` or \`id\` of the metrics in this pull request. Lightdash requires the IDs and labels to match 1:1 in order to replace custom metrics with YAML metrics.`,
+> ⚠️ **Note: Do not change the \`label\` or \`id\` of your ${typeName}s in this pull request.** Your ${typeName}s _will not be replaced_ with YAML ${typeName}s if you change the \`label\` or \`id\` of the ${typeName}s in this pull request. Lightdash requires the IDs and labels to match 1:1 in order to replace custom ${typeName}s with YAML ${typeName}s.`,
                 head: githubProps.branch,
                 base: githubProps.mainBranch,
             });
@@ -520,7 +507,7 @@ Triggered by user ${user.firstName} ${user.lastName} (${user.email})
                 userId: user.userUuid,
                 properties: {
                     ...eventProperties,
-                    customMetricsCount: customMetrics.length,
+                    [`${type}Count`]: fields.length,
                 },
             });
             return {
@@ -606,29 +593,25 @@ ${sql}
         );
         await checkFileDoesNotExist({ ...githubProps, path: fileName });
 
-        const content = yaml.dump(
-            {
-                version: 2,
-                models: [
-                    {
-                        name: snakeCaseName(name),
-                        label: friendlyName(name),
-                        description: `SQL model for ${friendlyName(name)}`,
-                        columns: columns.map((c) => ({
-                            name: c.reference,
-                            meta: {
-                                dimension: {
-                                    type: c.type,
-                                },
-                            },
-                        })),
+        const content = new DbtSchemaEditor(`version: 2`)
+            .addModel({
+                name: snakeCaseName(name),
+                description: `SQL model for ${friendlyName(name)}`,
+                meta: {
+                    label: friendlyName(name),
+                },
+                columns: columns.map((c) => ({
+                    name: c.reference,
+                    meta: {
+                        dimension: {
+                            type: c.type,
+                        },
                     },
-                ],
-            },
-            {
-                quotingType: githubProps.quoteChar,
-            },
-        );
+                })),
+            })
+            .toString({
+                quoteChar: githubProps.quoteChar,
+            });
 
         return createFile({
             ...githubProps,

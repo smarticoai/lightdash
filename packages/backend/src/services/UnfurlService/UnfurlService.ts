@@ -11,6 +11,7 @@ import {
     LightdashPage,
     LightdashRequestMethodHeader,
     RequestMethod,
+    ScreenshotError,
     SessionUser,
     snakeCaseName,
 } from '@lightdash/common';
@@ -274,6 +275,7 @@ export class UnfurlService extends BaseService {
         const details = await this.unfurlDetails(url);
 
         const buffer = await this.saveScreenshot({
+            authUserUuid,
             imageId,
             cookie,
             url,
@@ -377,6 +379,7 @@ export class UnfurlService extends BaseService {
         lightdashPage,
         chartType,
         organizationUuid,
+        authUserUuid,
         gridWidth = undefined,
         resourceUuid = undefined,
         resourceName = undefined,
@@ -393,6 +396,7 @@ export class UnfurlService extends BaseService {
         lightdashPage?: LightdashPage;
         chartType?: string;
         organizationUuid?: string;
+        authUserUuid: string;
         gridWidth?: number | undefined;
         resourceUuid?: string;
         resourceName?: string;
@@ -417,10 +421,22 @@ export class UnfurlService extends BaseService {
         // eslint-disable-next-line no-param-reassign
         retries -= 1;
 
-        return wrapSentryTransaction(
-            'UnfurlService.saveScreenshot',
-            {},
+        return Sentry.startSpan(
+            {
+                name: 'UnfurlService.saveScreenshot',
+                op: 'saveScreenshot',
+            },
             async (span) => {
+                Sentry.setTags({
+                    'page.type': lightdashPage ?? 'undefined',
+                    'page.context': context ?? 'undefined',
+                    'page.minimalUrl': url ?? 'undefined',
+                    'page.resourceUuid': resourceUuid ?? 'undefined',
+                    'page.resourceName': resourceName ?? 'undefined',
+                    'page.chartType': chartType ?? 'undefined',
+                    'page.organizationUuid': organizationUuid ?? 'undefined',
+                    'page.userUuid': authUserUuid ?? 'undefined',
+                });
                 let browser: playwright.Browser | undefined;
                 let page: playwright.Page | undefined;
 
@@ -732,15 +748,6 @@ export class UnfurlService extends BaseService {
                         });
                     }
 
-                    span.setAttributes({
-                        'chart.requests.total': chartRequests,
-                        'chart.requests.error': chartRequestErrors,
-                        'page.type': lightdashPage,
-                        url,
-                        chartType: chartType || 'undefined',
-                        organization_uuid: organizationUuid || 'undefined',
-                    });
-
                     if (
                         lightdashPage === LightdashPage.DASHBOARD ||
                         lightdashPage === LightdashPage.EXPLORE
@@ -761,6 +768,7 @@ export class UnfurlService extends BaseService {
                         fullPage: true,
                         animations: 'disabled',
                     });
+
                     return imageBuffer;
                 } catch (e) {
                     const errorMessage = getErrorMessage(e);
@@ -779,22 +787,12 @@ export class UnfurlService extends BaseService {
                                 e,
                             )}`,
                         );
-                        span.addEvent(getErrorMessage(e));
-                        span.setAttributes({
-                            'page.type': lightdashPage,
-                            url,
-                            chartType: chartType || 'undefined',
-                            organization_uuid: organizationUuid || 'undefined',
-                            uuid: resourceUuid ?? 'undefined',
-                            title: resourceName ?? 'undefined',
-                            is_retrying: true,
-                            custom_width: `${gridWidth}`,
-                        });
-                        span.setStatus({
-                            code: 2, // Error
-                        });
 
+                        span.setAttributes({
+                            is_retrying: true,
+                        });
                         return await this.saveScreenshot({
+                            authUserUuid,
                             imageId,
                             cookie,
                             url,
@@ -813,28 +811,31 @@ export class UnfurlService extends BaseService {
                         });
                     }
 
-                    Sentry.captureException(e);
                     hasError = true;
-                    span.addEvent(getErrorMessage(e));
-                    span.setAttributes({
-                        'page.type': lightdashPage,
-                        url,
-                        chartType: chartType || 'undefined',
-                        organization_uuid: organizationUuid || 'undefined',
-                        uuid: resourceUuid ?? 'undefined',
-                        title: resourceName ?? 'undefined',
-                        custom_width: `${gridWidth}`,
-                    });
-                    span.setStatus({
-                        code: 2, // Error
-                    });
 
                     this.logger.error(
                         `Unable to fetch screenshots for scheduler with url ${url}, of type: ${lightdashPage}. Message: ${getErrorMessage(
                             e,
                         )}`,
                     );
-                    throw e;
+
+                    const errorType =
+                        e instanceof playwright.errors.TimeoutError
+                            ? 'timeout'
+                            : 'failed';
+                    span.setStatus({
+                        code: 2, // Error
+                    });
+
+                    throw new ScreenshotError(
+                        `Screenshot ${errorType}: ${errorMessage}`,
+                        {
+                            url,
+                            lightdashPage,
+                            context,
+                            originalError: errorMessage,
+                        },
+                    );
                 } finally {
                     if (page) await page.close();
                     if (browser) await browser.close(); // clears all created contexts belonging to this browser and disconnects from the browser server.
@@ -948,7 +949,7 @@ export class UnfurlService extends BaseService {
             body: JSON.stringify({ token }),
         });
         if (response.status !== 200) {
-            throw new Error(
+            throw new AuthorizationError(
                 `Unable to get cookie for user ${userUuid}: ${await response.text()}`,
             );
         }

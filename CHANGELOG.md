@@ -1,3 +1,256 @@
+# [0.1531.0](https://github.com/lightdash/lightdash/compare/0.1530.6...0.1531.0) (2025-03-06)
+
+
+### Features
+
+* **backend:** allow email configuration without authentication ([#13877](https://github.com/lightdash/lightdash/issues/13877)) ([44f2217](https://github.com/lightdash/lightdash/commit/44f2217b17124f9247b64c6f3e8cc74a93d64678))
+
+## [0.1530.6](https://github.com/lightdash/lightdash/compare/0.1530.5...0.1530.6) (2025-03-06)
+
+
+### Bug Fixes
+
+* conditional formatting null comparison regression ([#13960](https://github.com/lightdash/lightdash/issues/13960)) ([5ad5850](https://github.com/lightdash/lightdash/commit/5ad585001f768a8ed1eea267a38bddaf90114358))
+
+## [0.1530.5](https://github.com/lightdash/lightdash/compare/0.1530.4...0.1530.5) (2025-03-06)
+
+
+### Bug Fixes
+
+* formatting cell value regression ([#13948](https://github.com/lightdash/lightdash/issues/13948)) ([5194924](https://github.com/lightdash/lightdash/commit/5194924e1eda118706d9f0f62aa34a762b8fb6d0))
+
+## [0.1530.4](https://github.com/lightdash/lightdash/compare/0.1530.3...0.1530.4) (2025-03-06)
+
+
+### Bug Fixes
+
+* migrate dashboard csv zip to scheduler ([#13951](https://github.com/lightdash/lightdash/issues/13951)) ([ab04235](https://github.com/lightdash/lightdash/commit/ab042358d45223ef15492715417ab47d6c19cb4c))
+
+## [0.1530.3](https://github.com/lightdash/lightdash/compare/0.1530.2...0.1530.3) (2025-03-06)
+
+
+### Bug Fixes
+
+* download valid chart csv ([#13942](https://github.com/lightdash/lightdash/issues/13942)) ([cbbcc67](https://github.com/lightdash/lightdash/commit/cbbcc678b970be428cb96332e6e09a7408b0d431))
+
+## [0.1530.2](https://github.com/lightdash/lightdash/compare/0.1530.1...0.1530.2) (2025-03-06)
+
+
+### Bug Fixes
+
+* fix import common ([#13944](https://github.com/lightdash/lightdash/issues/13944)) ([e8377ed](https://github.com/lightdash/lightdash/commit/e8377edf6ac3d947ea3df08b0f4b8f6c6bf61743))
+
+## [0.1530.1](https://github.com/lightdash/lightdash/compare/0.1530.0...0.1530.1) (2025-03-06)
+
+
+### Bug Fixes
+
+* table cell rendering for strings that does not have a newline ([#13947](https://github.com/lightdash/lightdash/issues/13947)) ([c23a134](https://github.com/lightdash/lightdash/commit/c23a13467243b5c2971be9c4bb75860dfd49ff18))
+
+# [0.1530.0](https://github.com/lightdash/lightdash/compare/0.1529.1...0.1530.0) (2025-03-06)
+
+
+### Features
+
+* feature flag write back for bin dimensions ([#13936](https://github.com/lightdash/lightdash/issues/13936)) ([1b679eb](https://github.com/lightdash/lightdash/commit/1b679ebe11a9358efa7988792f2623c055420854))
+
+## [0.1529.1](https://github.com/lightdash/lightdash/compare/0.1529.0...0.1529.1) (2025-03-05)
+
+
+### Bug Fixes
+
+*  disable calculate series color ([#13923](https://github.com/lightdash/lightdash/issues/13923)) ([d2744b2](https://github.com/lightdash/lightdash/commit/d2744b2f90b9f1a8e98b6091c9df04ab33f25f6a))
+
+# [0.1529.0](https://github.com/lightdash/lightdash/compare/0.1528.0...0.1529.0) (2025-03-05)
+
+
+### Features
+
+* **frontend:** Custom dimensions write back ([#13917](https://github.com/lightdash/lightdash/issues/13917)) ([c0aa312](https://github.com/lightdash/lightdash/commit/c0aa312f1d622fefa8c10e59a187a5622478ec4e))
+
+# [0.1528.0](https://github.com/lightdash/lightdash/compare/0.1527.2...0.1528.0) (2025-03-05)
+
+
+### Features
+
+* **API:** write back bin dimensions ([#13925](https://github.com/lightdash/lightdash/issues/13925)) ([a8d51fc](https://github.com/lightdash/lightdash/commit/a8d51fca995199ff333d440f585fb77354e4a9cf))
+
+## [0.1527.2](https://github.com/lightdash/lightdash/compare/0.1527.1...0.1527.2) (2025-03-04)
+
+
+### Bug Fixes
+
+* custom dimension table labels ([#13874](https://github.com/lightdash/lightdash/issues/13874)) ([87e785a](https://github.com/lightdash/lightdash/commit/87e785a7e9e68cd62fbeb529b98d3b35aaf9cd3e))
+
+## [0.1527.1](https://github.com/lightdash/lightdash/compare/0.1527.0...0.1527.1) (2025-03-04)
+
+
+### Bug Fixes
+
+* newlines in cells issue with react removeChild ([#13922](https://github.com/lightdash/lightdash/issues/13922)) ([dbd5cf7](https://github.com/lightdash/lightdash/commit/dbd5cf7e7abef0672836cfec434896fef4ba0ffe))
+
+# [0.1527.0](https://github.com/lightdash/lightdash/compare/0.1526.1...0.1527.0) (2025-03-04)
+
+
+### Features
+
+* calculate subtotals in the backend ([#13847](https://github.com/lightdash/lightdash/issues/13847)) ([ee7d1f3](https://github.com/lightdash/lightdash/commit/ee7d1f3cfa93799fc59eb376522097a0eda40806))
+
+## [0.1526.1](https://github.com/lightdash/lightdash/compare/0.1526.0...0.1526.1) (2025-03-04)
+
+
+### Bug Fixes
+
+* force github login on project form ([#13914](https://github.com/lightdash/lightdash/issues/13914)) ([f3f6b8b](https://github.com/lightdash/lightdash/commit/f3f6b8bf48f398ddf4018e5b9150eb1858369ff9))
+
+# [0.1526.0](https://github.com/lightdash/lightdash/compare/0.1525.1...0.1526.0) (2025-03-04)
+
+
+### Bug Fixes
+
+* CLI login ([#13915](https://github.com/lightdash/lightdash/issues/13915)) ([be9002c](https://github.com/lightdash/lightdash/commit/be9002cb941436c167dffcc00c900250cdb2442b))
+
+
+### Features
+
+* preserve YAML formatting and comments when running `lightdash generate` command ([#13901](https://github.com/lightdash/lightdash/issues/13901)) ([c9c5043](https://github.com/lightdash/lightdash/commit/c9c5043817c81d79334cc825018deb0ab0eb2ece))
+
+## [0.1525.1](https://github.com/lightdash/lightdash/compare/0.1525.0...0.1525.1) (2025-03-04)
+
+
+### Bug Fixes
+
+* fix dynamic height virtual table ([#13904](https://github.com/lightdash/lightdash/issues/13904)) ([d6d932f](https://github.com/lightdash/lightdash/commit/d6d932f068e30631bb3ef2625dade80532a891ee))
+
+# [0.1525.0](https://github.com/lightdash/lightdash/compare/0.1524.0...0.1525.0) (2025-03-03)
+
+
+### Features
+
+* **backend:** customSqlDimension write-back ([#13875](https://github.com/lightdash/lightdash/issues/13875)) ([a6bf1d2](https://github.com/lightdash/lightdash/commit/a6bf1d2bc714ab5c4b1ecc4cb64641db06f17f49))
+
+# [0.1524.0](https://github.com/lightdash/lightdash/compare/0.1523.1...0.1524.0) (2025-03-03)
+
+
+### Features
+
+* preserve YAML formatting and comments on dbt write back ([#13894](https://github.com/lightdash/lightdash/issues/13894)) ([e70570c](https://github.com/lightdash/lightdash/commit/e70570ca1ad10dca78c6b3cebe627ac2a801fbf0))
+
+## [0.1523.1](https://github.com/lightdash/lightdash/compare/0.1523.0...0.1523.1) (2025-03-03)
+
+
+### Bug Fixes
+
+* whitespace handling ([#13772](https://github.com/lightdash/lightdash/issues/13772)) ([e1f72ef](https://github.com/lightdash/lightdash/commit/e1f72efd31e2142abafda2ae90872de5a2f97e4f))
+
+# [0.1523.0](https://github.com/lightdash/lightdash/compare/0.1522.4...0.1523.0) (2025-03-03)
+
+
+### Features
+
+* add a flag to disable telemetry ([#13866](https://github.com/lightdash/lightdash/issues/13866)) ([2326ee5](https://github.com/lightdash/lightdash/commit/2326ee5706fc150d9aab45c9f8d16ba8ff9a4dc4))
+
+## [0.1522.4](https://github.com/lightdash/lightdash/compare/0.1522.3...0.1522.4) (2025-03-03)
+
+
+### Bug Fixes
+
+* revert format rows frontend ([#13888](https://github.com/lightdash/lightdash/issues/13888)) ([6cd6eab](https://github.com/lightdash/lightdash/commit/6cd6eaba678eb07a34a741f9a256ff4563dc8b26))
+
+## [0.1522.3](https://github.com/lightdash/lightdash/compare/0.1522.2...0.1522.3) (2025-03-03)
+
+
+### Bug Fixes
+
+* check if custom metric filter exists before validating ([#13873](https://github.com/lightdash/lightdash/issues/13873)) ([bcae72d](https://github.com/lightdash/lightdash/commit/bcae72d4680b60b199b770acfe6a289340fbb415))
+
+## [0.1522.2](https://github.com/lightdash/lightdash/compare/0.1522.1...0.1522.2) (2025-02-28)
+
+
+### Bug Fixes
+
+* save explores to cache in a transaction ([#13856](https://github.com/lightdash/lightdash/issues/13856)) ([427088e](https://github.com/lightdash/lightdash/commit/427088ec09485f334f463b6026025d4287ad302b))
+
+## [0.1522.1](https://github.com/lightdash/lightdash/compare/0.1522.0...0.1522.1) (2025-02-28)
+
+
+### Bug Fixes
+
+* husky prepare fallback ([#13867](https://github.com/lightdash/lightdash/issues/13867)) ([bb1718e](https://github.com/lightdash/lightdash/commit/bb1718e71c155ca4a08de6af09ad5da045717461))
+
+# [0.1522.0](https://github.com/lightdash/lightdash/compare/0.1521.1...0.1522.0) (2025-02-28)
+
+
+### Features
+
+* put formatting rules delete button in a menu ([#13864](https://github.com/lightdash/lightdash/issues/13864)) ([d85f2ee](https://github.com/lightdash/lightdash/commit/d85f2eefc5fd6eca2b7f04cf7f9dfb29652080b3))
+
+## [0.1521.1](https://github.com/lightdash/lightdash/compare/0.1521.0...0.1521.1) (2025-02-28)
+
+
+### Bug Fixes
+
+* chart as code pivot config ([#13860](https://github.com/lightdash/lightdash/issues/13860)) ([51ee4f0](https://github.com/lightdash/lightdash/commit/51ee4f06cf0b56ebbb1d073e4546adc56062c23f))
+* git secrets release action ([#13861](https://github.com/lightdash/lightdash/issues/13861)) ([0f35839](https://github.com/lightdash/lightdash/commit/0f358390c6448093018af4f71834e17a836c4567))
+* git secrets release action disable husky ([#13862](https://github.com/lightdash/lightdash/issues/13862)) ([e66aa97](https://github.com/lightdash/lightdash/commit/e66aa97e8205bdf1e869637cbb98964bc6a3724b))
+* git secrets release action disable husky env var ([#13865](https://github.com/lightdash/lightdash/issues/13865)) ([f3e0537](https://github.com/lightdash/lightdash/commit/f3e053794296e5ba268614456d761394f49ebdd9))
+
+# [0.1521.0](https://github.com/lightdash/lightdash/compare/0.1520.2...0.1521.0) (2025-02-27)
+
+
+### Features
+
+* allow saving custom color org palettes ([#13834](https://github.com/lightdash/lightdash/issues/13834)) ([ffb2cc5](https://github.com/lightdash/lightdash/commit/ffb2cc551326f97edadb56da07810d58e693bbd9))
+
+## [0.1520.2](https://github.com/lightdash/lightdash/compare/0.1520.1...0.1520.2) (2025-02-27)
+
+
+### Bug Fixes
+
+* **frontend:** infinite re-renders in user settings ([#13854](https://github.com/lightdash/lightdash/issues/13854)) ([9de82b5](https://github.com/lightdash/lightdash/commit/9de82b59ae75a2d6c4a5f49b6d6caf0ceff970d7))
+
+## [0.1520.1](https://github.com/lightdash/lightdash/compare/0.1520.0...0.1520.1) (2025-02-27)
+
+
+### Bug Fixes
+
+* new line processing in results ([#13846](https://github.com/lightdash/lightdash/issues/13846)) ([7e1575e](https://github.com/lightdash/lightdash/commit/7e1575efd3aa9a340b64c75c2e780ed1b59c4fc7))
+
+# [0.1520.0](https://github.com/lightdash/lightdash/compare/0.1519.1...0.1520.0) (2025-02-27)
+
+
+### Features
+
+* allow accessing Lightdash from an iframe ([#13836](https://github.com/lightdash/lightdash/issues/13836)) ([9726397](https://github.com/lightdash/lightdash/commit/9726397f809a2193c62881dfd2cd22b42795a99b))
+
+## [0.1519.1](https://github.com/lightdash/lightdash/compare/0.1519.0...0.1519.1) (2025-02-27)
+
+
+### Bug Fixes
+
+* **cli:** create Postgres project with certificates via CLI ([#13823](https://github.com/lightdash/lightdash/issues/13823)) ([37d081e](https://github.com/lightdash/lightdash/commit/37d081e41452431a4603720f9a8f7bae8f1a4a4c))
+
+# [0.1519.0](https://github.com/lightdash/lightdash/compare/0.1518.1...0.1519.0) (2025-02-26)
+
+
+### Features
+
+* sort stacked bar charts ([#13815](https://github.com/lightdash/lightdash/issues/13815)) ([1c7ef4c](https://github.com/lightdash/lightdash/commit/1c7ef4ccddd09b630a9d68aced64c5b55a24b836))
+
+## [0.1518.1](https://github.com/lightdash/lightdash/compare/0.1518.0...0.1518.1) (2025-02-26)
+
+
+### Bug Fixes
+
+* row numbers not appearing ([#13829](https://github.com/lightdash/lightdash/issues/13829)) ([0f095bd](https://github.com/lightdash/lightdash/commit/0f095bd3d48837aeae90b8332704cc2c0cb1bea7))
+
+# [0.1518.0](https://github.com/lightdash/lightdash/compare/0.1517.0...0.1518.0) (2025-02-26)
+
+
+### Features
+
+* list personal access tokens via API with PAT authentication ([#13826](https://github.com/lightdash/lightdash/issues/13826)) ([6dae07b](https://github.com/lightdash/lightdash/commit/6dae07b7fadc061b4ebab3e8fdca84f926f5e424))
+
 # [0.1517.0](https://github.com/lightdash/lightdash/compare/0.1516.0...0.1517.0) (2025-02-25)
 
 

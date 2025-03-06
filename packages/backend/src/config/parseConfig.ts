@@ -4,6 +4,7 @@ import {
     isOrganizationMemberRole,
     LightdashMode,
     OrganizationMemberRole,
+    ParameterError,
     ParseError,
     SentryConfig,
 } from '@lightdash/common';
@@ -76,6 +77,18 @@ export const getObjectFromEnvironmentVariable = (
             )}`,
         );
     }
+};
+
+const getArrayFromCommaSeparatedList = (envVar: string) => {
+    const raw = process.env[envVar];
+    if (!raw) {
+        return [];
+    }
+
+    return raw
+        .split(',')
+        .map((domain) => domain.trim())
+        .filter((domain) => domain.length > 0);
 };
 
 /**
@@ -207,11 +220,13 @@ export type LoggingConfig = {
 export type LightdashConfig = {
     lightdashSecret: string;
     secureCookies: boolean;
+    cookieSameSite?: 'lax' | 'none';
     security: {
         contentSecurityPolicy: {
             reportOnly: boolean;
             allowedDomains: string[];
             reportUri?: string;
+            frameAncestors: string[];
         };
         crossOriginResourceSharingPolicy: {
             enabled: boolean;
@@ -319,7 +334,6 @@ export type LightdashConfig = {
     contentAsCode: {
         maxDownloads: number;
     };
-    skipBackendFormatting: boolean;
 };
 
 export type SlackConfig = {
@@ -356,8 +370,8 @@ type PylonConfig = {
 };
 
 export type RudderConfig = {
-    writeKey: string;
-    dataPlaneUrl: string;
+    writeKey: string | undefined;
+    dataPlaneUrl: string | undefined;
 };
 
 export type PosthogConfig = {
@@ -462,6 +476,7 @@ export type SmtpConfig = {
     port: number;
     secure: boolean;
     allowInvalidCertificate: boolean;
+    useAuth: boolean;
     auth: {
         user: string;
         pass: string | undefined;
@@ -505,37 +520,52 @@ export const parseConfig = (): LightdashConfig => {
         );
     }
 
+    const iframeAllowedDomains = getArrayFromCommaSeparatedList(
+        'LIGHTDASH_IFRAME_EMBEDDING_DOMAINS',
+    );
+    const corsAllowedDomains = getArrayFromCommaSeparatedList(
+        'LIGHTDASH_CORS_ALLOWED_DOMAINS',
+    );
+    const iframeEmbeddingEnabled = iframeAllowedDomains.length > 0;
+    const corsEnabled = process.env.LIGHTDASH_CORS_ENABLED === 'true';
+    const secureCookies = process.env.SECURE_COOKIES === 'true';
+
+    if (iframeEmbeddingEnabled && !secureCookies) {
+        throw new ParameterError(
+            'To enable iframe embedding, SECURE_COOKIES must be set to true',
+        );
+    }
+
     return {
         mode,
+        cookieSameSite: iframeEmbeddingEnabled ? 'none' : 'lax',
         license: {
             licenseKey: process.env.LIGHTDASH_LICENSE_KEY || null,
         },
         security: {
             contentSecurityPolicy: {
                 reportOnly: process.env.LIGHTDASH_CSP_REPORT_ONLY !== 'false', // defaults to true
-                allowedDomains: (
-                    process.env.LIGHTDASH_CSP_ALLOWED_DOMAINS || ''
-                )
-                    .split(',')
-                    .map((domain) => domain.trim()),
+                allowedDomains: getArrayFromCommaSeparatedList(
+                    'LIGHTDASH_CSP_ALLOWED_DOMAINS',
+                ),
+                frameAncestors: iframeEmbeddingEnabled
+                    ? iframeAllowedDomains
+                    : ['https://*'],
                 reportUri: process.env.LIGHTDASH_CSP_REPORT_URI,
             },
             crossOriginResourceSharingPolicy: {
-                enabled: process.env.LIGHTDASH_CORS_ENABLED === 'true',
-                allowedDomains: (
-                    process.env.LIGHTDASH_CORS_ALLOWED_DOMAINS || ''
-                )
-                    .split(',')
-                    .map((domain) => domain.trim()),
+                enabled: corsEnabled,
+                allowedDomains: corsEnabled ? corsAllowedDomains : [],
             },
         },
         smtp: process.env.EMAIL_SMTP_HOST
             ? {
                   host: process.env.EMAIL_SMTP_HOST,
                   port: parseInt(process.env.EMAIL_SMTP_PORT || '587', 10),
-                  secure: process.env.EMAIL_SMTP_SECURE !== 'false', // default to true
+                  secure: process.env.EMAIL_SMTP_SECURE !== 'false', // defaults to true
                   allowInvalidCertificate:
                       process.env.EMAIL_SMTP_ALLOW_INVALID_CERT === 'true',
+                  useAuth: process.env.EMAIL_SMTP_USE_AUTH !== 'false', // defaults to true
                   auth: {
                       user: process.env.EMAIL_SMTP_USER || '',
                       pass: process.env.EMAIL_SMTP_PASSWORD,
@@ -560,12 +590,15 @@ export const parseConfig = (): LightdashConfig => {
             : undefined,
         rudder: {
             writeKey:
-                process.env.RUDDERSTACK_WRITE_KEY === undefined
-                    ? ''
-                    : process.env.RUDDERSTACK_WRITE_KEY,
+                process.env.RUDDERSTACK_ANALYTICS_DISABLED === 'true'
+                    ? undefined
+                    : process.env.RUDDERSTACK_WRITE_KEY ||
+                      '',
             dataPlaneUrl:
-                process.env.RUDDERSTACK_DATA_PLANE_URL ||
-                'https://analytics.lightdash.com',
+                process.env.RUDDERSTACK_ANALYTICS_DISABLED === 'true'
+                    ? undefined
+                    : process.env.RUDDERSTACK_DATA_PLANE_URL ||
+                      'https://analytics.lightdash.com',
         },
         sentry: {
             backend: {
@@ -595,7 +628,7 @@ export const parseConfig = (): LightdashConfig => {
             },
         },
         lightdashSecret,
-        secureCookies: process.env.SECURE_COOKIES === 'true',
+        secureCookies,
         cookiesMaxAgeHours: getIntegerFromEnvironmentVariable(
             'COOKIES_MAX_AGE_HOURS',
         ),
@@ -891,6 +924,5 @@ export const parseConfig = (): LightdashConfig => {
                 getIntegerFromEnvironmentVariable('MAX_DOWNLOADS_AS_CODE') ||
                 100,
         },
-        skipBackendFormatting: process.env.SKIP_BACKEND_FORMATTING === 'true',
     };
 };

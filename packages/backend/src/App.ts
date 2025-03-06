@@ -385,7 +385,11 @@ export default class App {
                         ],
                         'img-src': ["'self'", 'data:', 'https://*'],
                         'frame-src': ["'self'", 'https://*'],
-                        'frame-ancestors': ["'self'", 'https://*'],
+                        'frame-ancestors': [
+                            "'self'",
+                            ...this.lightdashConfig.security
+                                .contentSecurityPolicy.frameAncestors,
+                        ],
                         'worker-src': [
                             "'self'",
                             'blob:',
@@ -456,7 +460,7 @@ export default class App {
                         1000, // in ms
                     secure: this.lightdashConfig.secureCookies,
                     httpOnly: true,
-                    sameSite: 'lax',
+                    sameSite: this.lightdashConfig.cookieSameSite,
                 },
                 resave: false,
                 saveUninitialized: false,

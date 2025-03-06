@@ -168,6 +168,7 @@ export const lightdashConfigMock: LightdashConfig = {
         contentSecurityPolicy: {
             reportOnly: false,
             allowedDomains: [],
+            frameAncestors: [],
         },
         crossOriginResourceSharingPolicy: {
             enabled: false,
@@ -184,5 +185,4 @@ export const lightdashConfigMock: LightdashConfig = {
     contentAsCode: {
         maxDownloads: 100,
     },
-    skipBackendFormatting: false,
 };

@@ -265,7 +265,7 @@ export type CompleteEChartsConfig = {
     legend?: EchartsLegend;
     grid?: EchartsGrid;
     series: Series[];
-    xAxis: Axis[];
+    xAxis: XAxis[];
     yAxis: Axis[];
 };
 
@@ -280,6 +280,37 @@ type Axis = {
     inverse?: boolean;
     rotate?: number;
 };
+
+export type XAxis = Axis & {
+    sortType?: XAxisSortType;
+};
+
+export enum XAxisSortType {
+    DEFAULT = 'default',
+    BAR_TOTALS = 'bar_totals',
+}
+
+export enum XAxisSort {
+    ASCENDING = 'ascending',
+    DESCENDING = 'descending',
+    BAR_TOTALS_ASCENDING = 'bar_totals_ascending',
+    BAR_TOTALS_DESCENDING = 'bar_totals_descending',
+}
+
+export function getXAxisSort(
+    xAxis: Pick<XAxis, 'sortType' | 'inverse'> | undefined,
+): XAxisSort {
+    if (!xAxis) return XAxisSort.ASCENDING;
+
+    switch (xAxis.sortType) {
+        case XAxisSortType.BAR_TOTALS:
+            return xAxis.inverse
+                ? XAxisSort.BAR_TOTALS_DESCENDING
+                : XAxisSort.BAR_TOTALS_ASCENDING;
+        default:
+            return xAxis.inverse ? XAxisSort.DESCENDING : XAxisSort.ASCENDING;
+    }
+}
 
 export type CompleteCartesianChartLayout = {
     xField: string;
@@ -692,6 +723,20 @@ export type CalculateTotalFromQuery = {
 export type ApiCalculateTotalResponse = {
     status: 'ok';
     results: Record<string, number>;
+};
+
+export type CalculateSubtotalsFromQuery = CalculateTotalFromQuery & {
+    columnOrder: string[];
+    pivotDimensions?: string[];
+};
+
+export type ApiCalculateSubtotalsResponse = {
+    status: 'ok';
+    results: {
+        [subtotalDimensions: string]: {
+            [key: string]: number;
+        }[];
+    };
 };
 
 export type ReplaceableFieldMatchMap = {

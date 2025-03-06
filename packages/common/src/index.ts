@@ -41,6 +41,7 @@ import {
 } from './types/personalAccessToken';
 import { type ProjectMemberProfile } from './types/projectMemberProfile';
 import {
+    type ApiCalculateSubtotalsResponse,
     type ApiCalculateTotalResponse,
     type ChartHistory,
     type ChartVersion,
@@ -97,7 +98,6 @@ import {
     type ApiJobStatusResponse,
     type SchedulerAndTargets,
     type SchedulerJobStatus,
-    type SchedulerWithLogs,
 } from './types/scheduler';
 import { type ApiSlackChannelsResponse } from './types/slack';
 import { type Space } from './types/space';
@@ -141,6 +141,7 @@ import type {
     ApiMetricsExplorerTotalResults,
 } from './types/metricsExplorer';
 import { type ApiPromotionChangesResponse } from './types/promotion';
+import { type SchedulerWithLogs } from './types/schedulerLog';
 import {
     type ApiSemanticLayerClientInfo,
     type ApiSemanticViewerChartCreate,
@@ -168,6 +169,7 @@ export * from './authorization/types';
 export * from './compiler/exploreCompiler';
 export * from './compiler/filtersCompiler';
 export * from './compiler/translator';
+export { default as DbtSchemaEditor } from './dbt/DbtSchemaEditor/DbtSchemaEditor';
 export * from './dbt/validation';
 export * from './ee/index';
 export * from './pivotTable/pivotQueryResults';
@@ -227,6 +229,8 @@ export * from './types/resourceViewItem';
 export * from './types/results';
 export * from './types/savedCharts';
 export * from './types/scheduler';
+export * from './types/schedulerLog';
+export * from './types/schedulerTaskList';
 export * from './types/search';
 export * from './types/semanticLayer';
 export * from './types/share';
@@ -245,6 +249,7 @@ export * from './types/userAttributes';
 export * from './types/userWarehouseCredentials';
 export * from './types/validation';
 export * from './types/warehouse';
+export * from './types/yamlSchema';
 export * from './utils/accessors';
 export * from './utils/additionalMetrics';
 export * from './utils/api';
@@ -252,7 +257,9 @@ export { default as assertUnreachable } from './utils/assertUnreachable';
 export * from './utils/catalogMetricsTree';
 export * from './utils/charts';
 export * from './utils/conditionalFormatting';
-export * from './utils/convertToDbt';
+export * from './utils/convertCustomDimensionsToYaml';
+export * from './utils/convertCustomMetricsToYaml';
+export * from './utils/customDimensions';
 export * from './utils/dashboard';
 export * from './utils/dbt';
 export * from './utils/email';
@@ -265,10 +272,12 @@ export * from './utils/item';
 export * from './utils/loadLightdashProjectConfig';
 export * from './utils/metricsExplorer';
 export * from './utils/projectMemberRole';
+export * from './utils/promises';
 export * from './utils/sanitizeHtml';
 export * from './utils/scheduler';
 export * from './utils/semanticLayer';
 export * from './utils/slugs';
+export * from './utils/subtotals';
 export * from './utils/time';
 export * from './utils/timeFrames';
 export * from './utils/virtualView';
@@ -741,7 +750,8 @@ type ApiResults =
     | ApiChartAsCodeUpsertResponse['results']
     | ApiGetMetricsTree['results']
     | ApiMetricsExplorerTotalResults['results']
-    | ApiGetSpotlightTableConfig['results'];
+    | ApiGetSpotlightTableConfig['results']
+    | ApiCalculateSubtotalsResponse['results'];
 
 export type ApiResponse<T extends ApiResults = ApiResults> = {
     status: 'ok';
@@ -817,8 +827,8 @@ export type HealthState = {
         version?: string;
     };
     rudder: {
-        writeKey: string;
-        dataPlaneUrl: string;
+        writeKey: string | undefined;
+        dataPlaneUrl: string | undefined;
     };
     sentry: Pick<
         SentryConfig,
@@ -1156,6 +1166,26 @@ function formatRawValue(
     return value;
 }
 
+// ! We format raw values so we can't use the values directly from the warehouse to compare with subtotals of date dimensions
+export function formatRawRows(
+    rows: { [col: string]: AnyType }[],
+    itemsMap: ItemsMap,
+): Record<string, unknown>[] {
+    return rows.map((row) => {
+        const resultRow: ResultRow = {};
+        const columnNames = Object.keys(row || {});
+
+        for (const columnName of columnNames) {
+            const value = row[columnName];
+            const item = itemsMap[columnName];
+
+            resultRow[columnName] = formatRawValue(item, value);
+        }
+
+        return resultRow;
+    });
+}
+
 export function formatRows(
     rows: { [col: string]: AnyType }[],
     itemsMap: ItemsMap,
@@ -1176,24 +1206,6 @@ export function formatRows(
             };
         }
 
-        return resultRow;
-    });
-}
-
-export function rowsWithoutFormatting(rows: { [col: string]: AnyType }[]) {
-    return rows.map((row) => {
-        const resultRow: ResultRow = {};
-        const columnNames = Object.keys(row || {});
-
-        for (const columnName of columnNames) {
-            const value = row[columnName];
-            resultRow[columnName] = {
-                value: {
-                    raw: value,
-                    formatted: null,
-                },
-            };
-        }
         return resultRow;
     });
 }

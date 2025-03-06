@@ -1,7 +1,5 @@
 import {
     formatItemValue,
-    friendlyName,
-    getFormattedWithFallback,
     getItemMap,
     isAdditionalMetric,
     isCustomDimension,
@@ -11,7 +9,6 @@ import {
     itemsInMetricQuery,
     type AdditionalMetric,
     type CustomDimension,
-    type Dimension,
     type Field,
     type ItemsMap,
     type RawResultRow,
@@ -49,42 +46,13 @@ export const getItemBgColor = (
     }
 };
 
-export const formatCellContent = (
-    data?: { value: ResultValue },
-    item?:
-        | Field
-        | Dimension
-        | AdditionalMetric
-        | TableCalculation
-        | CustomDimension,
-) => {
-    if (!data) return '-';
-
-    const { value } = data;
-
-    if (typeof value?.formatted === 'string') {
-        const lines = value?.formatted.split('\\n') ?? [];
-        return lines.length > 1
-            ? lines.map((line, index, array) => (
-                  <Fragment key={index}>
-                      {line}
-                      {index < array.length - 1 && <br />}
-                  </Fragment>
-              ))
-            : getFormattedWithFallback(value);
-    }
-
-    if (value?.formatted === null && item) {
-        // Null formatting means the formatting was skipped by the backend
-        // so we need to handle formatting in the frontend based on the raw value
-        return formatItemValue(item, value?.raw);
-    }
-    return getFormattedWithFallback(value);
+export const formatCellContent = (data?: { value: ResultValue }) => {
+    return data?.value.formatted ?? '-';
 };
 
 export const getFormattedValueCell = (
     info: CellContext<ResultRow, { value: ResultValue }>,
-) => <span>{formatCellContent(info.getValue())}</span>;
+) => formatCellContent(info.getValue());
 
 export const getValueCell = (info: CellContext<RawResultRow, string>) => {
     const value = info.getValue();
@@ -211,11 +179,15 @@ export const useColumns = (): TableColumn[] => {
                                         {item.label}
                                     </TableHeaderBoldLabel>
                                 </>
+                            ) : isCustomDimension(item) ? (
+                                <TableHeaderBoldLabel>
+                                    {item.name}
+                                </TableHeaderBoldLabel>
                             ) : (
                                 <TableHeaderBoldLabel>
-                                    {('displayName' in item &&
-                                        item.displayName) ||
-                                        friendlyName(item.name)}
+                                    {item && 'displayName' in item
+                                        ? item.displayName
+                                        : 'Undefined'}
                                 </TableHeaderBoldLabel>
                             )}
                         </TableHeaderLabelContainer>

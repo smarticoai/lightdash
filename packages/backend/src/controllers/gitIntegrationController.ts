@@ -1,12 +1,11 @@
 import {
     AdditionalMetric,
     ApiErrorPayload,
-    GitIntegrationConfiguration,
+    CustomDimension,
     PullRequestCreated,
 } from '@lightdash/common';
 import {
     Body,
-    Get,
     Middlewares,
     OperationId,
     Path,
@@ -56,11 +55,48 @@ export class GitIntegrationController extends BaseController {
             status: 'ok',
             results: await this.services
                 .getGitIntegrationService()
-                .createPullRequestForCustomMetrics(
+                .createPullRequest(
                     req.user!,
                     projectUuid,
-                    body.customMetrics,
                     body.quoteChar || '"',
+                    {
+                        type: 'customMetrics',
+                        fields: body.customMetrics,
+                    },
+                ),
+        };
+    }
+
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('/pull-requests/custom-dimensions')
+    @OperationId('CreatePullRequestForCustomDimensions')
+    async CreatePullRequestForCustomDimensions(
+        @Path() projectUuid: string,
+        @Body()
+        body: {
+            customDimensions: CustomDimension[];
+            quoteChar?: `"` | `'`; // to be used in the yml dump options
+        },
+        @Request() req: express.Request,
+    ): Promise<{ status: 'ok'; results: PullRequestCreated }> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getGitIntegrationService()
+                .createPullRequest(
+                    req.user!,
+                    projectUuid,
+                    body.quoteChar || '"',
+                    {
+                        type: 'customDimensions',
+                        fields: body.customDimensions,
+                    },
                 ),
         };
     }
