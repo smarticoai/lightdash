@@ -73,7 +73,7 @@ import TextCopy from '../TextCopy';
 import DashboardUpdateModal from '../modal/DashboardUpdateModal';
 import { DashboardRefreshButton } from './DashboardRefreshButton';
 import ShareLinkButton from './ShareLinkButton';
-import { smrMode } from '../../../utils/smarticoUtils';
+import { smrIsEmbeddedMode, smrMode } from '../../../utils/smarticoUtils';
 
 type DashboardHeaderProps = {
     spaces?: SpaceSummary[];
@@ -270,6 +270,7 @@ const DashboardHeader = ({
                                     firstViewedAt={dashboard.firstViewedAt}
                                 />
 
+                                {(!smrIsEmbeddedMode()) && (
                                 <InfoContainer>
                                     <MantineIcon icon={IconKey} />
                                     Slug:
@@ -279,8 +280,9 @@ const DashboardHeader = ({
                                         tooltipLabel="Copy slug"
                                     />
                                 </InfoContainer>
+                                )}
 
-                                {dashboard.spaceName && (
+                                {(dashboard.spaceName && !smrIsEmbeddedMode()) && (
                                     <SpaceAndDashboardInfo
                                         space={{
                                             link: `/projects/${projectUuid}/spaces/${dashboard.spaceUuid}`,

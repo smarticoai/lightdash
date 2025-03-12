@@ -3,6 +3,7 @@ import { IconFolder } from '@tabler/icons-react';
 import { type FC } from 'react';
 import { Link } from 'react-router';
 import MantineIcon from '../../common/MantineIcon';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 
 type Props = {
     projectUuid: string;
@@ -30,7 +31,7 @@ export const TitleBreadCrumbs: FC<Props> = ({
     const isChartWithinDashboard = !!(dashboardUuid && dashboardName);
     return (
         <>
-            {spaceName && spaceUuid ? (
+            {spaceName && spaceUuid && !smrIsEmbeddedMode() ? (
                 <>
                     <Group spacing="xs">
                         <Tooltip

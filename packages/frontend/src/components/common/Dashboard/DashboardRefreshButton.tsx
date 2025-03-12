@@ -13,6 +13,7 @@ import { useDashboardRefresh } from '../../../hooks/dashboard/useDashboardRefres
 import useToaster from '../../../hooks/toaster/useToaster';
 import useDashboardContext from '../../../providers/Dashboard/useDashboardContext';
 import MantineIcon from '../MantineIcon';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 
 const REFRESH_INTERVAL_OPTIONS = [
     {
@@ -35,7 +36,19 @@ const REFRESH_INTERVAL_OPTIONS = [
         value: '120',
         label: '2h',
     },
+    {
+        value: '240',
+        label: '4h',
+    },
+    {
+        value: '480',
+        label: '8h',
+    }
 ];
+
+if (smrIsEmbeddedMode()) {
+    REFRESH_INTERVAL_OPTIONS.splice(0, REFRESH_INTERVAL_OPTIONS.length - 2)
+}
 
 type DashboardRefreshButtonProps = {
     onIntervalChange: (intervalMin?: number) => void;
