@@ -19,7 +19,7 @@ const EmptyChart = () => (
     <Box h="100%" w="100%" py="xl">
         <SuboptimalState
             title="No data available"
-            description="Query metrics and dimensions with results."
+            // description="Query metrics and dimensions with results." -- SMR
             icon={IconFilterOff}
         />
     </Box>

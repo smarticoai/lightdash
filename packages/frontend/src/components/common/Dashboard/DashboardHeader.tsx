@@ -669,6 +669,7 @@ const DashboardHeader = ({
 
                                 {(userCanExportData ||
                                     userCanManageDashboard) &&
+                                    !smrIsEmbeddedMode() &&
                                     !hasNewSemanticLayerChart && (
                                         <Menu.Item
                                             icon={

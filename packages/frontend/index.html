@@ -24,6 +24,12 @@
 
         <script lang="javascript">
             var _smr_is_embedded = window.location.hash && window.location.hash.includes('token=');
+            var _smr_token = window.location.hash && window.location.hash.includes('token=')
+                ? window.location.hash.split('token=')[1].split('&')[0]
+                : null;
+            var _smr_currency = window.location.hash && window.location.hash.includes('currency=')
+                ? decodeURI(window.location.hash.split('currency=')[1].split('&')[0])
+                : null;
         </script>
         <title>Lightdash</title>
     </head>

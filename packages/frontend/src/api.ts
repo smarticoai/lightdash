@@ -8,7 +8,7 @@ import {
 import { spanToTraceHeader, startSpan } from '@sentry/react';
 import fetch from 'isomorphic-fetch';
 import { LIGHTDASH_SDK_INSTANCE_URL_LOCAL_STORAGE_KEY } from './sdk';
-import { smrIsEmbeddedMode } from './utils/smarticoUtils';
+import { smrIsEmbeddedMode, smrReplaceRecursivelyCurrency } from './utils/smarticoUtils';
 
 export const BASE_API_URL =
     import.meta.env.VITEST === 'true'
@@ -22,7 +22,7 @@ const defaultHeaders: any = {
 };
 
 if (smrIsEmbeddedMode()) {
-    defaultHeaders.JWT = 'token ' + window.location.hash.split('token=')[1];
+    defaultHeaders.JWT = 'token ' + (window as any)._smr_token;
 }
 
 const handleError = (err: any): ApiError => {
@@ -110,6 +110,9 @@ export const lightdashApi = async <T extends ApiResponse['results']>({
                 case 'ok':
                     // make sure we return null instead of undefined
                     // otherwise react-query will crash
+                    if (d.results) {
+                        d.results = smrReplaceRecursivelyCurrency(d.results);
+                    }
                     return (d.results ?? null) as T;
                 case 'error':
                     throw d;

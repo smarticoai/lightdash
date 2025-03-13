@@ -65,7 +65,7 @@ export const EmptyChart = () => (
     <div style={{ height: '100%', width: '100%', padding: '50px 0' }}>
         <SuboptimalState
             title="No data available"
-            description="Query metrics and dimensions with results."
+            // description="Query metrics and dimensions with results." -- SMR
             icon={IconChartBarOff}
         />
     </div>
