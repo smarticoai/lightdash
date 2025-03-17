@@ -3,6 +3,13 @@
 
 export const smrIsEmbeddedMode = (): boolean => (window as any)._smr_is_embedded ? true : false;
 
+if (smrIsEmbeddedMode()) {
+    window.history.pushState(null, '', window.location.href);
+    window.onpopstate = function () {
+      window.history.pushState(null, '', window.location.href);
+    };    
+}
+
 export const smrCurrency = (): string => (window as any)._smr_currency;
 
 export const smrMode = () => true;
