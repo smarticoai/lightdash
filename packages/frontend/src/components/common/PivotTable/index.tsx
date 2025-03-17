@@ -6,6 +6,7 @@ import {
     getItemId,
     isDimension,
     isField,
+    isHexCodeColor,
     isNumericItem,
     isSummable,
     type ConditionalFormattingConfig,
@@ -38,7 +39,7 @@ import {
     formatCellContent,
     getFormattedValueCell,
 } from '../../../hooks/useColumns';
-import { getColorFromRange, isHexCodeColor } from '../../../utils/colorUtils';
+import { getColorFromRange } from '../../../utils/colorUtils';
 import { getConditionalRuleLabel } from '../Filters/FilterInputs/utils';
 import Table from '../LightTable';
 import { CELL_HEIGHT } from '../LightTable/constants';
@@ -190,26 +191,32 @@ const PivotTable: FC<PivotTableProps> = ({
                                 const subtotal = data.groupedSubtotals?.[
                                     subtotalGroupKey
                                 ]?.find((sub) => {
-                                    return (
-                                        // All grouping values in the row must match the subtotal values
-                                        Object.keys(groupingValues).every(
-                                            (key) => {
-                                                return (
-                                                    groupingValues[key]?.value
-                                                        .raw === sub[key]
-                                                );
-                                            },
-                                        ) &&
-                                        // All pivoted header values in the row must match the subtotal values
-                                        Object.keys(pivotedHeaderValues).every(
-                                            (key) => {
+                                    try {
+                                        return (
+                                            // All grouping values in the row must match the subtotal values
+                                            Object.keys(groupingValues).every(
+                                                (key) => {
+                                                    return (
+                                                        groupingValues[key]
+                                                            ?.value.raw ===
+                                                        sub[key]
+                                                    );
+                                                },
+                                            ) &&
+                                            // All pivoted header values in the row must match the subtotal values
+                                            Object.keys(
+                                                pivotedHeaderValues,
+                                            ).every((key) => {
                                                 return (
                                                     pivotedHeaderValues[key]
                                                         ?.raw === sub[key]
                                                 );
-                                            },
-                                        )
-                                    );
+                                            })
+                                        );
+                                    } catch (e) {
+                                        console.error(e);
+                                        return false;
+                                    }
                                 });
 
                                 const subtotalValue = getSubtotalValueFromGroup(

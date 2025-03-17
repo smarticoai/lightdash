@@ -1,5 +1,7 @@
 import {
+    cleanColorArray,
     getErrorMessage,
+    getInvalidHexColors,
     isLightdashMode,
     isOrganizationMemberRole,
     LightdashMode,
@@ -89,6 +91,36 @@ const getArrayFromCommaSeparatedList = (envVar: string) => {
         .split(',')
         .map((domain) => domain.trim())
         .filter((domain) => domain.length > 0);
+};
+
+export const getHexColorsFromEnvironmentVariable = (
+    colorPalette: string | undefined,
+): string[] | undefined => {
+    if (!colorPalette) {
+        return undefined;
+    }
+
+    const hexColors = cleanColorArray(colorPalette.split(','));
+
+    // Validate that all colors are valid hex codes
+    const invalidColors = getInvalidHexColors(hexColors);
+
+    if (invalidColors.length > 0) {
+        throw new ParseError(
+            `Cannot parse environment variable "DEFAULT_COLOR_PALETTE_COLORS". All values must be valid hex colors (e.g. #FF0000) but found invalid colors: ${invalidColors.join(
+                ', ',
+            )}`,
+        );
+    }
+
+    // Validate that there are exactly 20 colors
+    if (hexColors.length !== 20) {
+        throw new ParseError(
+            `Cannot parse environment variable "DEFAULT_COLOR_PALETTE_COLORS". Must contain exactly 20 colors, but found ${hexColors.length} colors.`,
+        );
+    }
+
+    return hexColors;
 };
 
 /**
@@ -276,6 +308,7 @@ export type LightdashConfig = {
         defaultLimit: number;
         csvCellsLimit: number;
         timezone: string | undefined;
+        maxPageSize: number;
     };
     pivotTable: {
         maxColumnLimit: number;
@@ -287,6 +320,11 @@ export type LightdashConfig = {
     };
     customVisualizations: {
         enabled: boolean;
+    };
+    // This is the override color palette for the organization
+    appearance: {
+        overrideColorPalette?: string[];
+        overrideColorPaletteName?: string;
     };
     s3?: S3Config;
     headlessBrowser: HeadlessBrowserConfig;
@@ -784,6 +822,10 @@ export const parseConfig = (): LightdashConfig => {
                     'LIGHTDASH_CSV_CELLS_LIMIT',
                 ) || 100000,
             timezone: process.env.LIGHTDASH_QUERY_TIMEZONE,
+            maxPageSize:
+                getIntegerFromEnvironmentVariable(
+                    'LIGHTDASH_QUERY_MAX_PAGE_SIZE',
+                ) || 2500, // Defaults to default limit * 5
         },
         chart: {
             versionHistory: {
@@ -923,6 +965,13 @@ export const parseConfig = (): LightdashConfig => {
             maxDownloads:
                 getIntegerFromEnvironmentVariable('MAX_DOWNLOADS_AS_CODE') ||
                 100,
+        },
+        appearance: {
+            overrideColorPalette: getHexColorsFromEnvironmentVariable(
+                process.env.OVERRIDE_COLOR_PALETTE_COLORS || undefined,
+            ),
+            // not required if overrideColorPalette is set
+            overrideColorPaletteName: process.env.OVERRIDE_COLOR_PALETTE_NAME,
         },
     };
 };

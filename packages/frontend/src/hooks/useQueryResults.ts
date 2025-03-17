@@ -1,42 +1,44 @@
 import {
-    type ApiChartAndResults,
     type ApiError,
+    type ApiExecuteAsyncQueryResults,
+    type ApiGetAsyncQueryResults,
     type ApiQueryResults,
+    assertUnreachable,
     type DashboardFilters,
     type DateGranularity,
+    type ExecuteAsyncQueryRequestParams,
+    FeatureFlags,
     type MetricQuery,
-    type SortField,
+    ParameterError,
+    QueryExecutionContext,
+    QueryHistoryStatus,
+    type ResultRow,
+    sleep,
 } from '@lightdash/common';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { useParams } from 'react-router';
 import { lightdashApi } from '../api';
-import useDashboardContext from '../providers/Dashboard/useDashboardContext';
-import {
-    convertDateDashboardFilters,
-    convertDateFilters,
-} from '../utils/dateFilter';
-import useToaster from './toaster/useToaster';
+import { convertDateFilters } from '../utils/dateFilter';
+import { useFeatureFlag } from './useFeatureFlagEnabled';
 import useQueryError from './useQueryError';
 
-type QueryResultsProps = {
+export type QueryResultsProps = {
     projectUuid: string;
     tableId: string;
     query?: MetricQuery;
     csvLimit?: number | null; //giving null returns all results (no limit)
     chartUuid?: string;
+    chartVersionUuid?: string;
     dateZoomGranularity?: DateGranularity;
     context?: string;
 };
 
 const getChartResults = async ({
     chartUuid,
-    invalidateCache,
     context,
 }: {
     chartUuid?: string;
-    invalidateCache?: boolean;
-    dashboardSorts?: SortField[];
     context?: string;
 }) => {
     return lightdashApi<ApiQueryResults>({
@@ -44,46 +46,10 @@ const getChartResults = async ({
             context ? `?context=${context}` : ''
         }`,
         method: 'POST',
-        body: JSON.stringify({
-            ...(invalidateCache && { invalidateCache: true }),
-        }),
+        body: undefined,
     });
 };
 
-const getChartAndResults = async ({
-    chartUuid,
-    dashboardUuid,
-    dashboardFilters,
-    invalidateCache,
-    dashboardSorts,
-    granularity,
-    autoRefresh,
-    context,
-}: {
-    chartUuid?: string;
-    dashboardUuid: string;
-    dashboardFilters: DashboardFilters;
-    invalidateCache?: boolean;
-    dashboardSorts: SortField[];
-    granularity?: DateGranularity;
-    autoRefresh?: boolean;
-    context?: string;
-}) => {
-    return lightdashApi<ApiChartAndResults>({
-        url: `/saved/${chartUuid}/chart-and-results${
-            context ? `?context=${context}` : ''
-        }`,
-        method: 'POST',
-        body: JSON.stringify({
-            dashboardUuid,
-            dashboardFilters,
-            dashboardSorts,
-            granularity,
-            ...(invalidateCache && { invalidateCache: true }),
-            autoRefresh,
-        }),
-    });
-};
 const getQueryResults = async ({
     projectUuid,
     tableId,
@@ -108,74 +74,6 @@ const getQueryResults = async ({
             context,
         }),
     });
-};
-
-export const useQueryResults = (props?: {
-    chartUuid?: string;
-    isViewOnly?: boolean;
-    dateZoomGranularity?: DateGranularity;
-    context?: string;
-}) => {
-    const { projectUuid } = useParams<{ projectUuid: string }>();
-    const setErrorResponse = useQueryError({
-        forceToastOnForbidden: true,
-        forbiddenToastTitle: 'Error running query',
-    });
-
-    const fetchQuery =
-        props?.isViewOnly === true ? getChartResults : getQueryResults;
-    const mutation = useMutation<ApiQueryResults, ApiError, QueryResultsProps>(
-        fetchQuery,
-        {
-            mutationKey: ['queryResults'],
-            onError: (error) => {
-                setErrorResponse(error);
-            },
-        },
-    );
-
-    const { mutateAsync } = mutation;
-
-    const mutateAsyncOverride = useCallback(
-        async (tableName: string, metricQuery: MetricQuery) => {
-            const fields = new Set([
-                ...metricQuery.dimensions,
-                ...metricQuery.metrics,
-                ...metricQuery.tableCalculations.map(({ name }) => name),
-            ]);
-            const isValidQuery = fields.size > 0;
-            if (!!tableName && isValidQuery && projectUuid) {
-                await mutateAsync({
-                    projectUuid,
-                    tableId: tableName,
-                    query: metricQuery,
-                    chartUuid: props?.chartUuid,
-                    dateZoomGranularity: props?.dateZoomGranularity,
-                    context: props?.context,
-                });
-            } else {
-                console.warn(
-                    `Can't make SQL request, invalid state`,
-                    tableName,
-                    isValidQuery,
-                    metricQuery,
-                );
-                return Promise.reject();
-            }
-        },
-        [
-            mutateAsync,
-            projectUuid,
-            props?.chartUuid,
-            props?.dateZoomGranularity,
-            props?.context,
-        ],
-    );
-
-    return useMemo(
-        () => ({ ...mutation, mutateAsync: mutateAsyncOverride }),
-        [mutation, mutateAsyncOverride],
-    );
 };
 
 const getUnderlyingDataResults = async ({
@@ -221,99 +119,6 @@ export const useUnderlyingDataResults = (
     });
 };
 
-export const useChartAndResults = (
-    chartUuid: string | null,
-    dashboardUuid: string | null,
-    dashboardFilters: DashboardFilters,
-    dashboardSorts: SortField[],
-    invalidateCache?: boolean,
-    granularity?: DateGranularity,
-    autoRefresh?: boolean,
-    context?: string,
-) => {
-    const setChartsWithDateZoomApplied = useDashboardContext(
-        (c) => c.setChartsWithDateZoomApplied,
-    );
-    const queryClient = useQueryClient();
-
-    const sortKey =
-        dashboardSorts
-            ?.map((ds) => `${ds.fieldId}.${ds.descending}`)
-            ?.join(',') || '';
-    const queryKey = useMemo(
-        () => [
-            'savedChartResults',
-            chartUuid,
-            dashboardUuid,
-            dashboardFilters,
-            invalidateCache,
-            sortKey,
-            autoRefresh,
-        ],
-        [
-            chartUuid,
-            dashboardUuid,
-            dashboardFilters,
-            invalidateCache,
-            sortKey,
-            autoRefresh,
-        ],
-    );
-    const apiChartAndResults =
-        queryClient.getQueryData<ApiChartAndResults>(queryKey);
-
-    const timezoneFixFilters =
-        dashboardFilters && convertDateDashboardFilters(dashboardFilters);
-    const hasADateDimension =
-        !!apiChartAndResults?.metricQuery?.metadata?.hasADateDimension;
-
-    const fetchChartAndResults = useCallback(
-        () =>
-            getChartAndResults({
-                chartUuid: chartUuid!,
-                dashboardUuid: dashboardUuid!,
-                dashboardFilters: timezoneFixFilters,
-                invalidateCache,
-                dashboardSorts,
-                granularity,
-                autoRefresh,
-                context,
-            }),
-        [
-            chartUuid,
-            dashboardUuid,
-            timezoneFixFilters,
-            invalidateCache,
-            dashboardSorts,
-            granularity,
-            autoRefresh,
-            context,
-        ],
-    );
-
-    setChartsWithDateZoomApplied((prev) => {
-        if (hasADateDimension) {
-            if (granularity) {
-                return (prev ?? new Set()).add(chartUuid!);
-            }
-            prev?.clear();
-            return prev;
-        }
-        return prev;
-    });
-
-    return useQuery<ApiChartAndResults, ApiError>({
-        queryKey:
-            hasADateDimension && granularity
-                ? queryKey.concat([granularity])
-                : queryKey,
-        queryFn: fetchChartAndResults,
-        enabled: !!chartUuid && !!dashboardUuid,
-        retry: false,
-        refetchOnMount: false,
-    });
-};
-
 const getChartVersionResults = async (
     chartUuid: string,
     versionUuid: string,
@@ -325,40 +130,164 @@ const getChartVersionResults = async (
     });
 };
 
-export const useChartVersionResultsMutation = (
-    chartUuid: string | undefined,
-    versionUuid?: string,
-) => {
-    const { showToastApiError } = useToaster();
-    const mutation = useMutation<ApiQueryResults, ApiError>(
-        () =>
-            chartUuid && versionUuid
-                ? getChartVersionResults(chartUuid, versionUuid)
-                : Promise.reject(),
-        {
-            mutationKey: ['chartVersionResults', chartUuid, versionUuid],
-            onError: ({ error }) => {
-                showToastApiError({
-                    title: 'Error running query',
-                    apiError: error,
-                });
-            },
-        },
-    );
-    const { mutateAsync } = mutation;
-    // needs these args to work with ExplorerProvider
-    const mutateAsyncOverride = useCallback(
-        async (_tableName: string, _metricQuery: MetricQuery) => {
-            await mutateAsync();
-        },
-        [mutateAsync],
-    );
+/**
+ * Aggregates pagination results for a query
+ */
+export const getQueryPaginatedResults = async (
+    projectUuid: string,
+    data: ExecuteAsyncQueryRequestParams,
+): Promise<
+    ApiQueryResults & {
+        queryUuid: string;
+        appliedDashboardFilters: DashboardFilters | null;
+    }
+> => {
+    const firstPage = await lightdashApi<ApiExecuteAsyncQueryResults>({
+        url: `/projects/${projectUuid}/query`,
+        version: 'v2',
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
 
-    return useMemo(
-        () => ({
-            ...mutation,
-            mutateAsync: mutateAsyncOverride,
-        }),
-        [mutation, mutateAsyncOverride],
+    // Get all page rows in sequence
+    let allRows: ResultRow[] = [];
+    let currentPage: ApiGetAsyncQueryResults | undefined;
+
+    while (
+        !currentPage ||
+        currentPage.status === QueryHistoryStatus.PENDING ||
+        (currentPage.status === QueryHistoryStatus.READY &&
+            currentPage.nextPage)
+    ) {
+        const page =
+            currentPage?.status === QueryHistoryStatus.READY
+                ? currentPage?.nextPage
+                : 1;
+        const searchParams = new URLSearchParams();
+        if (page) {
+            searchParams.set('page', page.toString());
+        }
+        if (data.pageSize) {
+            searchParams.set('pageSize', data.pageSize.toString());
+        }
+
+        const urlQueryParams = searchParams.toString();
+        currentPage = await lightdashApi<ApiGetAsyncQueryResults>({
+            url: `/projects/${projectUuid}/query/${firstPage.queryUuid}${
+                urlQueryParams ? `?${urlQueryParams}` : ''
+            }`,
+            version: 'v2',
+            method: 'GET',
+            body: undefined,
+        });
+
+        const { status } = currentPage;
+
+        switch (status) {
+            case QueryHistoryStatus.CANCELLED:
+                throw <ApiError>{
+                    status: 'error',
+                    error: {
+                        name: 'Error',
+                        statusCode: 500,
+                        message: 'Query cancelled',
+                        data: {},
+                    },
+                };
+            case QueryHistoryStatus.ERROR:
+                throw <ApiError>{
+                    status: 'error',
+                    error: {
+                        name: 'Error',
+                        statusCode: 500,
+                        message: currentPage.error ?? 'Query failed',
+                        data: {},
+                    },
+                };
+            case QueryHistoryStatus.READY:
+                allRows = allRows.concat(currentPage.rows);
+                break;
+            case QueryHistoryStatus.PENDING:
+                await sleep(200);
+                break;
+            default:
+                return assertUnreachable(status, 'Unknown query status');
+        }
+    }
+
+    return {
+        queryUuid: currentPage.queryUuid,
+        metricQuery: currentPage.metricQuery,
+        cacheMetadata: {
+            // todo: to be replaced once we have save query metadata in the DB
+            cacheHit: false,
+        },
+        rows: allRows,
+        fields: currentPage.fields,
+        appliedDashboardFilters: firstPage.appliedDashboardFilters,
+    };
+};
+
+export const useQueryResults = (data: QueryResultsProps | null) => {
+    const setErrorResponse = useQueryError({
+        forceToastOnForbidden: true,
+        forbiddenToastTitle: 'Error running query',
+    });
+    const { data: queryPaginationEnabled } = useFeatureFlag(
+        FeatureFlags.QueryPagination,
     );
+    const result = useQuery<ApiQueryResults, ApiError>({
+        enabled: !!data && !!queryPaginationEnabled,
+        queryKey: ['query-all-results', data],
+        queryFn: () => {
+            if (data?.chartUuid && data?.chartVersionUuid) {
+                if (queryPaginationEnabled?.enabled) {
+                    return getQueryPaginatedResults(data.projectUuid, {
+                        context: QueryExecutionContext.CHART_HISTORY,
+                        chartUuid: data.chartUuid,
+                        versionUuid: data.chartVersionUuid,
+                    });
+                }
+                return getChartVersionResults(
+                    data.chartUuid,
+                    data.chartVersionUuid,
+                );
+            } else if (data?.chartUuid) {
+                if (queryPaginationEnabled?.enabled) {
+                    return getQueryPaginatedResults(data.projectUuid, {
+                        context: QueryExecutionContext.CHART,
+                        chartUuid: data.chartUuid,
+                    });
+                }
+                return getChartResults(data);
+            } else if (data?.query) {
+                if (queryPaginationEnabled?.enabled) {
+                    return getQueryPaginatedResults(data.projectUuid, {
+                        context: QueryExecutionContext.EXPLORE,
+                        query: {
+                            ...data.query,
+                            filters: convertDateFilters(data.query.filters),
+                            timezone: data.query.timezone ?? undefined,
+                            exploreName: data.tableId,
+                            granularity: data.dateZoomGranularity,
+                        },
+                    });
+                }
+                return getQueryResults(data);
+            }
+
+            return Promise.reject(
+                new ParameterError('Missing QueryResultsProps'),
+            );
+        },
+    });
+
+    // On Error
+    useEffect(() => {
+        if (result.error) {
+            setErrorResponse(result.error);
+        }
+    }, [result.error, setErrorResponse]);
+
+    return result;
 };

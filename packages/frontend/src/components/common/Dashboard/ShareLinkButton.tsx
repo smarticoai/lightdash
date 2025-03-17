@@ -4,7 +4,7 @@ import { IconCheck, IconLink } from '@tabler/icons-react';
 import { type FC } from 'react';
 import useToaster from '../../../hooks/toaster/useToaster';
 import MantineIcon from '../MantineIcon';
-
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 const ShareLinkButton: FC<{ url: string }> = ({ url }) => {
     const clipboard = useClipboard({ timeout: 500 });
     const { showToastSuccess } = useToaster();
@@ -15,6 +15,10 @@ const ShareLinkButton: FC<{ url: string }> = ({ url }) => {
             title: 'Link copied to clipboard',
         });
     };
+
+    if (smrIsEmbeddedMode()) {
+        return null;
+    }
 
     return (
         <ActionIcon variant="default" onClick={handleCopyClick} color="gray">

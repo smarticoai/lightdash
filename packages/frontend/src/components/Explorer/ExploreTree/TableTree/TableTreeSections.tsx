@@ -132,9 +132,7 @@ const TableTreeSections: FC<Props> = ({
     const isGithubProject =
         project?.dbtConnection.type === DbtProjectType.GITHUB;
     const { data: gitIntegration } = useGitIntegration();
-    const isCustomSqlEnabled = useFeatureFlagEnabled(
-        FeatureFlags.CustomSQLEnabled,
-    );
+
     const isWriteBackCustomBinDimensionsEnabled = useFeatureFlagEnabled(
         FeatureFlags.WriteBackCustomBinDimensions,
     );
@@ -165,6 +163,11 @@ const TableTreeSections: FC<Props> = ({
             };
         }, {});
     }, [metrics, additionalMetrics]);
+
+    const searchResults = useMemo(
+        () => getSearchResults(dimensions, searchQuery),
+        [dimensions, searchQuery],
+    );
 
     return (
         <>
@@ -217,8 +220,7 @@ const TableTreeSections: FC<Props> = ({
                 </>
             )}
 
-            {isSearching &&
-            getSearchResults(dimensions, searchQuery).size === 0 ? null : (
+            {isSearching && searchResults.length === 0 ? null : (
                 <Group mt="sm" mb="xs" position={'apart'}>
                     <Text fw={600} color="blue.9">
                         Dimensions
@@ -268,8 +270,7 @@ const TableTreeSections: FC<Props> = ({
                 </Center>
             )}
 
-            {isSearching &&
-            getSearchResults(metrics, searchQuery).size === 0 ? null : (
+            {isSearching && searchResults.length === 0 ? null : (
                 <Group position="apart" mt="sm" mb="xs" pr="sm">
                     <Text fw={600} color="yellow.9">
                         Metrics
@@ -312,10 +313,7 @@ const TableTreeSections: FC<Props> = ({
             ) : null}
 
             {hasCustomMetrics &&
-            !(
-                isSearching &&
-                getSearchResults(customMetrics, searchQuery).size === 0
-            ) ? (
+            !(isSearching && searchResults.length === 0) ? (
                 <Group position="apart" mt="sm" mb="xs" pr="sm">
                     <Group>
                         <Text fw={600} color="yellow.9">
@@ -338,7 +336,7 @@ const TableTreeSections: FC<Props> = ({
                             }}
                         />
                     </Group>
-                    {isCustomSqlEnabled && hasCustomMetrics && (
+                    {hasCustomMetrics && (
                         <Tooltip label="Write back custom metrics">
                             <ActionIcon
                                 onClick={() => {
@@ -382,9 +380,7 @@ const TableTreeSections: FC<Props> = ({
                     itemsAlerts={customMetricsIssues}
                     groupDetails={table.groupDetails}
                     onItemClick={(key) => onSelectedNodeChange(key, false)}
-                    isGithubIntegrationEnabled={
-                        isGithubProject && isCustomSqlEnabled
-                    }
+                    isGithubIntegrationEnabled={isGithubProject}
                     gitIntegration={gitIntegration}
                 >
                     <TreeRoot />
@@ -393,10 +389,7 @@ const TableTreeSections: FC<Props> = ({
 
             {hasCustomDimensions &&
             customDimensionsMap &&
-            !(
-                isSearching &&
-                getSearchResults(customDimensionsMap, searchQuery).size === 0
-            ) ? (
+            !(isSearching && searchResults.length === 0) ? (
                 <Group position="apart" mt="sm" mb="xs" pr="sm">
                     <Group>
                         <Text fw={600} color="blue.9">
@@ -420,7 +413,7 @@ const TableTreeSections: FC<Props> = ({
                             }}
                         />
                     </Group>
-                    {isCustomSqlEnabled && hasCustomDimensionsToWriteBack && (
+                    {hasCustomDimensionsToWriteBack && (
                         <Tooltip label="Write back custom dimensions">
                             <ActionIcon
                                 onClick={() => {

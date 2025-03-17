@@ -2,9 +2,8 @@ import { Anchor } from '@mantine/core';
 import { IconFolder } from '@tabler/icons-react';
 import { type FC } from 'react';
 import { Link } from 'react-router';
-
-import { InfoContainer } from '.';
-import MantineIcon from '../MantineIcon';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
+import InfoContainer from './InfoContainer';
 
 interface Props {
     space: {
@@ -21,10 +20,13 @@ const SpaceAndDashboardInfo: FC<Props> = ({
     space: { link, name },
     dashboard,
 }) => {
+    if (smrIsEmbeddedMode()) {
+        return null;
+    }
+
     return (
-        <InfoContainer>
-            <MantineIcon icon={IconFolder} />
-            Space:
+        <InfoContainer icon={IconFolder}>
+            Space:{' '}
             <Anchor component={Link} to={link}>
                 {name}
             </Anchor>

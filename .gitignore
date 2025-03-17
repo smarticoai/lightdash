@@ -1,5 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+/.cursor
+
 # dependencies
 /node_modules
 /.pnp
@@ -71,3 +73,4 @@ dangerfile.development.ts
 
 # Charts as code
 lightdash
+*storybook.log

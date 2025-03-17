@@ -1,5 +1,4 @@
 import {
-    ChartType,
     ECHARTS_DEFAULT_COLORS,
     getHiddenTableFields,
     getPivotConfig,
@@ -42,7 +41,7 @@ const VisualizationCard: FC<{
     );
 
     const isLoadingQueryResults = useExplorerContext(
-        (context) => context.queryResults.isLoading,
+        (context) => context.queryResults.isFetching,
     );
     const queryResults = useExplorerContext(
         (context) => context.queryResults.data,
@@ -71,9 +70,7 @@ const VisualizationCard: FC<{
     const tableCalculationsMetadata = useExplorerContext(
         (context) => context.state.metadata?.tableCalculations,
     );
-    const pivotConfig = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.pivotConfig,
-    );
+
     const isOpen = useMemo(
         () => expandedSections.includes(ExplorerSection.VISUALIZATION),
         [expandedSections],
@@ -129,10 +126,7 @@ const VisualizationCard: FC<{
                 hiddenFields: getHiddenTableFields(
                     unsavedChartVersion.chartConfig,
                 ),
-                pivotColumns:
-                    unsavedChartVersion.chartConfig.type === ChartType.TABLE
-                        ? pivotConfig?.columns
-                        : undefined,
+                pivotConfig: getPivotConfig(unsavedChartVersion),
             });
             return csvResponse;
         }

@@ -16,9 +16,6 @@ export enum FeatureFlags {
     /**/
     ShowDbtCloudProjectOption = 'show-dbt-cloud-project-option',
 
-    /**/
-    CustomSQLEnabled = 'custom-sql-enabled',
-
     /* Show user groups */
     UserGroupsEnabled = 'user-groups-enabled',
 
@@ -54,9 +51,18 @@ export enum FeatureFlags {
      * Enable the ability to write back custom bin dimensions to dbt.
      */
     WriteBackCustomBinDimensions = 'write-back-custom-bin-dimensions',
+
+    /**
+     * Enable a new API endpoint that requests results page by page.
+     */
+    QueryPagination = 'query-pagination',
 }
 
 export type FeatureFlag = {
     id: string;
     enabled: boolean;
 };
+
+export function isFeatureFlags(value: string): value is FeatureFlags {
+    return Object.values(FeatureFlags).includes(value as FeatureFlags);
+}
