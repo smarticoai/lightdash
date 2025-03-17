@@ -19,8 +19,6 @@ export const useFeatureFlagEnabled = (featureFlag: FeatureFlags) => {
             return true;
         case FeatureFlags.ShowDbtCloudProjectOption:
             return true;
-        case FeatureFlags.CustomSQLEnabled:
-            return true;
         case FeatureFlags.UserGroupsEnabled:
             return true;
         case FeatureFlags.DashboardTabs:
