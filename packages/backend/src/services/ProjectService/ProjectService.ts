@@ -463,9 +463,12 @@ export class ProjectService extends BaseService {
             }
             userWarehouseCredentialsUuid = userWarehouseCredentials.uuid;
         }
+
+        // SMR-start
         if (user?.userAttributes?.bq_project_id) {
             (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as unknown as string;
         }
+        // SMR-end
 
         return {
             ...credentials,
