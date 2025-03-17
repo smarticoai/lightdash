@@ -46,6 +46,12 @@ export const useFeatureFlag = (featureFlagId: string) => {
     return useQuery<FeatureFlag, ApiError>(
         ['feature-flag', featureFlagId],
         () => {
+            if (featureFlagId === FeatureFlags.QueryPagination) {
+                return {
+                    id: 'query-pagination',
+                    enabled: false,
+                };
+            }
             return lightdashApi<FeatureFlag>({
                 url: `/feature-flag/${featureFlagId}`,
                 version: 'v2',
