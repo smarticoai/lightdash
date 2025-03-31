@@ -566,8 +566,7 @@ export class ProjectService extends BaseService {
 
     private async getWarehouseCredentials(
         projectUuid: string,
-        userUuid: string,
-        user?: SessionUser
+        userUuid: string
     ) {
         let credentials =
             await this.projectModel.getWarehouseCredentialsForProject(
@@ -601,9 +600,18 @@ export class ProjectService extends BaseService {
         }
 
         // SMR-start
-        if (user?.userAttributes?.bq_project_id) {
-            (credentials as CreateBigqueryCredentials).project = user?.userAttributes?.bq_project_id as unknown as string;
+        const { organizationUuid } = await this.projectModel.getSummary(projectUuid);        
+        const userAttributes = await this.userAttributesModel.getAttributeValuesForOrgMember(
+            {
+                organizationUuid,
+                userUuid
+            },
+        );     
+        
+        if (userAttributes?.bq_project_id) {
+            (credentials as CreateBigqueryCredentials).project = userAttributes.bq_project_id as unknown as string;
         }
+
         // SMR-end
 
         return {
@@ -1474,7 +1482,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
             {
                 snowflakeVirtualWarehouse: explore.warehouse,
                 databricksCompute: explore.databricksCompute,
@@ -1968,7 +1976,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
             {
                 snowflakeVirtualWarehouse: explore.warehouse,
                 databricksCompute: explore.databricksCompute,
@@ -3089,8 +3097,7 @@ export class ProjectService extends BaseService {
                             projectUuid,
                             await this.getWarehouseCredentials(
                                 projectUuid,
-                                user.userUuid,
-                                user
+                                user.userUuid
                             ),
                             {
                                 snowflakeVirtualWarehouse: explore.warehouse,
@@ -3114,6 +3121,16 @@ export class ProjectService extends BaseService {
                     const intrinsicUserAttributes = emailStatus.isVerified
                         ? getIntrinsicUserAttributes(user)
                         : {};
+
+                    // SMR-START
+                    if (explore.tables && userAttributes?.bq_project_id) {
+                        const bqProjectId: string = userAttributes.bq_project_id as unknown as string;
+                        for (const [, compiledTable] of Object.entries(explore.tables)) {
+                            compiledTable.database = bqProjectId;
+                            compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
+                        }
+                    }
+                    // SMR-END                        
 
                     const fullQuery = await ProjectService._compileQuery(
                         metricQueryWithLimit,
@@ -3243,7 +3260,7 @@ export class ProjectService extends BaseService {
         });
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
         );
         this.logger.debug(`Run query against warehouse`);
         const queryTags: RunQueryTags = {
@@ -3271,7 +3288,7 @@ export class ProjectService extends BaseService {
         limit,
         sqlChartUuid,
         context,
-    }: SqlRunnerPayload, user: SessionUser): Promise<{
+    }: SqlRunnerPayload): Promise<{
         fileUrl: string;
         columns: VizColumn[];
     }> {
@@ -3294,7 +3311,7 @@ export class ProjectService extends BaseService {
         });
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, userUuid),
         );
         this.logger.debug(`Stream query against warehouse`);
         const queryTags: RunQueryTags = {
@@ -3435,7 +3452,7 @@ export class ProjectService extends BaseService {
         valuesColumns,
         groupByColumns,
         sortBy,
-    }: SqlRunnerPivotQueryPayload, user: SessionUser): Promise<
+    }: SqlRunnerPivotQueryPayload): Promise<
         Omit<PivotChartData, 'results' | 'columns'>
     > {
         if (!indexColumn) throw new ParameterError('Index column is required');
@@ -3445,8 +3462,7 @@ export class ProjectService extends BaseService {
 
         const warehouseCredentials = await this.getWarehouseCredentials(
             projectUuid,
-            userUuid,
-            user
+            userUuid
         );
         // Apply limit and pivot to the SQL query
         const pivotedSql = ProjectService.applyPivotToSqlQuery({
@@ -3770,7 +3786,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
             {
                 snowflakeVirtualWarehouse: explore.warehouse,
                 databricksCompute: explore.databricksCompute,
@@ -4584,8 +4600,7 @@ export class ProjectService extends BaseService {
 
         const credentials = await this.getWarehouseCredentials(
             projectUuid,
-            user.userUuid,
-            user
+            user.userUuid
         );
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
@@ -4637,8 +4652,7 @@ export class ProjectService extends BaseService {
 
         const credentials = await this.getWarehouseCredentials(
             projectUuid,
-            user.userUuid,
-            user
+            user.userUuid
         );
 
         let catalog: WarehouseTablesCatalog | null = null;
@@ -4690,8 +4704,7 @@ export class ProjectService extends BaseService {
         }
         const credentials = await this.getWarehouseCredentials(
             projectUuid,
-            user.userUuid,
-            user
+            user.userUuid
         );
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
@@ -5626,7 +5639,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
             {
                 snowflakeVirtualWarehouse: explore.warehouse,
                 databricksCompute: explore.databricksCompute,
@@ -5664,7 +5677,7 @@ export class ProjectService extends BaseService {
     ) {
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
             {
                 snowflakeVirtualWarehouse: explore.warehouse,
                 databricksCompute: explore.databricksCompute,
@@ -6223,7 +6236,7 @@ export class ProjectService extends BaseService {
         }
         const { warehouseClient } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
         );
         const virtualView = await this.projectModel.createVirtualView(
             projectUuid,
@@ -6311,7 +6324,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid),
         );
 
         const updatedExplore = await this.projectModel.updateVirtualView(
