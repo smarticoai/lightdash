@@ -2182,7 +2182,6 @@ export class ProjectService extends BaseService {
                             await this.getWarehouseCredentials(
                                 projectUuid,
                                 user.userUuid,
-                                user,
                             ),
                             {
                                 snowflakeVirtualWarehouse: explore.warehouse,
