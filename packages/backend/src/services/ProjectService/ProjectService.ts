@@ -3122,8 +3122,9 @@ export class ProjectService extends BaseService {
                         : {};
 
                     // SMR-START
-                    if (explore.tables && userAttributes?.bq_project_id) {
-                        const bqProjectId: string = userAttributes.bq_project_id as unknown as string;
+                    if (explore.tables && (user?.userAttributes?.bq_project_id || userAttributes?.bq_project_id)) {
+                        const bqProjectId: string = (user?.userAttributes?.bq_project_id || userAttributes?.bq_project_id) as unknown as string;
+                        // console.log('bqProjectId3', bqProjectId);
                         for (const [, compiledTable] of Object.entries(explore.tables)) {
                             compiledTable.database = bqProjectId;
                             compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
@@ -3670,6 +3671,7 @@ export class ProjectService extends BaseService {
         // SMR-START
         if (explore && explore.tables && user?.userAttributes?.bq_project_id) {
             const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
+            // console.log('bqProjectId1', bqProjectId);
             for (const [, compiledTable] of Object.entries(explore.tables)) {
                 compiledTable.database = bqProjectId;
                 compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
@@ -4412,6 +4414,7 @@ export class ProjectService extends BaseService {
                 // SMR-START
                 if (explore.tables && user.userAttributes?.bq_project_id) {
                     const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
+                    // console.log('bqProjectId2', bqProjectId);
                     for (const [, compiledTable] of Object.entries(explore.tables)) {
                         compiledTable.database = bqProjectId;
                         compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
