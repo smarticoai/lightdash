@@ -1144,8 +1144,12 @@ export default class SchedulerTask {
                 details: { createdByUserUuid: payload.userUuid },
             },
             async () => {
+                // SMR, get user and pass to task in order to get warehouse credentials
+                const user = await this.userService.getSessionByUserUuid(
+                    payload.userUuid,
+                );
                 const { fileUrl, columns } =
-                    await this.projectService.streamSqlQueryIntoFile(payload);
+                    await this.projectService.streamSqlQueryIntoFile(payload, user);
                 return { fileUrl, columns };
             },
         );
@@ -1163,7 +1167,13 @@ export default class SchedulerTask {
                 scheduledTime,
                 details: { createdByUserUuid: payload.userUuid },
             },
-            async () => this.projectService.pivotQueryWorkerTask(payload),
+            async () => {
+                // SMR, get user and pass to task in order to get warehouse credentials
+                const user = await this.userService.getSessionByUserUuid(
+                    payload.userUuid,
+                );                  
+                return this.projectService.pivotQueryWorkerTask(payload, user);
+            },
         );
     }
 

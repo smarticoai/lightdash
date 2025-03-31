@@ -1968,7 +1968,7 @@ export class ProjectService extends BaseService {
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, user.userUuid),
+            await this.getWarehouseCredentials(projectUuid, user.userUuid, user),
             {
                 snowflakeVirtualWarehouse: explore.warehouse,
                 databricksCompute: explore.databricksCompute,
@@ -2174,6 +2174,7 @@ export class ProjectService extends BaseService {
                             await this.getWarehouseCredentials(
                                 projectUuid,
                                 user.userUuid,
+                                user,
                             ),
                             {
                                 snowflakeVirtualWarehouse: explore.warehouse,
@@ -3270,7 +3271,7 @@ export class ProjectService extends BaseService {
         limit,
         sqlChartUuid,
         context,
-    }: SqlRunnerPayload): Promise<{
+    }: SqlRunnerPayload, user: SessionUser): Promise<{
         fileUrl: string;
         columns: VizColumn[];
     }> {
@@ -3293,7 +3294,7 @@ export class ProjectService extends BaseService {
         });
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
-            await this.getWarehouseCredentials(projectUuid, userUuid),
+            await this.getWarehouseCredentials(projectUuid, userUuid, user),
         );
         this.logger.debug(`Stream query against warehouse`);
         const queryTags: RunQueryTags = {
@@ -3434,7 +3435,7 @@ export class ProjectService extends BaseService {
         valuesColumns,
         groupByColumns,
         sortBy,
-    }: SqlRunnerPivotQueryPayload): Promise<
+    }: SqlRunnerPivotQueryPayload, user: SessionUser): Promise<
         Omit<PivotChartData, 'results' | 'columns'>
     > {
         if (!indexColumn) throw new ParameterError('Index column is required');
@@ -3445,6 +3446,7 @@ export class ProjectService extends BaseService {
         const warehouseCredentials = await this.getWarehouseCredentials(
             projectUuid,
             userUuid,
+            user
         );
         // Apply limit and pivot to the SQL query
         const pivotedSql = ProjectService.applyPivotToSqlQuery({
