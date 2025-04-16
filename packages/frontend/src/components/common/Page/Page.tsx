@@ -20,7 +20,7 @@ import {
     PAGE_MIN_CONTENT_WIDTH,
 } from './constants';
 import { SidebarPosition, type SidebarWidthProps } from './types';
-import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
+import { smrIsEmbeddedMode, smrWithNavbar } from '../../../utils/smarticoUtils';
 
 type StyleProps = {
     withCenteredContent?: boolean;
@@ -215,7 +215,7 @@ const Page: FC<React.PropsWithChildren<Props>> = ({
     withXLargePaddedContent = false,
     withFooter = false,
     withFullHeight = false,
-    withNavbar = !smrIsEmbeddedMode(),
+    withNavbar = smrWithNavbar(),
     withPaddedContent = false,
     withSidebarFooter = false,
     withSidebarBorder = false,

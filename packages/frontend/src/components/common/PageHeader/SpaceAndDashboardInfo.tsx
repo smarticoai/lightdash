@@ -2,7 +2,7 @@ import { Anchor } from '@mantine/core';
 import { IconFolder } from '@tabler/icons-react';
 import { type FC } from 'react';
 import { Link } from 'react-router';
-import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
+import { smrIsEmbeddedMode, smrWithNavbar } from '../../../utils/smarticoUtils';
 import InfoContainer from './InfoContainer';
 
 interface Props {
@@ -20,7 +20,7 @@ const SpaceAndDashboardInfo: FC<Props> = ({
     space: { link, name },
     dashboard,
 }) => {
-    if (smrIsEmbeddedMode()) {
+    if (smrIsEmbeddedMode() && !smrWithNavbar()) {
         return null;
     }
 

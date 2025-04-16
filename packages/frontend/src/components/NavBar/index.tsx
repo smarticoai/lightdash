@@ -16,7 +16,7 @@ import { BANNER_HEIGHT, NAVBAR_HEIGHT } from '../common/Page/constants';
 import { DashboardExplorerBanner } from './DashboardExplorerBanner';
 import { MainNavBarContent } from './MainNavBarContent';
 import { PreviewBanner } from './PreviewBanner';
-import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
+import { smrIsEmbeddedMode, smrWithNavbar } from '../../utils/smarticoUtils';
 
 enum NavBarMode {
     DEFAULT = 'default',
@@ -88,7 +88,7 @@ const NavBar = memo(() => {
         }
     };
 
-    if (smrIsEmbeddedMode()) {
+    if (smrIsEmbeddedMode() && !smrWithNavbar()) {
         return null;
     }
 
