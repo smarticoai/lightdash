@@ -257,7 +257,7 @@ const Settings: FC = () => {
             organization &&
             !organization.needsProject &&
             user?.ability.can(
-                'view',
+                'update',
                 subject('Project', {
                     organizationUuid: organization.organizationUuid,
                     projectUuid: project.projectUuid,
@@ -621,8 +621,8 @@ const Settings: FC = () => {
                                     />
 
                                     {user.ability?.can(
-                                        'manage',
-                                        subject('CompileProject', {
+                                        'update',
+                                        subject('Project', {
                                             organizationUuid:
                                                 project.organizationUuid,
                                             projectUuid: project.projectUuid,

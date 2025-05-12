@@ -87,7 +87,7 @@ export class ValidationService extends BaseService {
         this.schedulerClient = schedulerClient;
     }
 
-    private static getTableCalculationFieldIds(
+    static getTableCalculationFieldIds(
         tableCalculations: TableCalculation[],
     ): string[] {
         const parseTableField = (field: string) =>
@@ -356,10 +356,10 @@ export class ValidationService extends BaseService {
                             return containsFieldId({
                                 acc,
                                 fieldIds: allItemIdsAvailableInChart,
-                                fieldId: field.target.fieldId,
-                                error: `Filter error: the field '${field.target.fieldId}' no longer exists`,
+                                fieldId: field.target?.fieldId,
+                                error: `Filter error: the field '${field.target?.fieldId}' no longer exists`,
                                 errorType: ValidationErrorType.Filter,
-                                fieldName: field.target.fieldId,
+                                fieldName: field.target?.fieldId,
                             });
                         } catch (e) {
                             console.error(
@@ -821,11 +821,14 @@ export class ValidationService extends BaseService {
         const validation = await this.validationModel.getByValidationId(
             validationId,
         );
+        const projectSummary = await this.projectModel.getSummary(
+            validation.projectUuid,
+        );
         if (
             user.ability.cannot(
                 'manage',
                 subject('Validation', {
-                    organizationUuid: user.organizationUuid,
+                    organizationUuid: projectSummary.organizationUuid,
                     projectUuid: validation.projectUuid,
                 }),
             )

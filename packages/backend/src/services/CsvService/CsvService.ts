@@ -4,7 +4,6 @@ import {
     AnyType,
     ApiSqlQueryResults,
     applyDimensionOverrides,
-    ChartType,
     DashboardFilters,
     DateGranularity,
     DimensionType,
@@ -112,7 +111,7 @@ export const convertSqlToCsv = (
             const rowValue = Object.values(row)[fieldIndex];
 
             if (isRowValueTimestamp(rowValue, field)) {
-                return moment(rowValue).format('YYYY-MM-DD HH:mm:ss');
+                return moment(rowValue).format('YYYY-MM-DD HH:mm:ss.SSS');
             }
             if (isRowValueDate(rowValue, field)) {
                 return moment(rowValue).format('YYYY-MM-DD');
@@ -218,7 +217,7 @@ export class CsvService extends BaseService {
 
             const itemIsField = isField(item);
             if (itemIsField && item.type === DimensionType.TIMESTAMP) {
-                return moment(data).format('YYYY-MM-DD HH:mm:ss');
+                return moment(data).format('YYYY-MM-DD HH:mm:ss.SSS');
             }
             if (itemIsField && item.type === DimensionType.DATE) {
                 return moment(data).format('YYYY-MM-DD');
@@ -382,7 +381,7 @@ export class CsvService extends BaseService {
         return numberRows * numberColumns >= cellsLimit - numberColumns;
     }
 
-    private async downloadCsvFile({
+    public async downloadCsvFile({
         csvContent,
         fileName,
         projectUuid,
@@ -594,7 +593,9 @@ This method can be memory intensive
             exploreName: exploreId,
             csvLimit: getSchedulerCsvLimit(options),
             context: QueryExecutionContext.CSV,
-            granularity: dateZoomGranularity,
+            dateZoom: {
+                granularity: dateZoomGranularity,
+            },
             chartUuid,
             queryTags,
         });
@@ -932,12 +933,15 @@ This method can be memory intensive
         user: SessionUser,
         csvOptions: DownloadMetricCsv,
     ) {
+        const projectSummary = await this.projectModel.getSummary(
+            csvOptions.projectUuid,
+        );
         if (
             user.ability.cannot(
                 'manage',
                 subject('ExportCsv', {
-                    organizationUuid: user.organizationUuid,
-                    projectUuid: csvOptions.projectUuid,
+                    organizationUuid: projectSummary.organizationUuid,
+                    projectUuid: projectSummary.projectUuid,
                 }),
             )
         ) {
@@ -953,8 +957,8 @@ This method can be memory intensive
             user.ability.cannot(
                 'manage',
                 subject('CustomSql', {
-                    organizationUuid: user.organizationUuid,
-                    projectUuid: csvOptions.projectUuid,
+                    organizationUuid: projectSummary.organizationUuid,
+                    projectUuid: projectSummary.projectUuid,
                 }),
             )
         ) {
@@ -969,8 +973,8 @@ This method can be memory intensive
         const csvLimit = user.ability.cannot(
             'manage',
             subject('ChangeCsvResults', {
-                organizationUuid: user.organizationUuid,
-                projectUuid: csvOptions.projectUuid,
+                organizationUuid: projectSummary.organizationUuid,
+                projectUuid: projectSummary.projectUuid,
             }),
         )
             ? undefined
@@ -979,8 +983,8 @@ This method can be memory intensive
             ...csvOptions,
             csvLimit,
             userUuid: user.userUuid,
-            organizationUuid: user.organizationUuid || '',
-            projectUuid: csvOptions.projectUuid,
+            organizationUuid: projectSummary.organizationUuid,
+            projectUuid: projectSummary.projectUuid,
         };
         const { jobId } = await this.schedulerClient.downloadCsvJob(payload);
 
@@ -1006,12 +1010,13 @@ This method can be memory intensive
         }: DownloadMetricCsv,
     ) {
         const user = await this.userModel.findSessionUserByUUID(userUuid);
+        const projectSummary = await this.projectModel.getSummary(projectUuid);
 
         if (
             user.ability.cannot(
                 'manage',
                 subject('ExportCsv', {
-                    organizationUuid: user.organizationUuid,
+                    organizationUuid: projectSummary.organizationUuid,
                     projectUuid,
                 }),
             )
@@ -1025,7 +1030,7 @@ This method can be memory intensive
             user.ability.cannot(
                 'manage',
                 subject('CustomSql', {
-                    organizationUuid: user.organizationUuid,
+                    organizationUuid: projectSummary.organizationUuid,
                     projectUuid,
                 }),
             )
@@ -1186,7 +1191,7 @@ This method can be memory intensive
             user.ability.cannot(
                 'manage',
                 subject('ExportCsv', {
-                    organizationUuid: user.organizationUuid,
+                    organizationUuid: dashboard.organizationUuid,
                     projectUuid: dashboard.projectUuid,
                 }),
             )
@@ -1199,7 +1204,7 @@ This method can be memory intensive
             dashboardFilters,
             dateZoomGranularity,
             // TraceTaskBase
-            organizationUuid: user.organizationUuid!,
+            organizationUuid: dashboard.organizationUuid,
             projectUuid: dashboard.projectUuid,
             userUuid: user.userUuid,
             schedulerUuid: undefined,

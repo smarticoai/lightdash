@@ -3,7 +3,17 @@ import {
     type UserActivity as UserActivityResponse,
     type UserWithCount,
 } from '@lightdash/common';
-import { Box, Card, Group, Stack, Table, Text, Title } from '@mantine/core';
+import {
+    Box,
+    Button,
+    Card,
+    Group,
+    Stack,
+    Table,
+    Text,
+    Title,
+    Tooltip,
+} from '@mantine/core';
 import { IconUsers } from '@tabler/icons-react';
 import EChartsReact from 'echarts-for-react';
 import { type FC } from 'react';
@@ -14,7 +24,10 @@ import Page from '../components/common/Page/Page';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
 import ForbiddenPanel from '../components/ForbiddenPanel';
-import { useUserActivity } from '../hooks/analytics/useUserActivity';
+import {
+    useDownloadUserActivityCsv,
+    useUserActivity,
+} from '../hooks/analytics/useUserActivity';
 import useHealth from '../hooks/health/useHealth';
 import { useProject } from '../hooks/useProject';
 import useApp from '../providers/App/useApp';
@@ -178,6 +191,8 @@ const UserActivity: FC = () => {
     const { data: project } = useProject(params.projectUuid);
     const { user: sessionUser } = useApp();
     const { data: health } = useHealth();
+    const { mutateAsync: downloadCsv, isLoading: isDownloadingCsv } =
+        useDownloadUserActivityCsv();
 
     const { data, isInitialLoading } = useUserActivity(params.projectUuid);
     if (sessionUser.data?.ability?.cannot('view', 'Analytics')) {
@@ -194,7 +209,7 @@ const UserActivity: FC = () => {
 
     return (
         <Page title={`User activity for ${project?.name}`} withFitContent>
-            <Box mt={10} mb={30}>
+            <Group mt={10} mb={30} position="apart">
                 <PageBreadcrumbs
                     items={[
                         {
@@ -218,7 +233,33 @@ const UserActivity: FC = () => {
                         },
                     ]}
                 />
-            </Box>
+                <Tooltip label="Export raw chart and dashboard user views in a CSV format">
+                    <Button
+                        variant="outline"
+                        disabled={isDownloadingCsv}
+                        onClick={() => {
+                            if (params.projectUuid)
+                                downloadCsv(params.projectUuid)
+                                    .then((url) => {
+                                        if (url) {
+                                            // If the file takes a while to download,
+                                            // The browser might block the download when using window.open
+                                            // For that we need to create a link and click it
+                                            const link =
+                                                document.createElement('a');
+                                            link.href = url;
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                        }
+                                    })
+                                    .catch(console.error);
+                        }}
+                    >
+                        {isDownloadingCsv ? 'Exporting...' : 'Export CSV'}
+                    </Button>
+                </Tooltip>
+            </Group>
             <Box
                 sx={{
                     display: 'grid',

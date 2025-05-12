@@ -1,4 +1,5 @@
 import dayjs from 'dayjs';
+import isNil from 'lodash/isNil';
 import moment from 'moment';
 import { v4 as uuidv4 } from 'uuid';
 import { type AnyType } from '../types/any';
@@ -174,6 +175,20 @@ export const timeframeToUnitOfTime = (timeframe: TimeFrames) => {
     }
 };
 
+export const supportsSingleValue = (
+    filterType: FilterType,
+    filterOperator: FilterOperator,
+) =>
+    [FilterType.STRING, FilterType.NUMBER].includes(filterType) &&
+    [
+        FilterOperator.EQUALS,
+        FilterOperator.NOT_EQUALS,
+        FilterOperator.STARTS_WITH,
+        FilterOperator.ENDS_WITH,
+        FilterOperator.INCLUDE,
+        FilterOperator.NOT_INCLUDE,
+    ].includes(filterOperator);
+
 export const isWithValueFilter = (filterOperator: FilterOperator) =>
     filterOperator !== FilterOperator.NULL &&
     filterOperator !== FilterOperator.NOT_NULL;
@@ -242,6 +257,9 @@ export const getFilterRuleWithDefaultValue = <T extends FilterRule>(
                         [TimeFrames.WEEK]: moment(
                             valueIsDate ? value : undefined,
                         ).startOf('week'),
+                        [TimeFrames.QUARTER]: moment(
+                            valueIsDate ? value : undefined,
+                        ).startOf('quarter'),
                         [TimeFrames.MONTH]: moment(
                             valueIsDate ? value : undefined,
                         ).startOf('month'),
@@ -265,7 +283,10 @@ export const getFilterRuleWithDefaultValue = <T extends FilterRule>(
                         ? formatDate(
                               // Treat the date as UTC, then remove its timezone information before formatting
                               moment.utc(value).format('YYYY-MM-DD'),
-                              fieldTimeInterval, // Use the field's time interval if it has one
+                              // For QUARTER, we don't want to use the field's time interval(YYYY-[Q]Q) because the date is already in the correct format when generating the SQL
+                              fieldTimeInterval === TimeFrames.QUARTER
+                                  ? undefined
+                                  : fieldTimeInterval, // Use the field's time interval if it has one
                               false,
                           )
                         : formatDate(defaultDate, undefined, false);
@@ -387,7 +408,7 @@ export const createDashboardFilterRuleFromField = ({
             disabled: !isTemporary,
             label: undefined,
         },
-        value ? [value] : null, // When `null`, don't set default value if no value is provided
+        !isNil(value) ? [value] : null, // When `null`, don't set default value if no value is provided
     );
 
 type AddFilterRuleArgs = {

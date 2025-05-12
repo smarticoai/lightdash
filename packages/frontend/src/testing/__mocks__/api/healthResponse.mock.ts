@@ -45,7 +45,6 @@ export default function mockHealthResponse(
         pivotTable: {
             maxColumnLimit: 100,
         },
-        customVisualizationsEnabled: true,
         hasSlack: false,
         auth: {
             disablePasswordAuthentication: false,
@@ -80,6 +79,7 @@ export default function mockHealthResponse(
         hasExtendedUsageAnalytics: false,
         hasGithub: false,
         hasCacheAutocompleResults: false,
+        hasMicrosoftTeams: false,
         appearance: {
             overrideColorPalette: undefined,
             overrideColorPaletteName: undefined,

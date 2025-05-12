@@ -4,12 +4,24 @@ import {
     SpaceMemberRole,
     type SpaceShare,
 } from '@lightdash/common';
-import { Avatar, Group, Radio, Stack, Text, TextInput } from '@mantine/core';
+import {
+    Alert,
+    Anchor,
+    Avatar,
+    Group,
+    Radio,
+    Stack,
+    Text,
+    TextInput,
+} from '@mantine/core';
+import { IconInfoCircle } from '@tabler/icons-react';
 import upperFirst from 'lodash/upperFirst';
 import { useMemo, useState, type FC } from 'react';
+import { Link } from 'react-router';
 import { type CreateSpaceModalBody } from '.';
 import { useProjectAccess } from '../../../hooks/useProjectAccess';
 import useApp from '../../../providers/App/useApp';
+import MantineIcon from '../MantineIcon';
 import {
     SpaceAccessOptions,
     SpaceAccessType,
@@ -57,6 +69,9 @@ const CreateSpaceModalContent: FC<CreateSpaceModalBody> = ({
     organizationUsers,
     privateAccessType,
     onPrivateAccessTypeChange,
+    parentSpaceUuid,
+    rootSpace,
+    onClose,
 }) => {
     const {
         user: { data: sessionUser },
@@ -64,6 +79,8 @@ const CreateSpaceModalContent: FC<CreateSpaceModalBody> = ({
     const [selectedAccess, setSelectedAccess] = useState<AccessOption>(
         SpaceAccessOptions[0],
     );
+
+    const canSetSpaceAccess = !parentSpaceUuid;
 
     const { data: projectAccess } = useProjectAccess(projectUuid);
 
@@ -116,26 +133,44 @@ const CreateSpaceModalContent: FC<CreateSpaceModalBody> = ({
                         placeholder="eg. KPIs"
                     />
 
-                    <Radio.Group
-                        value={privateAccessType}
-                        onChange={(value: SpacePrivateAccessType) => {
-                            onPrivateAccessTypeChange(value);
-                        }}
-                    >
-                        <Stack spacing="xs">
-                            <Radio
-                                label="Private"
-                                description="Only you and admins can access this space."
-                                value={SpacePrivateAccessType.PRIVATE}
-                            />
+                    {canSetSpaceAccess ? (
+                        <Radio.Group
+                            value={privateAccessType}
+                            onChange={(value: SpacePrivateAccessType) => {
+                                onPrivateAccessTypeChange(value);
+                            }}
+                        >
+                            <Stack spacing="xs">
+                                <Radio
+                                    label="Private"
+                                    description="Only you and admins can access this space."
+                                    value={SpacePrivateAccessType.PRIVATE}
+                                />
 
-                            <Radio
-                                label="Shared"
-                                description="Choose who can access this space."
-                                value={SpacePrivateAccessType.SHARED}
-                            />
-                        </Stack>
-                    </Radio.Group>
+                                <Radio
+                                    label="Shared"
+                                    description="Choose who can access this space."
+                                    value={SpacePrivateAccessType.SHARED}
+                                />
+                            </Stack>
+                        </Radio.Group>
+                    ) : (
+                        <Alert
+                            variant="light"
+                            icon={<MantineIcon icon={IconInfoCircle} />}
+                        >
+                            This space will inherit permissions from the parent
+                            space: "
+                            <Anchor
+                                component={Link}
+                                onClick={onClose}
+                                to={`/projects/${projectUuid}/spaces/${rootSpace?.uuid}?shareSpaceModal=true`}
+                            >
+                                {rootSpace?.name}
+                            </Anchor>
+                            "
+                        </Alert>
+                    )}
                 </Stack>
             );
 

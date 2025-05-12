@@ -8,11 +8,6 @@ export enum FeatureFlags {
     /**/
     PassthroughLogin = 'passthrough-login',
 
-    /**
-     * Enables custom visualizations when the environment variable is also enabled
-     */
-    CustomVisualizationsEnabled = 'custom-visualizations-enabled',
-
     /**/
     ShowDbtCloudProjectOption = 'show-dbt-cloud-project-option',
 
@@ -56,6 +51,16 @@ export enum FeatureFlags {
      * Enable a new API endpoint that requests results page by page.
      */
     QueryPagination = 'query-pagination',
+
+    /**
+     * Enable the ability to show the warehouse execution time and total time in the chart tile.
+     */
+    ShowExecutionTime = 'show-execution-time',
+
+    /**
+     * Enable the ability to create custom visualizations with AI
+     */
+    AiCustomViz = 'ai-custom-viz',
 }
 
 export type FeatureFlag = {

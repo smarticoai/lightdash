@@ -3,9 +3,10 @@ import {
     ChartType,
     FeatureFlags,
     isDimension,
-    type ApiQueryResults,
     type ChartConfig,
     type DashboardFilters,
+    type ItemsMap,
+    type MetricQuery,
     type PivotValue,
     type Series,
     type TableCalculationMetadata,
@@ -31,6 +32,7 @@ import {
 } from '../../hooks/useChartColorConfig/utils';
 import { useFeatureFlagEnabled } from '../../hooks/useFeatureFlagEnabled';
 import usePivotDimensions from '../../hooks/usePivotDimensions';
+import { type InfiniteQueryResults } from '../../hooks/useQueryResults';
 import { type EchartSeriesClickEvent } from '../SimpleChart';
 import VisualizationBigNumberConfig from './VisualizationBigNumberConfig';
 import VisualizationCartesianConfig from './VisualizationConfigCartesian';
@@ -45,7 +47,10 @@ type Props = {
     minimal?: boolean;
     chartConfig: ChartConfig;
     initialPivotDimensions: string[] | undefined;
-    resultsData: ApiQueryResults | undefined;
+    resultsData: InfiniteQueryResults & {
+        metricQuery?: MetricQuery;
+        fields?: ItemsMap;
+    };
     isLoading: boolean;
     columnOrder: string[];
     onSeriesContextMenu?: (
@@ -95,12 +100,13 @@ const VisualizationProvider: FC<React.PropsWithChildren<Props>> = ({
         if (setEchartsRef)
             setEchartsRef(chartRef as RefObject<EChartsReact | null>);
     }, [chartRef, setEchartsRef]);
-    const [lastValidResultsData, setLastValidResultsData] =
-        useState<ApiQueryResults>();
+    const [lastValidResultsData, setLastValidResultsData] = useState<
+        InfiniteQueryResults & { metricQuery?: MetricQuery; fields?: ItemsMap }
+    >();
 
     const { validPivotDimensions, setPivotDimensions } = usePivotDimensions(
         initialPivotDimensions,
-        lastValidResultsData,
+        lastValidResultsData?.metricQuery,
     );
 
     const setChartType = useCallback(
@@ -153,12 +159,14 @@ const VisualizationProvider: FC<React.PropsWithChildren<Props>> = ({
             computedSeries && computedSeries.length > 0
                 ? computedSeries
                 : chartConfig.config.eChartsConfig.series;
+
+        const sortedSeriesIdentifiers = (allSeries ?? [])
+            .map((series) => calculateSeriesLikeIdentifier(series).join('|'))
+            .sort((a, b) => b.localeCompare(a));
+
         return Object.fromEntries(
-            (allSeries ?? []).map((series, i) => {
-                return [
-                    calculateSeriesLikeIdentifier(series).join('|'),
-                    colorPalette[i % colorPalette.length],
-                ];
+            sortedSeriesIdentifiers.map((identifier, i) => {
+                return [identifier, colorPalette[i % colorPalette.length]];
             }),
         );
     }, [chartConfig, colorPalette, computedSeries]);

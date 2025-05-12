@@ -4,6 +4,7 @@ import {
     ChartType,
     createDashboardFilterRuleFromField,
     DashboardTileTypes,
+    FeatureFlags,
     getCustomLabelsFromTableConfig,
     getDimensions,
     getFields,
@@ -12,10 +13,10 @@ import {
     getItemMap,
     getPivotConfig,
     getVisibleFields,
-    hasCustomDimension,
+    hasCustomBinDimension,
     isCartesianChartConfig,
-    isChartTile,
     isCompleteLayout,
+    isDashboardChartTileType,
     isFilterableField,
     isTableChartConfig,
     type ApiChartAndResults,
@@ -48,6 +49,7 @@ import { useClipboard } from '@mantine/hooks';
 import {
     IconAlertCircle,
     IconAlertTriangle,
+    IconClock,
     IconCopy,
     IconFilter,
     IconFolders,
@@ -60,6 +62,7 @@ import React, {
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
     type FC,
     type RefObject,
@@ -74,12 +77,21 @@ import {
     getExpectedSeriesMap,
     mergeExistingAndExpectedSeries,
 } from '../../hooks/cartesianChartConfig/utils';
-import useDashboardChart from '../../hooks/dashboard/useDashboardChart';
+import {
+    useDashboardChartReadyQuery,
+    type DashboardChartReadyQuery,
+} from '../../hooks/dashboard/useDashboardChartReadyQuery';
 import useDashboardFiltersForTile from '../../hooks/dashboard/useDashboardFiltersForTile';
 import { type EChartSeries } from '../../hooks/echarts/useEchartsCartesianConfig';
 import { uploadGsheet } from '../../hooks/gdrive/useGdrive';
 import useToaster from '../../hooks/toaster/useToaster';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../hooks/useExplorerRoute';
+import { useFeatureFlagEnabled } from '../../hooks/useFeatureFlagEnabled';
+import usePivotDimensions from '../../hooks/usePivotDimensions';
+import {
+    useInfiniteQueryResults,
+    type InfiniteQueryResults,
+} from '../../hooks/useQueryResults';
 import { useDuplicateChartMutation } from '../../hooks/useSavedQuery';
 import { useCreateShareMutation } from '../../hooks/useShare';
 import { Can } from '../../providers/Ability';
@@ -141,7 +153,7 @@ const ExportResultAsCSVModal: FC<ExportResultAsCSVModalProps> = ({
         <ExportCSVModal
             projectUuid={projectUuid}
             opened
-            rows={rows}
+            totalResults={rows.length}
             getCsvLink={getCsvLink}
             onClose={onClose}
             onConfirm={onConfirm}
@@ -179,9 +191,56 @@ const ExportGoogleSheet: FC<{ savedChart: SavedChart; disabled?: boolean }> = ({
     );
 };
 
+/**
+ * We need to compute these series on dashboards to populate properly fallbackColors in VisualizationProvider
+ * otherwise, some series will appear as transparent
+ * on view charts, this information is refreshed from the explore.
+ * This is the most basic function that runs on useEchartsCartesianConfig to generate series
+ *
+ * This is passed to computedSeries prop in VisualizationProvider
+ * We don't want to override the chartConfig, to cause conflicts with other visualization stuff.
+ */
+const computeDashboardChartSeries = (
+    chart: ApiChartAndResults['chart'],
+    validPivotDimensions: string[] | undefined,
+    resultData: InfiniteQueryResults | undefined,
+) => {
+    if (!chart.chartConfig || !resultData || resultData.rows.length === 0) {
+        return [];
+    }
+
+    if (
+        isCartesianChartConfig(chart.chartConfig.config) &&
+        isCompleteLayout(chart.chartConfig.config.layout)
+    ) {
+        const firstSerie = chart.chartConfig.config.eChartsConfig.series?.[0];
+
+        const expectedSeriesMap = getExpectedSeriesMap({
+            defaultSmooth: firstSerie?.smooth,
+            defaultShowSymbol: firstSerie?.showSymbol,
+            defaultAreaStyle: firstSerie?.areaStyle,
+            defaultCartesianType: CartesianSeriesType.BAR,
+            availableDimensions: chart.metricQuery.dimensions,
+            isStacked: false,
+            pivotKeys: validPivotDimensions,
+            rows: resultData.rows,
+            xField: chart.chartConfig.config.layout.xField,
+            yFields: chart.chartConfig.config.layout.yField,
+            defaultLabel: firstSerie?.label,
+        });
+        const newSeries = mergeExistingAndExpectedSeries({
+            expectedSeriesMap,
+            existingSeries: chart.chartConfig.config.eChartsConfig.series || [],
+        });
+        return newSeries;
+    }
+    return [];
+};
+
 const ValidDashboardChartTile: FC<{
     tileUuid: string;
-    chartAndResults: ApiChartAndResults;
+    dashboardChartReadyQuery: DashboardChartReadyQuery;
+    resultsData: InfiniteQueryResults;
     isTitleHidden?: boolean;
     project: string;
     onSeriesContextMenu?: (
@@ -192,7 +251,8 @@ const ValidDashboardChartTile: FC<{
 }> = ({
     tileUuid,
     isTitleHidden = false,
-    chartAndResults: { chart, metricQuery, rows, cacheMetadata, fields },
+    dashboardChartReadyQuery,
+    resultsData,
     onSeriesContextMenu,
     setEchartsRef,
 }) => {
@@ -205,68 +265,41 @@ const ValidDashboardChartTile: FC<{
 
     const { health } = useApp();
 
+    const {
+        executeQueryResponse: { cacheMetadata, metricQuery },
+        chart,
+    } = dashboardChartReadyQuery;
+
     useEffect(() => {
         addResultsCacheTime(cacheMetadata);
     }, [cacheMetadata, addResultsCacheTime]);
 
-    const resultData = useMemo(
-        () => ({
-            rows,
-            metricQuery,
-            cacheMetadata,
-            fields,
-        }),
-        [rows, metricQuery, cacheMetadata, fields],
+    const { validPivotDimensions } = usePivotDimensions(
+        chart.pivotConfig?.columns,
+        metricQuery,
     );
 
-    /**
-     * We need to compute these series on dashboards to populate properly fallbackColors in VisualizationProvider
-     * otherwise, some series will appear as transparent
-     * on view charts, this information is refreshed from the explore.
-     * This is the most basic function that runs on useEchartsCartesianConfig to generate series
-     *
-     * This is passed to computedSeries prop in VisualizationProvider
-     * We don't want to override the chartConfig, to cause conflicts with other visualization stuff.
-     */
     const computedSeries: Series[] = useMemo(() => {
-        if (!resultData?.fields || !chart.chartConfig || !resultData) {
-            return [];
-        }
+        return computeDashboardChartSeries(
+            chart,
+            validPivotDimensions,
+            resultsData,
+        );
+    }, [resultsData, chart, validPivotDimensions]);
 
-        if (
-            isCartesianChartConfig(chart.chartConfig.config) &&
-            isCompleteLayout(chart.chartConfig.config.layout)
-        ) {
-            const firstSerie =
-                chart.chartConfig.config.eChartsConfig.series?.[0];
-            const expectedSeriesMap = getExpectedSeriesMap({
-                defaultSmooth: firstSerie?.smooth,
-                defaultShowSymbol: firstSerie?.showSymbol,
-                defaultAreaStyle: firstSerie?.areaStyle,
-                defaultCartesianType: CartesianSeriesType.BAR,
-                availableDimensions: chart.metricQuery.dimensions,
-                isStacked: false,
-                pivotKeys: chart.pivotConfig?.columns,
-                resultsData: resultData,
-                xField: chart.chartConfig.config.layout.xField,
-                yFields: chart.chartConfig.config.layout.yField,
-                defaultLabel: firstSerie?.label,
-            });
-            const newSeries = mergeExistingAndExpectedSeries({
-                expectedSeriesMap,
-                existingSeries:
-                    chart.chartConfig.config.eChartsConfig.series || [],
-            });
-            return newSeries;
-        }
-
-        return [];
-    }, [
-        resultData,
-        chart.chartConfig,
-        chart.metricQuery.dimensions,
-        chart.pivotConfig?.columns,
-    ]);
+    const resultsDataWithQueryData = useMemo(
+        () => ({
+            ...resultsData,
+            metricQuery:
+                dashboardChartReadyQuery.executeQueryResponse.metricQuery,
+            fields: dashboardChartReadyQuery.executeQueryResponse.fields,
+        }),
+        [
+            resultsData,
+            dashboardChartReadyQuery.executeQueryResponse.metricQuery,
+            dashboardChartReadyQuery.executeQueryResponse.fields,
+        ],
+    );
 
     if (health.isInitialLoading || !health.data) {
         return null;
@@ -276,8 +309,8 @@ const ValidDashboardChartTile: FC<{
         <VisualizationProvider
             chartConfig={chart.chartConfig}
             initialPivotDimensions={chart.pivotConfig?.columns}
-            resultsData={resultData}
-            isLoading={false}
+            resultsData={resultsDataWithQueryData}
+            isLoading={resultsData.isFetchingRows}
             onSeriesContextMenu={onSeriesContextMenu}
             columnOrder={chart.tableConfig.columnOrder}
             pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}
@@ -301,11 +334,15 @@ const ValidDashboardChartTileMinimal: FC<{
     tileUuid: string;
     isTitleHidden?: boolean;
     title: string;
-    chartAndResults: ApiChartAndResults;
+    chart: SavedChart;
+    dashboardChartReadyQuery: DashboardChartReadyQuery;
+    resultsData: InfiniteQueryResults;
     setEchartsRef?: (ref: RefObject<EChartsReact | null> | undefined) => void;
 }> = ({
     tileUuid,
-    chartAndResults: { chart, metricQuery, rows, cacheMetadata, fields },
+    chart,
+    dashboardChartReadyQuery,
+    resultsData,
     isTitleHidden = false,
     setEchartsRef,
 }) => {
@@ -313,10 +350,33 @@ const ValidDashboardChartTileMinimal: FC<{
 
     const dashboardFilters = useDashboardFiltersForTile(tileUuid);
 
-    const resultData = useMemo(
-        () => ({ rows, metricQuery, cacheMetadata, fields }),
-        [rows, metricQuery, cacheMetadata, fields],
+    const { validPivotDimensions } = usePivotDimensions(
+        chart.pivotConfig?.columns,
+        dashboardChartReadyQuery.executeQueryResponse.metricQuery,
     );
+
+    const computedSeries: Series[] = useMemo(() => {
+        return computeDashboardChartSeries(
+            chart,
+            validPivotDimensions,
+            resultsData,
+        );
+    }, [resultsData, chart, validPivotDimensions]);
+
+    const resultsDataWithQueryData = useMemo(
+        () => ({
+            ...resultsData,
+            metricQuery:
+                dashboardChartReadyQuery.executeQueryResponse.metricQuery,
+            fields: dashboardChartReadyQuery.executeQueryResponse.fields,
+        }),
+        [
+            resultsData,
+            dashboardChartReadyQuery.executeQueryResponse.metricQuery,
+            dashboardChartReadyQuery.executeQueryResponse.fields,
+        ],
+    );
+
     if (health.isInitialLoading || !health.data) {
         return null;
     }
@@ -326,14 +386,15 @@ const ValidDashboardChartTileMinimal: FC<{
             minimal
             chartConfig={chart.chartConfig}
             initialPivotDimensions={chart.pivotConfig?.columns}
-            resultsData={resultData}
-            isLoading={false}
+            resultsData={resultsDataWithQueryData}
+            isLoading={resultsData.isFetchingRows}
             columnOrder={chart.tableConfig.columnOrder}
             pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}
             savedChartUuid={chart.uuid}
             dashboardFilters={dashboardFilters}
             colorPalette={chart.colorPalette}
             setEchartsRef={setEchartsRef}
+            computedSeries={computedSeries}
         >
             <LightdashVisualization
                 isDashboard
@@ -350,7 +411,8 @@ interface DashboardChartTileMainProps
         'tile' | 'onEdit' | 'onDelete' | 'isEditMode'
     > {
     tile: IDashboardChartTile;
-    chartAndResults: ApiChartAndResults;
+    dashboardChartReadyQuery: DashboardChartReadyQuery;
+    resultsData: InfiniteQueryResults;
     onAddTiles?: (tiles: Dashboard['tiles'][number][]) => void;
     canExportCsv?: boolean;
     canExportImages?: boolean;
@@ -362,6 +424,12 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
     const { showToastSuccess } = useToaster();
     const clipboard = useClipboard({ timeout: 200 });
     const { track } = useTracking();
+    const { user } = useApp();
+
+    const showExecutionTime = useFeatureFlagEnabled(
+        FeatureFlags.ShowExecutionTime,
+    );
+
     const {
         tile: {
             uuid: tileUuid,
@@ -372,11 +440,18 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
                 belongsToDashboard,
             },
         },
-        chartAndResults,
+        dashboardChartReadyQuery,
+        resultsData,
         isEditMode,
     } = props;
-    const { chart, explore, metricQuery, rows, appliedDashboardFilters } =
-        chartAndResults;
+
+    const {
+        executeQueryResponse: { appliedDashboardFilters, metricQuery },
+        chart,
+        explore,
+    } = dashboardChartReadyQuery;
+
+    const { rows, initialQueryExecutionMs } = resultsData;
 
     const { projectUuid, dashboardUuid } = useParams<{
         projectUuid: string;
@@ -397,7 +472,55 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
         top: number;
     }>();
     const [isMovingChart, setIsMovingChart] = useState(false);
-    const { user } = useApp();
+
+    // State used to only track event on initial load. Excluding lazy load updates for table charts.
+    const hasTrackedLoadEvent = useRef(false);
+    useEffect(() => {
+        if (dashboardChartReadyQuery.executeQueryResponse?.queryUuid) {
+            // Reset the tracking flag when queryUuid changes
+            hasTrackedLoadEvent.current = false;
+        }
+    }, [dashboardChartReadyQuery.executeQueryResponse?.queryUuid]);
+    // Track chart loading time
+    useEffect(() => {
+        if (
+            !hasTrackedLoadEvent.current &&
+            !resultsData.isInitialLoading &&
+            dashboardChartReadyQuery &&
+            user.data &&
+            dashboardUuid
+        ) {
+            track({
+                name: EventName.DASHBOARD_CHART_LOADED,
+                properties: {
+                    userId: user.data.userUuid,
+                    organizationId: chart.organizationUuid,
+                    projectId: chart.projectUuid,
+                    dashboardId: dashboardUuid,
+                    chartId: chart.uuid,
+                    queryId:
+                        dashboardChartReadyQuery.executeQueryResponse.queryUuid,
+                    warehouseExecutionTimeMs:
+                        resultsData.initialQueryExecutionMs,
+                    totalTimeMs: resultsData.totalClientFetchTimeMs,
+                    totalResults: resultsData.totalResults || 0,
+                    loadedRows: resultsData.rows.length,
+                },
+            });
+            // track only once
+            hasTrackedLoadEvent.current = true;
+        }
+    }, [
+        hasTrackedLoadEvent,
+        dashboardUuid,
+        dashboardChartReadyQuery,
+        resultsData,
+        track,
+        user.data,
+        chart.organizationUuid,
+        chart.projectUuid,
+        chart.uuid,
+    ]);
 
     const userCanManageChart = user.data?.ability?.can(
         'manage',
@@ -425,6 +548,12 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
         }),
     );
 
+    const dateZoomGranularity = useDashboardContext(
+        (c) => c.dateZoomGranularity,
+    );
+    const chartsWithDateZoomApplied = useDashboardContext(
+        (c) => c.chartsWithDateZoomApplied,
+    );
     const { openUnderlyingDataModal } = useMetricQueryDataContext();
 
     const [viewUnderlyingDataOptions, setViewUnderlyingDataOptions] = useState<{
@@ -439,9 +568,22 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
     const handleViewUnderlyingData = useCallback(() => {
         if (!viewUnderlyingDataOptions) return;
 
+        const applyDateZoom =
+            metricQuery?.metadata?.hasADateDimension &&
+            savedChartUuid &&
+            dateZoomGranularity &&
+            chartsWithDateZoomApplied?.has(savedChartUuid);
+
         openUnderlyingDataModal({
             ...viewUnderlyingDataOptions,
+            ...(applyDateZoom && {
+                dateZoom: {
+                    granularity: dateZoomGranularity,
+                    xAxisFieldId: `${metricQuery?.metadata?.hasADateDimension.table}_${metricQuery?.metadata?.hasADateDimension.name}`,
+                },
+            }),
         });
+
         track({
             name: EventName.VIEW_UNDERLYING_DATA_CLICKED,
             properties: {
@@ -451,11 +593,16 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
             },
         });
     }, [
-        track,
-        user,
-        projectUuid,
-        openUnderlyingDataModal,
         viewUnderlyingDataOptions,
+        dateZoomGranularity,
+        openUnderlyingDataModal,
+        track,
+        user?.data?.organizationUuid,
+        user?.data?.userUuid,
+        projectUuid,
+        metricQuery?.metadata?.hasADateDimension,
+        savedChartUuid,
+        chartsWithDateZoomApplied,
     ]);
 
     const handleCopyToClipboard = useCallback(() => {
@@ -637,13 +784,13 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
     const chartWithDashboardFilters = useMemo(
         () => ({
             ...chart,
-            metricQuery,
+            metricQuery: metricQuery ?? chart.metricQuery,
         }),
         [chart, metricQuery],
     );
     const cannotUseCustomDimensions =
         !userCanRunCustomSql &&
-        chartWithDashboardFilters.metricQuery.customDimensions;
+        chartWithDashboardFilters.metricQuery?.customDimensions;
 
     const { pathname: chartPathname, search: chartSearch } = useMemo(() => {
         if (cannotUseCustomDimensions) {
@@ -685,13 +832,6 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
                 />
             ),
         [showComments, isCommentsMenuOpen, tileUuid],
-    );
-
-    const dateZoomGranularity = useDashboardContext(
-        (c) => c.dateZoomGranularity,
-    );
-    const chartsWithDateZoomApplied = useDashboardContext(
-        (c) => c.chartsWithDateZoomApplied,
     );
 
     const editButtonTooltipLabel = useMemo(() => {
@@ -833,10 +973,41 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
                                 </HoverCard.Target>
                             </HoverCard>
                         )}
+                        {showExecutionTime &&
+                            initialQueryExecutionMs !== undefined &&
+                            resultsData.totalClientFetchTimeMs !==
+                                undefined && (
+                                <HoverCard
+                                    withArrow
+                                    withinPortal
+                                    shadow="md"
+                                    position="bottom-end"
+                                    offset={4}
+                                    arrowOffset={10}
+                                >
+                                    <HoverCard.Dropdown>
+                                        <Text size="xs" color="gray.6" fw={600}>
+                                            Warehouse execution time:{' '}
+                                            {initialQueryExecutionMs}
+                                            ms
+                                        </Text>
+                                        <Text size="xs" color="gray.6" fw={600}>
+                                            Total time:{' '}
+                                            {resultsData.totalClientFetchTimeMs}
+                                            ms
+                                        </Text>
+                                    </HoverCard.Dropdown>
+                                    <HoverCard.Target>
+                                        <ActionIcon size="sm">
+                                            <MantineIcon icon={IconClock} />
+                                        </ActionIcon>
+                                    </HoverCard.Target>
+                                </HoverCard>
+                            )}
                     </>
                 }
                 titleLeftIcon={
-                    metricQuery.metadata?.hasADateDimension &&
+                    metricQuery?.metadata?.hasADateDimension &&
                     savedChartUuid &&
                     dateZoomGranularity &&
                     chartsWithDateZoomApplied?.has(savedChartUuid) ? (
@@ -1048,7 +1219,7 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
                                     projectUuid: projectUuid,
                                 })}
                             >
-                                {!hasCustomDimension(metricQuery) && (
+                                {!hasCustomBinDimension(metricQuery) && (
                                     <Menu.Item
                                         icon={<MantineIcon icon={IconStack} />}
                                         onClick={handleViewUnderlyingData}
@@ -1088,8 +1259,9 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
 
                     <ValidDashboardChartTile
                         tileUuid={tileUuid}
-                        chartAndResults={chartAndResults}
-                        project={chartAndResults.chart.projectUuid}
+                        dashboardChartReadyQuery={dashboardChartReadyQuery}
+                        resultsData={resultsData}
+                        project={chart.projectUuid}
                         isTitleHidden={hideTitle}
                         onSeriesContextMenu={onSeriesContextMenu}
                         setEchartsRef={setEchartRef}
@@ -1100,6 +1272,7 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
             {chart.spaceUuid && (
                 <MoveChartThatBelongsToDashboardModal
                     className={'non-draggable'}
+                    projectUuid={projectUuid}
                     uuid={chart.uuid}
                     name={chart.name}
                     spaceUuid={chart.spaceUuid}
@@ -1110,7 +1283,8 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
                         setDashboardTiles(
                             (currentDashboardTiles) =>
                                 currentDashboardTiles?.map((tile) =>
-                                    tile.uuid === tileUuid && isChartTile(tile)
+                                    tile.uuid === tileUuid &&
+                                    isDashboardChartTileType(tile)
                                         ? {
                                               ...tile,
                                               properties: {
@@ -1130,7 +1304,7 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = (props) => {
                     projectUuid={chart.projectUuid}
                     chartUuid={chart.uuid}
                     tileUuid={tileUuid}
-                    dashboardFilters={appliedDashboardFilters}
+                    dashboardFilters={appliedDashboardFilters ?? undefined}
                     rows={rows}
                     onClose={() => setIsCSVExportModalOpen(false)}
                     onConfirm={() => setIsCSVExportModalOpen(false)}
@@ -1146,15 +1320,26 @@ const DashboardChartTileMinimal: FC<DashboardChartTileMainProps> = (props) => {
             uuid: tileUuid,
             properties: { savedChartUuid, hideTitle, title },
         },
-        chartAndResults,
+        dashboardChartReadyQuery,
+        resultsData,
         canExportCsv,
         canExportImages,
     } = props;
-    const { chart } = chartAndResults;
+
+    const {
+        chart,
+        explore,
+        executeQueryResponse: { fields },
+    } = dashboardChartReadyQuery;
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const [echartRef, setEchartRef] = useState<
         RefObject<EChartsReact | null> | undefined
     >();
+
+    const resultsDataWithFields = useMemo(
+        () => ({ ...resultsData, fields }),
+        [resultsData, fields],
+    );
 
     return (
         <TileBase
@@ -1170,7 +1355,9 @@ const DashboardChartTileMinimal: FC<DashboardChartTileMainProps> = (props) => {
                     <>
                         {canExportCsv && (
                             <DashboardMinimalDownloadCsv
-                                chartAndResults={chartAndResults}
+                                explore={explore}
+                                resultsData={resultsDataWithFields}
+                                chart={chart}
                             />
                         )}
                         {canExportImages &&
@@ -1190,7 +1377,9 @@ const DashboardChartTileMinimal: FC<DashboardChartTileMainProps> = (props) => {
             <ValidDashboardChartTileMinimal
                 tileUuid={tileUuid}
                 isTitleHidden={hideTitle}
-                chartAndResults={chartAndResults}
+                chart={chart}
+                dashboardChartReadyQuery={dashboardChartReadyQuery}
+                resultsData={resultsData}
                 title={title || chart.name}
                 setEchartsRef={setEchartRef}
             />
@@ -1200,11 +1389,13 @@ const DashboardChartTileMinimal: FC<DashboardChartTileMainProps> = (props) => {
 
 type DashboardChartTileProps = Omit<
     DashboardChartTileMainProps,
-    'chartAndResults'
+    'dashboardChartReadyQuery' | 'resultsData'
 > & {
     minimal?: boolean;
     canExportCsv?: boolean;
     canExportImages?: boolean;
+    dashboardChartReadyQuery?: DashboardChartReadyQuery;
+    resultsData?: InfiniteQueryResults;
 };
 
 // Abstraction needed for enterprise version
@@ -1212,7 +1403,6 @@ type DashboardChartTileProps = Omit<
 export const GenericDashboardChartTile: FC<
     DashboardChartTileProps & {
         isLoading: boolean;
-        data: ApiChartAndResults | undefined;
         error: ApiError | null;
     }
 > = ({
@@ -1220,7 +1410,8 @@ export const GenericDashboardChartTile: FC<
     tile,
     isEditMode,
     isLoading,
-    data,
+    dashboardChartReadyQuery,
+    resultsData,
     error,
     canExportCsv = false,
     canExportImages = false,
@@ -1231,35 +1422,15 @@ export const GenericDashboardChartTile: FC<
         dashboardUuid: string;
     }>();
     const { user } = useApp();
+
     const userCanManageChart =
-        data?.chart &&
-        user.data?.ability?.can('manage', subject('SavedChart', data.chart));
-
-    if (isLoading) {
-        return (
-            <TileBase
-                isEditMode={isEditMode}
-                chartName={tile.properties.chartName ?? ''}
-                titleHref={`/projects/${projectUuid}/saved/${tile.properties.savedChartUuid}/`}
-                description={''}
-                belongsToDashboard={tile.properties.belongsToDashboard}
-                tile={tile}
-                isLoading
-                title={tile.properties.title || tile.properties.chartName || ''}
-                extraMenuItems={
-                    !minimal &&
-                    userCanManageChart &&
-                    tile.properties.savedChartUuid && (
-                        <EditChartMenuItem tile={tile} />
-                    )
-                }
-                minimal={minimal}
-                {...rest}
-            />
+        dashboardChartReadyQuery?.chart &&
+        user.data?.ability?.can(
+            'manage',
+            subject('SavedChart', dashboardChartReadyQuery.chart),
         );
-    }
 
-    if (error !== null || !data)
+    if (error !== null) {
         return (
             <TileBase
                 title=""
@@ -1288,19 +1459,48 @@ export const GenericDashboardChartTile: FC<
                 ></SuboptimalState>
             </TileBase>
         );
+    }
+
+    if (isLoading || !dashboardChartReadyQuery || !resultsData) {
+        return (
+            <TileBase
+                isEditMode={isEditMode}
+                chartName={tile.properties.chartName ?? ''}
+                titleHref={`/projects/${projectUuid}/saved/${tile.properties.savedChartUuid}/`}
+                description={''}
+                belongsToDashboard={tile.properties.belongsToDashboard}
+                tile={tile}
+                isLoading
+                title={tile.properties.title || tile.properties.chartName || ''}
+                extraMenuItems={
+                    !minimal &&
+                    userCanManageChart &&
+                    tile.properties.savedChartUuid && (
+                        <EditChartMenuItem tile={tile} />
+                    )
+                }
+                minimal={minimal}
+                {...rest}
+            />
+        );
+    }
 
     return (
         <MetricQueryDataProvider
-            metricQuery={data?.metricQuery}
-            tableName={data?.chart.tableName || ''}
-            explore={data?.explore}
+            metricQuery={
+                dashboardChartReadyQuery.executeQueryResponse.metricQuery
+            }
+            tableName={dashboardChartReadyQuery.chart.tableName || ''}
+            explore={dashboardChartReadyQuery.explore}
+            queryUuid={dashboardChartReadyQuery.executeQueryResponse.queryUuid}
         >
             {minimal ? (
                 <DashboardChartTileMinimal
                     {...rest}
                     tile={tile}
                     isEditMode={isEditMode}
-                    chartAndResults={data}
+                    resultsData={resultsData}
+                    dashboardChartReadyQuery={dashboardChartReadyQuery}
                     canExportCsv={canExportCsv}
                     canExportImages={canExportImages}
                 />
@@ -1309,7 +1509,8 @@ export const GenericDashboardChartTile: FC<
                     {...rest}
                     tile={tile}
                     isEditMode={isEditMode}
-                    chartAndResults={data}
+                    resultsData={resultsData}
+                    dashboardChartReadyQuery={dashboardChartReadyQuery}
                 />
             )}
             <UnderlyingDataModal />
@@ -1319,17 +1520,40 @@ export const GenericDashboardChartTile: FC<
 };
 
 const DashboardChartTile: FC<DashboardChartTileProps> = (props) => {
-    const { isInitialLoading, data, error } = useDashboardChart(
+    const readyQuery = useDashboardChartReadyQuery(
         props.tile.uuid,
-        props.tile.properties?.savedChartUuid ?? null,
+        props.tile.properties?.savedChartUuid,
     );
+
+    const resultsData = useInfiniteQueryResults(
+        readyQuery.data?.chart.projectUuid,
+        readyQuery.data?.executeQueryResponse.queryUuid,
+    );
+
+    const isLoading = useMemo(() => {
+        const isCreatingQuery = readyQuery.isFetching;
+        const isFetchingFirstPage = resultsData.isFetchingFirstPage;
+        const isFetchingAllRows =
+            resultsData.fetchAll && !resultsData.hasFetchedAllRows;
+        return (
+            (isCreatingQuery || isFetchingFirstPage || isFetchingAllRows) &&
+            !resultsData.error
+        );
+    }, [
+        readyQuery.isFetching,
+        resultsData.fetchAll,
+        resultsData.hasFetchedAllRows,
+        resultsData.isFetchingFirstPage,
+        resultsData.error,
+    ]);
 
     return (
         <GenericDashboardChartTile
             {...props}
-            isLoading={isInitialLoading}
-            data={data}
-            error={error}
+            isLoading={isLoading}
+            resultsData={resultsData}
+            dashboardChartReadyQuery={readyQuery.data}
+            error={readyQuery.error ?? resultsData.error}
         />
     );
 };

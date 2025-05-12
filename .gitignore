@@ -25,14 +25,14 @@ lightdash_dev.yml
 
 # production
 /packages/frontend/build
-/packages/frontend/dist
+/packages/frontend/sdk/dist
 /packages/common/dist
 /packages/backend/dist
 /packages/cli/dist
 /packages/warehouses/dist
 /packages/sdk/dist
 /packages/sdk-test-app/dist
-
+/packages/mantine-v7/dist
 # misc
 .DS_Store
 .env.local
@@ -74,3 +74,7 @@ dangerfile.development.ts
 # Charts as code
 lightdash
 *storybook.log
+
+# Prometheus
+prometheus.yml
+data/

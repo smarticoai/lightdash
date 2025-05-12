@@ -1,5 +1,5 @@
 import { Box, MantineProvider, type MantineThemeOverride } from '@mantine/core';
-import { type FC } from 'react';
+import { type FC, useMemo } from 'react';
 import { useParams } from 'react-router';
 import LightdashVisualization from '../components/LightdashVisualization';
 import VisualizationProvider from '../components/LightdashVisualization/VisualizationProvider';
@@ -20,9 +20,16 @@ const themeOverride: MantineThemeOverride = {
 };
 const MinimalExplorer: FC = () => {
     const { health } = useApp();
+    const queryResults = useExplorerContext((context) => context.queryResults);
+    const query = useExplorerContext((context) => context.query);
 
-    const queryResults = useExplorerContext(
-        (context) => context.queryResults.data,
+    const resultsData = useMemo(
+        () => ({
+            ...queryResults,
+            metricQuery: query.data?.metricQuery,
+            fields: query.data?.fields,
+        }),
+        [queryResults, query.data],
     );
 
     const savedChart = useExplorerContext(
@@ -30,7 +37,8 @@ const MinimalExplorer: FC = () => {
     );
 
     const isLoadingQueryResults = useExplorerContext(
-        (context) => context.queryResults.isFetching,
+        (context) =>
+            context.query.isFetching || context.queryResults.isFetchingRows,
     );
 
     if (!savedChart || health.isInitialLoading || !health.data) {
@@ -42,7 +50,7 @@ const MinimalExplorer: FC = () => {
             minimal
             chartConfig={savedChart.chartConfig}
             initialPivotDimensions={savedChart.pivotConfig?.columns}
-            resultsData={queryResults}
+            resultsData={resultsData}
             isLoading={isLoadingQueryResults}
             columnOrder={savedChart.tableConfig.columnOrder}
             pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}

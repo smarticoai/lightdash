@@ -19,7 +19,7 @@ import {
 import { Group, Tooltip } from '@mantine/core';
 import { IconExclamationCircle } from '@tabler/icons-react';
 import { type CellContext } from '@tanstack/react-table';
-import { Fragment, useMemo } from 'react';
+import { useMemo } from 'react';
 import { formatRowValueFromWarehouse } from '../components/DataViz/formatters/formatRowValueFromWarehouse';
 import MantineIcon from '../components/common/MantineIcon';
 import {
@@ -31,6 +31,7 @@ import {
     columnHelper,
     type TableColumn,
 } from '../components/common/Table/types';
+import useEmbed from '../ee/providers/Embed/useEmbed';
 import useExplorerContext from '../providers/Explorer/useExplorerContext';
 import { useCalculateTotal } from './useCalculateTotal';
 import { useExplore } from './useExplore';
@@ -82,13 +83,18 @@ export const useColumns = (): TableColumn[] => {
     const sorts = useExplorerContext(
         (context) => context.state.unsavedChartVersion.metricQuery.sorts,
     );
-    const resultsData = useExplorerContext(
-        (context) => context.queryResults.data,
+    const resultsMetricQuery = useExplorerContext(
+        (context) => context.query.data?.metricQuery,
+    );
+    const resultsFields = useExplorerContext(
+        (context) => context.query.data?.fields,
     );
 
     const { data: exploreData } = useExplore(tableName, {
         refetchOnMount: false,
     });
+
+    const { embedToken } = useEmbed();
 
     const itemsMap = useMemo<ItemsMap | undefined>(() => {
         if (exploreData) {
@@ -100,11 +106,11 @@ export const useColumns = (): TableColumn[] => {
                     tableCalculations,
                     customDimensions,
                 ),
-                ...(resultsData?.fields || {}),
+                ...(resultsFields || {}),
             };
         }
     }, [
-        resultsData,
+        resultsFields,
         exploreData,
         additionalMetrics,
         tableCalculations,
@@ -145,12 +151,13 @@ export const useColumns = (): TableColumn[] => {
     }, [itemsMap, activeFields]);
 
     const { data: totals } = useCalculateTotal({
-        metricQuery: resultsData?.metricQuery,
+        metricQuery: resultsMetricQuery,
         explore: exploreData?.baseTable,
-        fieldIds: resultsData
-            ? itemsInMetricQuery(resultsData.metricQuery)
+        fieldIds: resultsMetricQuery
+            ? itemsInMetricQuery(resultsMetricQuery)
             : undefined,
         itemsMap: activeItemsMap,
+        embedToken,
     });
 
     return useMemo(() => {

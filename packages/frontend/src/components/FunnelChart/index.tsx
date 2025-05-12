@@ -8,6 +8,7 @@ import { memo, useCallback, useEffect, useState, type FC } from 'react';
 import useEchartsFunnelConfig, {
     type FunnelSeriesDataPoint,
 } from '../../hooks/echarts/useEchartsFunnelConfig';
+import { useLegendDoubleClickSelection } from '../../hooks/echarts/useLegendDoubleClickSelection';
 import useApp from '../../providers/App/useApp';
 import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
@@ -45,9 +46,14 @@ type FunnelChartProps = Omit<EChartsReactProps, 'option'> & {
 const EchartOptions: Opts = { renderer: 'svg' };
 
 const FunnelChart: FC<FunnelChartProps> = memo((props) => {
-    const { chartRef, isLoading } = useVisualizationContext();
+    const { chartRef, isLoading, resultsData } = useVisualizationContext();
+    const { selectedLegends, onLegendChange } = useLegendDoubleClickSelection();
 
-    const funnelChartOptions = useEchartsFunnelConfig(props.isInDashboard);
+    const funnelChartOptions = useEchartsFunnelConfig(
+        selectedLegends,
+        props.isInDashboard,
+    );
+
     const { user } = useApp();
 
     const [isOpen, { open, close }] = useDisclosure();
@@ -57,6 +63,11 @@ const FunnelChart: FC<FunnelChartProps> = memo((props) => {
         value: FunnelChartContextMenuProps['value'];
         rows: FunnelChartContextMenuProps['rows'];
     }>();
+
+    useEffect(() => {
+        // Load all the rows
+        resultsData?.setFetchAll(true);
+    }, [resultsData]);
 
     useEffect(() => {
         const listener = () => chartRef.current?.getEchartsInstance().resize();
@@ -117,6 +128,7 @@ const FunnelChart: FC<FunnelChartProps> = memo((props) => {
                 onEvents={{
                     click: handleOpenContextMenu,
                     oncontextmenu: handleOpenContextMenu,
+                    legendselectchanged: onLegendChange,
                 }}
             />
 

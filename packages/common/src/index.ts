@@ -1,7 +1,11 @@
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import { z } from 'zod';
-import { type UserActivity, type ViewStatistics } from './types/analytics';
+import {
+    type ApiUserActivityDownloadCsv,
+    type UserActivity,
+    type ViewStatistics,
+} from './types/analytics';
 import {
     type Dashboard,
     type DashboardAvailableFilters,
@@ -31,9 +35,9 @@ import {
 } from './types/field';
 import { type AdditionalMetric, type MetricQuery } from './types/metricQuery';
 import {
+    OrganizationMemberRole,
     type ApiOrganizationMemberProfiles,
     type OrganizationMemberProfile,
-    type OrganizationMemberRole,
 } from './types/organizationMemberProfile';
 import {
     type CreatePersonalAccessToken,
@@ -92,7 +96,7 @@ import {
     type WarehouseCredentials,
 } from './types/projects';
 import { type MostPopularAndRecentlyUpdated } from './types/resourceViewItem';
-import { type ResultRow } from './types/results';
+import { type ResultColumns, type ResultRow } from './types/results';
 import {
     type ApiJobScheduledResponse,
     type ApiJobStatusResponse,
@@ -172,6 +176,7 @@ export * from './authorization/types';
 export * from './compiler/exploreCompiler';
 export * from './compiler/filtersCompiler';
 export * from './compiler/translator';
+export * from './constants/sqlRunner';
 export { default as DbtSchemaEditor } from './dbt/DbtSchemaEditor/DbtSchemaEditor';
 export * from './dbt/validation';
 export * from './ee/index';
@@ -231,6 +236,7 @@ export * from './types/projectMemberRole';
 export * from './types/projects';
 export * from './types/promotion';
 export * from './types/queryHistory';
+export * from './types/rename';
 export * from './types/resourceViewItem';
 export * from './types/results';
 export * from './types/savedCharts';
@@ -283,6 +289,7 @@ export * from './utils/projectMemberRole';
 export * from './utils/promises';
 export * from './utils/sanitizeHtml';
 export * from './utils/scheduler';
+export * from './utils/searchParams';
 export * from './utils/semanticLayer';
 export * from './utils/sleep';
 export * from './utils/slugs';
@@ -394,6 +401,44 @@ export const SEED_ORG_1_ADMIN_EMAIL = {
 export const SEED_ORG_1_ADMIN_PASSWORD = {
     password: 'demo_password!',
 };
+export const SEED_ORG_1_ADMIN_ROLE = OrganizationMemberRole.ADMIN;
+
+export const SEED_ORG_1_EDITOR = {
+    user_uuid: '80fb8b59-d6b7-4ed6-b969-9849310f3e53',
+    first_name: 'Editor',
+    last_name: 'User',
+    is_marketing_opted_in: true,
+    is_tracking_anonymized: false,
+    is_setup_complete: true,
+    is_active: true,
+};
+export const SEED_ORG_1_EDITOR_EMAIL = {
+    email: 'demo2@lightdash.com',
+    is_primary: true,
+};
+export const SEED_ORG_1_EDITOR_PASSWORD = {
+    password: 'demo_password!',
+};
+export const SEED_ORG_1_EDITOR_ROLE = OrganizationMemberRole.EDITOR;
+
+export const SEED_ORG_1_VIEWER = {
+    user_uuid: 'e0dd2003-c291-4e14-b977-7a03b7edc842',
+    first_name: 'Viewer',
+    last_name: 'User',
+    is_marketing_opted_in: true,
+    is_tracking_anonymized: false,
+    is_setup_complete: true,
+    is_active: true,
+};
+export const SEED_ORG_1_VIEWER_EMAIL = {
+    email: 'demo3@lightdash.com',
+    is_primary: true,
+};
+export const SEED_ORG_1_VIEWER_PASSWORD = {
+    password: 'demo_password!',
+};
+export const SEED_ORG_1_VIEWER_ROLE = OrganizationMemberRole.VIEWER;
+
 // Another user
 export const SEED_ORG_2 = {
     organization_uuid: '42339eef-359e-4ec4-b810-54ef0b4e3446',
@@ -415,7 +460,7 @@ export const SEED_ORG_2_ADMIN_EMAIL = {
 export const SEED_ORG_2_ADMIN_PASSWORD = {
     password: 'demo_password!',
 };
-
+export const SEED_ORG_2_ADMIN_ROLE = OrganizationMemberRole.ADMIN;
 export const SEED_EMBED_SECRET = 'zU3h50saDOO20czNFNRok';
 
 export const SEED_PROJECT = {
@@ -461,6 +506,8 @@ export const hasSpecialCharacters = (text: string) => /[^a-zA-Z ]/g.test(text);
 
 export type CacheMetadata = {
     cacheUpdatedTime?: Date;
+    cacheExpiresAt?: Date;
+    cacheKey?: string;
     cacheHit: boolean;
 };
 
@@ -471,33 +518,53 @@ export type ApiQueryResults = {
     fields: ItemsMap;
 };
 
-export type ApiExecuteAsyncQueryResults = {
+type ApiExecuteAsyncQueryResultsCommon = {
     queryUuid: string;
-    appliedDashboardFilters: DashboardFilters | null;
+    cacheMetadata: CacheMetadata;
+};
+
+export type ApiExecuteAsyncMetricQueryResults =
+    ApiExecuteAsyncQueryResultsCommon & {
+        metricQuery: MetricQuery;
+        fields: ItemsMap;
+    };
+
+export type ApiExecuteAsyncDashboardChartQueryResults =
+    ApiExecuteAsyncQueryResultsCommon & {
+        metricQuery: MetricQuery;
+        fields: ItemsMap;
+        appliedDashboardFilters: DashboardFilters;
+    };
+
+export type ApiExecuteAsyncSqlQueryResults =
+    ApiExecuteAsyncQueryResultsCommon & {
+        // leaving empty for now
+    };
+
+export type ApiExecuteAsyncDashboardSqlChartQueryResults =
+    ApiExecuteAsyncQueryResultsCommon & {
+        appliedDashboardFilters: DashboardFilters;
+    };
+
+export type ReadyQueryResultsPage = ResultsPaginationMetadata<ResultRow> & {
+    queryUuid: string;
+    columns: ResultColumns;
+    rows: ResultRow[];
+    initialQueryExecutionMs: number;
+    resultsPageExecutionMs: number;
+    status: QueryHistoryStatus.READY;
 };
 
 export type ApiGetAsyncQueryResults =
-    | (ResultsPaginationMetadata<ResultRow> & {
-          queryUuid: string;
-          rows: ResultRow[];
-          fields: ItemsMap;
-          initialQueryExecutionMs: number;
-          resultsPageExecutionMs: number;
-          metricQuery: MetricQuery;
-          status: QueryHistoryStatus.READY;
-      })
+    | ReadyQueryResultsPage
     | {
           status: QueryHistoryStatus.PENDING | QueryHistoryStatus.CANCELLED;
           queryUuid: string;
-          metricQuery: MetricQuery;
-          fields: ItemsMap;
       }
     | {
           status: QueryHistoryStatus.ERROR;
           queryUuid: string;
           error: string | null;
-          metricQuery: MetricQuery;
-          fields: ItemsMap;
       };
 
 export type ApiChartAndResults = {
@@ -680,6 +747,11 @@ export type ApiAiGetDashboardSummaryResponse = {
     results: DashboardSummary;
 };
 
+export type ApiAiGenerateCustomVizResponse = {
+    status: 'ok';
+    results: string;
+};
+
 type ApiResults =
     | ApiQueryResults
     | ApiSqlQueryResults
@@ -792,8 +864,12 @@ type ApiResults =
     | ApiMetricsExplorerTotalResults['results']
     | ApiGetSpotlightTableConfig['results']
     | ApiCalculateSubtotalsResponse['results']
-    | ApiExecuteAsyncQueryResults
-    | ApiGetAsyncQueryResults;
+    | ApiExecuteAsyncSqlQueryResults
+    | ApiExecuteAsyncDashboardSqlChartQueryResults
+    | ApiExecuteAsyncMetricQueryResults
+    | ApiExecuteAsyncDashboardChartQueryResults
+    | ApiGetAsyncQueryResults
+    | ApiUserActivityDownloadCsv['results'];
 
 export type ApiResponse<T extends ApiResults = ApiResults> = {
     status: 'ok';
@@ -865,6 +941,7 @@ export type HealthState = {
     isAuthenticated: boolean;
     requiresOrgRegistration: boolean;
     hasEmailClient: boolean;
+    hasMicrosoftTeams: boolean;
     latest: {
         version?: string;
     };
@@ -934,7 +1011,6 @@ export type HealthState = {
     pivotTable: {
         maxColumnLimit: number;
     };
-    customVisualizationsEnabled: boolean;
     hasSlack: boolean;
     hasGithub: boolean;
     hasHeadlessBrowser: boolean;

@@ -1,6 +1,6 @@
 import {
     DashboardTileTypes,
-    isChartTile,
+    isDashboardChartTileType,
     type Dashboard,
     type DashboardTab,
 } from '@lightdash/common';
@@ -96,7 +96,7 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
             ? tile.properties.hideTitle
             : false;
     const belongsToDashboard: boolean =
-        isChartTile(tile) && !!tile.properties.belongsToDashboard;
+        isDashboardChartTileType(tile) && !!tile.properties.belongsToDashboard;
 
     const isMarkdownTileTitleEmpty =
         tile.type === DashboardTileTypes.MARKDOWN && !title;
@@ -127,6 +127,7 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
             }}
         >
             <LoadingOverlay
+                // ! Very important to have this class name on the tile loading overlay, otherwise the unfurl service will not be able to find it
                 className="loading_chart_overlay"
                 visible={isLoading ?? false}
                 zIndex={getDefaultZIndex('modal') - 10}

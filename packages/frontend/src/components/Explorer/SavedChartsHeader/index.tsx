@@ -1,11 +1,17 @@
 import { subject } from '@casl/ability';
-import { DashboardTileTypes, FeatureFlags } from '@lightdash/common';
+import {
+    ChartSourceType,
+    ContentType,
+    DashboardTileTypes,
+    FeatureFlags,
+    ResourceViewItemType,
+    type ResourceViewChartItem,
+} from '@lightdash/common';
 import {
     ActionIcon,
     Alert,
     Box,
     Button,
-    Flex,
     Group,
     Menu,
     Modal,
@@ -18,15 +24,13 @@ import {
     IconAlertTriangle,
     IconArrowBack,
     IconBell,
-    IconCheck,
-    IconChevronRight,
     IconCirclePlus,
     IconCirclesRelation,
     IconCopy,
     IconDatabaseExport,
     IconDots,
-    IconFolder,
     IconFolders,
+    IconFolderSymlink,
     IconHistory,
     IconLayoutGridAdd,
     IconPencil,
@@ -35,7 +39,7 @@ import {
     IconSend,
     IconTrash,
 } from '@tabler/icons-react';
-import { Fragment, useEffect, useMemo, useState, type FC } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { useBlocker, useLocation, useNavigate, useParams } from 'react-router';
 import { PromotionConfirmDialog } from '../../../features/promotion/components/PromotionConfirmDialog';
 import {
@@ -51,12 +55,11 @@ import {
 import { SyncModal as GoogleSheetsSyncModal } from '../../../features/sync/components';
 import { useChartViewStats } from '../../../hooks/chart/useChartViewStats';
 import useDashboardStorage from '../../../hooks/dashboard/useDashboardStorage';
+import { useChartPinningMutation } from '../../../hooks/pinning/useChartPinningMutation';
+import { useContentAction } from '../../../hooks/useContent';
 import { useFeatureFlagEnabled } from '../../../hooks/useFeatureFlagEnabled';
 import { useProject } from '../../../hooks/useProject';
-import {
-    useMoveChartMutation,
-    useUpdateMutation,
-} from '../../../hooks/useSavedQuery';
+import { useUpdateMutation } from '../../../hooks/useSavedQuery';
 import useSearchParams from '../../../hooks/useSearchParams';
 import { useSpaceSummaries } from '../../../hooks/useSpaces';
 import useApp from '../../../providers/App/useApp';
@@ -70,6 +73,7 @@ import PageHeader from '../../common/Page/PageHeader';
 import { UpdatedInfo } from '../../common/PageHeader/UpdatedInfo';
 import { ResourceInfoPopup } from '../../common/ResourceInfoPopup/ResourceInfoPopup';
 import ShareShortLinkButton from '../../common/ShareShortLinkButton';
+import TransferItemsModal from '../../common/TransferItemsModal/TransferItemsModal';
 import ChartCreateModal from '../../common/modal/ChartCreateModal';
 import ChartDeleteModal from '../../common/modal/ChartDeleteModal';
 import ChartDuplicateModal from '../../common/modal/ChartDuplicateModal';
@@ -78,25 +82,11 @@ import MoveChartThatBelongsToDashboardModal from '../../common/modal/MoveChartTh
 import SaveChartButton from '../SaveChartButton';
 import { TitleBreadCrumbs } from './TitleBreadcrumbs';
 
-enum SpaceType {
-    SharedWithMe,
-    AdminContentView,
-}
+const SavedChartsHeader: FC = () => {
+    const userTimeZonesEnabled = useFeatureFlagEnabled(
+        FeatureFlags.EnableUserTimezones,
+    );
 
-const SpaceTypeLabels = {
-    [SpaceType.SharedWithMe]: 'Shared with me',
-    [SpaceType.AdminContentView]: 'Public content view',
-};
-
-type SavedChartsHeaderProps = {
-    isPinned: boolean;
-    onTogglePin: () => void;
-};
-
-const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
-    isPinned,
-    onTogglePin,
-}) => {
     const { search } = useLocation();
     const { projectUuid } = useParams<{
         projectUuid: string;
@@ -105,9 +95,6 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
     const isFromDashboard = !!dashboardUuid;
     const spaceUuid = useSearchParams('fromSpace');
 
-    const userTimeZonesEnabled = useFeatureFlagEnabled(
-        FeatureFlags.EnableUserTimezones,
-    );
     const { data: project } = useProject(projectUuid);
 
     const { mutate: promoteChart } = usePromoteMutation();
@@ -132,16 +119,21 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
     );
     const reset = useExplorerContext((context) => context.actions.reset);
 
-    const resultsData = useExplorerContext(
-        (context) => context.queryResults.data,
+    const itemsMap = useExplorerContext(
+        (context) => context.query.data?.fields,
     );
     const isValidQuery = useExplorerContext(
         (context) => context.state.isValidQuery,
     );
 
-    const itemsMap = useMemo(() => {
-        return resultsData?.fields;
-    }, [resultsData]);
+    const isPinned = useMemo(() => {
+        return Boolean(savedChart?.pinnedListUuid);
+    }, [savedChart?.pinnedListUuid]);
+    const { mutate: togglePinChart } = useChartPinningMutation();
+    const onChartPinning = useCallback(() => {
+        if (!savedChart) return;
+        togglePinChart({ uuid: savedChart.uuid });
+    }, [savedChart, togglePinChart]);
 
     const { clearDashboardStorage } = useDashboardStorage();
     const [isRenamingChart, setIsRenamingChart] = useState(false);
@@ -158,10 +150,13 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
         useDisclosure();
     const [isChartDuplicateModalOpen, chartDuplicateModalHandlers] =
         useDisclosure();
+    const [isTransferToSpaceModalOpen, transferToSpaceModalHandlers] =
+        useDisclosure();
 
     const { user, health } = useApp();
     const { data: spaces = [] } = useSpaceSummaries(projectUuid, true);
-    const { mutate: moveChartToSpace } = useMoveChartMutation();
+    const { mutateAsync: contentAction, isLoading: isContentActionLoading } =
+        useContentAction(projectUuid);
     const updateSavedChart = useUpdateMutation(
         dashboardUuid ? dashboardUuid : undefined,
         savedChart?.uuid,
@@ -228,31 +223,6 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
         }
         return false; // allow navigation
     });
-
-    const spacesByType = useMemo(() => {
-        const spacesUserCanCreateIn = spaces.filter((space) => {
-            return user.data?.ability?.can(
-                'create',
-                subject('SavedChart', {
-                    ...space,
-                    access: space.userAccess ? [space.userAccess] : [],
-                }),
-            );
-        });
-        const spacesSharedWithMe = spacesUserCanCreateIn.filter((space) => {
-            return user.data && space.access.includes(user.data.userUuid);
-        });
-        const spacesAdminsCanSee = spacesUserCanCreateIn.filter((space) => {
-            return (
-                spacesSharedWithMe.find((s) => s.uuid === space.uuid) ===
-                undefined
-            );
-        });
-        return {
-            [SpaceType.SharedWithMe]: spacesSharedWithMe,
-            [SpaceType.AdminContentView]: spacesAdminsCanSee,
-        };
-    }, [spaces, user.data]);
 
     const userCanManageChart =
         savedChart &&
@@ -568,7 +538,7 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
                                                     />
                                                 )
                                             }
-                                            onClick={onTogglePin}
+                                            onClick={onChartPinning}
                                         >
                                             {isPinned
                                                 ? 'Unpin from homepage'
@@ -581,141 +551,17 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
                                         <Menu.Item
                                             icon={
                                                 <MantineIcon
-                                                    icon={IconFolders}
+                                                    icon={IconFolderSymlink}
                                                 />
                                             }
-                                            onClick={(
-                                                e: React.MouseEvent<HTMLDivElement>,
-                                            ) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                setIsMovingChart(true);
-                                            }}
+                                            onClick={
+                                                transferToSpaceModalHandlers.open
+                                            }
                                         >
-                                            <Menu
-                                                width={250}
-                                                withArrow
-                                                position="left-start"
-                                                shadow="md"
-                                                offset={40}
-                                                trigger="hover"
-                                            >
-                                                <Menu.Target>
-                                                    <Flex
-                                                        justify="space-between"
-                                                        align="center"
-                                                        onClick={(e) =>
-                                                            e.stopPropagation()
-                                                        }
-                                                    >
-                                                        Move to space
-                                                        <MantineIcon
-                                                            icon={
-                                                                IconChevronRight
-                                                            }
-                                                        />
-                                                    </Flex>
-                                                </Menu.Target>
-                                                <Menu.Dropdown
-                                                    onClick={(e) =>
-                                                        e.stopPropagation()
-                                                    }
-                                                >
-                                                    {[
-                                                        SpaceType.SharedWithMe,
-                                                        SpaceType.AdminContentView,
-                                                    ].map((spaceType) => (
-                                                        <Fragment
-                                                            key={spaceType}
-                                                        >
-                                                            {spacesByType[
-                                                                spaceType
-                                                            ].length > 0 ? (
-                                                                <>
-                                                                    {spaceType ===
-                                                                        SpaceType.AdminContentView &&
-                                                                    spacesByType[
-                                                                        SpaceType
-                                                                            .SharedWithMe
-                                                                    ].length >
-                                                                        0 ? (
-                                                                        <Menu.Divider />
-                                                                    ) : null}
-
-                                                                    <Menu.Label>
-                                                                        {
-                                                                            SpaceTypeLabels[
-                                                                                spaceType
-                                                                            ]
-                                                                        }
-                                                                    </Menu.Label>
-                                                                </>
-                                                            ) : null}
-
-                                                            {spacesByType[
-                                                                spaceType
-                                                            ].map(
-                                                                (
-                                                                    spaceToMove,
-                                                                ) => {
-                                                                    const isDisabled =
-                                                                        savedChart?.spaceUuid ===
-                                                                        spaceToMove.uuid;
-                                                                    return (
-                                                                        <Menu.Item
-                                                                            disabled={
-                                                                                isDisabled
-                                                                            }
-                                                                            key={
-                                                                                spaceToMove.uuid
-                                                                            }
-                                                                            icon={
-                                                                                <MantineIcon
-                                                                                    icon={
-                                                                                        isDisabled
-                                                                                            ? IconCheck
-                                                                                            : IconFolder
-                                                                                    }
-                                                                                />
-                                                                            }
-                                                                            color={
-                                                                                isDisabled
-                                                                                    ? 'gray.5'
-                                                                                    : ''
-                                                                            }
-                                                                            onClick={(
-                                                                                e: React.MouseEvent<HTMLDivElement>,
-                                                                            ) => {
-                                                                                e.preventDefault();
-                                                                                e.stopPropagation();
-                                                                                if (
-                                                                                    savedChart &&
-                                                                                    savedChart.spaceUuid !==
-                                                                                        spaceToMove.uuid
-                                                                                ) {
-                                                                                    moveChartToSpace(
-                                                                                        {
-                                                                                            uuid: savedChart.uuid,
-                                                                                            spaceUuid:
-                                                                                                spaceToMove.uuid,
-                                                                                        },
-                                                                                    );
-                                                                                }
-                                                                            }}
-                                                                        >
-                                                                            {
-                                                                                spaceToMove.name
-                                                                            }
-                                                                        </Menu.Item>
-                                                                    );
-                                                                },
-                                                            )}
-                                                        </Fragment>
-                                                    ))}
-                                                </Menu.Dropdown>
-                                            </Menu>
+                                            Move chart
                                         </Menu.Item>
                                     )}
+
                                 {userCanManageChart && (
                                     <Menu.Item
                                         icon={
@@ -900,6 +746,7 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
             {savedChart && (
                 <MoveChartThatBelongsToDashboardModal
                     className={'non-draggable'}
+                    projectUuid={projectUuid}
                     uuid={savedChart.uuid}
                     name={savedChart.name}
                     spaceUuid={savedChart.spaceUuid}
@@ -935,7 +782,52 @@ const SavedChartsHeader: FC<SavedChartsHeaderProps> = ({
                     onConfirm={() => {
                         if (savedChart?.uuid) promoteChart(savedChart.uuid);
                     }}
-                ></PromotionConfirmDialog>
+                />
+            )}
+
+            {isTransferToSpaceModalOpen && projectUuid && (
+                <TransferItemsModal
+                    projectUuid={projectUuid}
+                    opened={isTransferToSpaceModalOpen}
+                    items={[
+                        ...(savedChart && chartViewStats.data
+                            ? [
+                                  {
+                                      data: {
+                                          ...savedChart,
+                                          firstViewedAt:
+                                              chartViewStats.data.firstViewedAt,
+                                          views: chartViewStats.data.views,
+                                      },
+                                      type: ResourceViewItemType.CHART,
+                                  } satisfies ResourceViewChartItem,
+                              ]
+                            : []),
+                    ]}
+                    spaces={spaces}
+                    isLoading={isMovingChart || isContentActionLoading}
+                    onClose={transferToSpaceModalHandlers.close}
+                    onConfirm={async (newSpaceUuid) => {
+                        if (!newSpaceUuid) {
+                            throw new Error('No space uuid provided');
+                        }
+
+                        if (savedChart) {
+                            await contentAction({
+                                action: {
+                                    type: 'move',
+                                    targetSpaceUuid: newSpaceUuid,
+                                },
+                                item: {
+                                    uuid: savedChart.uuid,
+                                    contentType: ContentType.CHART,
+                                    source: ChartSourceType.DBT_EXPLORE,
+                                },
+                            });
+                        }
+                        transferToSpaceModalHandlers.close();
+                    }}
+                />
             )}
         </TrackSection>
     );

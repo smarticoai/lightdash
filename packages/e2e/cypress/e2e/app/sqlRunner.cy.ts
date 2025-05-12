@@ -125,7 +125,7 @@ describe('SQL Runner (new)', () => {
         cy.get('div[role="option"]').contains('first_name').click();
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('Customer id sum aaron')
+            .contains('Customer id sum frances')
             .should('be.visible');
 
         // Verify that the chart is not displayed when the configuration is incomplete
@@ -209,6 +209,7 @@ describe('SQL Runner (new)', () => {
         cy.get(
             'input[placeholder="eg. How many weekly active users do we have?"]',
         ).type('Customers table SQL chart');
+        cy.findByText('Next').click();
         cy.get('section[role="dialog"]')
             .find('button')
             .contains('Save')

@@ -141,45 +141,48 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
     constructor(credentials: CreateSnowflakeCredentials) {
         super(credentials);
 
-        let privateKey: string | undefined;
-        if (credentials.privateKey) {
-            if (
-                typeof credentials.privateKeyPass === 'string' &&
-                credentials.privateKeyPass.length > 0
-            ) {
-                // Get the private key from the file as an object and
-                // extract the private key from the object as a PEM-encoded string.
-                privateKey = crypto
-                    .createPrivateKey({
-                        key: credentials.privateKey,
-                        format: 'pem',
-                        passphrase: credentials.privateKeyPass,
-                    })
-                    .export({
-                        format: 'pem',
-                        type: 'pkcs8',
-                    })
-                    .toString();
-            } else {
-                privateKey = credentials.privateKey;
-            }
-        }
-
         if (typeof credentials.quotedIdentifiersIgnoreCase !== 'undefined') {
             this.quotedIdentifiersIgnoreCase =
                 credentials.quotedIdentifiersIgnoreCase;
         }
 
         let authenticationOptions: Partial<ConnectionOptions> = {};
-        if (credentials.password) {
+
+        // if authenticationType is undefined, we assume it is a password authentication, for backwards compatibility
+        if (
+            credentials.privateKey &&
+            credentials.authenticationType === 'private_key'
+        ) {
+            if (!credentials.privateKeyPass) {
+                authenticationOptions = {
+                    privateKey: credentials.privateKey,
+                    authenticator: 'SNOWFLAKE_JWT',
+                };
+            } else {
+                /**
+                 * @ref https://docs.snowflake.com/en/developer-guide/node-js/nodejs-driver-authenticate#use-key-pair-authentication-and-key-pair-rotation
+                 */
+                const privateKeyObject = crypto.createPrivateKey({
+                    key: credentials.privateKey,
+                    format: 'pem',
+                    passphrase: credentials.privateKeyPass,
+                });
+
+                // Extract the private key from the object as a PEM-encoded string.
+                const privateKey = privateKeyObject.export({
+                    format: 'pem',
+                    type: 'pkcs8',
+                });
+
+                authenticationOptions = {
+                    privateKey: privateKey.toString(),
+                    authenticator: 'SNOWFLAKE_JWT',
+                };
+            }
+        } else if (credentials.password) {
             authenticationOptions = {
                 password: credentials.password,
                 authenticator: 'SNOWFLAKE',
-            };
-        } else if (privateKey) {
-            authenticationOptions = {
-                privateKey,
-                authenticator: 'SNOWFLAKE_JWT',
             };
         }
 
@@ -288,12 +291,10 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
             : {};
     }
 
-    async executeAsyncQuery({
-        sql,
-        values,
-        tags,
-        timezone,
-    }: WarehouseExecuteAsyncQueryArgs): Promise<WarehouseExecuteAsyncQuery> {
+    async executeAsyncQuery(
+        { sql, values, tags, timezone }: WarehouseExecuteAsyncQueryArgs,
+        resultsStreamCallback?: (rows: WarehouseResults['rows']) => void,
+    ): Promise<WarehouseExecuteAsyncQuery> {
         const connection = await this.getConnection();
         await this.prepareWarehouse(connection, {
             timezone,
@@ -301,9 +302,14 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
         });
 
         const { queryId, durationMs, totalRows } =
-            await this.executeAsyncStatement(connection, sql, {
-                values,
-            });
+            await this.executeAsyncStatement(
+                connection,
+                sql,
+                {
+                    values,
+                },
+                resultsStreamCallback,
+            );
 
         return {
             queryId,
@@ -368,6 +374,7 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
         options?: {
             values?: AnyType[];
         },
+        resultsStreamCallback?: (rows: WarehouseResults['rows']) => void,
     ) {
         const startTime = performance.now();
         const { queryId, totalRows, durationMs } = await new Promise<{
@@ -409,6 +416,28 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
                 },
             });
         });
+
+        // If we have a callback, stream the rows to the callback.
+        // This is used when writing to the results cache.
+        if (resultsStreamCallback) {
+            const completedStatement = await connection.getResultsFromQueryId({
+                sqlText: '',
+                queryId,
+            });
+            await new Promise<void>((resolve, reject) => {
+                completedStatement
+                    .streamRows()
+                    .on('error', (e) => {
+                        reject(e);
+                    })
+                    .on('data', (row) => {
+                        resultsStreamCallback([row]);
+                    })
+                    .on('end', () => {
+                        resolve();
+                    });
+            });
+        }
 
         return {
             queryId,
@@ -480,6 +509,7 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
 
         try {
             await this.prepareWarehouse(connection, options);
+
             await this.executeStreamStatement(
                 connection,
                 sql,

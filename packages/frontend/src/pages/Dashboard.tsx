@@ -1,6 +1,6 @@
 import {
+    ContentType,
     DashboardTileTypes,
-    ResourceViewItemType,
     type DashboardTab,
     type DashboardTile,
     type Dashboard as IDashboard,
@@ -26,14 +26,12 @@ import { useDashboardCommentsCheck } from '../features/comments';
 import { DateZoom } from '../features/dateZoom';
 import {
     appendNewTilesToBottom,
-    useMoveDashboardMutation,
     useUpdateDashboard,
 } from '../hooks/dashboard/useDashboard';
 import useDashboardStorage from '../hooks/dashboard/useDashboardStorage';
 import { useOrganization } from '../hooks/organization/useOrganization';
-import { useDashboardPinningMutation } from '../hooks/pinning/useDashboardPinningMutation';
-import { usePinnedItems } from '../hooks/pinning/usePinnedItems';
 import useToaster from '../hooks/toaster/useToaster';
+import { useContentAction } from '../hooks/useContent';
 import { useSpaceSummaries } from '../hooks/useSpaces';
 import useApp from '../providers/App/useApp';
 import DashboardProvider from '../providers/Dashboard/DashboardProvider';
@@ -120,32 +118,14 @@ const Dashboard: FC = () => {
         reset,
         isLoading: isSaving,
     } = useUpdateDashboard(dashboardUuid);
-    const { mutate: moveDashboardToSpace } = useMoveDashboardMutation();
+
+    const { mutateAsync: contentAction, isLoading: isContentActionLoading } =
+        useContentAction(projectUuid);
 
     const [isDeleteModalOpen, deleteModalHandlers] = useDisclosure();
     const [isDuplicateModalOpen, duplicateModalHandlers] = useDisclosure();
     const [isExportDashboardModalOpen, exportDashboardModalHandlers] =
         useDisclosure();
-    const { mutate: toggleDashboardPinning } = useDashboardPinningMutation();
-    const { data: pinnedItems } = usePinnedItems(
-        projectUuid,
-        dashboard?.pinnedListUuid ?? undefined,
-    );
-
-    const handleDashboardPinning = useCallback(() => {
-        if (!dashboardUuid) return;
-        toggleDashboardPinning({ uuid: dashboardUuid });
-    }, [dashboardUuid, toggleDashboardPinning]);
-
-    const isPinned = useMemo(() => {
-        return Boolean(
-            pinnedItems?.some(
-                (item) =>
-                    item.type === ResourceViewItemType.DASHBOARD &&
-                    item.data.uuid === dashboardUuid,
-            ),
-        );
-    }, [dashboardUuid, pinnedItems]);
 
     const hasNewSemanticLayerChart = useMemo(() => {
         if (!dashboardTiles) return false;
@@ -464,16 +444,21 @@ const Dashboard: FC = () => {
     ]);
 
     const handleMoveDashboardToSpace = useCallback(
-        (spaceUuid: string) => {
+        async (spaceUuid: string) => {
             if (!dashboard) return;
 
-            moveDashboardToSpace({
-                uuid: dashboard.uuid,
-                name: dashboard.name,
-                spaceUuid,
+            await contentAction({
+                action: {
+                    type: 'move',
+                    targetSpaceUuid: spaceUuid,
+                },
+                item: {
+                    uuid: dashboard.uuid,
+                    contentType: ContentType.DASHBOARD,
+                },
             });
         },
-        [dashboard, moveDashboardToSpace],
+        [dashboard, contentAction],
     );
 
     useEffect(() => {
@@ -600,7 +585,6 @@ const Dashboard: FC = () => {
                         isSaving={isSaving}
                         oldestCacheTime={oldestCacheTime}
                         isFullscreen={isFullscreen}
-                        isPinned={isPinned}
                         activeTabUuid={activeTab?.uuid}
                         dashboardTabs={dashboardTabs}
                         isFullScreenFeatureEnabled={isFullScreenFeatureEnabled}
@@ -654,11 +638,11 @@ const Dashboard: FC = () => {
                         }}
                         onCancel={handleCancel}
                         onMoveToSpace={handleMoveDashboardToSpace}
+                        isMovingDashboardToSpace={isContentActionLoading}
                         onDuplicate={duplicateModalHandlers.open}
                         onDelete={deleteModalHandlers.open}
                         onExport={exportDashboardModalHandlers.open}
                         setAddingTab={setAddingTab}
-                        onTogglePin={handleDashboardPinning}
                         onEditClicked={handleEnterEditMode}
                     />
                 }

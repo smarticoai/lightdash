@@ -1,5 +1,10 @@
-import { type ApiError, type DecodedEmbed } from '@lightdash/common';
 import {
+    type ApiError,
+    type DecodedEmbed,
+    type UpdateEmbed,
+} from '@lightdash/common';
+import {
+    Anchor,
     Button,
     Flex,
     Paper,
@@ -68,13 +73,14 @@ const useEmbedConfigCreateMutation = (projectUuid: string) => {
 const useEmbedConfigUpdateMutation = (projectUuid: string) => {
     const queryClient = useQueryClient();
     const { showToastSuccess, showToastError } = useToaster();
-    return useMutation<null, ApiError, { dashboardUuids: string[] }>(
-        ({ dashboardUuids }: { dashboardUuids: string[] }) =>
+    return useMutation<null, ApiError, UpdateEmbed>(
+        ({ dashboardUuids, allowAllDashboards }: UpdateEmbed) =>
             lightdashApi<null>({
                 url: `/embed/${projectUuid}/config/dashboards`,
                 method: 'PATCH',
                 body: JSON.stringify({
                     dashboardUuids,
+                    allowAllDashboards,
                 }),
             }),
         {
@@ -98,8 +104,11 @@ const useEmbedConfigUpdateMutation = (projectUuid: string) => {
 const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
     const { health } = useApp();
     const { isLoading, data: embedConfig, error } = useEmbedConfig(projectUuid);
-    const { isLoading: isLoadingDashboards, data: dashboards } =
-        useDashboards(projectUuid);
+    const { isLoading: isLoadingDashboards, data: dashboards } = useDashboards(
+        projectUuid,
+        undefined,
+        true,
+    );
     const { mutate: createEmbedConfig, isLoading: isCreating } =
         useEmbedConfigCreateMutation(projectUuid);
     const { mutate: updateEmbedConfig, isLoading: isUpdating } =
@@ -109,6 +118,9 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
     const allowedDashboards = useMemo(() => {
         if (!dashboards || !embedConfig) {
             return [];
+        }
+        if (embedConfig.allowAllDashboards) {
+            return dashboards;
         }
         return dashboards.filter((dashboard) =>
             embedConfig.dashboardUuids.includes(dashboard.uuid),
@@ -172,13 +184,12 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
                         The secret is used to generate embed tokens for
                         embedding dashboards.
                     </Text>
-                    {/* Uncomment once we have a docs page */}
-                    {/*<Text color="dimmed">*/}
-                    {/*    Read more about using embed secret in our{' '}*/}
-                    {/*    <Anchor href="https://docs.lightdash.com/guides/embed">*/}
-                    {/*        docs guide*/}
-                    {/*    </Anchor>*/}
-                    {/*</Text>*/}
+                    <Text color="dimmed" fz="xs">
+                        Read more about using embed secret in our{' '}
+                        <Anchor href="https://docs.lightdash.com/references/embedding">
+                            docs guide
+                        </Anchor>
+                    </Text>
                 </Stack>
                 <Stack>
                     <PasswordInput
@@ -200,26 +211,17 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
                     </Flex>
                 </Stack>
             </SettingsGridCard>
-            <SettingsGridCard>
-                <Stack spacing="sm">
+            <Paper shadow="sm" withBorder p="md">
+                <Stack spacing="sm" mb="md">
                     <Title order={4}>Allowed dashboards</Title>
-                    <Text color="dimmed">
-                        Only these dashboards will be allowed to be embedded.
-                    </Text>
                 </Stack>
                 <EmbedDashboardsForm
                     disabled={isSaving}
-                    selectedDashboardsUuids={
-                        embedConfig.dashboardUuids as string[]
-                    }
+                    embedConfig={embedConfig}
                     dashboards={dashboards || []}
-                    onSave={(dashboardUuids) =>
-                        updateEmbedConfig({
-                            dashboardUuids,
-                        })
-                    }
+                    onSave={updateEmbedConfig}
                 />
-            </SettingsGridCard>
+            </Paper>
             <Paper shadow="sm" withBorder p="md">
                 <Stack spacing="sm" mb="md">
                     <Title order={4}>Preview & code snippet</Title>

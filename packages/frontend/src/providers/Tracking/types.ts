@@ -383,6 +383,32 @@ type CustomMetricReplacementEvent = {
     };
 };
 
+type DashboardChartLoadedEvent = {
+    name: EventName.DASHBOARD_CHART_LOADED;
+    properties: {
+        userId: string;
+        organizationId: string;
+        projectId: string;
+        dashboardId: string;
+        chartId: string;
+        queryId: string;
+        warehouseExecutionTimeMs: number | undefined;
+        totalTimeMs: number | undefined;
+        totalResults: number;
+        loadedRows: number;
+        // cacheMetadata: CacheMetadata;
+    };
+};
+
+type SpaceBreadcrumbClickedEvent = {
+    name: EventName.SPACE_BREADCRUMB_CLICKED;
+    properties: {
+        userId: string;
+        organizationId: string;
+        projectId: string;
+    };
+};
+
 export type EventData =
     | GenericEvent
     | FormClickedEvent
@@ -415,7 +441,9 @@ export type EventData =
     | MetricsCatalogTreesEdgeRemovedEvent
     | MetricsCatalogTreesCanvasModeClickedEvent
     | WriteBackEvent
-    | CustomMetricReplacementEvent;
+    | DashboardChartLoadedEvent
+    | CustomMetricReplacementEvent
+    | SpaceBreadcrumbClickedEvent;
 
 export type IdentifyData = {
     id: string;

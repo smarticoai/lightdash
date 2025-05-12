@@ -2,6 +2,7 @@ import {
     AdditionalMetric,
     AndFilterGroup,
     AnyType,
+    ApiCalculateTotalResponse,
     ApiErrorPayload,
     ApiSuccessEmpty,
     CacheMetadata,
@@ -20,6 +21,7 @@ import {
     MetricQueryResponse,
     SavedChart,
     SavedChartsInfoForDashboardAvailableFilters,
+    UpdateEmbed,
 } from '@lightdash/common';
 import {
     Body,
@@ -72,7 +74,7 @@ export type ApiEmbedConfigResponse = {
     results: DecodedEmbed;
 };
 
-export type ApiChartAndResultsResponse = {
+export type ApiEmbedChartAndResultsResponse = {
     status: 'ok';
     results: {
         chart: SavedChart;
@@ -100,7 +102,10 @@ export class EmbedController extends BaseController {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await this.getEmbedService().getConfig(projectUuid),
+            results: await this.getEmbedService().getConfig(
+                req.user!,
+                projectUuid,
+            ),
         };
     }
 
@@ -131,13 +136,13 @@ export class EmbedController extends BaseController {
     async updateEmbeddedDashboards(
         @Request() req: express.Request,
         @Path() projectUuid: string,
-        @Body() body: { dashboardUuids: string[] },
+        @Body() body: UpdateEmbed,
     ): Promise<ApiSuccessEmpty> {
         this.setStatus(200);
         await this.getEmbedService().updateDashboards(
             req.user!,
             projectUuid,
-            body.dashboardUuids,
+            body,
         );
         return {
             status: 'ok',
@@ -214,7 +219,7 @@ export class EmbedController extends BaseController {
             dashboardFilters?: DashboardFilters;
             dateZoomGranularity?: DateGranularity;
         },
-    ): Promise<ApiChartAndResultsResponse> {
+    ): Promise<ApiEmbedChartAndResultsResponse> {
         this.setStatus(200);
         return {
             status: 'ok',
@@ -224,6 +229,32 @@ export class EmbedController extends BaseController {
                 body.tileUuid,
                 body.dashboardFilters,
                 body.dateZoomGranularity,
+            ),
+        };
+    }
+
+    @SuccessResponse('200', 'Success')
+    @Post('/chart/:savedChartUuid/calculate-total')
+    @OperationId('embedCalculateTotalFromSavedChart')
+    async embedCalculateTotalFromSavedChart(
+        @Header('Lightdash-Embed-Token') embedToken: string,
+        @Path() projectUuid: string,
+        @Path() savedChartUuid: string,
+        @Body()
+        body: {
+            dashboardFilters?: AnyType; // DashboardFilters; temp disable validation
+            invalidateCache?: boolean;
+        },
+    ): Promise<ApiCalculateTotalResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.getEmbedService().calculateTotalFromSavedChart(
+                embedToken,
+                projectUuid,
+                savedChartUuid,
+                body.dashboardFilters,
+                body.invalidateCache,
             ),
         };
     }

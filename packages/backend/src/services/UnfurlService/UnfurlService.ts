@@ -34,16 +34,13 @@ import { SpaceModel } from '../../models/SpaceModel';
 import { getAuthenticationToken } from '../../routers/headlessBrowser';
 import { BaseService } from '../BaseService';
 
+const RESPONSE_TIMEOUT_MS = 180000;
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const uuidRegex = new RegExp(uuid, 'g');
 const nanoid = '[\\w-]{21}';
 const nanoidRegex = new RegExp(nanoid);
-const legacyMetricQueryEndpointRegex = /\/runQuery/;
 const createQueryEndpointRegex = /\/query/;
 const paginatedQueryEndpointRegex = new RegExp(`/query/${uuid}`);
-const legacyChartAndResultsEndpointRegex =
-    /\/saved\/[a-f0-9-]+\/chart-and-results/;
-const legacyChartResultsEndpointRegex = /\/saved\/[a-f0-9-]+\/results/;
 
 const viewport = {
     width: 1400,
@@ -136,16 +133,27 @@ export class UnfurlService extends BaseService {
         this.downloadFileModel = downloadFileModel;
     }
 
-    static async waitForAllPaginatedResultsResponse(
+    private async waitForAllPaginatedResultsResponse(
         page: playwright.Page,
         expectedResponses: number,
         timeout: number,
     ) {
+        if (expectedResponses === 0) {
+            return undefined;
+        }
+
         let responseCount = 0;
+
+        this.logger.info(
+            `Waiting for ${expectedResponses} paginated responses with timeout ${timeout}ms`,
+        );
 
         const responsePromise = new Promise<void>((resolve, reject) => {
             const responseHandler = async (response: playwright.Response) => {
                 if (response.url().match(paginatedQueryEndpointRegex)) {
+                    this.logger.debug(
+                        `Received paginated response: ${response.url()}`,
+                    );
                     const body = await response.body();
                     const json = JSON.parse(body.toString()) as {
                         status: 'ok';
@@ -157,15 +165,44 @@ export class UnfurlService extends BaseService {
                         !json.results.nextPage
                     ) {
                         responseCount += 1;
+                        this.logger.info(
+                            `Paginated response is complete. Count: ${responseCount}/${expectedResponses}`,
+                        );
                         if (responseCount === expectedResponses) {
+                            this.logger.info(
+                                `All ${expectedResponses} paginated responses received, resolving promise`,
+                            );
                             page.off('response', responseHandler); // Clean up the listener
                             resolve();
                         }
+                    } else {
+                        this.logger.debug(
+                            `Paginated response is not complete. Status: ${
+                                json.results.status
+                            }, hasNextPage: ${
+                                'nextPage' in json.results
+                                    ? !!json.results.nextPage
+                                    : 'N/A'
+                            }`,
+                        );
                     }
                 }
             };
             page.on('response', responseHandler);
         });
+
+        // This is needed because tables are lazy loaded so we have no way of knowing when the chart is displayed
+        async function waitForAllLoaded() {
+            // Wait for all the loading overlays to be in the DOM
+            await page.waitForSelector('.loading_chart_overlay', {
+                state: 'attached',
+            });
+
+            // Wait for the loading overlay to be hidden (loading is complete)
+            await page.waitForSelector('.loading_chart_overlay', {
+                state: 'hidden',
+            });
+        }
 
         const timeoutPromise = new Promise<never>((_, reject) => {
             setTimeout(() => {
@@ -177,14 +214,25 @@ export class UnfurlService extends BaseService {
             }, timeout);
         });
 
-        return Promise.race([responsePromise, timeoutPromise]);
+        return Promise.race([
+            responsePromise,
+            waitForAllLoaded(),
+            timeoutPromise,
+        ]);
     }
 
-    static async waitForPaginatedResultsResponse(page: playwright.Page) {
-        return UnfurlService.waitForAllPaginatedResultsResponse(page, 1, 60000);
+    private async waitForPaginatedResultsResponse(page: playwright.Page) {
+        return this.waitForAllPaginatedResultsResponse(
+            page,
+            1,
+            RESPONSE_TIMEOUT_MS,
+        );
     }
 
-    async getTitleAndDescription(parsedUrl: ParsedUrl): Promise<
+    async getTitleAndDescription(
+        parsedUrl: ParsedUrl,
+        selectedTabs?: string[],
+    ): Promise<
         Pick<
             Unfurl,
             'title' | 'description' | 'chartType' | 'organizationUuid'
@@ -203,15 +251,24 @@ export class UnfurlService extends BaseService {
                 const dashboard = await this.dashboardModel.getById(
                     parsedUrl.dashboardUuid,
                 );
+
+                // Filter tiles based on selected tabs if they exist
+                const filteredTiles =
+                    selectedTabs && selectedTabs.length > 0
+                        ? dashboard.tiles.filter((tile) =>
+                              selectedTabs.includes(tile.tabUuid || ''),
+                          )
+                        : dashboard.tiles;
+
                 return {
                     title: dashboard.name,
                     description: dashboard.description,
                     organizationUuid: dashboard.organizationUuid,
                     resourceUuid: dashboard.uuid,
-                    chartTileUuids: dashboard.tiles
+                    chartTileUuids: filteredTiles
                         .filter(isDashboardChartTileType)
                         .map((t) => t.properties.savedChartUuid),
-                    sqlChartTileUuids: dashboard.tiles
+                    sqlChartTileUuids: filteredTiles
                         .filter(isDashboardSqlChartTile)
                         .map((t) => t.properties.savedSqlUuid),
                 };
@@ -252,7 +309,10 @@ export class UnfurlService extends BaseService {
         }
     }
 
-    async unfurlDetails(originUrl: string): Promise<Unfurl | undefined> {
+    async unfurlDetails(
+        originUrl: string,
+        selectedTabs: string[] = [],
+    ): Promise<Unfurl | undefined> {
         const parsedUrl = await this.parseUrl(originUrl);
 
         if (
@@ -270,7 +330,7 @@ export class UnfurlService extends BaseService {
             chartType,
             resourceUuid,
             ...rest
-        } = await this.getTitleAndDescription(parsedUrl);
+        } = await this.getTitleAndDescription(parsedUrl, selectedTabs);
 
         return {
             title,
@@ -286,7 +346,10 @@ export class UnfurlService extends BaseService {
         };
     }
 
-    private async createImagePdf(id: string, buffer: Buffer): Promise<string> {
+    private async createImagePdf(
+        id: string,
+        buffer: Buffer,
+    ): Promise<{ source: string; fileName: string }> {
         // Converts an image to PDF format,
         // The PDF has the size of the image, not DIN A4
         const pdfDoc = await PDFDocument.create();
@@ -295,14 +358,22 @@ export class UnfurlService extends BaseService {
         page.drawImage(pngImage);
         const pdfBytes = await pdfDoc.save();
 
-        let path: string;
+        let source: string;
+        let fileName: string;
         if (this.s3Client.isEnabled()) {
-            path = await this.s3Client.uploadPdf(Buffer.from(pdfBytes), id);
+            const uploadPdfReturn = await this.s3Client.uploadPdf(
+                Buffer.from(pdfBytes),
+                id,
+            );
+            source = uploadPdfReturn.url;
+            fileName = uploadPdfReturn.fileName;
         } else {
-            path = `/tmp/${id}.pdf`;
-            await fsPromise.writeFile(path, pdfBytes);
+            fileName = `${id}.pdf`;
+            source = `/tmp/${fileName}`;
+            await fsPromise.writeFile(source, pdfBytes);
         }
-        return path;
+
+        return { source, fileName };
     }
 
     async unfurlImage({
@@ -315,6 +386,7 @@ export class UnfurlService extends BaseService {
         selector = undefined,
         context,
         contextId,
+        selectedTabs,
     }: {
         url: string;
         lightdashPage?: LightdashPage;
@@ -325,9 +397,13 @@ export class UnfurlService extends BaseService {
         selector?: string;
         context: ScreenshotContext;
         contextId?: unknown;
-    }): Promise<{ imageUrl?: string; pdfPath?: string }> {
+        selectedTabs?: string[];
+    }): Promise<{
+        imageUrl?: string;
+        pdfFile?: { source: string; fileName: string };
+    }> {
         const cookie = await this.getUserCookie(authUserUuid);
-        const details = await this.unfurlDetails(url);
+        const details = await this.unfurlDetails(url, selectedTabs);
 
         const buffer = await this.saveScreenshot({
             authUserUuid,
@@ -345,13 +421,15 @@ export class UnfurlService extends BaseService {
             sqlChartTileUuids: details?.sqlChartTileUuids,
             context,
             contextId,
+            selectedTabs,
         });
 
         let imageUrl;
-        let pdfPath;
+        let pdfFile;
+
         if (buffer !== undefined) {
             if (withPdf) {
-                pdfPath = await this.createImagePdf(imageId, buffer);
+                pdfFile = await this.createImagePdf(imageId, buffer);
             }
 
             if (this.s3Client.isEnabled()) {
@@ -373,7 +451,10 @@ export class UnfurlService extends BaseService {
             }
         }
 
-        return { imageUrl, pdfPath };
+        return {
+            imageUrl,
+            pdfFile,
+        };
     }
 
     async exportDashboard(
@@ -381,6 +462,7 @@ export class UnfurlService extends BaseService {
         queryFilters: string,
         gridWidth: number | undefined,
         user: SessionUser,
+        selectedTabs?: string[],
     ): Promise<string> {
         const dashboard = await this.dashboardModel.getById(dashboardUuid);
         const { isPrivate } = await this.spaceModel.get(dashboard.spaceUuid);
@@ -388,12 +470,33 @@ export class UnfurlService extends BaseService {
             user.userUuid,
             dashboard.spaceUuid,
         );
+
+        // Create a new URLSearchParams object for query filters
+        const selectedTabsParams = new URLSearchParams();
+        const selectedTabsList =
+            selectedTabs ??
+            dashboard.tiles
+                .map((tile) => tile.tabUuid)
+                .filter((tabUuid) => !!tabUuid);
+
+        if (selectedTabsList.length > 0)
+            selectedTabsParams.set(
+                'selectedTabs',
+                JSON.stringify(selectedTabsList),
+            );
+
         const { organizationUuid, projectUuid, name, minimalUrl, pageType } = {
             organizationUuid: dashboard.organizationUuid,
             projectUuid: dashboard.projectUuid,
             name: dashboard.name,
             minimalUrl: new URL(
-                `/minimal/projects/${dashboard.projectUuid}/dashboards/${dashboardUuid}${queryFilters}`,
+                `/minimal/projects/${
+                    dashboard.projectUuid
+                }/dashboards/${dashboardUuid}${queryFilters}${
+                    selectedTabsParams.toString()
+                        ? `${selectedTabsParams.toString()}`
+                        : ''
+                }`,
                 this.lightdashConfig.headlessBrowser.internalLightdashHost,
             ).href,
             pageType: LightdashPage.DASHBOARD,
@@ -413,6 +516,14 @@ export class UnfurlService extends BaseService {
             throw new ForbiddenError();
         }
 
+        this.logger.info(
+            `Exporting dashboard ${name} with minimalUrl ${minimalUrl}${
+                selectedTabs
+                    ? ` and selected tabs: ${selectedTabs.join(', ')}`
+                    : ''
+            }`,
+        );
+
         const unfurlImage = await this.unfurlImage({
             url: minimalUrl,
             lightdashPage: pageType,
@@ -420,6 +531,7 @@ export class UnfurlService extends BaseService {
             authUserUuid: user.userUuid,
             gridWidth,
             context: ScreenshotContext.EXPORT_DASHBOARD,
+            selectedTabs,
         });
         if (unfurlImage.imageUrl === undefined) {
             throw new Error('Unable to unfurl image');
@@ -444,6 +556,7 @@ export class UnfurlService extends BaseService {
         retries = SCREENSHOT_RETRIES,
         context,
         contextId,
+        selectedTabs,
     }: {
         imageId: string;
         cookie: string;
@@ -461,7 +574,13 @@ export class UnfurlService extends BaseService {
         retries?: number;
         context: ScreenshotContext;
         contextId?: unknown;
+        selectedTabs?: string[];
     }): Promise<Buffer | undefined> {
+        this.logger.info(
+            `with tiles ${JSON.stringify(chartTileUuids)} and ${JSON.stringify(
+                sqlChartTileUuids,
+            )}`,
+        );
         if (this.lightdashConfig.headlessBrowser?.host === undefined) {
             this.logger.error(
                 `Can't get screenshot if HEADLESS_BROWSER_HOST env variable is not defined`,
@@ -586,9 +705,6 @@ export class UnfurlService extends BaseService {
                     page.on('response', async (response) => {
                         const responseUrl = response.url();
                         const resultsEndpointRegexes = [
-                            legacyMetricQueryEndpointRegex, // legacy endpoint for explorer page
-                            legacyChartResultsEndpointRegex, // legacy endpoint for chart view page
-                            legacyChartAndResultsEndpointRegex, // legacy endpoint for dashboard page
                             createQueryEndpointRegex, // create query
                             paginatedQueryEndpointRegex, // get paginated results
                         ];
@@ -648,35 +764,33 @@ export class UnfurlService extends BaseService {
                                 | Promise<unknown>
                                 | undefined;
                             if (chartTileUuids) {
-                                const legacyExploreChartResultsPromises =
-                                    chartTileUuids.map((id) => {
-                                        if (page) {
-                                            const responsePattern = new RegExp(
-                                                `${id}/chart-and-results`,
-                                            );
+                                this.logger.info(
+                                    `Dashboard screenshot: Found ${
+                                        chartTileUuids.length
+                                    } chart tiles, with values: ${JSON.stringify(
+                                        chartTileUuids,
+                                    )}`,
+                                );
 
-                                            return page?.waitForResponse(
-                                                responsePattern,
-                                                { timeout: 60000 },
-                                            ); // NOTE: No await here
-                                        }
-                                        return undefined;
-                                    });
+                                const nonNullChartTileUuids =
+                                    chartTileUuids.filter((id) => id !== null);
+                                this.logger.info(
+                                    `Dashboard screenshot: ${nonNullChartTileUuids.length} non-null chart tiles out of ${chartTileUuids.length} total tiles`,
+                                );
+
                                 const expectedPaginatedResponses =
                                     chartTileUuids.length;
-                                const paginatedQueryPromise =
-                                    UnfurlService.waitForAllPaginatedResultsResponse(
+                                this.logger.info(
+                                    `Dashboard screenshot: Expecting ${expectedPaginatedResponses} paginated responses`,
+                                );
+
+                                exploreChartResultsPromise =
+                                    this.waitForAllPaginatedResultsResponse(
                                         page,
                                         expectedPaginatedResponses,
-                                        expectedPaginatedResponses * 60000,
+                                        expectedPaginatedResponses *
+                                            RESPONSE_TIMEOUT_MS,
                                     ); // NOTE: No await here
-
-                                exploreChartResultsPromise = Promise.race([
-                                    Promise.allSettled(
-                                        legacyExploreChartResultsPromises,
-                                    ),
-                                    paginatedQueryPromise,
-                                ]);
                             }
 
                             // Create separate arrays for each type of SQL response
@@ -698,6 +812,14 @@ export class UnfurlService extends BaseService {
                                     (id): id is string => !!id,
                                 );
 
+                            this.logger.info(
+                                `Dashboard screenshot: SQL chart tiles - original count: ${
+                                    sqlChartTileUuids?.length || 0
+                                }, filtered count: ${
+                                    filteredSqlChartTileUuids?.length || 0
+                                }`,
+                            );
+
                             const hasSqlCharts =
                                 filteredSqlChartTileUuids &&
                                 filteredSqlChartTileUuids.length > 0;
@@ -709,7 +831,7 @@ export class UnfurlService extends BaseService {
                                         );
                                         return page?.waitForResponse(
                                             responsePattern,
-                                            { timeout: 60000 },
+                                            { timeout: RESPONSE_TIMEOUT_MS },
                                         );
                                     });
 
@@ -720,7 +842,10 @@ export class UnfurlService extends BaseService {
                                                 new RegExp(
                                                     `/sqlRunner/saved/${id}/results-job`,
                                                 ),
-                                                { timeout: 60000 },
+                                                {
+                                                    timeout:
+                                                        RESPONSE_TIMEOUT_MS,
+                                                },
                                             ), // NOTE: No await here
                                     );
 
@@ -728,14 +853,14 @@ export class UnfurlService extends BaseService {
                                 sqlResultsPromises = [
                                     page?.waitForResponse(
                                         /\/sqlRunner\/results/,
-                                        { timeout: 60000 },
+                                        { timeout: RESPONSE_TIMEOUT_MS },
                                     ), // NOTE: No await here
                                 ];
 
                                 sqlPivotPromises = [
                                     page?.waitForResponse(
                                         /\/sqlRunner\/runPivotQuery/,
-                                        { timeout: 60000 },
+                                        { timeout: RESPONSE_TIMEOUT_MS },
                                     ), // NOTE: No await here
                                 ];
                             }
@@ -747,48 +872,13 @@ export class UnfurlService extends BaseService {
                                 ...(sqlResultsPromises || []),
                                 ...(sqlPivotPromises || []),
                             ];
-                        } else if (lightdashPage === LightdashPage.CHART) {
-                            // Wait for the visualization to load if we are in an saved explore page
-                            const responsePattern = new RegExp(
-                                `${resourceUuid}/results`,
-                            );
-                            // Wait for the visualization to load if we are in an unsaved explore page
-                            const legacyQueryPromise = page?.waitForResponse(
-                                responsePattern,
-                                {
-                                    timeout: 60000,
-                                },
-                            ); // NOTE: No await here
-                            const paginatedQueryPromise =
-                                UnfurlService.waitForPaginatedResultsResponse(
-                                    page,
-                                ); // NOTE: No await here
-
+                        } else if (
+                            lightdashPage === LightdashPage.CHART ||
+                            lightdashPage === LightdashPage.EXPLORE
+                        ) {
                             chartResultsPromises = [
-                                Promise.race([
-                                    legacyQueryPromise,
-                                    paginatedQueryPromise,
-                                ]),
-                            ];
-                        } else if (lightdashPage === LightdashPage.EXPLORE) {
-                            // Wait for the visualization to load if we are in an unsaved explore page
-                            const legacyQueryPromise = page?.waitForResponse(
-                                legacyMetricQueryEndpointRegex,
-                                {
-                                    timeout: 60000,
-                                },
-                            ); // NOTE: No await here
-                            const paginatedQueryPromise =
-                                UnfurlService.waitForPaginatedResultsResponse(
-                                    page,
-                                ); // NOTE: No await here
-
-                            chartResultsPromises = [
-                                Promise.race([
-                                    legacyQueryPromise,
-                                    paginatedQueryPromise,
-                                ]),
-                            ];
+                                this.waitForPaginatedResultsResponse(page),
+                            ]; // NOTE: No await here
                         }
 
                         await page.goto(url, {
@@ -822,7 +912,7 @@ export class UnfurlService extends BaseService {
                             loadingChartOverlays.map((loadingChartOverlay) =>
                                 loadingChartOverlay.waitFor({
                                     state: 'hidden',
-                                    timeout: 60000,
+                                    timeout: RESPONSE_TIMEOUT_MS,
                                 }),
                             ),
                         );
@@ -837,7 +927,7 @@ export class UnfurlService extends BaseService {
                         loadingCharts.map((loadingChart) =>
                             loadingChart.waitFor({
                                 state: 'hidden',
-                                timeout: 60000,
+                                timeout: RESPONSE_TIMEOUT_MS,
                             }),
                         ),
                     );
@@ -876,6 +966,7 @@ export class UnfurlService extends BaseService {
                             .screenshot({
                                 path,
                                 animations: 'disabled',
+                                timeout: RESPONSE_TIMEOUT_MS,
                             });
 
                         return imageBuffer;
@@ -927,6 +1018,7 @@ export class UnfurlService extends BaseService {
                             retries,
                             context,
                             contextId,
+                            selectedTabs,
                         });
                     }
 
@@ -985,7 +1077,7 @@ export class UnfurlService extends BaseService {
         return fullUrl;
     }
 
-    private async parseUrl(linkUrl: string): Promise<ParsedUrl> {
+    async parseUrl(linkUrl: string): Promise<ParsedUrl> {
         const shareUrl = new RegExp(`/share/${nanoid}`);
         const url = linkUrl.match(shareUrl)
             ? await this.getSharedUrl(linkUrl)

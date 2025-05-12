@@ -23,7 +23,10 @@ import {
     type TableChartConfig,
     type TimeZone,
 } from '@lightdash/common';
-import { type useQueryResults } from '../../hooks/useQueryResults';
+import {
+    type useGetReadyQueryResults,
+    type useInfiniteQueryResults,
+} from '../../hooks/useQueryResults';
 
 export enum ExplorerSection {
     FILTERS = 'FILTERS',
@@ -270,7 +273,8 @@ export interface ExplorerState extends ExplorerReduceState {
 
 export interface ExplorerContextType {
     state: ExplorerState;
-    queryResults: ReturnType<typeof useQueryResults>;
+    query: ReturnType<typeof useGetReadyQueryResults>;
+    queryResults: ReturnType<typeof useInfiniteQueryResults>;
     actions: {
         clearExplore: () => void;
         clearQuery: () => void;
@@ -315,6 +319,7 @@ export interface ExplorerContextType {
         setChartType: (chartType: ChartType) => void;
         setChartConfig: (chartConfig: ChartConfig) => void;
         fetchResults: () => void;
+        cancelQuery: () => void;
         toggleExpandedSection: (section: ExplorerSection) => void;
         addCustomDimension: (customDimension: CustomDimension) => void;
         editCustomDimension: (

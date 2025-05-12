@@ -2,12 +2,14 @@
 import { Type } from '@aws-sdk/client-s3';
 import {
     AnyType,
+    CacheMetadata,
     CartesianSeriesType,
     ChartKind,
     ChartType,
     DbtProjectType,
     LightdashInstallType,
     LightdashMode,
+    LightdashPage,
     LightdashRequestMethodHeader,
     LightdashUser,
     OpenIdIdentityIssuerType,
@@ -15,6 +17,7 @@ import {
     PinnedItem,
     ProjectMemberRole,
     QueryExecutionContext,
+    QueryHistoryStatus,
     RequestMethod,
     SchedulerFormat,
     SemanticLayerQuery,
@@ -254,6 +257,7 @@ type QueryExecutionEvent = BaseTrack & {
         context: QueryExecutionContext;
         organizationId: string;
         projectId: string;
+        cacheMetadata?: CacheMetadata;
     } & (
         | PaginatedMetricQueryExecutionProperties
         | MetricQueryExecutionProperties
@@ -288,13 +292,58 @@ type QueryPageEvent = BaseTrack & {
     properties: {
         queryId: string;
         projectId: string;
-        warehouseType: WarehouseTypes;
+        warehouseType: WarehouseTypes | null;
         page: number;
         columnsCount: number;
         totalRowCount: number;
         totalPageCount: number;
         resultsPageSize: number;
         resultsPageExecutionMs: number;
+        status: QueryHistoryStatus;
+        cacheMetadata: Omit<CacheMetadata, 'cacheHit'> | null;
+    };
+};
+
+type ResultsCacheCreateEvent = BaseTrack & {
+    event: 'results_cache.create';
+    properties: {
+        projectId: string;
+        cacheKey: string;
+        totalRowCount: number | null;
+        createdAt: Date;
+        expiresAt: Date;
+    };
+};
+
+type ResultsCacheWriteEvent = BaseTrack & {
+    event: 'results_cache.write';
+    properties: {
+        queryId: string;
+        projectId: string;
+        cacheKey: string;
+        totalRowCount: number | null;
+    };
+};
+
+type ResultsCacheReadEvent = BaseTrack & {
+    event: 'results_cache.read';
+    properties: {
+        queryId: string;
+        projectId: string;
+        cacheKey: string;
+        page: number;
+        requestedPageSize: number;
+        rowCount: number;
+        resultsPageExecutionMs: number;
+    };
+};
+
+type ResultsCacheDeleteEvent = BaseTrack & {
+    event: 'results_cache.delete';
+    properties: {
+        queryId: string;
+        projectId: string;
+        cacheKey: string;
     };
 };
 
@@ -435,6 +484,7 @@ export type CreateSavedChartVersionEvent = BaseTrack & {
             referenceLinesCount: number;
             margins: string;
             showLegend: boolean;
+            hasCustomTooltip: boolean;
         };
         pie?: {
             isDonut: boolean;
@@ -447,6 +497,10 @@ export type CreateSavedChartVersionEvent = BaseTrack & {
         };
         bigValue?: {
             hasBigValueComparison?: boolean;
+        };
+        custom?: {
+            size: number;
+            type: string;
         };
         numFixedWidthBinCustomDimensions: number;
         numFixedBinsBinCustomDimensions: number;
@@ -644,6 +698,7 @@ type SpaceEvent = BaseTrack & {
         projectId: string;
         isPrivate: boolean;
         userAccessCount: number;
+        isNested: boolean;
     };
 };
 
@@ -655,6 +710,7 @@ type SpaceDeleted = BaseTrack & {
         name: string;
         spaceId: string;
         projectId: string;
+        isNested: boolean;
     };
 };
 
@@ -872,7 +928,7 @@ type PromoteContent = BaseTrack & {
 };
 
 type AnalyticsDashboardView = BaseTrack & {
-    event: 'usage_analytics.dashboard_viewed';
+    event: 'usage_analytics.dashboard_viewed' | 'usage_analytics.csv_download';
     userId: string;
     properties: {
         projectId: string;
@@ -917,7 +973,7 @@ export type SchedulerUpsertEvent = BaseTrack & {
         format: SchedulerFormat;
         targets: Array<{
             schedulerTargetId: string;
-            type: 'slack' | 'email';
+            type: 'slack' | 'email' | 'msteams';
         }>;
         timeZone: string | undefined;
         includeLinks: boolean;
@@ -978,7 +1034,7 @@ export type SchedulerNotificationJobEvent = BaseTrack & {
         jobId: string;
         schedulerId?: string;
         resourceType?: 'dashboard' | 'chart';
-        type: 'slack' | 'email' | 'gsheets';
+        type: 'slack' | 'email' | 'gsheets' | 'msteams';
         format?: SchedulerFormat;
         withPdf?: boolean;
         sendNow: boolean;
@@ -1224,6 +1280,53 @@ export type CustomFieldsReplaced = BaseTrack & {
     };
 };
 
+export type DeprecatedRouteCalled = BaseTrack & {
+    event: 'deprecated_route.called';
+    userId: string;
+    properties: {
+        organizationId: string;
+        projectId: string;
+        route: string;
+        context: string;
+    };
+};
+
+export type RenameResourceEvent = BaseTrack & {
+    event:
+        | 'rename_chart.executed'
+        | 'rename_resource.executed'
+        | 'rename_resource.error';
+    userId: string;
+    properties: {
+        organizationId: string;
+        projectId: string | undefined;
+        context: string;
+        renamedCharts?: number;
+        renamedDashboards?: number;
+        renamedAlerts?: number;
+        renamedDashboardSchedulers?: number;
+        from: string;
+        to: string;
+        type: string;
+        error?: string;
+        dryRun?: boolean;
+        chartId?: string; // for rename_chart
+        withValidationWarning?: boolean; // for rename_resource.error
+    };
+};
+
+export type SupportShareEvent = BaseTrack & {
+    event: 'support.share';
+    userId: string;
+    properties: {
+        organizationId: string;
+        projectId: string | undefined;
+        page: LightdashPage | undefined;
+        withScreenshot: boolean;
+        canImpersonate: boolean;
+    };
+};
+
 type TypedEvent =
     | TrackSimpleEvent
     | CreateUserEvent
@@ -1235,6 +1338,10 @@ type TypedEvent =
     | QueryReadyEvent
     | QueryErrorEvent
     | QueryPageEvent
+    | ResultsCacheCreateEvent
+    | ResultsCacheWriteEvent
+    | ResultsCacheReadEvent
+    | ResultsCacheDeleteEvent
     | ModeDashboardChartEvent
     | UpdateSavedChartEvent
     | DeleteSavedChartEvent
@@ -1307,7 +1414,8 @@ type TypedEvent =
     | CreateTagEvent
     | CategoriesAppliedEvent
     | CustomFieldsReplaced
-    | SubtotalQueryEvent;
+    | SubtotalQueryEvent
+    | DeprecatedRouteCalled;
 
 type WrapTypedEvent = SemanticLayerView;
 

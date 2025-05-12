@@ -174,6 +174,10 @@ import {
     QueryHistoryTableName,
 } from '../database/entities/queryHistory';
 import {
+    ResultsCacheTable,
+    ResultsCacheTableName,
+} from '../database/entities/resultsFile';
+import {
     SavedSemanticViewerChartsTable,
     SavedSemanticViewerChartsTableName,
     SavedSemanticViewerChartVersionsTable,
@@ -190,6 +194,8 @@ import {
     SchedulerEmailTargetTableName,
     SchedulerLogTable,
     SchedulerLogTableName,
+    SchedulerMsTeamsTargetTable,
+    SchedulerMsTeamsTargetTableName,
     SchedulerSlackTargetTable,
     SchedulerSlackTargetTableName,
     SchedulerTable,
@@ -304,6 +310,7 @@ declare module 'knex/types/tables' {
         [SchedulerTableName]: SchedulerTable;
         [SchedulerSlackTargetTableName]: SchedulerSlackTargetTable;
         [SchedulerEmailTargetTableName]: SchedulerEmailTargetTable;
+        [SchedulerMsTeamsTargetTableName]: SchedulerMsTeamsTargetTable;
         [EmailOneTimePasscodesTableName]: EmailOneTimePasscodeTable;
         [SchedulerLogTableName]: SchedulerLogTable;
         [OrganizationAllowedEmailDomainsTableName]: OrganizationAllowedEmailDomainsTable;
@@ -337,5 +344,6 @@ declare module 'knex/types/tables' {
         [SpotlightTableConfigTableName]: SpotlightTableConfigTable;
         [OrganizationColorPaletteTableName]: OrganizationColorPaletteTable;
         [QueryHistoryTableName]: QueryHistoryTable;
+        [ResultsCacheTableName]: ResultsCacheTable;
     }
 }

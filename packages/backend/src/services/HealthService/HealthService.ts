@@ -99,9 +99,6 @@ export class HealthService extends BaseService {
             posthog: this.lightdashConfig.posthog,
             query: this.lightdashConfig.query,
             pivotTable: this.lightdashConfig.pivotTable,
-            customVisualizationsEnabled:
-                this.lightdashConfig.customVisualizations &&
-                this.lightdashConfig.customVisualizations.enabled,
             hasSlack: this.hasSlackConfig(),
             hasGithub: process.env.GITHUB_PRIVATE_KEY !== undefined,
             auth: {
@@ -143,7 +140,7 @@ export class HealthService extends BaseService {
             hasExtendedUsageAnalytics:
                 this.lightdashConfig.extendedUsageAnalytics.enabled,
             hasCacheAutocompleResults:
-                this.lightdashConfig.resultsCache.autocompleteEnabled || false,
+                this.lightdashConfig.results.autocompleteEnabled,
             appearance: {
                 overrideColorPalette:
                     this.lightdashConfig.appearance.overrideColorPalette,
@@ -152,6 +149,7 @@ export class HealthService extends BaseService {
                     ? this.lightdashConfig.appearance.overrideColorPaletteName
                     : undefined,
             },
+            hasMicrosoftTeams: this.lightdashConfig.microsoftTeams.enabled,
         };
     }
 

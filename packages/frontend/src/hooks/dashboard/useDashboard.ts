@@ -89,11 +89,12 @@ const exportDashboard = async (
     id: string,
     gridWidth: number | undefined,
     queryFilters: string,
+    selectedTabs?: string[],
 ) =>
     lightdashApi<string>({
         url: `/dashboards/${id}/export`,
         method: 'POST',
-        body: JSON.stringify({ queryFilters, gridWidth }),
+        body: JSON.stringify({ queryFilters, gridWidth, selectedTabs }),
     });
 
 export const useDashboardsAvailableFilters = (
@@ -141,6 +142,7 @@ export const useExportDashboard = () => {
             gridWidth: number | undefined;
             queryFilters: string;
             isPreview?: boolean;
+            selectedTabs?: string[];
         }
     >(
         (data) =>
@@ -148,6 +150,7 @@ export const useExportDashboard = () => {
                 data.dashboard.uuid,
                 data.gridWidth,
                 data.queryFilters,
+                data.selectedTabs,
             ),
         {
             mutationKey: ['export_dashboard'],
@@ -319,53 +322,6 @@ export const useUpdateDashboard = (
             onError: ({ error }) => {
                 showToastApiError({
                     title: `Failed to update dashboard`,
-                    apiError: error,
-                });
-            },
-        },
-    );
-};
-
-export const useMoveDashboardMutation = () => {
-    const navigate = useNavigate();
-    const { projectUuid } = useParams<{ projectUuid: string }>();
-    const queryClient = useQueryClient();
-    const { showToastSuccess, showToastApiError } = useToaster();
-    return useMutation<
-        Dashboard,
-        ApiError,
-        Pick<Dashboard, 'uuid' | 'name' | 'spaceUuid'>
-    >(
-        ({ uuid, name, spaceUuid }) =>
-            updateDashboard(uuid, { name, spaceUuid }),
-        {
-            mutationKey: ['dashboard_move'],
-            onSuccess: async (data) => {
-                await queryClient.invalidateQueries(['space']);
-                await queryClient.invalidateQueries(['dashboards']);
-                await queryClient.invalidateQueries([
-                    'most-popular-and-recently-updated',
-                ]);
-                await queryClient.invalidateQueries(['content']);
-                queryClient.setQueryData(
-                    ['saved_dashboard_query', data.uuid],
-                    data,
-                );
-                showToastSuccess({
-                    title: `Dashboard has been moved to ${data.spaceName}`,
-                    action: {
-                        children: 'Go to space',
-                        icon: IconArrowRight,
-                        onClick: () =>
-                            navigate(
-                                `/projects/${projectUuid}/spaces/${data.spaceUuid}`,
-                            ),
-                    },
-                });
-            },
-            onError: ({ error }) => {
-                showToastApiError({
-                    title: `Failed to move dashboard`,
                     apiError: error,
                 });
             },

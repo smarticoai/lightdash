@@ -31,6 +31,7 @@ import {
     createBranch,
     createFile,
     createPullRequest,
+    getBranches,
     getFileContent,
     getLastCommit,
     getOrRefreshToken,
@@ -240,7 +241,7 @@ Affected charts:
             token,
         });
 
-        const yamlSchema = new DbtSchemaEditor(fileContent);
+        const yamlSchema = new DbtSchemaEditor(fileContent, fileName);
 
         if (!yamlSchema.hasModels()) {
             throw new Error(`No models found in ${fileName}`);
@@ -709,5 +710,11 @@ Triggered by user ${user.firstName} ${user.lastName} (${user.email})
             ],
             owner,
         };
+    }
+
+    async getBranches(user: SessionUser, projectUuid: string) {
+        const githubProps = await this.getGithubProps(user, projectUuid, '"');
+        const branches = await getBranches(githubProps);
+        return branches.map((branch) => branch.name);
     }
 }

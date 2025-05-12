@@ -188,13 +188,13 @@ export const getPemFileContent = (certValue: string | undefined) =>
         decodeUnlessStartsWith: '-----BEGIN ', // -----BEGIN CERTIFICATE | -----BEGIN PRIVATE KEY
     });
 
-type LoggingLevel = 'error' | 'warn' | 'info' | 'http' | 'debug';
+type LoggingLevel = 'error' | 'warn' | 'info' | 'http' | 'debug' | 'audit';
 const assertIsLoggingLevel = (x: string): x is LoggingLevel =>
-    ['error', 'warn', 'info', 'http', 'debug'].includes(x);
+    ['error', 'warn', 'info', 'http', 'debug', 'audit'].includes(x);
 const parseLoggingLevel = (raw: string): LoggingLevel => {
     if (!assertIsLoggingLevel(raw)) {
         throw new ParseError(
-            `Cannot parse environment variable "LIGHTDASH_LOG_LEVEL". Value must be one of "error", "warn", "info", "debug" but LIGHTDASH_LOG_LEVEL=${raw}`,
+            `Cannot parse environment variable "LIGHTDASH_LOG_LEVEL". Value must be one of "error", "warn", "info", "debug", "audit" but LIGHTDASH_LOG_LEVEL=${raw}`,
         );
     }
     return raw;
@@ -236,6 +236,66 @@ export const parseOrganizationMemberRoleArray = (
         }
         return role;
     });
+};
+
+export const parseBaseS3Config = (): LightdashConfig['s3'] => {
+    const endpoint = process.env.S3_ENDPOINT;
+    const bucket = process.env.S3_BUCKET;
+    const region = process.env.S3_REGION;
+    const accessKey = process.env.S3_ACCESS_KEY;
+    const secretKey = process.env.S3_SECRET_KEY;
+    const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+    const expirationTime = parseInt(
+        process.env.S3_EXPIRATION_TIME || '259200', // 3 days in seconds
+        10,
+    );
+
+    if (!endpoint || !bucket || !region) {
+        console.error(
+            'ERROR: S3 is not configured. Missing S3_ENDPOINT, S3_BUCKET, S3_REGION, read docs for more info: https://docs.lightdash.com/self-host/customize-deployment/environment-variables',
+        );
+        throw new ParseError('Missing S3 configuration');
+    }
+
+    return {
+        endpoint,
+        bucket,
+        region,
+        accessKey,
+        secretKey,
+        expirationTime,
+        forcePathStyle,
+    };
+};
+
+export const parseResultsS3Config = (): LightdashConfig['results']['s3'] => {
+    const baseS3Config = parseBaseS3Config();
+    const {
+        endpoint: baseEndpoint,
+        bucket: baseBucket,
+        region: baseRegion,
+        accessKey: baseAccessKey,
+        secretKey: baseSecretKey,
+        forcePathStyle: baseForcePathStyle,
+    } = baseS3Config;
+
+    // TODO: rename to RESULTS_S3_BUCKET
+    const bucket = process.env.RESULTS_CACHE_S3_BUCKET || baseBucket;
+    // TODO: rename to RESULTS_S3_REGION
+    const region = process.env.RESULTS_CACHE_S3_REGION || baseRegion;
+    // TODO: rename to RESULTS_S3_ACCESS_KEY
+    const accessKey = process.env.RESULTS_CACHE_S3_ACCESS_KEY || baseAccessKey;
+    // TODO: rename to RESULTS_S3_SECRET_KEY
+    const secretKey = process.env.RESULTS_CACHE_S3_SECRET_KEY || baseSecretKey;
+
+    return {
+        endpoint: baseEndpoint, // ! For now we keep reusing the S3_ENDPOINT like we have been so far, we are just going to enforce it
+        forcePathStyle: baseForcePathStyle, // ! For now we keep reusing the S3_FORCE_PATH_STYLE like we have been so far, we are just going to enforce it
+        bucket,
+        region,
+        accessKey,
+        secretKey,
+    };
 };
 
 export type LoggingConfig = {
@@ -318,26 +378,18 @@ export type LightdashConfig = {
             daysLimit: number;
         };
     };
-    customVisualizations: {
-        enabled: boolean;
-    };
     // This is the override color palette for the organization
     appearance: {
         overrideColorPalette?: string[];
         overrideColorPaletteName?: string;
     };
-    s3?: S3Config;
+    s3: S3Config;
     headlessBrowser: HeadlessBrowserConfig;
-    resultsCache: {
-        resultsEnabled: boolean;
+    results: {
+        cacheEnabled: boolean;
         autocompleteEnabled: boolean;
         cacheStateTimeSeconds: number;
-        s3: {
-            bucket?: string;
-            region?: string;
-            accessKey?: string;
-            secretKey?: string;
-        };
+        s3: Omit<S3Config, 'expirationTime'>;
     };
     slack?: SlackConfig;
     scheduler: {
@@ -356,6 +408,7 @@ export type LightdashConfig = {
     ai: {
         copilot: {
             enabled: boolean;
+            requiresFeatureFlag: boolean;
             embeddingSearchEnabled?: boolean;
         };
     };
@@ -372,6 +425,12 @@ export type LightdashConfig = {
     contentAsCode: {
         maxDownloads: number;
     };
+    microsoftTeams: {
+        enabled: boolean;
+    };
+    googleCloudPlatform: {
+        projectId?: string;
+    };
 };
 
 export type SlackConfig = {
@@ -383,6 +442,7 @@ export type SlackConfig = {
     port: number;
     socketMode?: boolean;
     channelsCachedTime: number;
+    supportUrl: string;
 };
 export type HeadlessBrowserConfig = {
     host?: string;
@@ -390,12 +450,13 @@ export type HeadlessBrowserConfig = {
     internalLightdashHost: string;
 };
 export type S3Config = {
-    region?: string;
+    region: string;
+    endpoint: string;
+    bucket: string;
+    expirationTime?: number;
     accessKey?: string;
     secretKey?: string;
-    endpoint?: string;
-    bucket?: string;
-    expirationTime?: number;
+    forcePathStyle?: boolean;
 };
 export type IntercomConfig = {
     appId: string;
@@ -588,7 +649,7 @@ export const parseConfig = (): LightdashConfig => {
                 ),
                 frameAncestors: iframeEmbeddingEnabled
                     ? iframeAllowedDomains
-                    : ['https://*'],
+                    : [],
                 reportUri: process.env.LIGHTDASH_CSP_REPORT_URI,
             },
             crossOriginResourceSharingPolicy: {
@@ -835,26 +896,11 @@ export const parseConfig = (): LightdashConfig => {
                     ) || 3,
             },
         },
-        customVisualizations: {
-            enabled:
-                process.env.CUSTOM_VISUALIZATIONS_ENABLED === 'true' || false,
-        },
         pivotTable: {
             maxColumnLimit:
                 getIntegerFromEnvironmentVariable(
                     'LIGHTDASH_PIVOT_TABLE_MAX_COLUMN_LIMIT',
                 ) || 60,
-        },
-        s3: {
-            region: process.env.S3_REGION,
-            accessKey: process.env.S3_ACCESS_KEY,
-            secretKey: process.env.S3_SECRET_KEY,
-            bucket: process.env.S3_BUCKET,
-            endpoint: process.env.S3_ENDPOINT,
-            expirationTime: parseInt(
-                process.env.S3_EXPIRATION_TIME || '259200', // 3 days in seconds
-                10,
-            ),
         },
         headlessBrowser: {
             port: process.env.HEADLESS_BROWSER_PORT,
@@ -862,20 +908,16 @@ export const parseConfig = (): LightdashConfig => {
             internalLightdashHost:
                 process.env.INTERNAL_LIGHTDASH_HOST || siteUrl,
         },
-        resultsCache: {
-            resultsEnabled: process.env.RESULTS_CACHE_ENABLED === 'true',
+        s3: parseBaseS3Config(),
+        results: {
+            cacheEnabled: process.env.RESULTS_CACHE_ENABLED === 'true',
             autocompleteEnabled:
                 process.env.AUTOCOMPLETE_CACHE_ENABLED === 'true',
             cacheStateTimeSeconds: parseInt(
                 process.env.CACHE_STALE_TIME_SECONDS || '86400', // A day in seconds
                 10,
             ),
-            s3: {
-                bucket: process.env.RESULTS_CACHE_S3_BUCKET,
-                region: process.env.RESULTS_CACHE_S3_REGION,
-                accessKey: process.env.RESULTS_CACHE_S3_ACCESS_KEY,
-                secretKey: process.env.RESULTS_CACHE_S3_SECRET_KEY,
-            },
+            s3: parseResultsS3Config(),
         },
         slack: {
             signingSecret: process.env.SLACK_SIGNING_SECRET,
@@ -889,6 +931,7 @@ export const parseConfig = (): LightdashConfig => {
                 process.env.SLACK_CHANNELS_CACHED_TIME || '600000',
                 10,
             ), // 10 minutes
+            supportUrl: process.env.SLACK_SUPPORT_URL || '',
         },
         scheduler: {
             enabled: process.env.SCHEDULER_ENABLED !== 'false',
@@ -945,6 +988,8 @@ export const parseConfig = (): LightdashConfig => {
         ai: {
             copilot: {
                 enabled: process.env.AI_COPILOT_ENABLED === 'true',
+                requiresFeatureFlag:
+                    process.env.AI_COPILOT_REQUIRES_FEATURE_FLAG === 'true',
                 embeddingSearchEnabled:
                     process.env.AI_COPILOT_EMBEDDING_SEARCH_ENABLED === 'true',
             },
@@ -972,6 +1017,12 @@ export const parseConfig = (): LightdashConfig => {
             ),
             // not required if overrideColorPalette is set
             overrideColorPaletteName: process.env.OVERRIDE_COLOR_PALETTE_NAME,
+        },
+        microsoftTeams: {
+            enabled: process.env.MICROSOFT_TEAMS_ENABLED === 'true',
+        },
+        googleCloudPlatform: {
+            projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
         },
     };
 };

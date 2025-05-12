@@ -18,6 +18,9 @@ export const projectMemberAbilities: Record<
             projectUuid: member.projectUuid,
             isPrivate: false,
         });
+        can('view', 'JobStatus', {
+            createdByUserUuid: member.userUuid,
+        });
         can('view', 'SavedChart', {
             projectUuid: member.projectUuid,
             isPrivate: false,
@@ -198,11 +201,18 @@ export const projectMemberAbilities: Record<
         can('manage', 'ContentAsCode', {
             projectUuid: member.projectUuid,
         });
+        can('view', 'JobStatus', {
+            projectUuid: member.projectUuid,
+        });
     },
     admin(member, { can }) {
         projectMemberAbilities.developer(member, { can });
 
         can('delete', 'Project', {
+            projectUuid: member.projectUuid,
+        });
+
+        can('view', 'Analytics', {
             projectUuid: member.projectUuid,
         });
 

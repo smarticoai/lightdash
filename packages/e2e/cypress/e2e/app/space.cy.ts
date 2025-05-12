@@ -27,7 +27,6 @@ describe('Space', () => {
         cy.contains('Chart name');
 
         cy.get('.mantine-Modal-body').find('button').should('be.disabled');
-        cy.contains('Select a space to save the chart directly to'); // Wait until it finishes loading, otherwise the input will be cleared
         cy.get('[data-testid="ChartCreateModal/NameInput"]')
             .type(`Private chart ${timestamp}`)
             .should('have.value', `Private chart ${timestamp}`);
@@ -36,19 +35,28 @@ describe('Space', () => {
         cy.get('.mantine-Modal-body')
             .find('button')
             .should('not.be.disabled')
+            .contains('Next')
+            .click();
+        cy.get('.mantine-Modal-body')
+            .find('button')
+            .should('not.be.disabled')
             .contains('Save')
             .click();
 
+        cy.contains('Success! Chart was saved.').should('exist');
+
         // Go back to space using breadcrumbs
-        cy.contains('Private space').click();
+        cy.visit(`/projects/${SEED_PROJECT.project_uuid}/spaces`);
+        cy.contains(`Private space ${timestamp}`).click();
 
         // Create new dashboard
-        cy.get('.tabler-icon-plus').click();
+        cy.get('[data-testid="Space/AddButton"]').click();
         cy.contains('Create new dashboard').click();
         cy.findByPlaceholderText('eg. KPI Dashboard').type(
             `Private dashboard ${timestamp}`,
         );
-        cy.get('.mantine-Modal-body').find('button').contains('Create').click();
+        cy.findByText('Next').click();
+        cy.findByText('Create').click();
         // At this point the dashboard is created, but empty
         // TODO add private chart to dashboard ?
 
