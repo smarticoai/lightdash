@@ -4,7 +4,6 @@ import {
     FeatureFlags,
 } from '@lightdash/common';
 import { useQuery } from '@tanstack/react-query';
-import { useFeatureFlagEnabled as useFeatureFlagEnabledPosthog } from 'posthog-js/react';
 import { lightdashApi } from '../api';
 
 /**
@@ -14,8 +13,6 @@ import { lightdashApi } from '../api';
 export const useFeatureFlagEnabled = (featureFlag: FeatureFlags) => {
     switch (featureFlag) {
         case FeatureFlags.PassthroughLogin:
-            return true;
-        case FeatureFlags.CustomVisualizationsEnabled:
             return true;
         case FeatureFlags.ShowDbtCloudProjectOption:
             return true;
