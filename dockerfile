@@ -175,6 +175,8 @@ COPY packages/backend/tsconfig.json ./packages/backend/
 COPY packages/backend/tsconfig.sentry.json ./packages/backend/
 COPY packages/backend/src/ ./packages/backend/src
 
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+
 # Conditionally build backend with sourcemaps if Sentry environment variables are set
 RUN if [ -n "${SENTRY_AUTH_TOKEN}" ] && [ -n "${SENTRY_ORG}" ] && [ -n "${SENTRY_RELEASE_VERSION}" ] && [ -n "${SENTRY_FRONTEND_PROJECT}" ] && [ -n "${SENTRY_BACKEND_PROJECT}" ] && [ -n "${SENTRY_ENVIRONMENT}" ]; then \
     echo "Building backend with sourcemaps for Sentry"; \
