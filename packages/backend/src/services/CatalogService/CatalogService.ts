@@ -27,6 +27,7 @@ import {
     TablesConfiguration,
     TimeFrames,
     UserAttributeValueMap,
+    convertToAiHints,
     getAvailableCompareMetrics,
     getAvailableSegmentDimensions,
     getAvailableTimeDimensionsFromTables,
@@ -55,6 +56,7 @@ import {
     type CatalogSearchContext,
 } from '../../models/CatalogModel/CatalogModel';
 import { parseFieldsFromCompiledTable } from '../../models/CatalogModel/utils/parser';
+import { ChangesetModel } from '../../models/ChangesetModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { SavedChartModel } from '../../models/SavedChartModel';
 import { SpaceModel } from '../../models/SpaceModel';
@@ -77,6 +79,7 @@ export type CatalogArguments<T extends CatalogModel = CatalogModel> = {
     savedChartModel: SavedChartModel;
     spaceModel: SpaceModel;
     tagsModel: TagsModel;
+    changesetModel: ChangesetModel;
 };
 
 export class CatalogService<
@@ -98,6 +101,8 @@ export class CatalogService<
 
     tagsModel: TagsModel;
 
+    changesetModel: ChangesetModel;
+
     constructor({
         lightdashConfig,
         analytics,
@@ -107,6 +112,7 @@ export class CatalogService<
         savedChartModel,
         spaceModel,
         tagsModel,
+        changesetModel,
     }: CatalogArguments<T>) {
         super();
         this.lightdashConfig = lightdashConfig;
@@ -117,6 +123,7 @@ export class CatalogService<
         this.savedChartModel = savedChartModel;
         this.spaceModel = spaceModel;
         this.tagsModel = tagsModel;
+        this.changesetModel = changesetModel;
     }
 
     private static async getCatalogFields(
@@ -166,6 +173,7 @@ export class CatalogService<
     ): Promise<CatalogTable[]> {
         const tablesConfiguration =
             await this.projectModel.getTablesConfiguration(projectUuid);
+
         return explores.reduce<CatalogTable[]>((acc, explore) => {
             if (isExploreError(explore)) {
                 // If no dimensions found, we don't show the explore error
@@ -188,13 +196,16 @@ export class CatalogService<
                             explore.baseTable &&
                             explore.tables?.[explore.baseTable]?.description,
                         type: CatalogType.Table,
-                        joinedTables: explore.joinedTables,
+                        joinedTables:
+                            explore.joinedTables?.map((join) => join.table) ??
+                            null,
                         chartUsage: undefined,
                         // ! since we're not pulling from the catalog search table these do not exist (keep compatibility with data catalog)
                         catalogSearchUuid: '',
                         categories: [],
                         icon: null,
-                    },
+                        aiHints: convertToAiHints(explore.aiHint) ?? null,
+                    } satisfies CatalogTable,
                 ];
             }
 
@@ -213,53 +224,69 @@ export class CatalogService<
                             explore.tables[explore.baseTable].description,
                         type: CatalogType.Table,
                         groupLabel: explore.groupLabel,
-                        joinedTables: explore.joinedTables,
+                        joinedTables:
+                            explore.joinedTables?.map((join) => join.table) ??
+                            null,
                         tags: explore.tags,
                         chartUsage: undefined,
                         // ! since we're not pulling from the catalog search table these do not exist (keep compatibility with data catalog)
                         catalogSearchUuid: '',
                         categories: [],
                         icon: null,
-                    },
+                        aiHints: convertToAiHints(explore.aiHint) ?? null,
+                    } satisfies CatalogTable,
                 ];
             }
             return acc;
         }, []);
     }
 
-    private async searchCatalog(
-        projectUuid: string,
-        userAttributes: UserAttributeValueMap,
-        catalogSearch: ApiCatalogSearch,
-        context: CatalogSearchContext,
-        paginateArgs?: KnexPaginateArgs,
-        sortArgs?: ApiSort,
-    ): Promise<KnexPaginatedData<CatalogItem[]>> {
-        const tablesConfiguration =
-            await this.projectModel.getTablesConfiguration(projectUuid);
-
+    public async searchCatalog(args: {
+        projectUuid: string;
+        userAttributes: UserAttributeValueMap;
+        catalogSearch: ApiCatalogSearch;
+        context: CatalogSearchContext;
+        paginateArgs?: KnexPaginateArgs;
+        sortArgs?: ApiSort;
+        excludeUnmatched?: boolean;
+        fullTextSearchOperator?: 'OR' | 'AND';
+    }): Promise<KnexPaginatedData<CatalogItem[]>> {
         return wrapSentryTransaction(
             'CatalogService.searchCatalog',
             {
-                projectUuid,
-                userAttributesSize: Object.keys(userAttributes).length,
-                searchQuery: catalogSearch.searchQuery,
+                projectUuid: args.projectUuid,
+                userAttributesSize: Object.keys(args.userAttributes).length,
+                searchQuery: args.catalogSearch.searchQuery,
             },
-            async () =>
-                wrapSentryTransaction(
+            async () => {
+                const exploreCacheMap =
+                    await this.projectModel.findExploresFromCache(
+                        args.projectUuid,
+                        'name',
+                    );
+                const tablesConfiguration =
+                    await this.projectModel.getTablesConfiguration(
+                        args.projectUuid,
+                    );
+
+                return wrapSentryTransaction(
                     'CatalogService.searchCatalog.modelSearch',
                     {},
-                    async () =>
+                    () =>
                         this.catalogModel.search({
-                            projectUuid,
-                            catalogSearch,
-                            paginateArgs,
+                            projectUuid: args.projectUuid,
+                            catalogSearch: args.catalogSearch,
+                            paginateArgs: args.paginateArgs,
+                            userAttributes: args.userAttributes,
+                            sortArgs: args.sortArgs,
+                            context: args.context,
                             tablesConfiguration,
-                            userAttributes,
-                            sortArgs,
-                            context,
+                            excludeUnmatched: args.excludeUnmatched,
+                            fullTextSearchOperator: args.fullTextSearchOperator,
+                            exploreCacheMap,
                         }),
-                ),
+                );
+            },
         );
     }
 
@@ -270,6 +297,7 @@ export class CatalogService<
     ) {
         const cachedExplores = await this.projectModel.findExploresFromCache(
             projectUuid,
+            'name',
         );
 
         if (!cachedExplores) return [];
@@ -317,8 +345,10 @@ export class CatalogService<
     }
 
     async indexCatalog(projectUuid: string, userUuid: string | undefined) {
-        const cachedExploresMap =
-            await this.projectModel.getAllExploresFromCache(projectUuid);
+        const cachedExploresMap = await this.projectModel.findExploresFromCache(
+            projectUuid,
+            'uuid',
+        );
 
         const { organizationUuid } = await this.projectModel.getSummary(
             projectUuid,
@@ -351,6 +381,41 @@ export class CatalogService<
         }
 
         return result;
+    }
+
+    /**
+     * Index catalog updates for a list of explore names
+     * It will use the changeset to find the changes and update the catalog items in the database
+     * @param projectUuid - project uuid
+     * @param exploreNames - list of explore names
+     * @returns - catalog updates
+     */
+    async indexCatalogUpdates(projectUuid: string, exploreNames: string[]) {
+        const cachedExploreMap = await this.projectModel.findExploresFromCache(
+            projectUuid,
+            'name',
+            exploreNames,
+        );
+
+        const changeset =
+            await this.changesetModel.findActiveChangesetWithChangesByProjectUuid(
+                projectUuid,
+                {
+                    tableNames: exploreNames,
+                },
+            );
+
+        if (!changeset) {
+            return {
+                catalogUpdates: [],
+            };
+        }
+
+        return this.catalogModel.indexCatalogUpdates({
+            projectUuid,
+            cachedExploreMap,
+            changeset,
+        });
     }
 
     /**
@@ -563,12 +628,12 @@ export class CatalogService<
 
         if (catalogSearch.searchQuery) {
             // On search we don't show explore errors, because they are not indexed
-            return this.searchCatalog(
+            return this.searchCatalog({
                 projectUuid,
                 userAttributes,
                 catalogSearch,
                 context,
-            );
+            });
         }
 
         if (catalogSearch.type === CatalogType.Field) {
@@ -774,10 +839,10 @@ export class CatalogService<
                 user
             });
 
-        const paginatedCatalog = await this.searchCatalog(
+        const paginatedCatalog = await this.searchCatalog({
             projectUuid,
             userAttributes,
-            {
+            catalogSearch: {
                 searchQuery,
                 type: CatalogType.Field,
                 filter: CatalogFilter.Metrics,
@@ -786,7 +851,7 @@ export class CatalogService<
             context,
             paginateArgs,
             sortArgs,
-        );
+        });
 
         const { data: catalogMetrics, pagination } = paginatedCatalog;
 
@@ -997,6 +1062,7 @@ export class CatalogService<
 
         const explores = await this.projectModel.findExploresFromCache(
             projectUuid,
+            'name',
             uniqBy(metrics, 'tableName').map((m) => m.tableName),
         );
 
@@ -1229,6 +1295,10 @@ export class CatalogService<
         ) {
             throw new ForbiddenError();
         }
+        const exploreCacheMap = await this.projectModel.findExploresFromCache(
+            projectUuid,
+            'name',
+        );
 
         const userAttributes =
             await this.userAttributesModel.getAttributeValuesForOrgMember({
@@ -1248,6 +1318,7 @@ export class CatalogService<
             tablesConfiguration: await this.projectModel.getTablesConfiguration(
                 projectUuid,
             ),
+            exploreCacheMap,
         });
 
         const filteredMetrics = allCatalogMetrics.data.filter(
@@ -1287,9 +1358,10 @@ export class CatalogService<
             throw new ForbiddenError();
         }
 
-        const explore = await this.projectModel.getExploreFromCache(
+        const exploreCacheMap = await this.projectModel.findExploresFromCache(
             projectUuid,
-            tableName,
+            'name',
+            [tableName],
         );
 
         const userAttributes =
@@ -1311,10 +1383,15 @@ export class CatalogService<
             tablesConfiguration: await this.projectModel.getTablesConfiguration(
                 projectUuid,
             ),
+            exploreCacheMap,
         });
 
         const allDimensions = catalogDimensions.data
-            .map((d) => explore?.tables?.[tableName]?.dimensions?.[d.name])
+            .map(
+                (d) =>
+                    exploreCacheMap[tableName]?.tables?.[tableName]
+                        ?.dimensions?.[d.name],
+            )
             .filter((d): d is CompiledDimension => d !== undefined);
 
         return getAvailableSegmentDimensions(allDimensions);

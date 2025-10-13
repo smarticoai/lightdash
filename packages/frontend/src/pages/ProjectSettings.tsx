@@ -4,15 +4,16 @@ import { Navigate, useParams, useRoutes, type RouteObject } from 'react-router';
 import { DataOps } from '../components/DataOps';
 import ProjectUserAccess from '../components/ProjectAccess';
 import { UpdateProjectConnection } from '../components/ProjectConnection';
+import ProjectParameters from '../components/ProjectParameters';
 import ProjectTablesConfiguration from '../components/ProjectTablesConfiguration/ProjectTablesConfiguration';
 import SettingsScheduler from '../components/SettingsScheduler';
-import SettingsSemanticLayer from '../components/SettingsSemanticLayer';
 import SettingsUsageAnalytics from '../components/SettingsUsageAnalytics';
 import { SettingsValidator } from '../components/SettingsValidator';
 import ErrorState from '../components/common/ErrorState';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
 import SettingsEmbed from '../ee/features/embed/SettingsEmbed';
+import { ProjectChangesets } from '../features/changesets/components/ProjectChangesets';
 import { useProject } from '../hooks/useProject';
 
 const ProjectSettings: FC = () => {
@@ -38,12 +39,12 @@ const ProjectSettings: FC = () => {
                 ),
             },
             {
-                path: `/projectAccess`,
-                element: <ProjectUserAccess projectUuid={projectUuid} />,
+                path: `/changesets`,
+                element: <ProjectChangesets projectUuid={projectUuid} />,
             },
             {
-                path: `/semanticLayer`,
-                element: <SettingsSemanticLayer projectUuid={projectUuid} />,
+                path: `/projectAccess`,
+                element: <ProjectUserAccess projectUuid={projectUuid} />,
             },
             {
                 path: `/usageAnalytics`,
@@ -60,6 +61,10 @@ const ProjectSettings: FC = () => {
             {
                 path: `/dataOps`,
                 element: <DataOps projectUuid={projectUuid} />,
+            },
+            {
+                path: `/parameters`,
+                element: <ProjectParameters projectUuid={projectUuid} />,
             },
             {
                 path: '*',

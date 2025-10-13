@@ -3,23 +3,35 @@ import { Knex } from 'knex';
 export const AiThreadTableName = 'ai_thread';
 
 export type DbAiThread = {
+    agent_uuid: string | null;
     ai_thread_uuid: string;
     created_at: Date;
     organization_uuid: string;
     project_uuid: string;
-    created_from: string; // slack, web, etc
+    created_from: 'slack' | 'web_app' | 'evals'; // slack, web_app, evals etc
+    title: string | null;
+    title_generated_at: Date | null;
 };
 
 export type AiThreadTable = Knex.CompositeTableType<
     DbAiThread,
-    Pick<DbAiThread, 'organization_uuid' | 'project_uuid' | 'created_from'>
+    Pick<
+        DbAiThread,
+        'organization_uuid' | 'project_uuid' | 'created_from' | 'agent_uuid'
+    >,
+    Partial<
+        Pick<
+            DbAiThread,
+            'agent_uuid' | 'title' | 'title_generated_at' | 'project_uuid'
+        >
+    >
 >;
 
 export const AiSlackThreadTableName = 'ai_slack_thread';
 
 export const AiWebAppThreadTableName = 'ai_web_app_thread';
 
-type DbAiSlackThread = {
+export type DbAiSlackThread = {
     ai_slack_thread_uuid: string;
     ai_thread_uuid: string;
     slack_user_id: string;
@@ -47,7 +59,7 @@ export type AiSlackThreadTable = Knex.CompositeTableType<
 
 export type AiWebAppThreadTable = Knex.CompositeTableType<
     DbWebAppThread,
-    Pick<DbWebAppThread, 'user_uuid'>,
+    Pick<DbWebAppThread, 'ai_thread_uuid'>,
     never
 >;
 
@@ -65,30 +77,34 @@ export type DbAiPrompt = {
     filters_output: object | null;
     human_score: number | null;
     metric_query: object | null;
+    saved_query_uuid: string | null;
 };
 
-type DbAiPromptUpdate = Partial<
-    Pick<
-        DbAiPrompt,
-        | 'response'
-        | 'responded_at'
-        | 'viz_config_output'
-        | 'filters_output'
-        | 'human_score'
-        | 'metric_query'
-    >
->;
-
 export type AiPromptTable = Knex.CompositeTableType<
+    // base
     DbAiPrompt,
+    // insert
     Pick<DbAiPrompt, 'ai_thread_uuid' | 'created_by_user_uuid' | 'prompt'>,
-    DbAiPromptUpdate
+    // update
+    Partial<
+        Pick<
+            DbAiPrompt,
+            | 'response'
+            | 'viz_config_output'
+            | 'filters_output'
+            | 'human_score'
+            | 'metric_query'
+            | 'saved_query_uuid'
+        > & {
+            responded_at: Knex.Raw;
+        }
+    >
 >;
 
 export const AiSlackPromptTableName = 'ai_slack_prompt';
 export const AiWebAppPromptTableName = 'ai_web_app_prompt';
 
-type DbAiSlackPrompt = {
+export type DbAiSlackPrompt = {
     ai_slack_prompt_uuid: string;
     ai_prompt_uuid: string;
     slack_user_id: string;
@@ -97,7 +113,7 @@ type DbAiSlackPrompt = {
     response_slack_ts: string | null;
 };
 
-type DbAiWebAppPrompt = {
+export type DbAiWebAppPrompt = {
     ai_slack_prompt_uuid: string;
     ai_prompt_uuid: string;
     user_uuid: string;
@@ -117,6 +133,49 @@ export type AiSlackPromptTable = Knex.CompositeTableType<
 
 export type AiWebAppPromptTable = Knex.CompositeTableType<
     DbAiWebAppPrompt,
-    Pick<DbAiWebAppPrompt, 'ai_prompt_uuid'>,
+    Pick<DbAiWebAppPrompt, 'ai_prompt_uuid' | 'user_uuid'>,
     Pick<DbAiWebAppPrompt, 'user_uuid'>
+>;
+
+export const AiAgentToolCallTableName = 'ai_agent_tool_call';
+
+export type DbAiAgentToolCall = {
+    ai_agent_tool_call_uuid: string;
+    ai_prompt_uuid: string;
+    tool_call_id: string;
+    tool_name: string;
+    tool_args: object;
+    created_at: Date;
+};
+
+export type AiAgentToolCallTable = Knex.CompositeTableType<
+    DbAiAgentToolCall,
+    Pick<
+        DbAiAgentToolCall,
+        'ai_prompt_uuid' | 'tool_call_id' | 'tool_name' | 'tool_args'
+    >,
+    never
+>;
+
+export const AiAgentToolResultTableName = 'ai_agent_tool_result';
+
+export type DbAiAgentToolResult = {
+    ai_agent_tool_result_uuid: string;
+    ai_prompt_uuid: string;
+    tool_call_id: string;
+    tool_name: string;
+    result: string;
+    metadata: object | null;
+    created_at: Date;
+    // TODO add updated_at
+};
+
+export type AiAgentToolResultTable = Knex.CompositeTableType<
+    DbAiAgentToolResult,
+    Pick<
+        DbAiAgentToolResult,
+        'ai_prompt_uuid' | 'tool_call_id' | 'tool_name' | 'result'
+    > &
+        Partial<Pick<DbAiAgentToolResult, 'metadata'>>,
+    Partial<Pick<DbAiAgentToolResult, 'metadata'>>
 >;

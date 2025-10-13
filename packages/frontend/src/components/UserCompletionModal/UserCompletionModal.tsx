@@ -99,7 +99,11 @@ const UserCompletionModal: FC = () => {
         setFieldValue('enableEmailDomainAccess', true);
     }, [canEnableEmailDomainAccess, setFieldValue]);
 
-    if (!user.data || user.data.isSetupComplete) {
+    if (
+        !user.data ||
+        user.data.isSetupComplete ||
+        health.data?.rudder.writeKey === undefined
+    ) {
         return null;
     }
 

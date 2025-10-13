@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+    ForbiddenError,
     getErrorMessage,
     LightdashError,
     RenameType,
@@ -7,11 +8,18 @@ import {
 } from '@lightdash/common';
 import { InvalidArgumentError, Option, program } from 'commander';
 import { validate } from 'uuid';
-import { findDbtDefaultProfile } from './dbt/profile';
+import {
+    CLI_VERSION,
+    DEFAULT_DBT_PROFILES_DIR as defaultProfilesDir,
+    DEFAULT_DBT_PROJECT_DIR as defaultProjectDir,
+    NODE_VERSION,
+    OPTIMIZED_NODE_VERSION,
+} from './env';
 import { compileHandler } from './handlers/compile';
 import { refreshHandler } from './handlers/dbt/refresh';
 import { dbtRunHandler } from './handlers/dbt/run';
 import { deployHandler } from './handlers/deploy';
+import { diagnosticsHandler } from './handlers/diagnostics';
 import { downloadHandler, uploadHandler } from './handlers/download';
 import { generateHandler } from './handlers/generate';
 import { generateExposuresHandler } from './handlers/generateExposures';
@@ -25,18 +33,9 @@ import { renameHandler } from './handlers/renameHandler';
 import { setProjectHandler } from './handlers/setProject';
 import { validateHandler } from './handlers/validate';
 import * as styles from './styles';
-
+// Trigger CLI tests
 // Suppress AWS SDK V2 warning, imported by snowflake SDK
 process.env.AWS_SDK_JS_SUPPRESS_MAINTENANCE_MODE_MESSAGE = '1';
-
-const nodeVersion = require('parse-node-version')(process.version);
-
-const OPTIMIZED_NODE_VERSION = 20;
-
-const { version: VERSION } = require('../package.json');
-
-const defaultProjectDir = process.env.DBT_PROJECT_DIR || '.';
-const defaultProfilesDir: string = findDbtDefaultProfile();
 
 function parseIntArgument(value: string) {
     const parsedValue = parseInt(value, 10);
@@ -78,7 +77,7 @@ function parseProjectArgument(value: string | undefined): string | undefined {
 }
 
 program
-    .version(VERSION)
+    .version(CLI_VERSION)
     .name(styles.title('⚡️lightdash'))
     .description(
         'Developer tools for dbt and Lightdash.\nSee https://docs.lightdash.com for more help and examples',
@@ -172,13 +171,22 @@ ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
             'login',
         )} https://custom.lightdash.domain --token 12345 ${styles.secondary(
-            '-- Logs in with a personal access token (useful for users that use SSO in the browser)',
+            '-- Logs in with an API access token (useful for users that use SSO in the browser)',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'login',
+        )} https://custom.lightdash.domain --oauth ${styles.secondary(
+            '-- Logs in using OAuth2 flow (opens browser for authentication)',
         )}
 `,
     )
-    .option('--token <token>', 'Login with a personal access token', undefined)
+    .option('--token <token>', 'Login with an API access token', undefined)
+    .option(
+        '--oauth',
+        'Login using OAuth2 flow (opens browser for authentication)',
+        false,
+    )
     .option('--verbose', undefined, false)
-
     .action(login);
 
 // CONFIG
@@ -275,6 +283,11 @@ ${styles.bold('Examples:')}
     .option('--verbose', undefined, false)
     .option('-y, --assume-yes', 'assume yes to prompts', false)
     .option('-no, --assume-no', 'assume no to prompts', false)
+    .option(
+        '--preserve-column-case',
+        'preserve original casing of column names in generated schema files',
+        false,
+    )
     .action(dbtRunHandler);
 
 program
@@ -331,6 +344,10 @@ program
         '--no-defer',
         'dbt property. Do not resolve unselected nodes by deferring to the manifest within the --state directory.',
         undefined,
+    )
+    .option(
+        '--no-warehouse-credentials',
+        'Compile without any warehouse credentials. Skips dbt compile + warehouse catalog',
     )
     .action(compileHandler);
 
@@ -405,6 +422,16 @@ program
         true,
     )
     .option('--ignore-errors', 'Allows deploy with errors on compile', false)
+    .option(
+        '--table-configuration <prod|all>',
+        `If set to 'prod' it will copy the table configuration from prod project`,
+        'all',
+    )
+    .option(
+        '--skip-copy-content',
+        'Skip copying content from the source project',
+        false,
+    )
     .action(previewHandler);
 
 program
@@ -478,6 +505,16 @@ program
         true,
     )
     .option('--ignore-errors', 'Allows deploy with errors on compile', false)
+    .option(
+        '--table-configuration <prod|all>',
+        `If set to 'prod' it will copy the table configuration from prod project`,
+        'all',
+    )
+    .option(
+        '--skip-copy-content',
+        'Skip copying content from the source project',
+        false,
+    )
     .action(startPreviewHandler);
 
 program
@@ -552,6 +589,16 @@ program
         parseProjectArgument,
         undefined,
     )
+    .option(
+        '--skip-space-create',
+        'Skip space creation if it does not exist',
+        false,
+    )
+    .option(
+        '--include-charts',
+        'Include charts updates when uploading dashboards',
+        false,
+    )
     .action(uploadHandler);
 
 program
@@ -616,6 +663,10 @@ program
         'Use `dbt list` instead of `dbt compile` to generate dbt manifest.json',
         parseUseDbtListOption,
         true,
+    )
+    .option(
+        '--no-warehouse-credentials',
+        'Create project without warehouse credentials. Skips dbt compile + warehouse catalog',
     )
     .action(deployHandler);
 
@@ -765,6 +816,11 @@ ${styles.bold('Examples:')}
         'exclude Lightdash metadata from the generated .yml',
         false,
     )
+    .option(
+        '--preserve-column-case',
+        'preserve original casing of column names in generated schema files',
+        false,
+    )
     .option('--verbose', undefined, false)
 
     .action(generateHandler);
@@ -822,9 +878,67 @@ ${styles.bold('Examples:')}
     )
     .action(generateExposuresHandler);
 
+program
+    .command('diagnostics')
+    .description('Shows diagnostic information about the CLI environment')
+    .addHelpText(
+        'after',
+        `
+${styles.bold('Examples:')}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'diagnostics',
+        )} ${styles.secondary(
+            '-- shows CLI version, Node.js version, and auth status',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'diagnostics',
+        )} --dbt ${styles.secondary('-- includes dbt debug output')}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'diagnostics',
+        )} --dbt --project-dir ./my-dbt-project ${styles.secondary(
+            '-- runs dbt debug with custom project directory',
+        )}
+`,
+    )
+    .option('--dbt', 'Include dbt debug information', false)
+    .option(
+        '--project-dir <path>',
+        'The directory of the dbt project (used with --dbt flag)',
+        defaultProjectDir,
+    )
+    .option(
+        '--profiles-dir <path>',
+        'The directory of the dbt profiles (used with --dbt flag)',
+        defaultProfilesDir,
+    )
+    .option(
+        '--defer',
+        'dbt property. Resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .option(
+        '--no-defer',
+        'dbt property. Do not resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .action(diagnosticsHandler);
+
 const errorHandler = (err: Error) => {
-    console.error(styles.error(getErrorMessage(err)));
-    if (err.name === 'AuthorizationError') {
+    // Use error message with fallback for safety
+    const errorMessage = getErrorMessage(err) || 'An unexpected error occurred';
+    console.error(styles.error(errorMessage));
+
+    if (err.name === 'ForbiddenError' || err instanceof ForbiddenError) {
+        // For permission errors, show clear message with fallback
+        const permissionMessage =
+            err.message || "You don't have permission to perform this action";
+        if (permissionMessage !== errorMessage) {
+            console.error(styles.error(permissionMessage));
+        }
+        console.error(
+            `\n💡 Contact your Lightdash administrator to request project creation access or if you believe this is incorrect.\n`,
+        );
+    } else if (err.name === 'AuthorizationError') {
         console.error(
             `Looks like you did not authenticate or the personal access token expired.\n\n👀 See https://docs.lightdash.com/guides/cli/cli-authentication for help and examples`,
         );
@@ -847,7 +961,7 @@ const errorHandler = (err: Error) => {
             ),
         );
     }
-    if (nodeVersion.major !== OPTIMIZED_NODE_VERSION) {
+    if (NODE_VERSION.major !== OPTIMIZED_NODE_VERSION) {
         console.warn(
             styles.warning(
                 `⚠️ You are using Node.js version ${process.version}. Lightdash CLI is optimized for v${OPTIMIZED_NODE_VERSION} so you might experience issues.`,

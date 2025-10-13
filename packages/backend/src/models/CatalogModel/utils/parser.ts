@@ -6,6 +6,7 @@ import {
     CompiledDimension,
     CompiledMetric,
     CompiledTable,
+    convertToAiHints,
     Explore,
     getBasicType,
     type Tag,
@@ -15,37 +16,36 @@ import { DbCatalog } from '../../../database/entities/catalog';
 const parseFieldFromMetricOrDimension = (
     table: CompiledTable,
     field: CompiledMetric | CompiledDimension,
-    {
-        catalogSearchUuid,
-        tags,
-        categories,
-        requiredAttributes,
-        chartUsage,
-        icon,
-    }: {
+    catalogArgs: {
+        label: string | null;
+        description: string | null;
         catalogSearchUuid: string;
         tags: string[];
         categories: Pick<Tag, 'tagUuid' | 'color' | 'name' | 'yamlReference'>[];
         requiredAttributes: Record<string, string | string[]> | undefined;
         chartUsage: number | undefined;
         icon: CatalogItemIcon | null;
+        searchRank?: number;
     },
 ): CatalogField => ({
     name: field.name,
-    label: field.label,
-    description: field.description,
+    label: catalogArgs.label ?? '',
+    description: catalogArgs.description ?? '',
     tableLabel: field.tableLabel,
     tableName: table.name,
     tableGroupLabel: table.groupLabel,
     fieldType: field.fieldType,
     basicType: getBasicType(field),
+    fieldValueType: field.type,
     type: CatalogType.Field,
-    requiredAttributes,
-    tags,
-    categories,
-    chartUsage,
-    catalogSearchUuid,
-    icon,
+    aiHints: convertToAiHints(field.aiHint) ?? null,
+    requiredAttributes: catalogArgs.requiredAttributes,
+    tags: catalogArgs.tags,
+    categories: catalogArgs.categories,
+    chartUsage: catalogArgs.chartUsage,
+    catalogSearchUuid: catalogArgs.catalogSearchUuid,
+    icon: catalogArgs.icon,
+    searchRank: catalogArgs.searchRank,
 });
 
 export const parseFieldsFromCompiledTable = (
@@ -57,6 +57,8 @@ export const parseFieldsFromCompiledTable = (
     ].filter((f) => !f.hidden); // Filter out hidden fields from catalog
     return tableFields.map((field) =>
         parseFieldFromMetricOrDimension(table, field, {
+            label: field.label,
+            description: field.description ?? '',
             tags: [],
             categories: [],
             requiredAttributes:
@@ -76,6 +78,7 @@ export const parseCatalog = (
             Tag,
             'tagUuid' | 'name' | 'color' | 'yamlReference'
         >[];
+        search_rank: number;
     },
 ): CatalogTable | CatalogField => {
     const baseTable = dbCatalog.explore.tables[dbCatalog.explore.baseTable];
@@ -93,6 +96,9 @@ export const parseCatalog = (
             categories: dbCatalog.catalog_tags,
             chartUsage: dbCatalog.chart_usage ?? undefined,
             icon: dbCatalog.icon ?? null,
+            aiHints: convertToAiHints(dbCatalog.explore.aiHint) ?? null,
+            joinedTables: dbCatalog.joined_tables ?? null,
+            searchRank: dbCatalog.search_rank,
         };
     }
 
@@ -112,11 +118,14 @@ export const parseCatalog = (
         );
     }
     return parseFieldFromMetricOrDimension(baseTable, findField, {
+        label: dbCatalog.label,
+        description: dbCatalog.description,
         catalogSearchUuid: dbCatalog.catalog_search_uuid,
         tags: dbCatalog.explore.tags,
         categories: dbCatalog.catalog_tags,
         requiredAttributes: dbCatalog.required_attributes ?? undefined,
         chartUsage: dbCatalog.chart_usage ?? 0,
         icon: dbCatalog.icon ?? null,
+        searchRank: dbCatalog.search_rank,
     });
 };

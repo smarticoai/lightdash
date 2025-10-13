@@ -14,6 +14,7 @@ export enum DbtProjectType {
     BITBUCKET = 'bitbucket',
     AZURE_DEVOPS = 'azure_devops',
     NONE = 'none',
+    MANIFEST = 'manifest',
 }
 
 export enum WarehouseTypes {
@@ -23,11 +24,7 @@ export enum WarehouseTypes {
     SNOWFLAKE = 'snowflake',
     DATABRICKS = 'databricks',
     TRINO = 'trino',
-}
-
-export enum SemanticLayerType {
-    DBT = 'DBT',
-    CUBE = 'CUBE',
+    CLICKHOUSE = 'clickhouse',
 }
 
 export type SshTunnelConfiguration = {
@@ -39,6 +36,11 @@ export type SshTunnelConfiguration = {
     sshTunnelPrivateKey?: string;
 };
 
+export enum BigqueryAuthenticationType {
+    SSO = 'sso',
+    PRIVATE_KEY = 'private_key',
+    ADC = 'adc', // Application Default Credentials
+}
 export type CreateBigqueryCredentials = {
     type: WarehouseTypes.BIGQUERY;
     project: string;
@@ -46,7 +48,8 @@ export type CreateBigqueryCredentials = {
     threads?: number;
     timeoutSeconds: number | undefined;
     priority: 'interactive' | 'batch' | undefined;
-    keyfileContents: Record<string, string>;
+    authenticationType?: BigqueryAuthenticationType;
+    keyfileContents: Record<string, string>; // used for both sso and private key
     requireUserCredentials?: boolean;
     retries: number | undefined;
     location: string | undefined;
@@ -65,6 +68,8 @@ export const sensitiveCredentialsFieldNames = [
     'sslcert',
     'sslkey',
     'sslrootcert',
+    'token',
+    'refreshToken',
 ] as const;
 export type SensitiveCredentialsFieldNames =
     typeof sensitiveCredentialsFieldNames[number];
@@ -139,6 +144,22 @@ export type TrinoCredentials = Omit<
     CreateTrinoCredentials,
     SensitiveCredentialsFieldNames
 >;
+export type CreateClickhouseCredentials = {
+    type: WarehouseTypes.CLICKHOUSE;
+    host: string;
+    user: string;
+    password: string;
+    requireUserCredentials?: boolean;
+    port: number;
+    schema: string;
+    secure?: boolean;
+    startOfWeek?: WeekDay | null;
+    timeoutSeconds?: number;
+};
+export type ClickhouseCredentials = Omit<
+    CreateClickhouseCredentials,
+    SensitiveCredentialsFieldNames
+>;
 export type CreateRedshiftCredentials = SshTunnelConfiguration & {
     type: WarehouseTypes.REDSHIFT;
     host: string;
@@ -159,6 +180,14 @@ export type RedshiftCredentials = Omit<
     CreateRedshiftCredentials,
     SensitiveCredentialsFieldNames
 >;
+
+// TODO use enum instead
+export enum SnowflakeAuthenticationType {
+    PASSWORD = 'password',
+    PRIVATE_KEY = 'private_key',
+    SSO = 'sso',
+}
+
 export type CreateSnowflakeCredentials = {
     type: WarehouseTypes.SNOWFLAKE;
     account: string;
@@ -167,7 +196,9 @@ export type CreateSnowflakeCredentials = {
     requireUserCredentials?: boolean;
     privateKey?: string;
     privateKeyPass?: string;
-    authenticationType?: 'password' | 'private_key';
+    authenticationType?: SnowflakeAuthenticationType;
+    refreshToken?: string; // Refresh token for sso, this is used to generate a new access token
+    token?: string; // Access token for sso, this has a low expiry time
     role?: string;
     database: string;
     warehouse: string;
@@ -178,7 +209,7 @@ export type CreateSnowflakeCredentials = {
     accessUrl?: string;
     startOfWeek?: WeekDay | null;
     quotedIdentifiersIgnoreCase?: boolean;
-    override?: string;
+    override?: boolean;
 };
 export type SnowflakeCredentials = Omit<
     CreateSnowflakeCredentials,
@@ -190,14 +221,16 @@ export type CreateWarehouseCredentials =
     | CreatePostgresCredentials
     | CreateSnowflakeCredentials
     | CreateDatabricksCredentials
-    | CreateTrinoCredentials;
+    | CreateTrinoCredentials
+    | CreateClickhouseCredentials;
 export type WarehouseCredentials =
     | SnowflakeCredentials
     | RedshiftCredentials
     | PostgresCredentials
     | BigqueryCredentials
     | DatabricksCredentials
-    | TrinoCredentials;
+    | TrinoCredentials
+    | ClickhouseCredentials;
 
 export type CreatePostgresLikeCredentials =
     | CreateRedshiftCredentials
@@ -235,6 +268,7 @@ export enum SupportedDbtVersions {
     V1_7 = 'v1.7',
     V1_8 = 'v1.8',
     V1_9 = 'v1.9',
+    V1_10 = 'v1.10',
 }
 
 // Make it an enum to avoid TSOA errors
@@ -261,6 +295,12 @@ export interface DbtNoneProjectConfig extends DbtProjectCompilerBase {
     type: DbtProjectType.NONE;
 
     hideRefreshButton?: boolean;
+}
+
+export interface DbtManifestProjectConfig extends DbtProjectConfigBase {
+    type: DbtProjectType.MANIFEST;
+    manifest: string;
+    hideRefreshButton: boolean;
 }
 
 export interface DbtLocalProjectConfig extends DbtProjectCompilerBase {
@@ -324,7 +364,8 @@ export type DbtProjectConfig =
     | DbtBitBucketProjectConfig
     | DbtGitlabProjectConfig
     | DbtAzureDevOpsProjectConfig
-    | DbtNoneProjectConfig;
+    | DbtNoneProjectConfig
+    | DbtManifestProjectConfig;
 
 export const isGitProjectType = (
     connection: DbtProjectConfig,
@@ -350,37 +391,28 @@ export const maybeOverrideDbtConnection = <T extends DbtProjectConfig>(
     overrides: {
         branch?: string;
         environment?: DbtProjectEnvironmentVariable[];
+        manifest?: string;
     },
-): T => ({
-    ...connection,
-    ...(isGitProjectType(connection) && overrides.branch
-        ? { branch: overrides.branch }
-        : undefined),
-    ...(!isRemoteType(connection) && overrides.environment
-        ? { environment: overrides.environment }
-        : undefined),
-});
+): T => {
+    // If manifest is provided, create a MANIFEST connection type
+    if (overrides.manifest) {
+        return {
+            type: DbtProjectType.MANIFEST,
+            manifest: overrides.manifest,
+            hideRefreshButton: true,
+        } as T;
+    }
 
-export type DbtSemanticLayerConnection = {
-    type: SemanticLayerType.DBT;
-    environmentId: string;
-    domain: string;
-    token: string;
+    return {
+        ...connection,
+        ...(isGitProjectType(connection) && overrides.branch
+            ? { branch: overrides.branch }
+            : undefined),
+        ...(!isRemoteType(connection) && overrides.environment
+            ? { environment: overrides.environment }
+            : undefined),
+    };
 };
-
-export type CubeSemanticLayerConnection = {
-    type: SemanticLayerType.CUBE;
-    domain: string;
-    token: string;
-};
-
-export type SemanticLayerConnection =
-    | DbtSemanticLayerConnection
-    | CubeSemanticLayerConnection;
-
-export type SemanticLayerConnectionUpdate =
-    | (Partial<DbtSemanticLayerConnection> & { type: SemanticLayerType.DBT })
-    | (Partial<CubeSemanticLayerConnection> & { type: SemanticLayerType.CUBE });
 
 export type Project = {
     organizationUuid: string;
@@ -392,9 +424,9 @@ export type Project = {
     pinnedListUuid?: string;
     upstreamProjectUuid?: string;
     dbtVersion: DbtVersionOption;
-    semanticLayerConnection?: SemanticLayerConnection;
     schedulerTimezone: string;
     createdByUserUuid: string | null;
+    organizationWarehouseCredentialsUuid?: string;
 };
 
 export type ProjectSummary = Pick<

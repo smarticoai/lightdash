@@ -42,10 +42,10 @@ import { useEffect, useMemo, useState, type FC } from 'react';
 import { useTableStyles } from '../../../hooks/styles/useTableStyles';
 import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import { useCreateInviteLinkMutation } from '../../../hooks/useInviteLink';
+import { useUpsertOrganizationUserRoleAssignmentMutation } from '../../../hooks/useOrganizationRoles';
 import {
     useDeleteOrganizationUserMutation,
     usePaginatedOrganizationUsers,
-    useUpdateUserMutation,
 } from '../../../hooks/useOrganizationUsers';
 import useApp from '../../../providers/App/useApp';
 import useTracking from '../../../providers/Tracking/useTracking';
@@ -150,7 +150,7 @@ const UserListItem: FC<{
     const inviteLink = useCreateInviteLinkMutation();
     const { track } = useTracking();
     const { user: activeUser, health } = useApp();
-    const updateUser = useUpdateUserMutation(user.userUuid);
+    const updateUserRole = useUpsertOrganizationUserRoleAssignmentMutation();
     const handleDelete = () => mutate(user.userUuid);
 
     const getNewLink = () => {
@@ -194,8 +194,9 @@ const UserListItem: FC<{
                                     }),
                                 )}
                                 onChange={(newRole: string) => {
-                                    updateUser.mutate({
-                                        role: newRole as OrganizationMemberRole,
+                                    updateUserRole.mutate({
+                                        userId: user.userUuid,
+                                        roleId: newRole,
                                     });
                                 }}
                                 value={user.role}
@@ -347,7 +348,7 @@ const UserListItem: FC<{
 const UsersView: FC = () => {
     const [showInviteModal, setShowInviteModal] = useState(false);
     const { user } = useApp();
-    const { data: UserGroupsFeatureFlag } = useFeatureFlag(
+    const userGroupsFeatureFlagQuery = useFeatureFlag(
         FeatureFlags.UserGroupsEnabled,
     );
     const { classes } = useTableStyles();
@@ -384,9 +385,16 @@ const UsersView: FC = () => {
         return paginatedUsers?.pagination;
     }, [paginatedUsers]);
 
-    if (!user.data || !UserGroupsFeatureFlag) return null;
+    if (!user.data) return null;
 
-    const isGroupManagementEnabled = UserGroupsFeatureFlag?.enabled;
+    if (userGroupsFeatureFlagQuery.isError) {
+        console.error(userGroupsFeatureFlagQuery.error);
+        throw new Error('Error fetching user groups feature flag');
+    }
+
+    const isGroupManagementEnabled =
+        userGroupsFeatureFlagQuery.isSuccess &&
+        userGroupsFeatureFlagQuery.data.enabled;
 
     return (
         <Stack spacing="xs">

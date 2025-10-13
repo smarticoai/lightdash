@@ -1,8 +1,12 @@
 import assertUnreachable from '../utils/assertUnreachable';
 import { type AnyType } from './any';
+import { type ApiSuccess } from './api/success';
+import type { DownloadFileType } from './downloadFile';
 import { type Explore, type ExploreError } from './explore';
 import { type DashboardFilterRule, type DashboardFilters } from './filter';
+import { type KnexPaginatedData } from './knex-paginate';
 import { type MetricQuery } from './metricQuery';
+import { type ParametersValuesMap } from './parameters';
 import { type PivotConfig } from './pivot';
 import { type DateGranularity } from './timeFrames';
 import { type ValidationTarget } from './validation';
@@ -10,6 +14,7 @@ import { type ValidationTarget } from './validation';
 export type SchedulerCsvOptions = {
     formatted: boolean;
     limit: 'table' | 'all' | number;
+    asAttachment?: boolean;
 };
 
 export type SchedulerImageOptions = {
@@ -37,6 +42,7 @@ export enum SchedulerJobStatus {
 
 export enum SchedulerFormat {
     CSV = 'csv',
+    XLSX = 'xlsx',
     IMAGE = 'image',
     GSHEETS = 'gsheets',
 }
@@ -96,11 +102,14 @@ export type SchedulerBase = {
     createdAt: Date;
     updatedAt: Date;
     createdBy: string;
+    createdByName: string | null;
     format: SchedulerFormat;
     cron: string;
     timezone?: string;
     savedChartUuid: string | null;
+    savedChartName: string | null;
     dashboardUuid: string | null;
+    dashboardName: string | null;
     options: SchedulerOptions;
     thresholds?: ThresholdOptions[]; // it can ben an array of AND conditions
     enabled: boolean;
@@ -117,16 +126,13 @@ export const isDashboardScheduler = (
     scheduler: Scheduler | CreateSchedulerAndTargets,
 ): scheduler is DashboardScheduler => scheduler.dashboardUuid !== undefined;
 
-export type SchedulerFilterRule = DashboardFilterRule & {
-    tileTargets: undefined;
-};
-
 export type DashboardScheduler = SchedulerBase & {
     savedChartUuid: null;
     dashboardUuid: string;
-    filters?: SchedulerFilterRule[];
+    filters?: DashboardFilterRule[];
+    parameters?: ParametersValuesMap;
     customViewportWidth?: number;
-    selectedTabs?: string[];
+    selectedTabs: string[] | null;
 };
 
 export type Scheduler = ChartScheduler | DashboardScheduler;
@@ -202,7 +208,12 @@ export type UpdateSchedulerEmailTarget = Pick<
 
 export type CreateSchedulerAndTargets = Omit<
     Scheduler,
-    'schedulerUuid' | 'createdAt' | 'updatedAt'
+    | 'schedulerUuid'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'createdByName'
+    | 'savedChartName'
+    | 'dashboardName'
 > & {
     targets: CreateSchedulerTarget[];
 };
@@ -225,7 +236,10 @@ export type UpdateSchedulerAndTargets = Pick<
     | 'notificationFrequency'
     | 'includeLinks'
 > &
-    Pick<DashboardScheduler, 'filters' | 'customViewportWidth'> & {
+    Pick<
+        DashboardScheduler,
+        'filters' | 'parameters' | 'customViewportWidth'
+    > & {
         targets: Array<
             | CreateSchedulerTarget
             | UpdateSchedulerSlackTarget
@@ -327,6 +341,10 @@ export type ApiSchedulerAndTargetsResponse = {
     status: 'ok';
     results: SchedulerAndTargets;
 };
+
+export type ApiSchedulersResponse = ApiSuccess<
+    KnexPaginatedData<SchedulerAndTargets[]>
+>;
 
 export type ScheduledJobs = {
     date: Date;
@@ -483,6 +501,7 @@ export type ValidateProjectPayload = TraceTaskBase & {
     context: 'lightdash_app' | 'dbt_refresh' | 'test_and_compile' | 'cli';
     explores?: (Explore | ExploreError)[];
     validationTargets?: ValidationTarget[];
+    onlyValidateExploresInArgs?: boolean;
 };
 
 export type ApiJobScheduledResponse = {
@@ -506,4 +525,16 @@ export type ExportCsvDashboardPayload = TraceTaskBase & {
     dashboardUuid: string;
     dashboardFilters: DashboardFilters;
     dateZoomGranularity?: DateGranularity;
+};
+
+export type DownloadAsyncQueryResultsPayload = TraceTaskBase & {
+    queryUuid: string;
+    type?: DownloadFileType;
+    onlyRaw?: boolean;
+    showTableNames?: boolean;
+    customLabels?: Record<string, string>;
+    columnOrder?: string[];
+    hiddenFields?: string[];
+    pivotConfig?: PivotConfig;
+    attachmentDownloadName?: string;
 };

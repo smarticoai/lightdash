@@ -1,10 +1,4 @@
-import {
-    ActionIcon,
-    Group,
-    Highlight,
-    Paper,
-    rem,
-} from '@lightdash/mantine-v7';
+import { ActionIcon, Group, Highlight, Paper, rem } from '@mantine-8/core';
 import {
     IconCheck,
     IconChevronDown,
@@ -71,6 +65,8 @@ const TreeItem: React.FC<Props> = ({
             pl={withPadding ? rem(4) : undefined}
             pr={withPadding ? 'xs' : undefined}
             radius="sm"
+            withBorder={false}
+            shadow="none"
             wrap="nowrap"
             onClick={onClick}
         >

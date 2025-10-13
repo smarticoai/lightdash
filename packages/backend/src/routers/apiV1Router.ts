@@ -7,17 +7,19 @@ import {
     getOidcRedirectURL,
     initiateOktaOpenIdLogin,
     storeOIDCRedirect,
+    storeSlackContext,
 } from '../controllers/authentication';
 import { UserModel } from '../models/UserModel';
 import { dashboardRouter } from './dashboardRouter';
 import { headlessBrowserRouter } from './headlessBrowser';
 import { inviteLinksRouter } from './inviteLinksRouter';
 import { jobsRouter } from './jobsRouter';
+import mcpRouter from './mcpRouter';
+import oauthRouter from './oauthRouter';
 import { organizationRouter } from './organizationRouter';
 import { passwordResetLinksRouter } from './passwordResetLinksRouter';
 import { projectRouter } from './projectRouter';
 import { savedChartRouter } from './savedChartRouter';
-import { slackRouter } from './slackRouter';
 import { userRouter } from './userRouter';
 
 export const apiV1Router = express.Router();
@@ -155,6 +157,58 @@ apiV1Router.get(
     }),
 );
 
+apiV1Router.get(
+    '/login/bigquery',
+    storeOIDCRedirect,
+    passport.authenticate('google', {
+        scope: ['profile', 'email', 'https://www.googleapis.com/auth/bigquery'],
+        accessType: 'offline',
+        prompt: 'consent',
+        session: false,
+        includeGrantedScopes: true,
+    }),
+);
+
+// path to start the OAuth flow
+apiV1Router.get(
+    '/auth/slack',
+    (req, res, next) => {
+        // If the user is not already authenticated in Lightdash, force them to login on lightdash first
+        if (req.user?.userUuid) {
+            return next();
+        }
+        return res.redirect('/login?redirect=/api/v1/auth/slack');
+    },
+    storeSlackContext,
+    passport.authenticate('slack'),
+);
+
+// OAuth callback url
+apiV1Router.get(
+    '/auth/slack/callback',
+    passport.authenticate('slack', {
+        failureRedirect: '/login',
+        session: false,
+    }),
+    (req, res) => {
+        const slackContext = req.session.slack;
+        const params = new URLSearchParams();
+
+        if (slackContext?.teamId) params.set('team', slackContext.teamId);
+        if (slackContext?.channelId)
+            params.set('channel', slackContext.channelId);
+        if (slackContext?.messageTs)
+            params.set('message', slackContext.messageTs);
+        if (slackContext?.threadTs)
+            params.set('thread_ts', slackContext.threadTs);
+
+        const redirectUrl = `/auth/slack/success${
+            params.toString() ? `?${params.toString()}` : ''
+        }`;
+        res.redirect(redirectUrl);
+    },
+);
+
 apiV1Router.get(lightdashConfig.auth.google.callbackPath, (req, res, next) => {
     passport.authenticate('google', {
         failureRedirect: getOidcRedirectURL(false)(req),
@@ -163,6 +217,22 @@ apiV1Router.get(lightdashConfig.auth.google.callbackPath, (req, res, next) => {
         includeGrantedScopes: true,
     })(req, res, next);
 });
+
+apiV1Router.get(
+    lightdashConfig.auth.snowflake.loginPath,
+    storeOIDCRedirect,
+    passport.authenticate('snowflake'),
+);
+
+apiV1Router.get(
+    lightdashConfig.auth.snowflake.callbackPath,
+    (req, res, next) => {
+        passport.authenticate('snowflake', {
+            failureRedirect: getOidcRedirectURL(false)(req),
+            successRedirect: getOidcRedirectURL(true)(req),
+        })(req, res, next);
+    },
+);
 
 apiV1Router.get('/logout', (req, res, next) => {
     req.logout((err) => {
@@ -189,5 +259,6 @@ apiV1Router.use('/projects/:projectUuid', projectRouter);
 apiV1Router.use('/dashboards', dashboardRouter);
 apiV1Router.use('/password-reset', passwordResetLinksRouter);
 apiV1Router.use('/jobs', jobsRouter);
-apiV1Router.use('/slack', slackRouter);
 apiV1Router.use('/headless-browser', headlessBrowserRouter);
+apiV1Router.use('/mcp', mcpRouter);
+apiV1Router.use('/oauth', oauthRouter);

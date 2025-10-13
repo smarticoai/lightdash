@@ -18,6 +18,7 @@ export const BaseResponse: HealthState = {
     hasExtendedUsageAnalytics: false,
     hasMicrosoftTeams: false,
     hasGithub: false,
+    hasGitlab: false,
     hasHeadlessBrowser: false,
     hasSlack: false,
     auth: {
@@ -27,6 +28,7 @@ export const BaseResponse: HealthState = {
             loginPath: '',
             oauth2ClientId: undefined,
             googleDriveApiKey: undefined,
+            enableGCloudADC: false,
         },
         okta: {
             enabled: false,
@@ -46,6 +48,9 @@ export const BaseResponse: HealthState = {
         },
         pat: {
             maxExpirationTimeInDays: undefined,
+        },
+        snowflake: {
+            enabled: false,
         },
     },
     intercom: {
@@ -85,6 +90,13 @@ export const BaseResponse: HealthState = {
     appearance: {
         overrideColorPalette: undefined,
         overrideColorPaletteName: undefined,
+    },
+    isServiceAccountEnabled: false,
+    isCustomRolesEnabled: false,
+    embedding: { enabled: false, events: undefined },
+    ai: {
+        analyticsProjectUuid: undefined,
+        analyticsDashboardUuid: undefined,
     },
 };
 

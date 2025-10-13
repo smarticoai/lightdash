@@ -44,6 +44,29 @@ export type ApiUserActivityDownloadCsv = {
     status: 'ok';
 };
 
+export type UnusedContentItem = {
+    lastViewedAt: Date | null;
+    lastViewedByUserUuid: string | null;
+    lastViewedByUserName: string | null;
+    createdByUserUuid: string;
+    createdByUserName: string;
+    createdAt: Date;
+    contentUuid: string;
+    contentName: string;
+    contentType: 'chart' | 'dashboard';
+    viewsCount: number;
+};
+
+export type UnusedContent = {
+    charts: UnusedContentItem[];
+    dashboards: UnusedContentItem[];
+};
+
+export type ApiUnusedContent = {
+    status: 'ok';
+    results: UnusedContent;
+};
+
 export type ViewStatistics = {
     views: number;
     firstViewedAt: Date | string | null;
@@ -71,8 +94,8 @@ export enum QueryExecutionContext {
     CALCULATE_SUBTOTAL = 'calculateSubtotal',
     EMBED = 'embed',
     AI = 'ai',
+    MCP = 'mcp',
     API = 'api',
     CLI = 'cli',
-    SEMANTIC_VIEWER = 'semanticViewer',
     METRICS_EXPLORER = 'metricsExplorer',
 }

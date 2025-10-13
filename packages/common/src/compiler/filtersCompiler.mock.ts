@@ -1,9 +1,8 @@
-import { ConditionalOperator } from '../types/conditionalRule';
 import { SupportedDbtAdapter } from '../types/dbt';
 import { DimensionType, FieldType } from '../types/field';
 import { FilterOperator, UnitOfTime } from '../types/filter';
 import { WeekDay } from '../utils/timeFrames';
-import { type renderFilterRuleSql } from './filtersCompiler';
+import { type renderFilterRuleSqlFromField } from './filtersCompiler';
 
 export const DimensionSqlMock = 'customers.created';
 export const NumberDimensionMock = 'customers.age';
@@ -24,6 +23,11 @@ export const NumberFilterBase = {
 export const NumberFilterBaseWithMultiValues = {
     ...NumberFilterBase,
     values: [1, 2],
+};
+
+export const NumberFilterBaseWithEmptyValues = {
+    ...NumberFilterBase,
+    values: [],
 };
 export const NumberOperatorsWithMultipleValues = [
     FilterOperator.IN_BETWEEN,
@@ -406,6 +410,18 @@ const stringMultiUnescapedValueFilter = {
     values: ["Bob's", "Tom's"],
 };
 
+const emptyStringFilter = {
+    id: '701b6520-1b19-4051-a553-7615aee0b03d',
+    target: { fieldId: 'customers_first_name' },
+    values: [''],
+};
+
+const mixedEmptyStringFilter = {
+    id: '701b6520-1b19-4051-a553-7615aee0b03d',
+    target: { fieldId: 'customers_first_name' },
+    values: ['', "Bob's", '', "Tom's"],
+};
+
 export const stringFilterDimension = '"customers".first_name';
 
 export const stringFilterRuleMocks = {
@@ -482,16 +498,60 @@ export const stringFilterRuleMocks = {
         ...stringMultiUnescapedValueFilter,
         operator: FilterOperator.EQUALS,
     },
+
+    includeFilterWithEmptyString: {
+        ...emptyStringFilter,
+        operator: FilterOperator.INCLUDE,
+    },
+    includeFilterWithEmptyStringSQL: 'true',
+
+    includeFilterWithMixedEmptyStrings: {
+        ...mixedEmptyStringFilter,
+        operator: FilterOperator.INCLUDE,
+    },
+    includeFilterWithMixedEmptyStringsSQL: `(LOWER(${stringFilterDimension}) LIKE LOWER('%Bob's%')\n  OR\n  LOWER(${stringFilterDimension}) LIKE LOWER('%Tom's%'))`,
+
+    equalsFilterWithEmptyString: {
+        ...emptyStringFilter,
+        operator: FilterOperator.EQUALS,
+    },
+    equalsFilterWithEmptyStringSQL: `(${stringFilterDimension}) IN ('')`,
+
+    startsWithFilterWithEmptyString: {
+        ...emptyStringFilter,
+        operator: FilterOperator.STARTS_WITH,
+    },
+    startsWithFilterWithEmptyStringSQL: 'true',
+
+    endsWithFilterWithEmptyString: {
+        ...emptyStringFilter,
+        operator: FilterOperator.ENDS_WITH,
+    },
+    endsWithFilterWithEmptyStringSQL: 'true',
+
+    notEqualsFilterWithEmptyString: {
+        ...emptyStringFilter,
+        operator: FilterOperator.NOT_EQUALS,
+    },
+    notEqualsFilterWithEmptyStringSQL: `((${stringFilterDimension}) NOT IN ('') OR ("customers".first_name) IS NULL)`,
+
+    notIncludeFilterWithEmptyString: {
+        ...emptyStringFilter,
+        operator: FilterOperator.NOT_INCLUDE,
+    },
+    notIncludeFilterWithEmptyStringSQL: 'true',
 };
 
-type RenderFilterRuleSqlParams = Parameters<typeof renderFilterRuleSql>;
+type RenderFilterRuleSqlParams = Parameters<
+    typeof renderFilterRuleSqlFromField
+>;
 
 export const disabledFilterMock: {
     filterRule: RenderFilterRuleSqlParams[0];
     field: RenderFilterRuleSqlParams[1];
     fieldQuoteChar: RenderFilterRuleSqlParams[2];
     stringQuoteChar: RenderFilterRuleSqlParams[3];
-    escapeStringQuoteChar: RenderFilterRuleSqlParams[4];
+    escapeString: RenderFilterRuleSqlParams[4];
     startOfWeek: RenderFilterRuleSqlParams[5];
     adapterType: RenderFilterRuleSqlParams[6];
     timezone: RenderFilterRuleSqlParams[7];
@@ -500,7 +560,7 @@ export const disabledFilterMock: {
         id: '3cf51ddc-fa2b-4442-afaa-9eee4f348d7a',
         target: { fieldId: 'payments_payment_method' },
         values: [],
-        operator: ConditionalOperator.NOT_EQUALS,
+        operator: FilterOperator.NOT_EQUALS,
         disabled: true,
     },
     field: {
@@ -519,7 +579,7 @@ export const disabledFilterMock: {
     },
     fieldQuoteChar: '"',
     stringQuoteChar: "'",
-    escapeStringQuoteChar: "'",
+    escapeString: (string: string) => string.replaceAll("'", "''"),
     startOfWeek: null,
     adapterType: SupportedDbtAdapter.POSTGRES,
     timezone: 'UTC',

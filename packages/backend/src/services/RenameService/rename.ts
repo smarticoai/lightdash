@@ -14,10 +14,12 @@ import {
     getFieldRef,
     isAndFilterGroup,
     isCustomBinDimension,
-    isDashboardFilterRule,
+    isDashboardFieldTarget,
     isDashboardScheduler,
     isFilterRule,
     isOrFilterGroup,
+    isSqlTableCalculation,
+    isTemplateTableCalculation,
     MetricFilterRule,
     MetricQuery,
     NameChanges,
@@ -84,14 +86,20 @@ export const createRenameFactory = ({
         replaceString = (str: string) =>
             str.replace(new RegExp(`${from}`, 'g'), `${to}`);
         replaceFieldReference = (str: string) => {
-            /// These are for ${TABLE}.field references like in additionalMetrics
+            // These are for ${TABLE}.field references like in additionalMetrics
+            // We only update here if the str is the same as the expected fromReference
+            // to avoid updating other references
             if (str.startsWith('${TABLE}')) {
+                const strWithoutTable = str.split('.')[1];
                 const fromReferenceWithoutTable = fromReference.split('.')[1];
                 const toReferenceWithoutTable = toReference.split('.')[1];
-                return str.replace(
-                    fromReferenceWithoutTable,
-                    toReferenceWithoutTable,
-                );
+                if (strWithoutTable === fromReferenceWithoutTable) {
+                    return str.replace(
+                        fromReferenceWithoutTable,
+                        toReferenceWithoutTable,
+                    );
+                }
+                return str;
             }
             return replaceReference(str);
         };
@@ -128,6 +136,7 @@ export const validateRename = (
     originalObject: Object,
     updatedObject: Object,
     objectName: string,
+    objectType: 'chart' | 'dashboard' | 'alert' | 'dashboard scheduler',
     { from, fromReference, to, toReference }: NameChanges,
 ) => {
     try {
@@ -176,7 +185,7 @@ export const validateRename = (
 
             // At this point, we've tried multiple approaches and the objects are still different
             console.warn(
-                `Validation check failed: Renaming chart "${objectName}" from model "${from}" to "${to}" was not successful.`,
+                `Validation check failed: Renaming "${objectType}" "${objectName}" from model "${from}" to "${to}" was not successful.`,
             );
 
             // Since the objects appear identical in the output but are still different,
@@ -230,16 +239,10 @@ export const validateRename = (
             console.warn(
                 `Full expected: ${JSON.stringify(
                     JSON.parse(normalizedExpected),
-                    null,
-                    2,
-                )}`,
+                )}`, // Do not add new lines, this will make it harder to read on GCP
             );
             console.warn(
-                `Full actual: ${JSON.stringify(
-                    JSON.parse(normalizedActual),
-                    null,
-                    2,
-                )}`,
+                `Full actual: ${JSON.stringify(JSON.parse(normalizedActual))}`,
             );
         }
     } catch (e) {
@@ -385,6 +388,25 @@ export const renameChartConfigType = (
                     fieldId: replaceOptionalId(chartConfig.config?.fieldId),
                 },
             };
+        case ChartType.TREEMAP:
+            return {
+                ...chartConfig,
+                config: {
+                    ...chartConfig.config,
+                    groupFieldIds: chartConfig.config?.groupFieldIds
+                        ? chartConfig.config.groupFieldIds.map((fieldId) =>
+                              replaceId(fieldId),
+                          )
+                        : undefined,
+
+                    sizeMetricId: replaceOptionalId(
+                        chartConfig.config?.sizeMetricId,
+                    ),
+                    colorMetricId: replaceOptionalId(
+                        chartConfig.config?.colorMetricId,
+                    ),
+                },
+            };
         case ChartType.CUSTOM:
             return {
                 ...chartConfig,
@@ -483,7 +505,7 @@ export const renameDashboardFilterRules = (
             ? Object.fromEntries(
                   Object.entries(filterRule.tileTargets).map(([key, value]) => [
                       key,
-                      value
+                      value && isDashboardFieldTarget(value)
                           ? {
                                 ...value,
                                 fieldId: replaceId(value.fieldId),
@@ -527,7 +549,21 @@ export const renameMetricQuery = (
         filters: renameFilters(metricQuery.filters, replaceId),
         tableCalculations: metricQuery.tableCalculations?.map((tc) => ({
             ...tc,
-            sql: replaceReference(tc.sql),
+            ...(isSqlTableCalculation(tc) && {
+                sql: replaceReference(tc.sql),
+            }),
+            ...(isTemplateTableCalculation(tc) && {
+                template: {
+                    ...tc.template,
+                    fieldId: replaceId(tc.template.fieldId),
+                    ...('orderBy' in tc.template && {
+                        orderBy: tc.template.orderBy.map((o) => ({
+                            ...o,
+                            fieldId: replaceId(o.fieldId),
+                        })),
+                    }),
+                },
+            }),
         })),
         additionalMetrics: metricQuery.additionalMetrics?.map((am) => ({
             ...am,
@@ -621,6 +657,14 @@ export const getNameChanges = ({
     };
 };
 
+const addSuffixIfPrefix = (value: string, isPrefix: boolean) =>
+    `${value}${isPrefix ? '_' : ''}`;
+
+const buildModelNameChecker = (searchTerms: string[]) => (model: Object) => {
+    const stringified = JSON.stringify(model);
+    return searchTerms.some((term) => term && stringified.includes(term));
+};
+
 export const renameSavedChart = ({
     type,
     chart,
@@ -632,14 +676,18 @@ export const renameSavedChart = ({
     nameChanges: NameChanges;
     validate: boolean;
 }): { updatedChart: SavedChartDAO; hasChanges: boolean } => {
-    let hasChanges = false;
-
     const isPrefix = type === RenameType.MODEL;
-    const containsModelName = (object: Object) =>
-        JSON.stringify(object).includes(
-            `${nameChanges.from}${isPrefix ? '_' : ''}`,
-        );
 
+    const searchTerms = [
+        addSuffixIfPrefix(nameChanges.from, isPrefix),
+        addSuffixIfPrefix(nameChanges.fromReference, isPrefix),
+        // fromFieldName is only available when rename type is FIELD
+        nameChanges.fromFieldName
+            ? addSuffixIfPrefix(nameChanges.fromFieldName, isPrefix)
+            : null,
+    ].filter((s) => s !== null);
+
+    const containsModelName = buildModelNameChecker(searchTerms);
     if (!containsModelName(chart)) {
         // These should be filtered already by model anyway
         return { updatedChart: chart, hasChanges: false };
@@ -654,12 +702,10 @@ export const renameSavedChart = ({
     // Create a shallow copy instead of deep clone
     const updatedChart = { ...chart };
     if (type === RenameType.MODEL && chart.tableName === nameChanges.from) {
-        hasChanges = true;
         updatedChart.tableName = nameChanges.to;
     }
 
     if (containsModelName(chart.metricQuery)) {
-        hasChanges = true;
         updatedChart.metricQuery = renameMetricQuery(
             chart.metricQuery,
             renameMethods,
@@ -667,27 +713,27 @@ export const renameSavedChart = ({
     }
 
     if (containsModelName(chart.chartConfig)) {
-        hasChanges = true;
         updatedChart.chartConfig = renameChartConfigType(
             chart.chartConfig,
             renameMethods,
         );
     }
     if (containsModelName(chart.tableConfig)) {
-        hasChanges = true;
         updatedChart.tableConfig = {
             columnOrder: replaceList(chart.tableConfig.columnOrder),
         };
     }
     if (chart.pivotConfig && containsModelName(chart.pivotConfig)) {
-        hasChanges = true;
         updatedChart.pivotConfig = {
             columns: replaceList(updatedChart.pivotConfig?.columns || []),
         };
     }
 
-    if (validate) validateRename(chart, updatedChart, chart.name, nameChanges);
+    if (validate)
+        validateRename(chart, updatedChart, chart.name, 'chart', nameChanges);
 
+    // Only mark changes if there was actually an update. There are renameFunctions that won't change the values if not needed
+    const hasChanges = JSON.stringify(chart) !== JSON.stringify(updatedChart);
     return { updatedChart, hasChanges };
 };
 
@@ -695,15 +741,15 @@ export const renameDashboard = (
     type: RenameType,
     dashboard: DashboardDAO,
     nameChanges: NameChanges,
+    validate: boolean = false,
 ): { updatedDashboard: DashboardDAO; hasChanges: boolean } => {
     const isPrefix = type === RenameType.MODEL;
 
     let hasChanges = false;
 
-    const containsModelName = (object: Object) =>
-        JSON.stringify(object).includes(
-            `${nameChanges.from}${isPrefix ? '_' : ''}`,
-        );
+    const containsModelName = buildModelNameChecker([
+        addSuffixIfPrefix(nameChanges.from, isPrefix),
+    ]);
 
     if (!containsModelName(dashboard)) {
         return { updatedDashboard: dashboard, hasChanges: false };
@@ -725,12 +771,14 @@ export const renameDashboard = (
         );
     }
 
-    validateRename(
-        dashboard,
-        updatedDashboard,
-        updatedDashboard.name,
-        nameChanges,
-    );
+    if (validate)
+        validateRename(
+            dashboard,
+            updatedDashboard,
+            updatedDashboard.name,
+            'dashboard',
+            nameChanges,
+        );
 
     return { updatedDashboard, hasChanges };
 };
@@ -739,13 +787,13 @@ export const renameAlert = (
     type: RenameType,
     alert: SchedulerAndTargets,
     nameChanges: NameChanges,
+    validate: boolean = false,
 ): { updatedAlert: SchedulerAndTargets; hasChanges: boolean } => {
     const isPrefix = type === RenameType.MODEL;
 
-    const containsModelName = (object: Object) =>
-        JSON.stringify(object).includes(
-            `${nameChanges.from}${isPrefix ? '_' : ''}`,
-        );
+    const containsModelName = buildModelNameChecker([
+        addSuffixIfPrefix(nameChanges.from, isPrefix),
+    ]);
 
     if (!alert.thresholds) {
         return { updatedAlert: alert, hasChanges: false };
@@ -765,7 +813,8 @@ export const renameAlert = (
         }));
     }
 
-    validateRename(alert, updatedAlert, `Alert: ${alert.name}`, nameChanges);
+    if (validate)
+        validateRename(alert, updatedAlert, alert.name, 'alert', nameChanges);
 
     return { updatedAlert, hasChanges };
 };
@@ -774,13 +823,13 @@ export const renameDashboardScheduler = (
     type: RenameType,
     dashboardScheduler: SchedulerAndTargets,
     nameChanges: NameChanges,
+    validate: boolean = false,
 ): { updatedDashboardScheduler: SchedulerAndTargets; hasChanges: boolean } => {
     const isPrefix = type === RenameType.MODEL;
 
-    const containsModelName = (object: Object) =>
-        JSON.stringify(object).includes(
-            `${nameChanges.from}${isPrefix ? '_' : ''}`,
-        );
+    const containsModelName = buildModelNameChecker([
+        addSuffixIfPrefix(nameChanges.from, isPrefix),
+    ]);
 
     if (!isDashboardScheduler(dashboardScheduler)) {
         return {
@@ -833,12 +882,14 @@ export const renameDashboardScheduler = (
         );
     }
 
-    validateRename(
-        dashboardScheduler,
-        updatedDashboardScheduler,
-        `Alert: ${dashboardScheduler.name}`,
-        nameChanges,
-    );
+    if (validate)
+        validateRename(
+            dashboardScheduler,
+            updatedDashboardScheduler,
+            dashboardScheduler.name,
+            'dashboard scheduler',
+            nameChanges,
+        );
 
     return { updatedDashboardScheduler, hasChanges };
 };

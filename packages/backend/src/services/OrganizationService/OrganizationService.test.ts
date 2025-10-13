@@ -1,8 +1,8 @@
 import { LightdashInstallType } from '@lightdash/common';
 import { analyticsMock } from '../../analytics/LightdashAnalytics.mock';
+import { buildAccount } from '../../auth/account/account.mock';
 import { lightdashConfigMock } from '../../config/lightdashConfig.mock';
 import { GroupsModel } from '../../models/GroupsModel';
-import { InviteLinkModel } from '../../models/InviteLinkModel';
 import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
 import { OrganizationAllowedEmailDomainsModel } from '../../models/OrganizationAllowedEmailDomainsModel';
 import { OrganizationMemberProfileModel } from '../../models/OrganizationMemberProfileModel';
@@ -26,7 +26,6 @@ describe('organization service', () => {
         organizationModel: organizationModel as unknown as OrganizationModel,
         projectModel: projectModel as unknown as ProjectModel,
         onboardingModel: {} as OnboardingModel,
-        inviteLinkModel: {} as InviteLinkModel,
         organizationMemberProfileModel: {} as OrganizationMemberProfileModel,
         userModel: {} as UserModel,
         organizationAllowedEmailDomainsModel:
@@ -45,16 +44,18 @@ describe('organization service', () => {
     });
 
     it('Should return needsProject false if there are projects in DB', async () => {
-        expect(await organizationService.get(user)).toEqual({
+        const account = buildAccount({ accountType: 'session' });
+        expect(await organizationService.get(account)).toEqual({
             ...organization,
             needsProject: false,
         });
     });
     it('Should return needsProject true if there are no projects in DB', async () => {
+        const account = buildAccount({ accountType: 'session' });
         (projectModel.hasProjects as jest.Mock).mockImplementationOnce(
             async () => false,
         );
-        expect(await organizationService.get(user)).toEqual({
+        expect(await organizationService.get(account)).toEqual({
             ...organization,
             needsProject: true,
         });

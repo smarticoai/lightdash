@@ -14,12 +14,17 @@ import {
     CreateColorPalette,
     CreateGroup,
     CreateOrganization,
+    getRequestMethod,
     KnexPaginateArgs,
+    LightdashRequestMethodHeader,
     OrganizationMemberProfileUpdate,
     UpdateAllowedEmailDomains,
     UpdateColorPalette,
     UpdateOrganization,
     UUID,
+    type ApiCreateProjectResults,
+    type ApiSuccess,
+    type CreateProjectOptionalCredentials,
 } from '@lightdash/common';
 import {
     Body,
@@ -64,7 +69,7 @@ export class OrganizationController extends BaseController {
             status: 'ok',
             results: await this.services
                 .getOrganizationService()
-                .get(req.user!),
+                .get(req.account!),
         };
     }
 
@@ -167,7 +172,7 @@ export class OrganizationController extends BaseController {
             status: 'ok',
             results: await this.services
                 .getOrganizationService()
-                .getProjects(req.user!),
+                .getProjects(req.account!),
         };
     }
 
@@ -258,6 +263,8 @@ export class OrganizationController extends BaseController {
      * @param req express request
      * @param userUuid the uuid of the user to update
      * @param body the new membership profile
+     *
+     * @deprecated Use the /api/v2/org/assignments/user/{userId} endpoint instead
      */
     @Middlewares([
         allowApiKeyAuthentication,
@@ -490,6 +497,31 @@ export class OrganizationController extends BaseController {
             results: await this.services
                 .getOrganizationService()
                 .setActiveColorPalette(req.user!, colorPaletteUuid),
+        };
+    }
+
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @Post('/projects')
+    @OperationId('CreateProject')
+    async createProject(
+        @Request() req: express.Request,
+        @Body() body: CreateProjectOptionalCredentials,
+    ): Promise<ApiSuccess<ApiCreateProjectResults>> {
+        const results = await this.services
+            .getProjectService()
+            .createWithoutCompile(
+                req.user!,
+                body,
+                getRequestMethod(req.header(LightdashRequestMethodHeader)),
+            );
+
+        return {
+            status: 'ok',
+            results,
         };
     }
 }

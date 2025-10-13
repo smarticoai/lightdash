@@ -2,7 +2,6 @@ import {
     type ApiError,
     type ApiOrganizationMemberProfiles,
     type KnexPaginateArgs,
-    type OrganizationMemberProfileUpdate,
 } from '@lightdash/common';
 import {
     useInfiniteQuery,
@@ -13,26 +12,27 @@ import {
 } from '@tanstack/react-query';
 import Fuse from 'fuse.js';
 import { lightdashApi } from '../api';
-import useApp from '../providers/App/useApp';
 import useToaster from './toaster/useToaster';
 import useQueryError from './useQueryError';
 
-const getOrganizationUsersQuery = async (
-    includeGroups?: number,
-    paginateArgs?: KnexPaginateArgs,
-    searchQuery?: string,
-    projectUuid?: string,
-) => {
+const getOrganizationUsersQuery = async (params?: {
+    includeGroups?: number;
+    paginateArgs?: KnexPaginateArgs;
+    searchQuery?: string;
+    projectUuid?: string;
+}) => {
     const urlParams = new URLSearchParams({
-        ...(paginateArgs
+        ...(params?.paginateArgs
             ? {
-                  page: String(paginateArgs.page),
-                  pageSize: String(paginateArgs.pageSize),
+                  page: String(params.paginateArgs.page),
+                  pageSize: String(params.paginateArgs.pageSize),
               }
             : {}),
-        ...(includeGroups ? { includeGroups: String(includeGroups) } : {}),
-        ...(searchQuery ? { searchQuery } : {}),
-        ...(projectUuid ? { projectUuid } : {}),
+        ...(params?.includeGroups
+            ? { includeGroups: String(params?.includeGroups) }
+            : {}),
+        ...(params?.searchQuery ? { searchQuery: params.searchQuery } : {}),
+        ...(params?.projectUuid ? { projectUuid: params.projectUuid } : {}),
     }).toString();
 
     return lightdashApi<ApiOrganizationMemberProfiles['results']>({
@@ -49,26 +49,33 @@ const deleteUserQuery = async (id: string) =>
         body: undefined,
     });
 
-const updateUser = async (id: string, data: OrganizationMemberProfileUpdate) =>
-    lightdashApi<null>({
-        url: `/org/users/${id}`,
-        method: 'PATCH',
-        body: JSON.stringify(data),
-    });
-
 export const useOrganizationUsers = (params?: {
     searchInput?: string;
     includeGroups?: number;
+    projectUuid?: string;
+    enabled?: boolean;
+    paginateArgs?: KnexPaginateArgs;
 }) => {
     const setErrorResponse = useQueryError();
     return useQuery<ApiOrganizationMemberProfiles['results']['data'], ApiError>(
         {
-            queryKey: ['organization_users', params?.includeGroups],
+            queryKey: [
+                'organization_users',
+                params?.includeGroups,
+                params?.searchInput,
+            ],
             queryFn: async () => {
-                return (await getOrganizationUsersQuery(params?.includeGroups))
-                    .data;
+                return (
+                    await getOrganizationUsersQuery({
+                        includeGroups: params?.includeGroups,
+                        searchQuery: params?.searchInput,
+                        projectUuid: params?.projectUuid,
+                        paginateArgs: params?.paginateArgs,
+                    })
+                ).data;
             },
             onError: (result) => setErrorResponse(result),
+            enabled: params?.enabled !== false,
             select: (data) => {
                 if (params?.searchInput) {
                     return new Fuse(Object.values(data), {
@@ -103,7 +110,11 @@ export const usePaginatedOrganizationUsers = ({
             searchInput,
         ],
         queryFn: () =>
-            getOrganizationUsersQuery(includeGroups, paginateArgs, searchInput),
+            getOrganizationUsersQuery({
+                includeGroups,
+                paginateArgs,
+                searchQuery: searchInput,
+            }),
         onError: (result) => setErrorResponse(result),
     });
 };
@@ -136,15 +147,15 @@ export const useInfiniteOrganizationUsers = (
                 projectUuid,
             ],
             queryFn: ({ pageParam }) => {
-                return getOrganizationUsersQuery(
+                return getOrganizationUsersQuery({
                     includeGroups,
-                    {
+                    paginateArgs: {
                         pageSize: pageSize,
                         page: pageParam ?? 1,
                     },
-                    searchInput,
+                    searchQuery: searchInput,
                     projectUuid,
-                );
+                });
             },
             onError: (result) => setErrorResponse(result),
             getNextPageParam: (lastPage) => {
@@ -178,36 +189,4 @@ export const useDeleteOrganizationUserMutation = () => {
             });
         },
     });
-};
-
-export const useUpdateUserMutation = (userUuid: string) => {
-    const queryClient = useQueryClient();
-    const { user } = useApp();
-    const { showToastSuccess, showToastApiError } = useToaster();
-    return useMutation<null, ApiError, OrganizationMemberProfileUpdate>(
-        (data) => {
-            if (userUuid) {
-                return updateUser(userUuid, data);
-            }
-            throw new Error('user ID is undefined');
-        },
-        {
-            mutationKey: ['organization_membership_roles'],
-            onSuccess: async () => {
-                if (user.data?.userUuid === userUuid) {
-                    await queryClient.refetchQueries(['user']);
-                }
-                await queryClient.refetchQueries(['organization_users']);
-                showToastSuccess({
-                    title: `Success! User was updated.`,
-                });
-            },
-            onError: ({ error }) => {
-                showToastApiError({
-                    title: `Failed to update user's permissions`,
-                    apiError: error,
-                });
-            },
-        },
-    );
 };

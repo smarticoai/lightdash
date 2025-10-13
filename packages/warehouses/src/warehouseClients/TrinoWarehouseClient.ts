@@ -2,23 +2,31 @@ import {
     AnyType,
     CreateTrinoCredentials,
     DimensionType,
-    getErrorMessage,
     Metric,
     MetricType,
+    getErrorMessage as originalGetErrorMessage,
     SupportedDbtAdapter,
     WarehouseConnectionError,
     WarehouseQueryError,
     WarehouseResults,
+    WarehouseTypes,
 } from '@lightdash/common';
 import {
     BasicAuth,
     ConnectionOptions,
     Iterator,
+    QueryError,
     QueryResult,
     Trino,
 } from 'trino-client';
 import { WarehouseCatalog } from '../types';
+import {
+    DEFAULT_BATCH_SIZE,
+    processPromisesInBatches,
+} from '../utils/processPromisesInBatches';
+import { normalizeUnicode } from '../utils/sql';
 import WarehouseBaseClient from './WarehouseBaseClient';
+import WarehouseBaseSqlBuilder from './WarehouseBaseSqlBuilder';
 
 export enum TrinoTypes {
     BOOLEAN = 'boolean',
@@ -53,6 +61,14 @@ interface TableInfo {
     table: string;
 }
 
+const getErrorMessage = (e: QueryError) => {
+    // Trino returns Object of type QueryError
+    if (e.message) {
+        // Convert Object to Error
+        return originalGetErrorMessage(new Error(e.message, { cause: e }));
+    }
+    return originalGetErrorMessage(e);
+};
 const queryTableSchema = ({
     database,
     schema,
@@ -127,6 +143,14 @@ const catalogToSchema = (results: string[][][]): WarehouseCatalog => {
     return warehouseCatalog;
 };
 
+/*
+    Force lowercase for Trino column names
+    When using trino and snowflake, some columns can be returned uppercase
+    and we can't enforce "ALTER SESSION SET QUOTED_IDENTIFIERS_IGNORE_CASE = FALSE;"
+    like we do in snowflake client
+*/
+const normalizeColumnName = (columnName: string) => columnName.toLowerCase();
+
 const resultHandler = (
     schema: { [key: string]: AnyType }[],
     data: AnyType[][],
@@ -135,24 +159,66 @@ const resultHandler = (
     return data.map((i) => {
         const item: { [key: string]: AnyType } = {};
         i.map((column, index) => {
-            /* Force lowercase for Trino column names 
-            When using trino and snowflake, some columns can be returned uppercase 
-            and we can't enforce "ALTER SESSION SET QUOTED_IDENTIFIERS_IGNORE_CASE = FALSE;"
-            like we do in snowflake client
-            */
-            const name: string = s[index].toLowerCase();
-            item[name] = column;
+            item[normalizeColumnName(s[index])] = column;
             return null;
         });
         return item;
     });
 };
 
+export class TrinoSqlBuilder extends WarehouseBaseSqlBuilder {
+    readonly type = WarehouseTypes.TRINO;
+
+    getAdapterType(): SupportedDbtAdapter {
+        return SupportedDbtAdapter.TRINO;
+    }
+
+    getEscapeStringQuoteChar(): string {
+        return "'";
+    }
+
+    getMetricSql(sql: string, metric: Metric): string {
+        switch (metric.type) {
+            case MetricType.PERCENTILE:
+                return `APPROX_PERCENTILE(${sql}, ${
+                    (metric.percentile ?? 50) / 100
+                })`;
+            case MetricType.MEDIAN:
+                return `APPROX_PERCENTILE(${sql},0.5)`;
+            default:
+                return super.getMetricSql(sql, metric);
+        }
+    }
+
+    getFloatingType(): string {
+        return 'DOUBLE';
+    }
+
+    escapeString(value: string): string {
+        if (typeof value !== 'string') {
+            return value;
+        }
+
+        return (
+            normalizeUnicode(value)
+                // Trino uses single quote doubling like PostgreSQL
+                .replaceAll("'", "''")
+                // Escape backslashes first (before LIKE wildcards)
+                .replaceAll('\\', '\\\\')
+                // Remove SQL comments (-- and /* */)
+                .replace(/--.*$/gm, '')
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                // Remove null bytes
+                .replaceAll('\0', '')
+        );
+    }
+}
+
 export class TrinoWarehouseClient extends WarehouseBaseClient<CreateTrinoCredentials> {
     connectionOptions: ConnectionOptions;
 
     constructor(credentials: CreateTrinoCredentials) {
-        super(credentials);
+        super(credentials, new TrinoSqlBuilder(credentials.startOfWeek));
         this.connectionOptions = {
             auth: new BasicAuth(credentials.user, credentials.password),
             catalog: credentials.dbname,
@@ -219,7 +285,7 @@ export class TrinoWarehouseClient extends WarehouseBaseClient<CreateTrinoCredent
             const fields = schema.reduce(
                 (acc, column) => ({
                     ...acc,
-                    [column.name]: {
+                    [normalizeColumnName(column.name)]: {
                         type: convertDataTypeToDimensionType(
                             column.typeSignature.rawType ?? TrinoTypes.VARCHAR,
                         ),
@@ -228,11 +294,13 @@ export class TrinoWarehouseClient extends WarehouseBaseClient<CreateTrinoCredent
                 {},
             );
 
-            // stream initial data
-            streamCallback({
-                fields,
-                rows: resultHandler(schema, queryResult.value.data ?? []),
-            });
+            // stream initial data, if available
+            if (queryResult.value.data) {
+                streamCallback({
+                    fields,
+                    rows: resultHandler(schema, queryResult.value.data ?? []),
+                });
+            }
             // Using `await` in this loop ensures data chunks are fetched and processed sequentially.
             // This maintains order and data integrity.
             while (!queryResult.done) {
@@ -273,56 +341,34 @@ export class TrinoWarehouseClient extends WarehouseBaseClient<CreateTrinoCredent
         let results: string[][][];
 
         try {
-            const promises = requests.map(async (request) => {
-                let query: Iterator<QueryResult> | null = null;
+            results = await processPromisesInBatches(
+                requests,
+                DEFAULT_BATCH_SIZE,
+                async (request) => {
+                    let query: Iterator<QueryResult> | null = null;
 
-                try {
-                    query = await session.query(queryTableSchema(request));
-                    const result = (await query.next()).value.data ?? [];
-                    return result;
-                } catch (e: AnyType) {
-                    throw new WarehouseQueryError(getErrorMessage(e));
-                } finally {
-                    if (query) void close();
-                }
-            });
-
-            results = await Promise.all(promises);
+                    try {
+                        query = await session.query(queryTableSchema(request));
+                        const result = (await query.next()).value.data ?? [];
+                        return result;
+                    } catch (e: AnyType) {
+                        throw new WarehouseQueryError(getErrorMessage(e));
+                    } finally {
+                        if (query) void close();
+                    }
+                },
+            );
         } finally {
             await close();
         }
         return catalogToSchema(results);
     }
 
-    getStringQuoteChar() {
-        return "'";
-    }
-
-    getEscapeStringQuoteChar() {
-        return "'";
-    }
-
-    getAdapterType(): SupportedDbtAdapter {
-        return SupportedDbtAdapter.TRINO;
-    }
-
-    getMetricSql(sql: string, metric: Metric) {
-        switch (metric.type) {
-            case MetricType.PERCENTILE:
-                return `APPROX_PERCENTILE(${sql}, ${
-                    (metric.percentile ?? 50) / 100
-                })`;
-            case MetricType.MEDIAN:
-                return `APPROX_PERCENTILE(${sql},0.5)`;
-            default:
-                return super.getMetricSql(sql, metric);
-        }
-    }
-
     private sanitizeInput(sql: string) {
         return sql.replaceAll(
-            this.getStringQuoteChar(),
-            this.getEscapeStringQuoteChar() + this.getStringQuoteChar(),
+            this.sqlBuilder.getStringQuoteChar(),
+            this.sqlBuilder.getEscapeStringQuoteChar() +
+                this.sqlBuilder.getStringQuoteChar(),
         );
     }
 

@@ -21,6 +21,7 @@ import { saveToSpaceSchema } from '../../../components/common/modal/ChartCreateM
 import { useModalSteps } from '../../../hooks/useModalSteps';
 import { useSpaceManagement } from '../../../hooks/useSpaceManagement';
 import { useSpaceSummaries } from '../../../hooks/useSpaces';
+import { DEFAULT_SQL_LIMIT } from '../constants';
 import { useCreateSqlChartMutation } from '../hooks/useSavedSqlCharts';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { EditorTabs, updateName } from '../store/sqlRunnerSlice';
@@ -92,7 +93,6 @@ const SaveChartForm: FC<Pick<Props, 'onClose'>> = ({ onClose }) => {
     // TODO: this sometimes runs `/api/v1/projects//spaces` request
     // because initial `projectUuid` is set to '' (empty string)
     // we should handle this by creating an impossible state
-    // check first few lines inside `features/semanticViewer/store/selectors.ts`
     const {
         data: spaces = [],
         isLoading: isLoadingSpace,
@@ -144,7 +144,7 @@ const SaveChartForm: FC<Pick<Props, 'onClose'>> = ({ onClose }) => {
                     name: form.values.name,
                     description: form.values.description || '',
                     sql,
-                    limit,
+                    limit: limit ?? DEFAULT_SQL_LIMIT,
                     config: currentVizConfig,
                     spaceUuid: spaceUuid,
                 });

@@ -1,7 +1,7 @@
 import {
     FilterType,
     createFilterRuleFromField,
-    getFilterRuleWithDefaultValue,
+    getFilterRuleFromFieldWithDefaultValue,
     getFilterTypeFromItem,
     getItemId,
     isDateItem,
@@ -67,7 +67,7 @@ const FilterRuleForm: FC<Props> = ({
 
                     const newFilterRule = isDateItem(selectedField)
                         ? // If the field is the same type but different field, we need to update the filter rule with the new time frames
-                          getFilterRuleWithDefaultValue(
+                          getFilterRuleFromFieldWithDefaultValue(
                               selectedField,
                               newFilterRuleBase,
                               filterRule.values,
@@ -92,7 +92,12 @@ const FilterRuleForm: FC<Props> = ({
     }
 
     return (
-        <Group noWrap align="start" spacing="xs">
+        <Group
+            noWrap
+            align="start"
+            spacing="xs"
+            data-testid="FilterRuleForm/filter-rule"
+        >
             <FieldSelect
                 size="xs"
                 disabled={!isEditMode}
@@ -110,7 +115,7 @@ const FilterRuleForm: FC<Props> = ({
             />
             <Select
                 size="xs"
-                w="150px"
+                w="175px"
                 sx={{ flexShrink: 0 }}
                 withinPortal={popoverProps?.withinPortal}
                 onDropdownOpen={popoverProps?.onOpen}
@@ -120,17 +125,14 @@ const FilterRuleForm: FC<Props> = ({
                 data={filterOperatorOptions}
                 onChange={(value) => {
                     if (!value) return;
-
                     onChange(
-                        getFilterRuleWithDefaultValue(
+                        getFilterRuleFromFieldWithDefaultValue(
                             activeField,
                             {
                                 ...filterRule,
                                 operator: value as FilterRule['operator'],
                             },
-                            (filterRule.values?.length || 0) > 0
-                                ? filterRule.values
-                                : [1],
+                            filterRule.values ?? [],
                         ),
                     );
                 }}
@@ -158,6 +160,7 @@ const FilterRuleForm: FC<Props> = ({
                             <ActionIcon
                                 onClick={onDelete}
                                 disabled={isRequired}
+                                data-testid="delete-filter-rule-button"
                             >
                                 <MantineIcon icon={IconX} size="sm" />
                             </ActionIcon>

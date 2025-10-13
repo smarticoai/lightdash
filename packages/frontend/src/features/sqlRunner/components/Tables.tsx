@@ -25,6 +25,7 @@ import {
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import Fuse from 'fuse.js';
+import isEmpty from 'lodash/isEmpty';
 import { memo, useEffect, useMemo, useState, type FC } from 'react';
 import MantineIcon from '../../../components/common/MantineIcon';
 import { useIsTruncated } from '../../../hooks/useIsTruncated';
@@ -76,7 +77,9 @@ const TableItem: FC<TableItemProps> = memo(
         const dispatch = useAppDispatch();
         const sql = useAppSelector((state) => state.sqlRunner.sql);
         const quoteChar = useAppSelector((state) => state.sqlRunner.quoteChar);
-        const quotedTable = `${quoteChar}${database}${quoteChar}.${quoteChar}${schema}${quoteChar}.${quoteChar}${table}${quoteChar}`;
+        const quotedTable = database
+            ? `${quoteChar}${database}${quoteChar}.${quoteChar}${schema}${quoteChar}.${quoteChar}${table}${quoteChar}`
+            : `${quoteChar}${schema}${quoteChar}.${quoteChar}${table}${quoteChar}`;
         return (
             <Box ref={hoverRef} pos="relative" {...rest}>
                 <UnstyledButton
@@ -282,7 +285,10 @@ export const Tables: FC = () => {
     const transformedData:
         | { database: string; tablesBySchema: TablesBySchema }
         | undefined = useMemo(() => {
-        if (!data) return undefined;
+        if (!data || isEmpty(data)) return undefined;
+        const [database] = Object.keys(data);
+        if (database === undefined) return undefined;
+
         const tablesBySchema = Object.entries(data).flatMap(([, schemas]) =>
             Object.entries(schemas).map(([schema, tables]) => ({
                 schema,
@@ -290,7 +296,7 @@ export const Tables: FC = () => {
             })),
         );
         return {
-            database: Object.keys(data)[0],
+            database,
             tablesBySchema,
         };
     }, [data]);

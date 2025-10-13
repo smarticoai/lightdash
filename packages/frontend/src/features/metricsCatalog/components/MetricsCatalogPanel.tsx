@@ -46,7 +46,7 @@ import { smrMode } from '../../../utils/smarticoUtils';
 
 const LOCAL_STORAGE_KEY = 'metrics-catalog-learn-more-popover-closed';
 
-const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['sx'] }> = ({
+const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['style'] }> = ({
     buttonStyles,
 }) => {
     const [opened, { close, open }] = useDisclosure(false);
@@ -89,7 +89,7 @@ const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['sx'] }> = ({
                     size="xs"
                     variant="default"
                     leftIcon={<MantineIcon icon={IconSparkles} />}
-                    sx={buttonStyles}
+                    style={buttonStyles}
                     onClick={opened ? handleClose : open}
                 >
                     Learn more
@@ -378,7 +378,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
         [tableName, metricName, dispatch],
     );
 
-    const headerButtonStyles: ButtonProps['sx'] = {
+    const headerButtonStyles: ButtonProps['style'] = {
         borderRadius: theme.radius.md,
         backgroundColor: '#FAFAFA',
         border: `1px solid ${theme.colors.gray[2]}`,
@@ -449,7 +449,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                                 />
                             }
                             loading={true}
-                            sx={headerButtonStyles}
+                            style={headerButtonStyles}
                         >
                             Refreshing catalog
                         </Button>

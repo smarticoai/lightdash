@@ -1,9 +1,12 @@
-import { createStyles, keyframes, Loader, Text } from '@mantine/core';
-import { type FC } from 'react';
+import { type ApiErrorDetail } from '@lightdash/common';
+import { Anchor, createStyles, keyframes, Loader, Text } from '@mantine/core';
+import { IconTableOff } from '@tabler/icons-react';
+import { Fragment, type FC } from 'react';
 import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import NoTableIcon from '../../../svgs/emptystate-no-table.svg?react';
 import { SectionName } from '../../../types/Events';
 import { EmptyState } from '../../common/EmptyState';
+import MantineIcon from '../../common/MantineIcon';
 import DocumentationHelpButton from '../../DocumentationHelpButton';
 import { RefreshButton } from '../../RefreshButton';
 
@@ -211,13 +214,63 @@ export const ExploreEmptyQueryState = () => (
 
 export const ExploreLoadingState = () => (
     <EmptyState title="Loading results">
-        <Loader color="gray" />
+        <Loader color="gray" data-testid="results-table-loading" />
     </EmptyState>
 );
 
-export const ExploreErrorState = () => (
+export const ExploreErrorState = ({
+    errorDetail,
+}: {
+    errorDetail?: ApiErrorDetail | null;
+}) => (
     <EmptyState
+        icon={<MantineIcon icon={IconTableOff} />}
         title="Error loading results"
-        description="There was an error loading the results"
-    ></EmptyState>
+        description={
+            <Fragment>
+                <Text style={{ whiteSpace: 'pre-wrap' }}>
+                    {errorDetail?.message ||
+                        'There was an error loading the results'}
+                </Text>
+                {errorDetail?.data.documentationUrl && (
+                    <Fragment>
+                        <br />
+                        <Anchor
+                            href={errorDetail.data.documentationUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                        >
+                            Learn how to resolve this in our documentation →
+                        </Anchor>
+                    </Fragment>
+                )}
+            </Fragment>
+        }
+    />
+);
+
+export const MissingRequiredParameters = ({
+    missingRequiredParameters,
+}: {
+    missingRequiredParameters: string[];
+}) => (
+    <EmptyState
+        title="Missing required parameters"
+        description={
+            <>
+                This query requires additional parameters to run.{' '}
+                <Text>
+                    {`Please provide the following ${
+                        missingRequiredParameters.length === 1
+                            ? 'parameter:'
+                            : 'parameters:'
+                    }`}
+                </Text>
+                <br />
+                <Text span fw={500} size="sm">
+                    {missingRequiredParameters.join(', ')}
+                </Text>
+            </>
+        }
+    />
 );

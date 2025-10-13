@@ -53,6 +53,7 @@ export default function mockHealthResponse(
                 oauth2ClientId: '',
                 loginPath: '/login/google',
                 enabled: false,
+                enableGCloudADC: false,
             },
             okta: {
                 loginPath: '/login/okta',
@@ -73,16 +74,30 @@ export default function mockHealthResponse(
             pat: {
                 maxExpirationTimeInDays: undefined,
             },
+            snowflake: {
+                enabled: false,
+            },
         },
         hasEmailClient: false,
         hasHeadlessBrowser: false,
         hasExtendedUsageAnalytics: false,
         hasGithub: false,
+        hasGitlab: false,
         hasCacheAutocompleResults: false,
         hasMicrosoftTeams: false,
         appearance: {
             overrideColorPalette: undefined,
             overrideColorPaletteName: undefined,
+        },
+        isServiceAccountEnabled: false,
+        isCustomRolesEnabled: false,
+        embedding: {
+            enabled: false,
+            events: undefined,
+        },
+        ai: {
+            analyticsProjectUuid: undefined,
+            analyticsDashboardUuid: undefined,
         },
         ...overrides,
     };

@@ -2,9 +2,20 @@ import { subject } from '@casl/ability';
 import { ActionIcon, Popover } from '@mantine/core';
 import { IconShare2 } from '@tabler/icons-react';
 import { memo, useCallback, useMemo, type FC } from 'react';
-import { useParams } from 'react-router';
-import { downloadCsv } from '../../../api/csv';
+import {
+    explorerActions,
+    selectColumnOrder,
+    selectIsEditMode,
+    selectIsResultsExpanded,
+    selectMetricQuery,
+    selectSorts,
+    selectTableName,
+    useExplorerDispatch,
+    useExplorerSelector,
+} from '../../../features/explorer/store';
 import { uploadGsheet } from '../../../hooks/gdrive/useGdrive';
+import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
+import { useProjectUuid } from '../../../hooks/useProjectUuid';
 import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import { ExplorerSection } from '../../../providers/Explorer/types';
@@ -21,52 +32,37 @@ import MantineIcon from '../../common/MantineIcon';
 import { ExplorerResults } from './ExplorerResults';
 
 const ResultsCard: FC = memo(() => {
-    const isEditMode = useExplorerContext(
-        (context) => context.state.isEditMode,
-    );
-    const expandedSections = useExplorerContext(
-        (context) => context.state.expandedSections,
-    );
-    const tableName = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.tableName,
-    );
-    const sorts = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.metricQuery.sorts,
+    const projectUuid = useProjectUuid();
+
+    const isEditMode = useExplorerSelector(selectIsEditMode);
+    const resultsIsOpen = useExplorerSelector(selectIsResultsExpanded);
+    const dispatch = useExplorerDispatch();
+    const tableName = useExplorerSelector(selectTableName);
+    const sorts = useExplorerSelector(selectSorts);
+    const metricQuery = useExplorerSelector(selectMetricQuery);
+    const columnOrder = useExplorerSelector(selectColumnOrder);
+
+    // Get query state from new hook
+    const { queryResults, getDownloadQueryUuid } = useExplorerQuery();
+    const totalResults = queryResults.totalResults;
+    const savedChart = useExplorerContext(
+        (context) => context.state.savedChart,
     );
 
-    const totalResults = useExplorerContext(
-        (context) => context.queryResults.totalResults,
-    );
-    const toggleExpandedSection = useExplorerContext(
-        (context) => context.actions.toggleExpandedSection,
-    );
-    const metricQuery = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.metricQuery,
-    );
-
-    const columnOrder = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.tableConfig.columnOrder,
+    const toggleExpandedSection = useCallback(
+        (section: ExplorerSection) => {
+            dispatch(explorerActions.toggleExpandedSection(section));
+        },
+        [dispatch],
     );
 
     const disabled = useMemo(() => (totalResults ?? 0) <= 0, [totalResults]);
 
-    const { projectUuid } = useParams<{ projectUuid: string }>();
-    const getCsvLink = async (csvLimit: number | null, onlyRaw: boolean) => {
-        if (projectUuid) {
-            return downloadCsv({
-                projectUuid,
-                tableId: tableName,
-                query: metricQuery,
-                csvLimit,
-                onlyRaw,
-                columnOrder,
-                showTableNames: true,
-                pivotConfig: undefined, // results are always unpivoted
-            });
-        } else {
-            throw new Error('Project UUID is missing');
-        }
-    };
+    const toggleCard = useCallback(
+        () => toggleExpandedSection(ExplorerSection.RESULTS),
+        [toggleExpandedSection],
+    );
+    const { user } = useApp();
 
     const getGsheetLink = async () => {
         if (projectUuid) {
@@ -76,21 +72,13 @@ const ResultsCard: FC = memo(() => {
                 metricQuery,
                 columnOrder,
                 showTableNames: true,
+                // No pivotConfig - ResultsCard only shows raw table data
             });
         } else {
             throw new Error('Project UUID is missing');
         }
     };
 
-    const resultsIsOpen = useMemo(
-        () => expandedSections.includes(ExplorerSection.RESULTS),
-        [expandedSections],
-    );
-    const toggleCard = useCallback(
-        () => toggleExpandedSection(ExplorerSection.RESULTS),
-        [toggleExpandedSection],
-    );
-    const { user } = useApp();
     return (
         <CollapsableCard
             title="Results"
@@ -109,13 +97,21 @@ const ResultsCard: FC = memo(() => {
                 resultsIsOpen &&
                 tableName && (
                     <>
-                        {isEditMode && <AddColumnButton />}
+                        <Can
+                            I="manage"
+                            this={subject('Explore', {
+                                organizationUuid: user.data?.organizationUuid,
+                                projectUuid,
+                            })}
+                        >
+                            {isEditMode && <AddColumnButton />}
+                        </Can>
 
                         <Can
                             I="manage"
                             this={subject('ExportCsv', {
                                 organizationUuid: user.data?.organizationUuid,
-                                projectUuid: projectUuid,
+                                projectUuid,
                             })}
                         >
                             <Popover
@@ -129,10 +125,7 @@ const ResultsCard: FC = memo(() => {
                                         {...COLLAPSABLE_CARD_ACTION_ICON_PROPS}
                                         disabled={disabled}
                                     >
-                                        <MantineIcon
-                                            icon={IconShare2}
-                                            color="gray"
-                                        />
+                                        <MantineIcon icon={IconShare2} />
                                     </ActionIcon>
                                 </Popover.Target>
 
@@ -140,8 +133,15 @@ const ResultsCard: FC = memo(() => {
                                     <ExportSelector
                                         projectUuid={projectUuid}
                                         totalResults={totalResults}
-                                        getCsvLink={getCsvLink}
+                                        getDownloadQueryUuid={
+                                            getDownloadQueryUuid
+                                        }
                                         getGsheetLink={getGsheetLink}
+                                        columnOrder={columnOrder}
+                                        customLabels={undefined} // for results table download, don't override labels
+                                        hiddenFields={undefined} // for results table download, don't hide columns
+                                        chartName={savedChart?.name}
+                                        showTableNames
                                     />
                                 </Popover.Dropdown>
                             </Popover>

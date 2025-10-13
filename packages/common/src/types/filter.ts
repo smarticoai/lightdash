@@ -1,6 +1,5 @@
 import { type AnyType } from './any';
-import { ConditionalOperator, type ConditionalRule } from './conditionalRule';
-import type { SchedulerFilterRule } from './scheduler';
+import { type DimensionType } from './field';
 
 export enum FilterType {
     STRING = 'string',
@@ -8,6 +7,34 @@ export enum FilterType {
     DATE = 'date',
     BOOLEAN = 'boolean',
 }
+
+export enum FilterOperator {
+    NULL = 'isNull',
+    NOT_NULL = 'notNull',
+    EQUALS = 'equals',
+    NOT_EQUALS = 'notEquals',
+    STARTS_WITH = 'startsWith',
+    ENDS_WITH = 'endsWith',
+    INCLUDE = 'include',
+    NOT_INCLUDE = 'doesNotInclude',
+    LESS_THAN = 'lessThan',
+    LESS_THAN_OR_EQUAL = 'lessThanOrEqual',
+    GREATER_THAN = 'greaterThan',
+    GREATER_THAN_OR_EQUAL = 'greaterThanOrEqual',
+    IN_THE_PAST = 'inThePast',
+    NOT_IN_THE_PAST = 'notInThePast',
+    IN_THE_NEXT = 'inTheNext',
+    IN_THE_CURRENT = 'inTheCurrent',
+    NOT_IN_THE_CURRENT = 'notInTheCurrent',
+    IN_BETWEEN = 'inBetween',
+    NOT_IN_BETWEEN = 'notInBetween',
+}
+
+export type BaseFilterRule<O = FilterOperator, V = unknown> = {
+    id: string;
+    operator: O;
+    values?: V[];
+};
 
 export enum UnitOfTime {
     milliseconds = 'milliseconds',
@@ -60,11 +87,11 @@ export type FieldTarget = {
 };
 
 export interface FilterRule<
-    O = ConditionalOperator,
+    O = FilterOperator,
     T = FieldTarget,
     V = AnyType,
     S = AnyType,
-> extends ConditionalRule<O, V> {
+> extends BaseFilterRule<O, V> {
     id: string;
     target: T;
     settings?: S;
@@ -73,17 +100,43 @@ export interface FilterRule<
 }
 
 export interface MetricFilterRule
-    extends FilterRule<ConditionalOperator, { fieldRef: string }> {}
+    extends FilterRule<FilterOperator, { fieldRef: string }> {}
+
+type JoinModelRequiredFilterTarget = {
+    fieldRef: string;
+    tableName: string;
+};
+
+export interface JoinModelRequiredFilterRule
+    extends FilterRule<FilterOperator, JoinModelRequiredFilterTarget> {}
+
+export type ModelRequiredFilterRule =
+    | MetricFilterRule // Keeping backwards compatibility with existing filters
+    | JoinModelRequiredFilterRule;
+
+export const isJoinModelRequiredFilter = (
+    filter: ModelRequiredFilterRule,
+): filter is JoinModelRequiredFilterRule => 'tableName' in filter.target;
 
 export type DashboardFieldTarget = {
     fieldId: string;
     tableName: string;
+    isSqlColumn?: boolean; // If true, fieldId is a SQL column name and tableName is redundant
+    fallbackType?: DimensionType; // Used to infer filter type when field/column is not available
 };
+
+export const isDashboardFieldTarget = (
+    target: unknown,
+): target is DashboardFieldTarget =>
+    target !== null &&
+    typeof target === 'object' &&
+    'fieldId' in target &&
+    'tableName' in target;
 
 export type DashboardTileTarget = DashboardFieldTarget | false;
 
 export type DashboardFilterRule<
-    O = ConditionalOperator,
+    O = FilterOperator,
     T extends DashboardFieldTarget = DashboardFieldTarget,
     V = AnyType,
     S = AnyType,
@@ -110,19 +163,14 @@ export type DateFilterSettings = {
 };
 
 export type DateFilterRule = FilterRule<
-    ConditionalOperator,
+    FilterOperator,
     unknown,
     AnyType,
     DateFilterSettings
 >;
 
 export const isDateFilterRule = (
-    filter: FilterRule<
-        ConditionalOperator,
-        FieldTarget | unknown,
-        AnyType,
-        AnyType
-    >,
+    filter: FilterRule<FilterOperator, FieldTarget | unknown, AnyType, AnyType>,
 ): filter is DateFilterRule => 'unitOfTime' in (filter.settings || {});
 
 export type FilterGroupItem = FilterGroup | FilterRule;
@@ -178,7 +226,7 @@ export const isFilterGroup = (value: FilterGroupItem): value is FilterGroup =>
     isOrFilterGroup(value) || isAndFilterGroup(value);
 
 export const isFilterRule = (
-    value: ConditionalRule | FilterGroupItem,
+    value: BaseFilterRule | FilterGroupItem,
 ): value is FilterRule =>
     'id' in value && 'target' in value && 'operator' in value;
 
@@ -190,23 +238,26 @@ export const isMetricFilterTarget = (
 ): value is { fieldRef: string } =>
     !!value && typeof value === 'object' && 'fieldRef' in value;
 
+export const flattenFilterGroup = (filterGroup: FilterGroup): FilterRule[] => {
+    // Explicitly checking for undefined filter groups (and || or), saved filter group somehow was undefined when saving
+    const groupItems: FilterGroupItem[] | undefined = isAndFilterGroup(
+        filterGroup,
+    )
+        ? filterGroup.and
+        : filterGroup.or;
+
+    return (groupItems || []).flatMap((item) => {
+        if (isFilterGroup(item)) {
+            return flattenFilterGroup(item);
+        }
+
+        return [item];
+    });
+};
+
 export const getFilterRules = (filters: Filters): FilterRule[] => {
     const rules: FilterRule[] = [];
-    const flattenFilterGroup = (filterGroup: FilterGroup): FilterRule[] => {
-        const groupRules: FilterRule[] = [];
 
-        (isAndFilterGroup(filterGroup)
-            ? filterGroup.and
-            : filterGroup.or
-        ).forEach((item) => {
-            if (isFilterGroup(item)) {
-                rules.push(...flattenFilterGroup(item));
-            } else {
-                rules.push(item);
-            }
-        });
-        return groupRules;
-    };
     if (filters.dimensions) {
         rules.push(...flattenFilterGroup(filters.dimensions));
     }
@@ -297,30 +348,39 @@ export const removeFieldFromFilterGroup = (
 
 export const applyDimensionOverrides = (
     dashboardFilters: DashboardFilters,
-    overrides: DashboardFilters | SchedulerFilterRule[],
-) =>
-    dashboardFilters.dimensions.map((dimension) => {
-        const override =
-            overrides instanceof Array
-                ? overrides.find(
-                      (overrideDimension) =>
-                          overrideDimension.id === dimension.id,
-                  )
-                : overrides.dimensions.find(
-                      (overrideDimension) =>
-                          overrideDimension.id === dimension.id,
-                  );
-        if (override) {
-            return {
-                ...override,
-                tileTargets: dimension.tileTargets,
-            };
-        }
-        return dimension;
-    });
+    overrides: DashboardFilters | DashboardFilterRule[],
+) => {
+    const overrideArray =
+        overrides instanceof Array ? overrides : overrides.dimensions;
+
+    // Apply overrides to existing dashboard dimensions
+    const overriddenDimensions = dashboardFilters.dimensions.map(
+        (dimension) => {
+            const override = overrideArray.find(
+                (overrideDimension) => overrideDimension.id === dimension.id,
+            );
+            if (override) {
+                return {
+                    ...override,
+                    tileTargets: dimension.tileTargets,
+                };
+            }
+            return dimension;
+        },
+    );
+
+    // Add scheduler filters that don't exist in dashboard saved filters
+    const existingIds = new Set(dashboardFilters.dimensions.map((d) => d.id));
+    const newDimensions = overrideArray.filter(
+        (schedulerFilter) => !existingIds.has(schedulerFilter.id),
+    );
+    overriddenDimensions.push(...newDimensions);
+
+    return overriddenDimensions;
+};
 
 export const isDashboardFilterRule = (
-    value: ConditionalRule,
+    value: BaseFilterRule,
 ): value is DashboardFilterRule =>
     isFilterRule(value) && 'tableName' in value.target;
 
@@ -409,6 +469,7 @@ export const compressDashboardFiltersToParam = (
                             // The filter will be automatically applied there
                             if (
                                 tileTargetValue !== false &&
+                                isDashboardFieldTarget(tileTargetValue) &&
                                 tileTargetValue.fieldId === f.target.fieldId &&
                                 tileTargetValue.tableName === f.target.tableName
                             ) {
@@ -477,5 +538,3 @@ export type TimeBasedOverrideMap = Record<
         fieldsToChange: string[];
     }
 >;
-
-export { ConditionalOperator as FilterOperator };

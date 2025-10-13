@@ -1,8 +1,5 @@
-import { ConditionalOperator } from '../types/conditionalRule';
-import { SupportedDbtAdapter } from '../types/dbt';
-import { type Explore, type Table } from '../types/explore';
-import { DimensionType, FieldType } from '../types/field';
 import {
+    FilterOperator,
     type AndFilterGroup,
     type DashboardFilterRule,
     type FilterGroup,
@@ -14,7 +11,8 @@ import {
 import {
     addDashboardFiltersToMetricQuery,
     addFilterRule,
-    createFilterRuleFromRequiredMetricRule,
+    createFilterRuleFromModelRequiredFilterRule,
+    getDashboardFilterRulesForTileAndReferences,
     isFilterRuleInQuery,
     overrideChartFilter,
     reduceRequiredDimensionFiltersToFilterRules,
@@ -22,7 +20,6 @@ import {
     trackWhichTimeBasedMetricFiltersToOverride,
 } from './filters';
 import {
-    baseTable,
     chartAndFilterGroup,
     chartOrFilterGroup,
     customSqlDimension,
@@ -36,9 +33,12 @@ import {
     expectedRequiredResetResult,
     expectedRequiredResult,
     filterRule,
-    metricFilterRule,
+    joinedModelRequiredFilterRule,
     metricQueryWithAndFilters,
     metricQueryWithOrFilters,
+    mockExplore,
+    mockExploreWithJoinedTable,
+    modelRequiredFilterRule,
 } from './filters.mock';
 
 jest.mock('uuid', () => ({
@@ -76,14 +76,14 @@ describe('overrideChartFilter', () => {
                     target: { fieldId: 'field-1' },
                     values: ['1', '2', '3'],
                     disabled: false,
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                 },
                 {
                     id: '2',
                     target: { fieldId: 'field-2' },
                     values: ['2'],
                     disabled: false,
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                 },
             ],
         });
@@ -103,14 +103,14 @@ describe('overrideChartFilter', () => {
                     target: { fieldId: 'field-1' },
                     values: ['1', '2', '3'],
                     disabled: false,
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                 },
                 {
                     id: '4',
                     target: { fieldId: 'field-2' },
                     values: ['2'],
                     disabled: false,
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                 },
             ],
         });
@@ -130,14 +130,14 @@ describe('overrideChartFilter', () => {
                     target: { fieldId: 'field-1' },
                     values: ['1', '2', '3'],
                     disabled: false,
-                    operator: ConditionalOperator.NOT_EQUALS,
+                    operator: FilterOperator.NOT_EQUALS,
                 },
                 {
                     id: '2',
                     target: { fieldId: 'field-2' },
                     values: ['2'],
                     disabled: false,
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                 },
             ],
         });
@@ -154,10 +154,10 @@ describe('addFilterRule', () => {
     });
 });
 
-describe('createFilterRuleFromRequiredMetricRule', () => {
+describe('createFilterRuleFromModelRequiredFilterRule', () => {
     test('should create a correct FilterRule', () => {
-        const result = createFilterRuleFromRequiredMetricRule(
-            metricFilterRule('dimension'),
+        const result = createFilterRuleFromModelRequiredFilterRule(
+            modelRequiredFilterRule('dimension'),
             'tableName',
         );
         expect(result).toEqual(
@@ -197,17 +197,12 @@ describe('reduceRequiredDimensionFiltersToFilterRules', () => {
     test('should correctly reduce required dimension filters to filter rules', () => {
         // Define mock data
         const mockRequiredFilters: MetricFilterRule[] = [
-            metricFilterRule('mockFieldRef1'),
-            metricFilterRule('mockFieldRef2'),
+            modelRequiredFilterRule('order_date_week'),
+            joinedModelRequiredFilterRule(
+                'customers.created_at_week',
+                'customers',
+            ),
         ];
-        const table: Table = {
-            ...baseTable,
-            lineageGraph: {},
-            dimensions: {
-                mockFieldRef1: dimension('mockFieldRef1', 'table'),
-                mockFieldRef2: dimension('mockFieldRef2', 'table'),
-            },
-        };
         const emptyFilters: Filters = {
             dimensions: {
                 id: 'mockGroupId',
@@ -216,13 +211,14 @@ describe('reduceRequiredDimensionFiltersToFilterRules', () => {
         };
         const result = reduceRequiredDimensionFiltersToFilterRules(
             mockRequiredFilters,
-            table,
             emptyFilters.dimensions,
+            mockExploreWithJoinedTable,
         );
         const expectedFilterRuleResult: FilterRule[] = [
-            expectedRequiredResult('mockFieldRef1', 'table'),
-            expectedRequiredResult('mockFieldRef2', 'table'),
+            expectedRequiredResult('order_date_week', 'orders'),
+            expectedRequiredResult('created_at_week', 'customers'),
         ];
+
         expect(result).toEqual(expectedFilterRuleResult);
     });
 });
@@ -245,79 +241,6 @@ describe('resetRequiredFilterRules', () => {
 });
 
 describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
-    const mockExplore: Explore = {
-        name: 'test',
-        label: 'Test',
-        tags: [],
-        baseTable: 'orders',
-        targetDatabase: SupportedDbtAdapter.POSTGRES,
-        joinedTables: [],
-        tables: {
-            orders: {
-                name: 'orders',
-                label: 'Orders',
-                database: 'test',
-                schema: 'public',
-                sqlTable: 'orders',
-                metrics: {},
-                lineageGraph: {},
-                dimensions: {
-                    order_date_year: {
-                        name: 'order_date_year',
-                        label: 'Order Date Year',
-                        table: 'orders',
-                        tableLabel: 'Orders',
-                        compiledSql: 'order_date_year',
-                        tablesReferences: [],
-                        sql: 'order_date_year',
-                        hidden: false,
-                        fieldType: FieldType.DIMENSION,
-                        type: DimensionType.DATE,
-                        timeIntervalBaseDimensionName: 'order_date',
-                    },
-                    order_date_month: {
-                        name: 'order_date_month',
-                        label: 'Order Date Month',
-                        table: 'orders',
-                        tableLabel: 'Orders',
-                        compiledSql: 'order_date_month',
-                        tablesReferences: [],
-                        sql: 'order_date_month',
-                        hidden: false,
-                        fieldType: FieldType.DIMENSION,
-                        type: DimensionType.DATE,
-                        timeIntervalBaseDimensionName: 'order_date',
-                    },
-                    order_date_week: {
-                        name: 'order_date_week',
-                        label: 'Order Date Week',
-                        table: 'orders',
-                        tableLabel: 'Orders',
-                        compiledSql: 'order_date_week',
-                        sql: 'order_date_week',
-                        hidden: false,
-                        tablesReferences: [],
-                        fieldType: FieldType.DIMENSION,
-                        type: DimensionType.DATE,
-                        timeIntervalBaseDimensionName: 'order_date',
-                    },
-                    status: {
-                        name: 'status',
-                        label: 'Status',
-                        table: 'orders',
-                        tableLabel: 'Orders',
-                        compiledSql: 'status',
-                        sql: 'status',
-                        hidden: false,
-                        tablesReferences: [],
-                        fieldType: FieldType.DIMENSION,
-                        type: DimensionType.BOOLEAN,
-                    },
-                },
-            },
-        },
-    };
-
     test('should track fields to change when dashboard filter targets base time dimension', () => {
         const metricQueryDimensionFilters: AndFilterGroup = {
             id: 'dim-filter-group',
@@ -325,13 +248,13 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 {
                     id: 'month-filter',
                     target: { fieldId: 'order_date_month' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['2024-03'],
                 },
                 {
                     id: 'week-filter',
                     target: { fieldId: 'order_date_week' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['2024-03-25'],
                 },
             ],
@@ -344,7 +267,7 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 fieldId: 'order_date_year',
                 tableName: 'orders',
             },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: ['2024'],
         };
 
@@ -366,7 +289,7 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 {
                     id: 'status-filter',
                     target: { fieldId: 'status' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['completed'],
                 },
             ],
@@ -379,7 +302,7 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 fieldId: 'status',
                 tableName: 'orders',
             },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: ['shipped'],
         };
 
@@ -399,19 +322,19 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 {
                     id: 'month-filter',
                     target: { fieldId: 'order_date_month' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['2024-03'],
                 },
                 {
                     id: 'week-filter',
                     target: { fieldId: 'order_date_week' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['2024-03-25'],
                 },
                 {
                     id: 'year-filter',
                     target: { fieldId: 'order_date_year' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['2024'],
                 },
             ],
@@ -424,7 +347,7 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 fieldId: 'order_date_year',
                 tableName: 'orders',
             },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: ['2024'],
         };
 
@@ -450,7 +373,7 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 {
                     id: 'status-filter',
                     target: { fieldId: 'status' },
-                    operator: ConditionalOperator.EQUALS,
+                    operator: FilterOperator.EQUALS,
                     values: ['completed'],
                 },
             ],
@@ -463,7 +386,7 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
                 fieldId: 'order_date_year',
                 tableName: 'orders',
             },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: ['2024'],
         };
 
@@ -474,5 +397,114 @@ describe('trackWhichTimeBasedMetricFiltersToOverride', () => {
         );
 
         expect(result.overrideData?.fieldsToChange).toBeUndefined();
+    });
+});
+
+describe('getDashboardFilterRulesForTileAndReferences', () => {
+    test('should return filter rules when there is a match (isSqlColumn is true and fieldId is in references)', () => {
+        const mockTileUuid = 'tile-123';
+        const mockReferences = ['field-1', 'field-2'];
+
+        const mockDashboardFilterRules: DashboardFilterRule[] = [
+            {
+                id: 'filter-1',
+                label: 'Filter 1',
+                target: {
+                    fieldId: 'field-1',
+                    tableName: 'table-1',
+                    isSqlColumn: true,
+                },
+                operator: FilterOperator.EQUALS,
+                values: ['value-1'],
+                tileTargets: {
+                    [mockTileUuid]: {
+                        fieldId: 'field-1',
+                        tableName: 'table-1',
+                        isSqlColumn: true,
+                    },
+                },
+            },
+        ];
+
+        const result = getDashboardFilterRulesForTileAndReferences(
+            mockTileUuid,
+            mockReferences,
+            mockDashboardFilterRules,
+        );
+
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('filter-1');
+        expect(result[0].target.fieldId).toBe('field-1');
+        expect(result[0].target.isSqlColumn).toBe(true);
+    });
+
+    test('should not return filter rules when isSqlColumn is false even though fieldId is a match', () => {
+        const mockTileUuid = 'tile-123';
+        const mockReferences = ['field-1', 'field-2'];
+
+        const mockDashboardFilterRules: DashboardFilterRule[] = [
+            {
+                id: 'filter-2',
+                label: 'Filter 2',
+                target: {
+                    fieldId: 'field-2',
+                    tableName: 'table-1',
+                    isSqlColumn: false,
+                },
+                operator: FilterOperator.EQUALS,
+                values: ['value-2'],
+                tileTargets: {
+                    [mockTileUuid]: {
+                        fieldId: 'field-2',
+                        tableName: 'table-1',
+                        isSqlColumn: false,
+                    },
+                },
+            },
+        ];
+
+        const result = getDashboardFilterRulesForTileAndReferences(
+            mockTileUuid,
+            mockReferences,
+            mockDashboardFilterRules,
+        );
+
+        // Verify filter-2 is not included (isSqlColumn is false but fieldId is a match)
+        expect(result).toHaveLength(0);
+    });
+
+    test('should not return filter rules when isSqlColumn is true but fieldId does not match', () => {
+        const mockTileUuid = 'tile-123';
+        const mockReferences = ['field-1', 'field-2'];
+
+        const mockDashboardFilterRules: DashboardFilterRule[] = [
+            {
+                id: 'filter-3',
+                label: 'Filter 3',
+                target: {
+                    fieldId: 'field-3',
+                    tableName: 'table-1',
+                    isSqlColumn: true,
+                },
+                operator: FilterOperator.EQUALS,
+                values: ['value-3'],
+                tileTargets: {
+                    [mockTileUuid]: {
+                        fieldId: 'field-3',
+                        tableName: 'table-1',
+                        isSqlColumn: true,
+                    },
+                },
+            },
+        ];
+
+        const result = getDashboardFilterRulesForTileAndReferences(
+            mockTileUuid,
+            mockReferences,
+            mockDashboardFilterRules,
+        );
+
+        // Verify filter-3 is not included (isSqlColumn is true but fieldId doesn't match)
+        expect(result).toHaveLength(0);
     });
 });

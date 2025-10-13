@@ -4,6 +4,8 @@ import {
     AnyType,
     ApiSqlQueryResults,
     applyDimensionOverrides,
+    CustomSqlQueryForbiddenError,
+    DashboardFilterRule,
     DashboardFilters,
     DateGranularity,
     DimensionType,
@@ -28,20 +30,21 @@ import {
     isDashboardChartTileType,
     isDashboardSqlChartTile,
     isField,
-    isMomentInput,
     isTableChartConfig,
     isVizCartesianChartConfig,
     ItemsMap,
     MetricQuery,
     MissingConfigError,
+    ParameterError,
+    ParametersValuesMap,
     PivotConfig,
     pivotResultsAsCsv,
     QueryExecutionContext,
     SCHEDULER_TASKS,
     SchedulerCsvOptions,
-    SchedulerFilterRule,
     SchedulerFormat,
     SessionUser,
+    validateSelectedTabs,
     type RunQueryTags,
 } from '@lightdash/common';
 import archiver from 'archiver';
@@ -49,17 +52,27 @@ import { stringify } from 'csv-stringify';
 import * as fs from 'fs';
 import * as fsPromise from 'fs/promises';
 
-import moment, { MomentInput } from 'moment';
+import { warehouseSqlBuilderFromType } from '@lightdash/warehouses';
+import isNil from 'lodash/isNil';
+import moment from 'moment';
 import { nanoid } from 'nanoid';
-import { pipeline, Readable, Transform, TransformCallback } from 'stream';
+import {
+    pipeline,
+    Readable,
+    Transform,
+    TransformCallback,
+    Writable,
+} from 'stream';
 import { Worker } from 'worker_threads';
 import {
     DownloadCsv,
     LightdashAnalytics,
     parseAnalyticsLimit,
 } from '../../analytics/LightdashAnalytics';
+import * as Account from '../../auth/account';
 import { S3Client } from '../../clients/Aws/S3Client';
 import { AttachmentUrl } from '../../clients/EmailClient/EmailClient';
+import { S3ResultsFileStorageClient } from '../../clients/ResultsFileStorageClients/S3ResultsFileStorageClient';
 import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
 import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
@@ -70,7 +83,16 @@ import { SavedSqlModel } from '../../models/SavedSqlModel';
 import { UserModel } from '../../models/UserModel';
 import { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { runWorkerThread, wrapSentryTransaction } from '../../utils';
+import {
+    generateGenericFileId,
+    isRowValueDate,
+    isRowValueTimestamp,
+    sanitizeGenericFileName,
+    streamJsonlData,
+} from '../../utils/FileDownloadUtils/FileDownloadUtils';
+import { PivotQueryBuilder } from '../../utils/QueryBuilder/PivotQueryBuilder';
 import { BaseService } from '../BaseService';
+import { PivotTableService } from '../PivotTableService/PivotTableService';
 import { ProjectService } from '../ProjectService/ProjectService';
 
 type CsvServiceArguments = {
@@ -85,19 +107,8 @@ type CsvServiceArguments = {
     downloadFileModel: DownloadFileModel;
     schedulerClient: SchedulerClient;
     projectModel: ProjectModel;
+    pivotTableService: PivotTableService;
 };
-
-const isRowValueTimestamp = (
-    value: unknown,
-    field: { type: DimensionType },
-): value is MomentInput =>
-    isMomentInput(value) && field.type === DimensionType.TIMESTAMP;
-
-const isRowValueDate = (
-    value: unknown,
-    field: { type: DimensionType },
-): value is MomentInput =>
-    isMomentInput(value) && field.type === DimensionType.DATE;
 
 export const convertSqlToCsv = (
     results: Pick<ApiSqlQueryResults, 'rows' | 'fields'>,
@@ -136,7 +147,7 @@ export const convertSqlToCsv = (
     });
 };
 
-const getSchedulerCsvLimit = (
+export const getSchedulerCsvLimit = (
     options: SchedulerCsvOptions | undefined,
 ): number | null | undefined => {
     switch (options?.limit) {
@@ -152,6 +163,37 @@ const getSchedulerCsvLimit = (
 };
 
 export class CsvService extends BaseService {
+    // Helper method to escape CSV values
+    private static escapeCsvValue(value: AnyType): string {
+        if (value === null || value === undefined) return '';
+        return `"${String(value).replace(/"/g, '""')}"`;
+    }
+
+    // Helper method to process a single JSON line to CSV
+    private static processJsonLineToCsv(
+        line: string,
+        itemMap: ItemsMap,
+        onlyRaw: boolean,
+        sortedFieldIds: string[],
+    ): string | null {
+        if (!line.trim()) return null;
+
+        try {
+            const jsonRow = JSON.parse(line.trim());
+            const csvRow = CsvService.convertRowToCsv(
+                jsonRow,
+                itemMap,
+                onlyRaw,
+                sortedFieldIds,
+            );
+
+            return csvRow.map(CsvService.escapeCsvValue).join(',');
+        } catch (error) {
+            Logger.debug(`Skipping invalid JSON line: ${error}`);
+            return null;
+        }
+    }
+
     lightdashConfig: LightdashConfig;
 
     analytics: LightdashAnalytics;
@@ -174,6 +216,8 @@ export class CsvService extends BaseService {
 
     projectModel: ProjectModel;
 
+    pivotTableService: PivotTableService;
+
     constructor({
         lightdashConfig,
         analytics,
@@ -186,6 +230,7 @@ export class CsvService extends BaseService {
         downloadFileModel,
         schedulerClient,
         projectModel,
+        pivotTableService,
     }: CsvServiceArguments) {
         super();
         this.lightdashConfig = lightdashConfig;
@@ -199,6 +244,7 @@ export class CsvService extends BaseService {
         this.downloadFileModel = downloadFileModel;
         this.schedulerClient = schedulerClient;
         this.projectModel = projectModel;
+        this.pivotTableService = pivotTableService;
     }
 
     static convertRowToCsv(
@@ -231,30 +277,169 @@ export class CsvService extends BaseService {
         });
     }
 
-    static sanitizeFileName(name: string): string {
-        return name
-            .toLowerCase()
-            .replace(/[^a-z0-9]/gi, '_') // Replace non-alphanumeric characters with underscores
-            .replace(/_{2,}/g, '_'); // Replace multiple underscores with a single one
-    }
-
     static generateFileId(
         fileName: string,
         truncated: boolean = false,
         time: moment.Moment = moment(),
     ): string {
-        const timestamp = time.format('YYYY-MM-DD-HH-mm-ss-SSSS');
-        const sanitizedFileName = CsvService.sanitizeFileName(fileName);
-        const fileId = `csv-${
-            truncated ? 'incomplete_results-' : ''
-        }${sanitizedFileName}-${timestamp}.csv`;
-        return fileId;
+        return generateGenericFileId({
+            fileName,
+            fileExtension: DownloadFileType.CSV,
+            truncated,
+            time,
+        });
     }
 
     static isValidCsvFileId(fileId: string): boolean {
-        return /^csv-(incomplete_results-)?[a-z0-9_]+-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{4}\.csv$/.test(
+        // Updated regex to allow Unicode characters, spaces, mixed case, and common punctuation
+        // This matches our new sanitizeGenericFileName approach
+        return /^csv-(incomplete_results-)?[^/\\:*?"<>|]+-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{4}\.csv$/.test(
             fileId,
         );
+    }
+
+    static async streamObjectRowsToFile(
+        onlyRaw: boolean,
+        itemMap: ItemsMap,
+        sortedFieldIds: string[],
+        csvHeader: string[],
+        {
+            readStream,
+            writeStream,
+        }: {
+            readStream: Readable;
+            writeStream: Writable;
+        },
+    ): Promise<void> {
+        // Create csv-stringify stringifier with clean configuration
+        const stringifier = stringify({
+            delimiter: ',',
+            header: true,
+            columns: csvHeader,
+        });
+
+        const rowTransformer = new Transform({
+            objectMode: true,
+            transform(
+                chunk: AnyType,
+                encoding: BufferEncoding,
+                callback: TransformCallback,
+            ) {
+                const csvRow = CsvService.convertRowToCsv(
+                    chunk,
+                    itemMap,
+                    onlyRaw,
+                    sortedFieldIds,
+                );
+
+                // Pass data to next stream in pipeline (csv-stringify)
+                callback(null, csvRow);
+            },
+        });
+
+        // Full pipeline - all streams connected with automatic backpressure
+        return new Promise((resolve, reject) => {
+            // Write BOM before starting the pipeline
+            const bomBuffer = Buffer.from('\uFEFF', 'utf8');
+            writeStream.write(bomBuffer);
+
+            pipeline(
+                readStream,
+                rowTransformer,
+                stringifier,
+                writeStream,
+                (err) => {
+                    if (err) {
+                        Logger.error(
+                            `streamObjectRowsToFile: Pipeline error: ${getErrorMessage(
+                                err,
+                            )}`,
+                        );
+                        reject(err);
+                        return;
+                    }
+                    resolve();
+                },
+            );
+        });
+    }
+
+    /**
+     * Stream JSONL data to CSV file with proper streaming patterns
+     * Processes data row-by-row to minimize memory usage
+     */
+    static async streamJsonlRowsToFile(
+        onlyRaw: boolean,
+        itemMap: ItemsMap,
+        sortedFieldIds: string[],
+        csvHeader: string[],
+        {
+            readStream,
+            writeStream,
+        }: { readStream: Readable; writeStream: Writable },
+    ): Promise<{ truncated: boolean }> {
+        return new Promise((resolve, reject) => {
+            // Write CSV header with BOM immediately
+            const headerWithBOM = Buffer.concat([
+                Buffer.from('\uFEFF', 'utf8'),
+                Buffer.from(`${csvHeader.join(',')}\n`, 'utf8'),
+            ]);
+            writeStream.write(headerWithBOM);
+
+            let lineBuffer = '';
+            let rowCount = 0;
+
+            readStream.on('data', (chunk: Buffer) => {
+                lineBuffer += chunk.toString();
+                const lines = lineBuffer.split('\n');
+
+                // Keep last incomplete line in buffer
+                lineBuffer = lines.pop() || '';
+
+                // Process complete lines
+                for (const line of lines) {
+                    const csvString = CsvService.processJsonLineToCsv(
+                        line,
+                        itemMap,
+                        onlyRaw,
+                        sortedFieldIds,
+                    );
+
+                    if (csvString) {
+                        writeStream.write(`${csvString}\n`);
+                        rowCount += 1;
+                    }
+                }
+            });
+
+            readStream.on('end', () => {
+                // Process any remaining line in buffer
+                const csvString = CsvService.processJsonLineToCsv(
+                    lineBuffer,
+                    itemMap,
+                    onlyRaw,
+                    sortedFieldIds,
+                );
+
+                if (csvString) {
+                    writeStream.write(`${csvString}\n`);
+                    rowCount += 1;
+                }
+
+                Logger.debug(
+                    `streamJsonlRowsToFile: Processed ${rowCount} rows successfully`,
+                );
+                resolve({ truncated: false });
+            });
+
+            readStream.on('error', (error) => {
+                Logger.error(
+                    'streamJsonlRowsToFile: Read stream error:',
+                    error,
+                );
+                reject(error);
+            });
+        });
     }
 
     static async writeRowsToFile(
@@ -283,9 +468,13 @@ export class CsvService extends BaseService {
         const fileId = CsvService.generateFileId(fileName, truncated);
         const writeStream = fs.createWriteStream(`/tmp/${fileId}`);
 
-        const sortedFieldIds = Object.keys(rows[0])
-            .filter((id) => selectedFieldIds.includes(id))
-            .sort((a, b) => columnOrder.indexOf(a) - columnOrder.indexOf(b));
+        const sortedFieldIds = isNil(rows[0])
+            ? []
+            : Object.keys(rows[0])
+                  .filter((id) => selectedFieldIds.includes(id))
+                  .sort(
+                      (a, b) => columnOrder.indexOf(a) - columnOrder.indexOf(b),
+                  );
 
         const csvHeader = sortedFieldIds.map((id) => {
             if (customLabels[id]) {
@@ -306,47 +495,18 @@ export class CsvService extends BaseService {
             highWaterMark: CHUNK_SIZE,
         });
 
-        const stringifier = stringify({
-            delimiter: ',',
-            header: true,
-            columns: csvHeader,
-        });
-
-        const rowTransformer = new Transform({
-            objectMode: true,
-            transform(
-                chunk: AnyType,
-                encoding: BufferEncoding,
-                callback: TransformCallback,
-            ) {
-                callback(
-                    null,
-                    CsvService.convertRowToCsv(
-                        chunk,
-                        itemMap,
-                        onlyRaw,
-                        sortedFieldIds,
-                    ),
-                );
-            },
-        });
-
-        const writePromise = new Promise<string>((resolve, reject) => {
-            pipeline(
+        await CsvService.streamObjectRowsToFile(
+            onlyRaw,
+            itemMap,
+            sortedFieldIds,
+            csvHeader,
+            {
                 readStream,
-                rowTransformer,
-                stringifier,
                 writeStream,
-                async (err) => {
-                    if (err) {
-                        reject(err);
-                    }
-                    resolve(fileId);
-                },
-            );
-        });
+            },
+        );
 
-        return writePromise;
+        return fileId;
     }
 
     static async convertSqlQueryResultsToCsv(
@@ -394,7 +554,11 @@ export class CsvService extends BaseService {
     }): Promise<AttachmentUrl> {
         const fileId = CsvService.generateFileId(fileName, truncated);
         const filePath = `/tmp/${fileId}`;
-        await fsPromise.writeFile(filePath, csvContent, 'utf-8');
+        const csvWithBOM = Buffer.concat([
+            Buffer.from('\uFEFF', 'utf8'),
+            Buffer.from(csvContent, 'utf8'),
+        ]);
+        await fsPromise.writeFile(filePath, csvWithBOM);
 
         if (this.s3Client.isEnabled()) {
             const s3Url = await this.s3Client.uploadCsv(csvContent, fileId);
@@ -433,93 +597,27 @@ export class CsvService extends BaseService {
         };
     }
 
-    /*  
-This pivot method returns directly the final CSV result as a string
-This method can be memory intensive
-*/
-    async downloadPivotTableCsv({
-        name,
-        projectUuid,
-        rows,
-        itemMap,
-        metricQuery,
-        pivotConfig,
-        exploreId,
-        onlyRaw,
-        truncated,
-        customLabels,
+    async getCsvForChart({
+        user,
+        chartUuid,
+        options,
+        jobId,
+        tileUuid,
+        dashboardFilters,
+        dateZoomGranularity,
+        invalidateCache,
+        schedulerParameters,
     }: {
-        name?: string;
-        projectUuid: string;
-        rows: Record<string, AnyType>[];
-        itemMap: ItemsMap;
-        metricQuery: MetricQuery;
-        pivotConfig: PivotConfig;
-        exploreId: string;
-        onlyRaw: boolean;
-        truncated: boolean;
-        customLabels: Record<string, string> | undefined;
-        metricsAsRows?: boolean;
-    }) {
-        return wrapSentryTransaction<AttachmentUrl>(
-            'downloadPivotTableCsv',
-            {
-                numberRows: rows.length,
-                projectUuid,
-                pivotColumns: pivotConfig.pivotDimensions,
-            },
-            async () => {
-                // PivotQueryResults expects a formatted ResultRow[] type, so we need to convert it first
-                // TODO: refactor pivotQueryResults to accept a Record<string, any>[] simple row type for performance
-                const formattedRows = formatRows(rows, itemMap);
-
-                const csvResults = pivotResultsAsCsv({
-                    pivotConfig,
-                    rows: formattedRows,
-                    itemMap,
-                    metricQuery,
-                    customLabels,
-                    onlyRaw,
-                    maxColumnLimit:
-                        this.lightdashConfig.pivotTable.maxColumnLimit,
-                });
-
-                const csvContent = await new Promise<string>(
-                    (resolve, reject) => {
-                        stringify(
-                            csvResults,
-                            {
-                                delimiter: ',',
-                            },
-                            (err, output) => {
-                                if (err) {
-                                    reject(new Error(getErrorMessage(err)));
-                                }
-                                resolve(output);
-                            },
-                        );
-                    },
-                );
-
-                return this.downloadCsvFile({
-                    csvContent,
-                    fileName: name || exploreId,
-                    projectUuid,
-                    truncated,
-                });
-            },
-        );
-    }
-
-    async getCsvForChart(
-        user: SessionUser,
-        chartUuid: string,
-        options: SchedulerCsvOptions | undefined,
-        jobId?: string,
-        tileUuid?: string,
-        dashboardFilters?: DashboardFilters,
-        dateZoomGranularity?: DateGranularity,
-    ): Promise<AttachmentUrl> {
+        user: SessionUser;
+        chartUuid: string;
+        options: SchedulerCsvOptions | undefined;
+        jobId?: string;
+        tileUuid?: string;
+        dashboardFilters?: DashboardFilters;
+        dateZoomGranularity?: DateGranularity;
+        invalidateCache?: boolean;
+        schedulerParameters?: ParametersValuesMap;
+    }): Promise<AttachmentUrl> {
         const chart = await this.savedChartModel.get(chartUuid);
         const {
             metricQuery,
@@ -554,8 +652,9 @@ This method can be memory intensive
             });
         }
 
+        const account = Account.fromSession(user);
         const explore = await this.projectService.getExplore(
-            user,
+            account,
             chart.projectUuid,
             exploreId,
         );
@@ -587,7 +686,7 @@ This method can be memory intensive
         };
 
         const { rows, fields } = await this.projectService.runMetricQuery({
-            user,
+            account,
             metricQuery: metricQueryWithDashboardFilters,
             projectUuid: chart.projectUuid,
             exploreName: exploreId,
@@ -598,6 +697,8 @@ This method can be memory intensive
             },
             chartUuid,
             queryTags,
+            invalidateCache,
+            parameters: schedulerParameters,
         });
         const numberRows = rows.length;
 
@@ -621,7 +722,7 @@ This method can be memory intensive
             );
             const customLabels = getCustomLabelsFromTableConfig(config);
 
-            const downloadUrl = this.downloadPivotTableCsv({
+            const downloadUrl = this.pivotTableService.downloadPivotTableCsv({
                 pivotConfig,
                 name: chart.name,
                 projectUuid: chart.projectUuid,
@@ -629,7 +730,7 @@ This method can be memory intensive
                 rows,
                 itemMap,
                 metricQuery,
-
+                pivotDetails: null, // TODO: this is using old way of running queries + pivoting, therefore pivotDetails is not available
                 exploreId,
                 onlyRaw,
                 truncated,
@@ -720,7 +821,7 @@ This method can be memory intensive
             });
         }
 
-        const { type: warehouseType } =
+        const { type: warehouseType, startOfWeek } =
             await this.projectModel.getWarehouseCredentialsForProject(
                 projectUuid,
             );
@@ -732,17 +833,26 @@ This method can be memory intensive
             isVizCartesianChartConfig(sqlChart.config) &&
             sqlChart.config.fieldConfig
         ) {
-            sql = ProjectService.applyPivotToSqlQuery({
+            const warehouseSqlBuilder = warehouseSqlBuilderFromType(
                 warehouseType,
+                startOfWeek,
+            );
+
+            const pivotQueryBuilder = new PivotQueryBuilder(
                 sql,
-                limit: sqlChart.limit,
-                indexColumn: sqlChart.config.fieldConfig.x,
-                valuesColumns: sqlChart.config.fieldConfig.y.filter(
-                    (col): col is Required<typeof col> => !!col.aggregation,
-                ),
-                groupByColumns: sqlChart.config.fieldConfig.groupBy,
-                sortBy: undefined,
-            });
+                {
+                    indexColumn: sqlChart.config.fieldConfig.x,
+                    valuesColumns: sqlChart.config.fieldConfig.y.filter(
+                        (col): col is Required<typeof col> => !!col.aggregation,
+                    ),
+                    groupByColumns: sqlChart.config.fieldConfig.groupBy,
+                    sortBy: undefined,
+                },
+                warehouseSqlBuilder,
+                sqlChart.limit,
+            );
+
+            sql = pivotQueryBuilder.toSql();
         }
 
         const resultsFileUrl = await this.projectService.runSqlQuery(
@@ -785,22 +895,27 @@ This method can be memory intensive
         selectedTabs,
         overrideDashboardFilters,
         dateZoomGranularity,
+        invalidateCache,
+        schedulerParameters,
     }: {
         user: SessionUser;
         dashboardUuid: string;
         options: SchedulerCsvOptions | undefined;
         jobId?: string;
-        schedulerFilters?: SchedulerFilterRule[];
-        selectedTabs?: string[] | undefined;
+        schedulerFilters?: DashboardFilterRule[];
+        selectedTabs: string[] | null;
         overrideDashboardFilters?: DashboardFilters;
         dateZoomGranularity?: DateGranularity;
+        invalidateCache?: boolean;
+        schedulerParameters?: ParametersValuesMap;
     }): Promise<AttachmentUrl[]> {
         const dashboard = await this.dashboardModel.getById(dashboardUuid);
 
         const dashboardFilters = overrideDashboardFilters || dashboard.filters;
 
+        validateSelectedTabs(selectedTabs, dashboard.tiles);
+
         if (schedulerFilters) {
-            // Scheduler filters can only override existing filters from the dashboard
             dashboardFilters.dimensions = applyDimensionOverrides(
                 dashboard.filters,
                 schedulerFilters,
@@ -831,7 +946,7 @@ This method can be memory intensive
         );
         const csvForChartPromises = chartTileUuidsWithChartUuids.map(
             ({ tileUuid, chartUuid }) =>
-                this.getCsvForChart(
+                this.getCsvForChart({
                     user,
                     chartUuid,
                     options,
@@ -839,7 +954,9 @@ This method can be memory intensive
                     tileUuid,
                     dashboardFilters,
                     dateZoomGranularity,
-                ),
+                    invalidateCache,
+                    schedulerParameters,
+                }),
         );
         this.logger.info(
             `Downloading ${sqlChartTileUuids.length} sql chart CSVs for dashboard ${dashboardUuid}`,
@@ -883,8 +1000,10 @@ This method can be memory intensive
             tableConfig,
             chartConfig,
         } = chart;
+
+        const account = Account.fromSession(user);
         const explore = await this.projectService.getExplore(
-            user,
+            account,
             projectUuid,
             tableName,
         );
@@ -962,9 +1081,7 @@ This method can be memory intensive
                 }),
             )
         ) {
-            throw new ForbiddenError(
-                'User cannot run queries with custom SQL dimensions',
-            );
+            throw new CustomSqlQueryForbiddenError();
         }
 
         // If the user can't change the csv limit, default csvLimit to undefined
@@ -1035,9 +1152,7 @@ This method can be memory intensive
                 }),
             )
         ) {
-            throw new ForbiddenError(
-                'User cannot run queries with custom SQL dimensions',
-            );
+            throw new CustomSqlQueryForbiddenError();
         }
 
         const baseAnalyticsProperties: DownloadCsv['properties'] = {
@@ -1076,8 +1191,9 @@ This method can be memory intensive
                 explore_name: exploreId,
             };
 
+            const account = Account.fromSession(user);
             const { rows, fields } = await this.projectService.runMetricQuery({
-                user,
+                account,
                 metricQuery,
                 projectUuid,
                 exploreName: exploreId,
@@ -1090,18 +1206,20 @@ This method can be memory intensive
             const truncated = this.couldBeTruncated(rows);
 
             if (pivotConfig) {
-                const downloadUrl = await this.downloadPivotTableCsv({
-                    pivotConfig,
-                    name: chartName,
-                    projectUuid,
-                    rows,
-                    itemMap: fields,
-                    metricQuery,
-                    exploreId,
-                    onlyRaw,
-                    truncated,
-                    customLabels,
-                });
+                const downloadUrl =
+                    await this.pivotTableService.downloadPivotTableCsv({
+                        pivotConfig,
+                        name: chartName,
+                        projectUuid,
+                        rows,
+                        itemMap: fields,
+                        metricQuery,
+                        exploreId,
+                        onlyRaw,
+                        truncated,
+                        customLabels,
+                        pivotDetails: null, // TODO: this is using old way of running queries + pivoting, therefore pivotDetails is not available
+                    });
 
                 this.analytics.track({
                     event: 'download_results.completed',
@@ -1292,6 +1410,7 @@ This method can be memory intensive
             options,
             overrideDashboardFilters: dashboardFilters,
             dateZoomGranularity,
+            selectedTabs: null,
         }).then((urls) => urls.filter((url) => url.path !== '#no-results'));
 
         this.logger.info(
@@ -1307,7 +1426,7 @@ This method can be memory intensive
                 numCharts: csvFiles.length,
             },
         });
-        const zipFileName = `${CsvService.sanitizeFileName(
+        const zipFileName = `${sanitizeGenericFileName(
             dashboard.name,
         )}-${moment().format('YYYY-MM-DD-HH-mm-ss-SSSS')}.zip`;
         this.logger.info(

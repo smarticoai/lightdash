@@ -25,7 +25,7 @@ module.exports = {
             '@semantic-release/exec',
             {
                 prepareCmd:
-                    'npm version ${nextRelease.version} --workspaces --include-workspace-root --allow-same-version --no-git-tag-version 2>&1 | grep -q EUNSUPPORTEDPROTOCOL && exit 0 || exit 1',
+                    'npm version ${nextRelease.version} --workspaces --include-workspace-root --allow-same-version --no-git-tag-version 2>&1 | grep -q -E "EUNSUPPORTEDPROTOCOL|Invalid comparator"',
             },
         ],
 
@@ -48,6 +48,7 @@ module.exports = {
                     'packages/e2e/package.json',
                     'packages/frontend/package.json',
                     'packages/warehouses/package.json',
+                    'packages/frontend/sdk/package.json',
                 ],
                 message:
                     'chore(release): ${nextRelease.version} \n\n${nextRelease.notes}',

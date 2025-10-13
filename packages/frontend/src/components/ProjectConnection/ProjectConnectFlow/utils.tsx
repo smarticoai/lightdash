@@ -10,6 +10,7 @@ import {
 
 // assets
 import BigQuery from './Assets/bigquery.svg';
+import ClickHouse from './Assets/clickhouse.svg';
 import Databricks from './Assets/databricks.svg';
 import PostgressLogo from './Assets/postgresql.svg';
 import Redshift from './Assets/redshift.svg';
@@ -54,6 +55,12 @@ export const WarehouseTypeLabels: WarehouseLabel[] = [
         image: Snowflake,
     },
     {
+        label: 'ClickHouse',
+        key: WarehouseTypes.CLICKHOUSE,
+        iconType: 'image',
+        image: ClickHouse,
+    },
+    {
         label: 'Other',
         key: OtherWarehouse.Other,
         iconType: 'icon',
@@ -61,11 +68,11 @@ export const WarehouseTypeLabels: WarehouseLabel[] = [
     },
 ];
 
-export const getWarehouseLabel = (key: SelectedWarehouse) => {
+export const getWarehouseLabel = (key?: SelectedWarehouse) => {
     return WarehouseTypeLabels.find((w) => w.key === key)?.label ?? null;
 };
 
-export const getWarehouseIcon = (key: SelectedWarehouse, size = 'md') => {
+export const getWarehouseIcon = (key?: SelectedWarehouse, size = 'md') => {
     const item = WarehouseTypeLabels.find((w) => w.key === key);
     if (!item) return null;
 

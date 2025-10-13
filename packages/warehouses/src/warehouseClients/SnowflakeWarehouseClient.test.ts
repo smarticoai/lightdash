@@ -1,8 +1,4 @@
-import {
-    DimensionType,
-    type ResultRow,
-    type WarehouseGetAsyncQueryResults,
-} from '@lightdash/common';
+import { DimensionType, type ResultRow } from '@lightdash/common';
 import { createConnection } from 'snowflake-sdk';
 import { Readable } from 'stream';
 import {
@@ -85,122 +81,6 @@ describe('SnowflakeWarehouseClient', () => {
             expectedWarehouseSchema,
         );
     });
-    describe('getAsyncQueryResults', () => {
-        beforeEach(() => {
-            executeMock.mockClear();
-        });
-
-        it('should return raw results', async () => {
-            const client = new SnowflakeWarehouseClient(credentials);
-
-            // Execute test
-            const result = await client.getAsyncQueryResults({
-                sql: 'SELECT * FROM test',
-                queryId: 'queryId',
-                page: 1,
-                pageSize: 10,
-                tags: {},
-                timezone: 'UTC',
-                values: [],
-                queryMetadata: null,
-            });
-
-            // Assertions
-            expect(getResultsFromQueryIdMock).toHaveBeenCalledWith({
-                sqlText: '',
-                queryId: 'queryId',
-            });
-
-            expect(result).toEqual({
-                fields: expectedFields,
-                rows: [expectedRow],
-                queryId: 'queryId',
-                pageCount: 1,
-                totalRows: 1,
-            } satisfies WarehouseGetAsyncQueryResults<Record<string, unknown>>);
-        });
-
-        it('should return formatted results when using a formatter', async () => {
-            const client = new SnowflakeWarehouseClient(credentials);
-
-            function formatter(row: Record<string, unknown>): ResultRow {
-                return Object.fromEntries(
-                    Object.entries(row).map(([key, value]) => [
-                        key,
-                        {
-                            value: {
-                                raw: value,
-                                formatted: `formatted_${value}`,
-                            },
-                        },
-                    ]),
-                );
-            }
-
-            const result = await client.getAsyncQueryResults(
-                {
-                    sql: 'SELECT * FROM test',
-                    page: 1,
-                    pageSize: 10,
-                    tags: {},
-                    timezone: 'UTC',
-                    values: [],
-                    queryId: 'queryId',
-                    queryMetadata: null,
-                },
-                formatter,
-            );
-
-            const expectedFormattedRow = formatter(expectedRow);
-
-            // Assertions
-            expect(getResultsFromQueryIdMock).toHaveBeenCalledWith({
-                sqlText: '',
-                queryId: 'queryId',
-            });
-
-            expect(result).toEqual({
-                fields: expectedFields,
-                rows: [expectedFormattedRow],
-                queryId: 'queryId',
-                pageCount: 1,
-                totalRows: 1,
-            } satisfies WarehouseGetAsyncQueryResults<ResultRow>);
-        });
-
-        it('should not execute any query when using queryId', async () => {
-            const client = new SnowflakeWarehouseClient(credentials);
-
-            const result = await client.getAsyncQueryResults({
-                queryId: 'queryId',
-                queryMetadata: null,
-                page: 1,
-                pageSize: 10,
-                tags: {},
-                timezone: 'UTC',
-                values: [],
-                sql: 'SELECT * FROM test',
-            });
-
-            // Assertions
-
-            // Ensure that in this case we don't execute any statement, we just fetch results
-            expect(executeMock).not.toHaveBeenCalled();
-
-            expect(getResultsFromQueryIdMock).toHaveBeenCalledWith({
-                sqlText: '',
-                queryId: 'queryId',
-            });
-
-            expect(result).toEqual({
-                fields: expectedFields,
-                rows: [expectedRow],
-                queryId: 'queryId',
-                pageCount: 1,
-                totalRows: 1,
-            } satisfies WarehouseGetAsyncQueryResults<Record<string, unknown>>);
-        });
-    });
 });
 
 describe('SnowflakeTypeParsing', () => {
@@ -209,5 +89,116 @@ describe('SnowflakeTypeParsing', () => {
     });
     it('expect VARCHAR(x) to be a string', () => {
         expect(mapFieldType('VARCHAR(12)')).toEqual(DimensionType.STRING);
+    });
+});
+
+describe('SnowflakeErrorParsing', () => {
+    let warehouse: SnowflakeWarehouseClient;
+    const originalEnv = process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE;
+
+    beforeEach(() => {
+        warehouse = new SnowflakeWarehouseClient(credentials);
+    });
+
+    afterEach(() => {
+        // Restore original environment variable
+        if (originalEnv) {
+            process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE = originalEnv;
+        } else {
+            delete process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE;
+        }
+    });
+
+    it('should return custom error message when SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE is set', () => {
+        // Set environment variable
+        process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE =
+            "You don't have access to the {snowflakeTable} table. Please go to 'analytics_{snowflakeSchema}' in sailpoint and request access";
+
+        const error = {
+            message:
+                "SQL compilation error: Object 'SNOWFLAKE_DATABASE_STAGING.JAFFLE.EVENTS' does not exist or not authorized.",
+            code: 'COMPILATION',
+            data: { type: 'COMPILATION' },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = warehouse.parseError(error as any);
+
+        expect(result.message).toBe(
+            "You don't have access to the EVENTS table. Please go to 'analytics_JAFFLE' in sailpoint and request access",
+        );
+    });
+
+    it('should return original error message when SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE is not set', () => {
+        // Make sure environment variable is not set
+        delete process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE;
+
+        const error = {
+            message:
+                "SQL compilation error: Object 'SNOWFLAKE_DATABASE_STAGING.JAFFLE.EVENTS' does not exist or not authorized.",
+            code: 'COMPILATION',
+            data: { type: 'COMPILATION' },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = warehouse.parseError(error as any);
+
+        expect(result.message).toBe(
+            "SQL compilation error: Object 'SNOWFLAKE_DATABASE_STAGING.JAFFLE.EVENTS' does not exist or not authorized.",
+        );
+    });
+
+    it('should return original error message for non-unauthorized errors', () => {
+        // Set environment variable
+        process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE =
+            "You don't have access to the {snowflakeTable} table. Please go to 'analytics_{snowflakeSchema}' in sailpoint and request access";
+
+        const error = {
+            message: 'Some other SQL error',
+            code: 'COMPILATION',
+            data: { type: 'COMPILATION' },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = warehouse.parseError(error as any);
+
+        expect(result.message).toBe('Some other SQL error');
+    });
+
+    it('should handle table names with different formats', () => {
+        process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE =
+            'Access denied for {snowflakeTable} in {snowflakeSchema}';
+
+        const error = {
+            message:
+                "Object 'DB.MY_SCHEMA.MY_TABLE' does not exist or not authorized.",
+            code: 'COMPILATION',
+            data: { type: 'COMPILATION' },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = warehouse.parseError(error as any);
+
+        expect(result.message).toBe('Access denied for MY_TABLE in MY_SCHEMA');
+    });
+
+    it('should handle errors without table information gracefully', () => {
+        process.env.SNOWFLAKE_UNAUTHORIZED_ERROR_MESSAGE =
+            "You don't have access to the {snowflakeTable} table. Please go to 'analytics_{snowflakeSchema}' in sailpoint and request access";
+
+        const error = {
+            message:
+                "Object 'INCOMPLETE_TABLE_NAME' does not exist or not authorized.",
+            code: 'COMPILATION',
+            data: { type: 'COMPILATION' },
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = warehouse.parseError(error as any);
+
+        // Should still use custom message but without variable replacement
+        expect(result.message).toBe(
+            "You don't have access to the {snowflakeTable} table. Please go to 'analytics_{snowflakeSchema}' in sailpoint and request access",
+        );
     });
 });

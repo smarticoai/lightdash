@@ -1,4 +1,5 @@
 import {
+    AnyType,
     ApiErrorPayload,
     ApiExecuteAsyncDashboardChartQueryResults,
     ApiExecuteAsyncDashboardSqlChartQueryResults,
@@ -6,11 +7,17 @@ import {
     ApiGetAsyncQueryResults,
     ApiSuccess,
     ApiSuccessEmpty,
+    DownloadAsyncQueryResultsRequestParams,
     ExecuteAsyncSqlQueryRequestParams,
+    ForbiddenError,
     isExecuteAsyncDashboardSqlChartByUuidParams,
     isExecuteAsyncSqlChartByUuidParams,
     QueryExecutionContext,
+    type ApiDownloadAsyncQueryResults,
+    type ApiDownloadAsyncQueryResultsAsCsv,
+    type ApiDownloadAsyncQueryResultsAsXlsx,
     type ApiExecuteAsyncMetricQueryResults,
+    type ApiJobScheduledResponse,
     type ExecuteAsyncDashboardChartRequestParams,
     type ExecuteAsyncDashboardSqlChartRequestParams,
     type ExecuteAsyncMetricQueryRequestParams,
@@ -46,9 +53,12 @@ export type ApiGetAsyncQueryResultsResponse = {
 
 @Route('/api/v2/projects/{projectUuid}/query')
 @Response<ApiErrorPayload>('default', 'Error')
-@Tags('v2', 'Query')
+@Tags('Query')
 export class QueryController extends BaseController {
-    @Hidden()
+    /**
+     * Retrieves paginated results from a previously executed async query using its UUID
+     * @summary Get results
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('/{queryUuid}')
@@ -56,11 +66,14 @@ export class QueryController extends BaseController {
     async getAsyncQueryResults(
         @Path()
         projectUuid: string,
+        /** The UUID of the async query to retrieve results for */
         @Path()
         queryUuid: string,
         @Request() req: express.Request,
+        /** Page number for pagination (starts at 1) */
         @Query()
         page?: number,
+        /** Number of results per page (default: 500, max: 5000) */
         @Query()
         pageSize?: number,
     ): Promise<ApiGetAsyncQueryResultsResponse> {
@@ -69,7 +82,7 @@ export class QueryController extends BaseController {
         const results = await this.services
             .getAsyncQueryService()
             .getAsyncQueryResults({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 queryUuid,
                 page,
@@ -82,20 +95,24 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Cancels a running async query and discards any partial results
+     * @summary Cancel query
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/{queryUuid}/cancel')
     @OperationId('cancelAsyncQuery')
     async cancelAsyncQuery(
         @Path() projectUuid: string,
+        /** The UUID of the async query to cancel */
         @Path() queryUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
         this.setStatus(200);
 
         await this.services.getAsyncQueryService().cancelAsyncQuery({
-            user: req.user!,
+            account: req.account!,
             projectUuid,
             queryUuid,
         });
@@ -106,7 +123,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a metric query asynchronously against your data warehouse using dimensions, metrics, filters, and sorts
+     * @summary Execute metric query
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/metric-query')
@@ -137,12 +157,14 @@ export class QueryController extends BaseController {
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncMetricQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache,
                 metricQuery,
                 context: context ?? QueryExecutionContext.API,
                 dateZoom: body.dateZoom,
+                parameters: body.parameters,
+                pivotConfiguration: body.pivotConfiguration,
             });
 
         return {
@@ -151,7 +173,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a saved chart query asynchronously with optional parameter overrides
+     * @summary Execute saved chart
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/chart')
@@ -166,15 +191,23 @@ export class QueryController extends BaseController {
 
         const context = body.context ?? getContextFromHeader(req);
 
+        if (req.account!.isJwtUser()) {
+            // we need more granular CASTL abilities before enabling this
+            throw new ForbiddenError('Feature not available for JWT users');
+        }
+
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncSavedChartQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache,
                 chartUuid: body.chartUuid,
                 versionUuid: body.versionUuid,
                 context: context ?? QueryExecutionContext.API,
+                limit: body.limit,
+                parameters: body.parameters,
+                pivotResults: body.pivotResults,
             });
 
         return {
@@ -183,7 +216,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a chart within a dashboard context asynchronously with inherited dashboard filters
+     * @summary Execute dashboard chart
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/dashboard-chart')
@@ -198,10 +234,15 @@ export class QueryController extends BaseController {
 
         const context = body.context ?? getContextFromHeader(req);
 
+        if (req.account!.isJwtUser()) {
+            // we need more granular CASTL abilities before enabling this
+            throw new ForbiddenError('Feature not available for JWT users');
+        }
+
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncDashboardChartQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache,
                 chartUuid: body.chartUuid,
@@ -209,7 +250,10 @@ export class QueryController extends BaseController {
                 dashboardFilters: body.dashboardFilters,
                 dashboardSorts: body.dashboardSorts,
                 dateZoom: body.dateZoom,
+                limit: body.limit,
                 context: context ?? QueryExecutionContext.API,
+                parameters: body.parameters,
+                pivotResults: body.pivotResults,
             });
 
         return {
@@ -218,7 +262,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a query to retrieve underlying raw data for drilling down into aggregated values
+     * @summary Execute underlying data
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/underlying-data')
@@ -236,7 +283,7 @@ export class QueryController extends BaseController {
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncUnderlyingDataQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache,
                 underlyingDataSourceQueryUuid:
@@ -245,6 +292,8 @@ export class QueryController extends BaseController {
                 underlyingDataItemId: body.underlyingDataItemId,
                 context: context ?? QueryExecutionContext.API,
                 dateZoom: body.dateZoom,
+                limit: body.limit,
+                parameters: body.parameters,
             });
 
         return {
@@ -253,7 +302,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a raw SQL query asynchronously against your data warehouse for custom queries
+     * @summary Execute SQL query
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/sql')
@@ -270,12 +322,14 @@ export class QueryController extends BaseController {
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncSqlQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache ?? false,
                 sql: body.sql,
                 context: context ?? QueryExecutionContext.SQL_RUNNER,
                 pivotConfiguration: body.pivotConfiguration,
+                limit: body.limit,
+                parameters: body.parameters,
             });
 
         return {
@@ -284,7 +338,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a saved SQL chart query asynchronously with optional chart configurations
+     * @summary Execute SQL chart
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/sql-chart')
@@ -301,10 +358,12 @@ export class QueryController extends BaseController {
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncSqlChartQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache ?? false,
                 context: context ?? QueryExecutionContext.SQL_RUNNER,
+                limit: body.limit,
+                parameters: body.parameters,
                 ...(isExecuteAsyncSqlChartByUuidParams(body)
                     ? { savedSqlUuid: body.savedSqlUuid }
                     : { slug: body.slug }),
@@ -316,7 +375,10 @@ export class QueryController extends BaseController {
         };
     }
 
-    @Hidden()
+    /**
+     * Executes a SQL chart within a dashboard context asynchronously with inherited filters
+     * @summary Execute dashboard SQL chart
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('/dashboard-sql-chart')
@@ -333,13 +395,16 @@ export class QueryController extends BaseController {
         const results = await this.services
             .getAsyncQueryService()
             .executeAsyncDashboardSqlChartQuery({
-                user: req.user!,
+                account: req.account!,
                 projectUuid,
                 invalidateCache: body.invalidateCache ?? false,
                 dashboardUuid: body.dashboardUuid,
+                tileUuid: body.tileUuid,
                 dashboardFilters: body.dashboardFilters,
                 dashboardSorts: body.dashboardSorts,
                 context: context ?? QueryExecutionContext.SQL_RUNNER,
+                limit: body.limit,
+                parameters: body.parameters,
                 ...(isExecuteAsyncDashboardSqlChartByUuidParams(body)
                     ? { savedSqlUuid: body.savedSqlUuid }
                     : { slug: body.slug }),
@@ -348,6 +413,127 @@ export class QueryController extends BaseController {
         return {
             status: 'ok',
             results,
+        };
+    }
+
+    /**
+     * Streams query results directly from storage as newline-delimited JSON for large result sets
+     * @summary Stream results
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/{queryUuid}/results')
+    @Hidden() // This endpoint is temporary while we migrate SQL runner to use pagination. Should not be part of API docs.
+    @OperationId('getResultsStream')
+    async getResultsStream(
+        @Path() projectUuid: string,
+        @Path() queryUuid: string,
+        @Request() req: express.Request,
+    ): Promise<AnyType> {
+        this.setStatus(200);
+        this.setHeader('Content-Type', 'application/json');
+
+        const readStream = await this.services
+            .getAsyncQueryService()
+            .getResultsStream({
+                account: req.account!,
+                projectUuid,
+                queryUuid,
+            });
+
+        const { res } = req;
+        if (res) {
+            readStream.pipe(res);
+            await new Promise<void>((resolve, reject) => {
+                readStream.on('end', () => {
+                    res.end();
+                    resolve();
+                });
+            });
+        }
+    }
+
+    /**
+     * Downloads query results in various formats with custom formatting options
+     * @summary Download results
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/{queryUuid}/download')
+    @OperationId('downloadResults')
+    async downloadResults(
+        @Path() projectUuid: string,
+        /** The UUID of the completed async query to download */
+        @Path() queryUuid: string,
+        @Request() req: express.Request,
+        @Body() body: Omit<DownloadAsyncQueryResultsRequestParams, 'queryUuid'>,
+    ): Promise<
+        ApiSuccess<
+            | ApiDownloadAsyncQueryResults
+            | ApiDownloadAsyncQueryResultsAsCsv
+            | ApiDownloadAsyncQueryResultsAsXlsx
+        >
+    > {
+        this.setStatus(200);
+
+        const results = await this.services.getAsyncQueryService().download({
+            account: req.account!,
+            projectUuid,
+            queryUuid,
+            type: body.type,
+            onlyRaw: body.onlyRaw,
+            showTableNames: body.showTableNames,
+            customLabels: body.customLabels,
+            columnOrder: body.columnOrder,
+            hiddenFields: body.hiddenFields,
+            pivotConfig: body.pivotConfig,
+            attachmentDownloadName: body.attachmentDownloadName,
+        });
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Downloads query results in various formats with custom formatting options
+     * @summary Download results
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/{queryUuid}/schedule-download')
+    @OperationId('scheduleDownloadResults')
+    async scheduleDownloadResults(
+        @Path() projectUuid: string,
+        /** The UUID of the completed async query to download */
+        @Path() queryUuid: string,
+        @Request() req: express.Request,
+        @Body() body: Omit<DownloadAsyncQueryResultsRequestParams, 'queryUuid'>,
+    ): Promise<ApiJobScheduledResponse> {
+        this.setStatus(200);
+
+        const jobId = await this.services
+            .getAsyncQueryService()
+            .scheduleDownloadAsyncQueryResults({
+                account: req.account!,
+                projectUuid,
+                queryUuid,
+                type: body.type,
+                onlyRaw: body.onlyRaw,
+                showTableNames: body.showTableNames,
+                customLabels: body.customLabels,
+                columnOrder: body.columnOrder,
+                hiddenFields: body.hiddenFields,
+                pivotConfig: body.pivotConfig,
+                attachmentDownloadName: body.attachmentDownloadName,
+            });
+
+        return {
+            status: 'ok',
+            results: {
+                jobId,
+            },
         };
     }
 }

@@ -2,12 +2,13 @@ import { type Ability, type ForcedSubject } from '@casl/ability';
 import { type OrganizationMemberProfile } from '../types/organizationMemberProfile';
 
 export type AbilityAction =
-    | 'manage'
-    | 'update'
-    | 'view'
     | 'create'
     | 'delete'
-    | 'promote';
+    | 'export'
+    | 'manage'
+    | 'promote'
+    | 'update'
+    | 'view';
 
 interface Project {
     organizationUuid: string;
@@ -19,35 +20,42 @@ interface Organization {
 }
 
 export type CaslSubjectNames =
-    | 'Project'
-    | 'Organization'
-    | 'OrganizationMemberProfile'
+    | 'AiAgent'
+    | 'AiAgentThread'
+    | 'Analytics'
+    | 'ChangeCsvResults'
+    | 'CompileProject'
+    | 'ContentAsCode'
+    | 'CustomSql'
     | 'Dashboard'
-    | 'Space'
-    | 'SavedChart'
+    | 'DashboardComments'
+    | 'DashboardCsv'
+    | 'DashboardImage'
+    | 'DashboardPdf'
+    | 'Explore'
+    | 'ExportCsv'
+    | 'GoogleSheets'
+    | 'Group'
     | 'InviteLink'
     | 'Job'
-    | 'SqlRunner'
-    | 'Analytics'
-    | 'Explore'
-    | 'UnderlyingData'
-    | 'ExportCsv'
     | 'JobStatus'
-    | 'PinnedItems'
-    | 'Validation'
-    | 'Group'
-    | 'ChangeCsvResults'
-    | 'ScheduledDeliveries'
-    | 'DashboardComments'
-    | 'CustomSql'
-    | 'CompileProject'
-    | 'SemanticViewer'
-    | 'VirtualView'
-    | 'Tags'
-    | 'PersonalAccessToken'
     | 'MetricsTree'
+    | 'Organization'
+    | 'OrganizationMemberProfile'
+    | 'OrganizationWarehouseCredentials'
+    | 'PersonalAccessToken'
+    | 'PinnedItems'
+    | 'Project'
+    | 'SavedChart'
+    | 'ScheduledDeliveries'
+    | 'SemanticViewer'
+    | 'Space'
     | 'SpotlightTableConfig'
-    | 'ContentAsCode';
+    | 'SqlRunner'
+    | 'Tags'
+    | 'UnderlyingData'
+    | 'Validation'
+    | 'VirtualView';
 
 export type Subject =
     | CaslSubjectNames

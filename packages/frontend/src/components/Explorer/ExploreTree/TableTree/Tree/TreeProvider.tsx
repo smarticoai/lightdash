@@ -1,7 +1,7 @@
-import { type FC } from 'react';
+import { useMemo, type FC } from 'react';
 import TreeContext from './TreeContext';
 import { type TreeProviderProps } from './types';
-import { getNodeMapFromItemsMap, getSearchResults } from './utils';
+import { getNodeMapFromItemsMap } from './utils';
 
 export const TreeProvider: FC<React.PropsWithChildren<TreeProviderProps>> = ({
     searchQuery,
@@ -14,12 +14,10 @@ export const TreeProvider: FC<React.PropsWithChildren<TreeProviderProps>> = ({
     groupDetails,
     ...rest
 }) => {
-    const nodeMap = getNodeMapFromItemsMap(
-        itemsMap,
-        selectedItems,
-        groupDetails,
+    const nodeMap = useMemo(
+        () => getNodeMapFromItemsMap(itemsMap, groupDetails),
+        [itemsMap, groupDetails],
     );
-    const searchResults = getSearchResults(itemsMap, searchQuery);
     const isSearching = !!searchQuery && searchQuery !== '';
     return (
         <TreeContext.Provider
@@ -29,7 +27,6 @@ export const TreeProvider: FC<React.PropsWithChildren<TreeProviderProps>> = ({
                 selectedItems,
                 isSearching,
                 searchQuery,
-                searchResults,
                 missingCustomMetrics,
                 itemsAlerts,
                 missingCustomDimensions,

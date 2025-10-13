@@ -78,26 +78,20 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
         const clearCacheAndFetch = useDashboardContext(
             (c) => c.clearCacheAndFetch,
         );
-        const invalidateCache = useDashboardContext((c) => c.invalidateCache);
 
         const setIsAutoRefresh = useDashboardContext((c) => c.setIsAutoRefresh);
         const isOneAtLeastFetching = isFetching > 0;
 
         const invalidateAndSetRefreshTime = useCallback(async () => {
-            if (invalidateCache) {
-                // only invalidate results queries manually if cache is invalidated in the state
-                // if it isn't, the queries will be refetched because `clearCacheAndFetch` will change `invalidateCache` to `true` which will invalidate the results queries
-                await invalidateDashboardResultsQueries();
-            }
-
             clearCacheAndFetch();
             await invalidateDashboardRelatedQueries();
+            await invalidateDashboardResultsQueries();
+
             setLastRefreshTime(new Date());
         }, [
             clearCacheAndFetch,
             invalidateDashboardRelatedQueries,
             invalidateDashboardResultsQueries,
-            invalidateCache,
         ]);
 
         const interval = useInterval(
@@ -124,6 +118,7 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
                 <Tooltip
                     withinPortal
                     position="bottom"
+                    disabled={isOpen}
                     label={
                         <Text>
                             Last refreshed at:{' '}
@@ -191,7 +186,7 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
                         </Button>
                     </Menu.Target>
                     <Menu.Dropdown>
-                        <Menu.Label>Auto-refresh</Menu.Label>
+                        <Menu.Label>Auto-refresh while viewing</Menu.Label>
                         <Menu.Item
                             fz="xs"
                             onClick={() => {

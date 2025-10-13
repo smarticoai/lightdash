@@ -1,12 +1,13 @@
 import { subject } from '@casl/ability';
 import {
+    Account,
     AllowedEmailDomains,
+    assertIsAccountWithOrg,
     convertProjectRoleToOrganizationRole,
     CreateColorPalette,
     CreateGroup,
     CreateOrganization,
     ForbiddenError,
-    getOrganizationNameSchema,
     Group,
     GroupWithMembers,
     isUserWithOrg,
@@ -35,7 +36,6 @@ import { groupBy } from 'lodash';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
 import { LightdashConfig } from '../../config/parseConfig';
 import { GroupsModel } from '../../models/GroupsModel';
-import { InviteLinkModel } from '../../models/InviteLinkModel';
 import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
 import { OrganizationAllowedEmailDomainsModel } from '../../models/OrganizationAllowedEmailDomainsModel';
 import { OrganizationMemberProfileModel } from '../../models/OrganizationMemberProfileModel';
@@ -50,10 +50,8 @@ type OrganizationServiceArguments = {
     organizationModel: OrganizationModel;
     projectModel: ProjectModel;
     onboardingModel: OnboardingModel;
-    inviteLinkModel: InviteLinkModel;
     organizationMemberProfileModel: OrganizationMemberProfileModel;
     userModel: UserModel;
-
     groupsModel: GroupsModel;
     organizationAllowedEmailDomainsModel: OrganizationAllowedEmailDomainsModel;
 };
@@ -69,8 +67,6 @@ export class OrganizationService extends BaseService {
 
     private readonly onboardingModel: OnboardingModel;
 
-    private readonly inviteLinkModel: InviteLinkModel;
-
     private readonly organizationMemberProfileModel: OrganizationMemberProfileModel;
 
     private readonly userModel: UserModel;
@@ -85,7 +81,6 @@ export class OrganizationService extends BaseService {
         organizationModel,
         projectModel,
         onboardingModel,
-        inviteLinkModel,
         organizationMemberProfileModel,
         userModel,
         groupsModel,
@@ -97,7 +92,6 @@ export class OrganizationService extends BaseService {
         this.organizationModel = organizationModel;
         this.projectModel = projectModel;
         this.onboardingModel = onboardingModel;
-        this.inviteLinkModel = inviteLinkModel;
         this.organizationMemberProfileModel = organizationMemberProfileModel;
         this.userModel = userModel;
         this.organizationAllowedEmailDomainsModel =
@@ -105,21 +99,26 @@ export class OrganizationService extends BaseService {
         this.groupsModel = groupsModel;
     }
 
-    async get(user: SessionUser): Promise<Organization> {
-        if (!isUserWithOrg(user)) {
-            throw new ForbiddenError('User is not part of an organization');
-        }
+    async get(account: Account): Promise<Organization> {
+        assertIsAccountWithOrg(account);
+
         const needsProject = !(await this.projectModel.hasProjects(
-            user.organizationUuid,
+            account.organization.organizationUuid,
         ));
 
         const organization = await this.organizationModel.get(
-            user.organizationUuid,
+            account.organization.organizationUuid,
         );
         return {
             ...organization,
             needsProject,
         };
+    }
+
+    async getOrganizationByUuid(
+        organizationUuid: string,
+    ): Promise<Organization> {
+        return this.organizationModel.get(organizationUuid);
     }
 
     async updateOrg(
@@ -287,8 +286,8 @@ export class OrganizationService extends BaseService {
         };
     }
 
-    async getProjects(user: SessionUser): Promise<OrganizationProject[]> {
-        const { organizationUuid } = user;
+    async getProjects(account: Account): Promise<OrganizationProject[]> {
+        const { organizationUuid } = account.organization;
         if (organizationUuid === undefined) {
             throw new NotExistsError('Organization not found');
         }
@@ -297,7 +296,7 @@ export class OrganizationService extends BaseService {
         );
 
         return projects.filter((project) =>
-            user.ability.can(
+            account.user.ability.can(
                 'view',
                 subject('Project', {
                     organizationUuid,

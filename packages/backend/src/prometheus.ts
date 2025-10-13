@@ -1,4 +1,4 @@
-import { AnyType } from '@lightdash/common';
+import { AnyType, QueryHistoryStatus } from '@lightdash/common';
 import express from 'express';
 import http from 'http';
 import { Knex } from 'knex';
@@ -12,6 +12,16 @@ export default class PrometheusMetrics {
     private readonly config: LightdashConfig['prometheus'];
 
     private server: http.Server | null = null;
+
+    // Add query status metrics
+    public queryStatusCounter: prometheus.Counter<string> | null = null;
+
+    // AI Agent response time metrics
+    public aiAgentGenerateResponseDurationHistogram: prometheus.Histogram | null =
+        null;
+
+    public aiAgentStreamResponseDurationHistogram: prometheus.Histogram | null =
+        null;
 
     constructor(config: LightdashConfig['prometheus']) {
         this.config = config;
@@ -35,6 +45,72 @@ export default class PrometheusMetrics {
                         );
                     },
                 });
+
+                // Initialize query status metrics
+                this.queryStatusCounter = new prometheus.Counter({
+                    name: 'query_status_total',
+                    help: 'Total number of queries by status',
+                    labelNames: ['status', 'warehouse_type', 'context'],
+                    ...rest,
+                });
+
+                // Initialize AI Agent response time histograms
+                this.aiAgentGenerateResponseDurationHistogram =
+                    new prometheus.Histogram({
+                        name: 'ai_agent_generate_response_duration_ms',
+                        help: 'Histogram of AI Agent generate response time in milliseconds',
+                        buckets: [
+                            100, // 100ms
+                            250, // 250ms
+                            500, // 500ms
+                            1000, // 1 second
+                            2500, // 2.5 seconds
+                            5000, // 5 seconds
+                            10000, // 10 seconds
+                            25000, // 25 seconds
+                            50000, // 50 seconds
+                            60000, // 1 minute
+                            120000, // 2 minutes
+                            180000, // 3 minutes
+                            240000, // 4 minutes
+                            300000, // 5 minutes
+                            600000, // 10 minutes
+                            900000, // 15 minutes
+                            1200000, // 20 minutes
+                            1500000, // 25 minutes
+                            1800000, // 30 minutes
+                        ],
+                        ...rest,
+                    });
+
+                this.aiAgentStreamResponseDurationHistogram =
+                    new prometheus.Histogram({
+                        name: 'ai_agent_stream_response_duration_ms',
+                        help: 'Histogram of AI Agent stream response time in milliseconds',
+                        buckets: [
+                            100, // 100ms
+                            250, // 250ms
+                            500, // 500ms
+                            1000, // 1 second
+                            2500, // 2.5 seconds
+                            5000, // 5 seconds
+                            10000, // 10 seconds
+                            25000, // 25 seconds
+                            50000, // 50 seconds
+                            60000, // 1 minute
+                            120000, // 2 minutes
+                            180000, // 3 minutes
+                            240000, // 4 minutes
+                            300000, // 5 minutes
+                            600000, // 10 minutes
+                            900000, // 15 minutes
+                            1200000, // 20 minutes
+                            1500000, // 25 minutes
+                            1800000, // 30 minutes
+                        ],
+                        ...rest,
+                    });
+
                 const app = express();
                 this.server = http.createServer(app);
                 app.get(path, async (req, res) => {
@@ -49,6 +125,20 @@ export default class PrometheusMetrics {
             } catch (e) {
                 Logger.error('Error starting prometheus metrics', e);
             }
+        }
+    }
+
+    public incrementQueryStatus(
+        status: QueryHistoryStatus,
+        warehouseType?: string,
+        context?: string,
+    ) {
+        if (this.queryStatusCounter) {
+            this.queryStatusCounter.inc({
+                status,
+                warehouse_type: warehouseType || 'unknown',
+                context: context || 'unknown',
+            });
         }
     }
 

@@ -10,7 +10,10 @@ import { LightdashConfig } from '../../config/parseConfig';
 import { isFeatureFlagEnabled } from '../../postHog';
 
 export type FeatureFlagLogicArgs = {
-    user?: Pick<LightdashUser, 'userUuid' | 'organizationUuid'>;
+    user?: Pick<
+        LightdashUser,
+        'userUuid' | 'organizationUuid' | 'organizationName'
+    >;
     featureFlagId: string;
 };
 
@@ -31,6 +34,9 @@ export class FeatureFlagModel {
         this.featureFlagHandlers = {
             [FeatureFlags.UserGroupsEnabled]:
                 this.getUserGroupsEnabled.bind(this),
+            [FeatureFlags.UseSqlPivotResults]:
+                this.getUseSqlPivotResults.bind(this),
+            [FeatureFlags.UseRedux]: this.getUseRedux.bind(this),
         };
     }
 
@@ -79,6 +85,53 @@ export class FeatureFlagModel {
                       {
                           // because we are checking this in the health check, we don't want to throw an error
                           // nor do we want to wait too long
+                          throwOnTimeout: false,
+                          timeoutMilliseconds: 500,
+                      },
+                  )
+                : false);
+        return {
+            id: featureFlagId,
+            enabled,
+        };
+    }
+
+    private async getUseSqlPivotResults({
+        user,
+        featureFlagId,
+    }: FeatureFlagLogicArgs) {
+        const enabled =
+            this.lightdashConfig.query.useSqlPivotResults ||
+            (user
+                ? await isFeatureFlagEnabled(
+                      FeatureFlags.UseSqlPivotResults,
+                      {
+                          userUuid: user.userUuid,
+                          organizationUuid: user.organizationUuid,
+                      },
+                      {
+                          throwOnTimeout: false,
+                          timeoutMilliseconds: 500,
+                      },
+                  )
+                : false);
+        return {
+            id: featureFlagId,
+            enabled,
+        };
+    }
+
+    private async getUseRedux({ user, featureFlagId }: FeatureFlagLogicArgs) {
+        const enabled =
+            this.lightdashConfig.useRedux ||
+            (user
+                ? await isFeatureFlagEnabled(
+                      FeatureFlags.UseRedux,
+                      {
+                          userUuid: user.userUuid,
+                          organizationUuid: user.organizationUuid,
+                      },
+                      {
                           throwOnTimeout: false,
                           timeoutMilliseconds: 500,
                       },

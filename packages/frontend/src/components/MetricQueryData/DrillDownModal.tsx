@@ -132,7 +132,13 @@ const drillDownExploreUrl = ({
             }),
             limit: 500,
             additionalMetrics: metricQuery.additionalMetrics,
-            sorts: [{ fieldId: drillByDimension, descending: false }],
+            customDimensions: metricQuery.customDimensions,
+            sorts: [
+                {
+                    fieldId: drillByDimension,
+                    descending: false,
+                },
+            ],
         },
         pivotConfig: undefined,
         tableConfig: {

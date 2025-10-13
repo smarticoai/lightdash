@@ -2,10 +2,10 @@ import { subject } from '@casl/ability';
 import {
     AlreadyExistsError,
     CommercialFeatureFlags,
-    CreateScimOrganizationAccessToken,
     ForbiddenError,
     getErrorMessage,
     GroupWithMembers,
+    isOrganizationMemberRole,
     isValidEmailAddress,
     LightdashUser,
     NotFoundError,
@@ -15,13 +15,14 @@ import {
     ScimError,
     ScimGroup,
     ScimListResponse,
-    ScimOrganizationAccessToken,
-    ScimOrganizationAccessTokenWithToken,
+    ScimResourceType,
+    ScimSchema,
+    ScimSchemaAttribute,
     ScimSchemaType,
+    ScimServiceProviderConfig,
     ScimUpsertGroup,
     ScimUpsertUser,
     ScimUser,
-    SessionServiceAccount,
     SessionUser,
 } from '@lightdash/common';
 import * as Sentry from '@sentry/node';
@@ -46,7 +47,7 @@ import {
     ScimAccessTokenEvent,
 } from '../../analytics';
 import { CommercialFeatureFlagModel } from '../../models/CommercialFeatureFlagModel';
-import { ScimOrganizationAccessTokenModel } from '../../models/ScimOrganizationAccessTokenModel';
+import { ServiceAccountModel } from '../../models/ServiceAccountModel';
 
 type ScimServiceArguments = {
     lightdashConfig: LightdashConfig;
@@ -55,7 +56,7 @@ type ScimServiceArguments = {
     emailModel: EmailModel;
     analytics: LightdashAnalytics;
     groupsModel: GroupsModel;
-    scimOrganizationAccessTokenModel: ScimOrganizationAccessTokenModel;
+    serviceAccountModel: ServiceAccountModel;
     commercialFeatureFlagModel: CommercialFeatureFlagModel;
 };
 
@@ -72,7 +73,7 @@ export class ScimService extends BaseService {
 
     private readonly groupsModel: GroupsModel;
 
-    private readonly scimOrganizationAccessTokenModel: ScimOrganizationAccessTokenModel;
+    private readonly serviceAccountModel: ServiceAccountModel;
 
     private readonly commercialFeatureFlagModel: CommercialFeatureFlagModel;
 
@@ -83,7 +84,7 @@ export class ScimService extends BaseService {
         emailModel,
         analytics,
         groupsModel,
-        scimOrganizationAccessTokenModel,
+        serviceAccountModel,
         commercialFeatureFlagModel,
     }: ScimServiceArguments) {
         super();
@@ -93,8 +94,7 @@ export class ScimService extends BaseService {
         this.emailModel = emailModel;
         this.analytics = analytics;
         this.groupsModel = groupsModel;
-        this.scimOrganizationAccessTokenModel =
-            scimOrganizationAccessTokenModel;
+        this.serviceAccountModel = serviceAccountModel;
         this.commercialFeatureFlagModel = commercialFeatureFlagModel;
     }
 
@@ -108,18 +108,6 @@ export class ScimService extends BaseService {
             )
         ) {
             throw new ForbiddenError('You do not have permission');
-        }
-    }
-
-    private async throwErrorOnFeatureDisabled(user: SessionUser) {
-        const isScimTokenManagementEnabled =
-            await this.commercialFeatureFlagModel.get({
-                user,
-                featureFlagId: CommercialFeatureFlags.Scim,
-            });
-
-        if (!isScimTokenManagementEnabled.enabled) {
-            throw new Error('SCIM token management feature not enabled!');
         }
     }
 
@@ -154,7 +142,8 @@ export class ScimService extends BaseService {
         const updatedAt =
             'updatedAt' in user ? user.updatedAt : user.userUpdatedAt;
 
-        return {
+        // Create the base SCIM user
+        const scimUser: ScimUser = {
             schemas: [ScimSchemaType.USER],
             id: user.userUuid,
             userName: user.email || '',
@@ -179,6 +168,16 @@ export class ScimService extends BaseService {
                 ).href,
             },
         };
+
+        // Add the Lightdash extension schema if the user has a role
+        if (user.role) {
+            scimUser.schemas.push(ScimSchemaType.LIGHTDASH_USER_EXTENSION);
+            scimUser[ScimSchemaType.LIGHTDASH_USER_EXTENSION] = {
+                role: user.role,
+            };
+        }
+
+        return scimUser;
     }
 
     static getScimUserEmail(user: Pick<ScimUser, 'userName'>): string {
@@ -353,12 +352,31 @@ export class ScimService extends BaseService {
                 },
                 user.active,
             );
+            // Extract role from extension schema if available
+            const extensionData = user[ScimSchemaType.LIGHTDASH_USER_EXTENSION];
+            let role = OrganizationMemberRole.MEMBER; // Default role
+
+            // If a role is provided in the extension schema, validate and use it
+            if (extensionData?.role) {
+                // Validate that the role is a valid OrganizationMemberRole
+                if (!isOrganizationMemberRole(extensionData.role)) {
+                    throw new ParameterError(
+                        `Invalid role: ${
+                            extensionData.role
+                        }. Role must be one of: ${Object.values(
+                            OrganizationMemberRole,
+                        ).join(', ')}`,
+                    );
+                }
+                role = extensionData.role;
+            }
+
             // Add user to organization
             await this.organizationMemberProfileModel.createOrganizationMembershipByUuid(
                 {
                     organizationUuid,
                     userUuid: dbUser.userUuid,
-                    role: OrganizationMemberRole.MEMBER,
+                    role,
                 },
             );
             // verify user email on create if coming from scim
@@ -435,18 +453,47 @@ export class ScimService extends BaseService {
                     isActive: user.active ?? dbUser.isActive,
                 },
             );
+
+            // Update user's organization role if provided in the extension schema
+            const extensionData = user[ScimSchemaType.LIGHTDASH_USER_EXTENSION];
+            if (extensionData?.role && extensionData.role !== dbUser.role) {
+                // Validate that the role is a valid OrganizationMemberRole
+                if (!isOrganizationMemberRole(extensionData.role)) {
+                    throw new ParameterError(
+                        `Invalid role: ${
+                            extensionData.role
+                        }. Role must be one of: ${Object.values(
+                            OrganizationMemberRole,
+                        ).join(', ')}`,
+                    );
+                }
+
+                await this.organizationMemberProfileModel.updateOrganizationMember(
+                    organizationUuid,
+                    userUuid,
+                    {
+                        role: extensionData.role,
+                    },
+                );
+            }
+
+            // Get the updated user with potentially new role
+            const finalUser = await this.userModel.getUserDetailsByUuid(
+                updatedUser.userUuid,
+            );
+
             this.analytics.track({
                 event: 'user.updated',
                 anonymousId: LightdashAnalytics.anonymousId,
                 properties: {
-                    ...updatedUser,
-                    updatedUserId: updatedUser.userUuid,
-                    organizationId: updatedUser.organizationUuid,
+                    ...finalUser,
+                    updatedUserId: finalUser.userUuid,
+                    organizationId: finalUser.organizationUuid,
                     context: 'scim',
                 },
             });
             // Construct SCIM-compliant response
-            return this.convertLightdashUserToScimUser(updatedUser);
+            return this.convertLightdashUserToScimUser(finalUser);
         } catch (error) {
             if (error instanceof ParameterError) {
                 throw new ScimError({
@@ -799,18 +846,6 @@ export class ScimService extends BaseService {
                     scimType: 'invalidValue',
                 });
             }
-            const { data: matchesByName } = await this.groupsModel.find({
-                organizationUuid,
-                name: groupToUpdate.displayName,
-            });
-
-            if (matchesByName.length > 0) {
-                throw new ScimError({
-                    detail: 'Group with this name already exists',
-                    status: 409,
-                    scimType: 'uniqueness',
-                });
-            }
 
             const group = await this.groupsModel.getGroupWithMembers(groupUuid);
             if (group.organizationUuid !== organizationUuid) {
@@ -820,6 +855,24 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
+
+            const { data: matchesByName } = await this.groupsModel.find({
+                organizationUuid,
+                name: groupToUpdate.displayName,
+            });
+
+            // Check for name uniqueness, but exclude the current group from the check
+            const conflictingGroups = matchesByName.filter(
+                (match) => match.uuid !== groupUuid,
+            );
+            if (conflictingGroups.length > 0) {
+                throw new ScimError({
+                    detail: 'Group with this name already exists',
+                    status: 409,
+                    scimType: 'uniqueness',
+                });
+            }
+
             const updatedGroup = await this.groupsModel.updateGroup({
                 updatedByUserUuid: null,
                 groupUuid,
@@ -1005,234 +1058,700 @@ export class ScimService extends BaseService {
         }
     }
 
-    async createOrganizationAccessToken({
-        user,
-        tokenDetails,
-    }: {
-        user: SessionUser;
-        tokenDetails: CreateScimOrganizationAccessToken;
-    }): Promise<ScimOrganizationAccessToken> {
-        try {
-            await this.throwErrorOnFeatureDisabled(user);
-            ScimService.throwForbiddenErrorOnNoPermission(user);
-            const token = await this.scimOrganizationAccessTokenModel.create({
-                user,
-                data: {
-                    organizationUuid: tokenDetails.organizationUuid,
-                    expiresAt: tokenDetails.expiresAt,
-                    description: tokenDetails.description,
-                },
-            });
-            this.analytics.track<ScimAccessTokenEvent>({
-                event: 'scim_access_token.created',
-                userId: user.userUuid,
-                properties: {
-                    organizationId: token.organizationUuid,
-                },
-            });
-            return token;
-        } catch (error) {
-            if (error instanceof ForbiddenError) {
-                throw error;
-            }
-            throw new Error('Failed to create organization access token');
-        }
-    }
-
-    async deleteOrganizationAccessToken({
-        user,
-        tokenUuid,
-    }: {
-        user: SessionUser;
-        tokenUuid: string;
-    }): Promise<void> {
-        try {
-            await this.throwErrorOnFeatureDisabled(user);
-            ScimService.throwForbiddenErrorOnNoPermission(user);
-            const organizationUuid = user.organizationUuid as string;
-            // get by uuid to check if token exists
-            const token =
-                await this.scimOrganizationAccessTokenModel.getTokenbyUuid(
-                    tokenUuid,
-                );
-            if (!token) {
-                throw new NotFoundError(
-                    `Token with UUID ${tokenUuid} not found`,
-                );
-            }
-            // throw forbidden if token does not belong to organization
-            if (token.organizationUuid !== organizationUuid) {
-                throw new ForbiddenError(
-                    "Token doesn't belong to organization",
-                );
-            }
-            await this.scimOrganizationAccessTokenModel.delete(tokenUuid);
-            this.analytics.track<ScimAccessTokenEvent>({
-                event: 'scim_access_token.deleted',
-                userId: user.userUuid,
-                properties: {
-                    organizationId: token.organizationUuid,
-                },
-            });
-        } catch (error) {
-            if (
-                error instanceof NotFoundError ||
-                error instanceof ForbiddenError
-            ) {
-                throw error;
-            }
-            throw new Error('Failed to delete organization access token');
-        }
-    }
-
-    async rotateOrganizationAccessToken({
-        user,
-        tokenUuid,
-        update,
-    }: {
-        user: SessionUser;
-        tokenUuid: string;
-        update: { expiresAt: Date };
-    }): Promise<ScimOrganizationAccessTokenWithToken> {
-        await this.throwErrorOnFeatureDisabled(user);
-        ScimService.throwForbiddenErrorOnNoPermission(user);
-
-        if (update.expiresAt.getTime() < Date.now()) {
-            throw new ParameterError('Expire time must be in the future');
-        }
-
-        // get by uuid to check if token exists
-        const existingToken =
-            await this.scimOrganizationAccessTokenModel.getTokenbyUuid(
-                tokenUuid,
-            );
-        if (!existingToken) {
-            throw new NotFoundError(`Token with UUID ${tokenUuid} not found`);
-        }
-        // throw forbidden if token does not belong to organization
-        if (existingToken.organizationUuid !== user.organizationUuid) {
-            throw new ForbiddenError("Token doesn't belong to organization");
-        }
-
-        // Business decision, we don't want to rotate tokens that don't expire. Rotation is a security feature that should be used with tokens that expire.
-        if (!existingToken.expiresAt) {
-            throw new ParameterError(
-                'Token with no expiration date cannot be rotated',
-            );
-        }
-
-        if (
-            existingToken.rotatedAt &&
-            existingToken.rotatedAt.getTime() > Date.now() - 3600000
-        ) {
-            throw new ParameterError('Token can only be rotated once per hour');
-        }
-
-        const newToken = await this.scimOrganizationAccessTokenModel.rotate({
-            scimOrganizationAccessTokenUuid: tokenUuid,
-            rotatedByUserUuid: user.userUuid,
-            expiresAt: update.expiresAt,
-        });
-        this.analytics.track<ScimAccessTokenEvent>({
-            event: 'scim_access_token.rotated',
-            userId: user.userUuid,
-            properties: {
-                organizationId: existingToken.organizationUuid,
+    static getServiceProviderConfig(): ScimServiceProviderConfig {
+        return {
+            schemas: [ScimSchemaType.SERVICE_PROVIDER_CONFIG],
+            documentationUri: 'https://docs.lightdash.com/guides/scim',
+            patch: {
+                supported: true,
             },
-        });
-        return newToken;
+            bulk: {
+                supported: false,
+            },
+            filter: {
+                supported: true,
+                maxResults: 200,
+            },
+            changePassword: {
+                supported: false,
+            },
+            sort: {
+                supported: false,
+            },
+            etag: {
+                supported: false,
+            },
+            authenticationSchemes: [
+                {
+                    type: 'oauthbearertoken',
+                    name: 'OAuth Bearer Token',
+                    description:
+                        'Authentication scheme using the OAuth 2.0 Bearer Token standard',
+                    primary: true,
+                },
+            ],
+        };
     }
 
-    async getOrganizationAccessToken({
-        user,
-        tokenUuid,
-    }: {
-        user: SessionUser;
-        tokenUuid: string;
-    }): Promise<ScimOrganizationAccessToken> {
-        await this.throwErrorOnFeatureDisabled(user);
-        ScimService.throwForbiddenErrorOnNoPermission(user);
+    /**
+     * Type-safe mapping of ScimUser interface fields to SCIM schema attributes
+     * This ensures all fields from ScimUser are covered and only those fields
+     */
+    private static buildUserSchemaAttributes(): ScimSchemaAttribute[] {
+        // Type-safe field mapping - TypeScript will catch if ScimUser interface changes
+        type ScimUserFieldMap = {
+            [K in keyof Omit<
+                ScimUser,
+                | 'schemas'
+                | 'id'
+                | 'externalId'
+                | 'meta'
+                | ScimSchemaType.LIGHTDASH_USER_EXTENSION
+            >]: ScimSchemaAttribute;
+        };
 
-        // get by uuid to check if token exists
-        const existingToken =
-            await this.scimOrganizationAccessTokenModel.getTokenbyUuid(
-                tokenUuid,
-            );
-        if (!existingToken) {
-            throw new NotFoundError(`Token with UUID ${tokenUuid} not found`);
-        }
-        // throw forbidden if token does not belong to organization
-        if (existingToken.organizationUuid !== user.organizationUuid) {
-            throw new ForbiddenError("Token doesn't belong to organization");
-        }
-        return existingToken;
-    }
-
-    async listOrganizationAccessTokens(
-        user: SessionUser,
-    ): Promise<ScimOrganizationAccessToken[]> {
-        try {
-            await this.throwErrorOnFeatureDisabled(user);
-            ScimService.throwForbiddenErrorOnNoPermission(user);
-            const organizationUuid = user.organizationUuid as string;
-            const tokens =
-                await this.scimOrganizationAccessTokenModel.getAllForOrganization(
-                    organizationUuid,
-                );
-            return tokens;
-        } catch (error) {
-            if (error instanceof ForbiddenError) {
-                throw error;
-            }
-            throw new Error('Failed to list organization access tokens');
-        }
-    }
-
-    async authenticateToken(
-        token: string,
-        request: {
-            method: string;
-            path: string;
-            routePath: string;
-        },
-    ): Promise<SessionServiceAccount | null> {
-        // return null if token is empty
-        if (token === '') return null;
-        // return null if token does not start with 'scim_'
-        if (!token.startsWith('scim_')) {
-            return null;
-        }
-        try {
-            const dbToken =
-                await this.scimOrganizationAccessTokenModel.getByToken(token);
-            if (dbToken) {
-                // return null if expired
-                if (dbToken.expiresAt && dbToken.expiresAt < new Date()) {
-                    return null;
-                }
-
-                this.analytics.track<ScimAccessTokenAuthenticationEvent>({
-                    event: 'scim_access_token.authenticated',
-                    anonymousId: LightdashAnalytics.anonymousId,
-                    properties: {
-                        organizationId: dbToken.organizationUuid,
-                        requestMethod: request.method,
-                        requestPath: request.path,
-                        requestRoutePath: request.routePath,
+        const fieldAttributeMap: ScimUserFieldMap = {
+            userName: {
+                name: 'userName',
+                type: 'string',
+                multiValued: false,
+                description:
+                    'Unique identifier for the User, typically used for login',
+                required: true,
+                caseExact: false,
+                mutability: 'readWrite',
+                returned: 'default',
+                uniqueness: 'server',
+            },
+            name: {
+                name: 'name',
+                type: 'complex',
+                multiValued: false,
+                description: "The components of the user's real name",
+                required: false,
+                caseExact: false,
+                mutability: 'readWrite',
+                returned: 'default',
+                uniqueness: 'none',
+                subAttributes: [
+                    {
+                        name: 'givenName',
+                        type: 'string',
+                        multiValued: false,
+                        description:
+                            'The given name of the User, or first name',
+                        required: false,
+                        caseExact: false,
+                        mutability: 'readWrite',
+                        returned: 'default',
+                        uniqueness: 'none',
                     },
-                });
-                // Update last used date
-                await this.scimOrganizationAccessTokenModel.updateUsedDate(
-                    dbToken.uuid,
-                );
-                // finally return organization uuid
-                return {
-                    organizationUuid: dbToken.organizationUuid,
-                };
-            }
-        } catch (error) {
-            return null;
-        }
-        return null;
+                    {
+                        name: 'familyName',
+                        type: 'string',
+                        multiValued: false,
+                        description:
+                            'The family name of the User, or last name',
+                        required: false,
+                        caseExact: false,
+                        mutability: 'readWrite',
+                        returned: 'default',
+                        uniqueness: 'none',
+                    },
+                ],
+            },
+            active: {
+                name: 'active',
+                type: 'boolean',
+                multiValued: false,
+                description:
+                    "A Boolean value indicating the User's administrative status",
+                required: false,
+                caseExact: false,
+                mutability: 'readWrite',
+                returned: 'default',
+                uniqueness: 'none',
+            },
+            emails: {
+                name: 'emails',
+                type: 'complex',
+                multiValued: true,
+                description: 'Email addresses for the user',
+                required: false,
+                caseExact: false,
+                mutability: 'readWrite',
+                returned: 'default',
+                uniqueness: 'none',
+                subAttributes: [
+                    {
+                        name: 'value',
+                        type: 'string',
+                        multiValued: false,
+                        description: 'Email address for the User',
+                        required: false,
+                        caseExact: false,
+                        mutability: 'readWrite',
+                        returned: 'default',
+                        uniqueness: 'none',
+                    },
+                    {
+                        name: 'primary',
+                        type: 'boolean',
+                        multiValued: false,
+                        description:
+                            'A Boolean value indicating the primary email address',
+                        required: false,
+                        caseExact: false,
+                        mutability: 'readWrite',
+                        returned: 'default',
+                        uniqueness: 'none',
+                    },
+                ],
+            },
+        };
+
+        // Return all attributes as array - TypeScript ensures all ScimUser fields are covered
+        return Object.values(fieldAttributeMap);
+    }
+
+    static getSchemas(): ScimSchema[] {
+        const userSchema: ScimSchema = {
+            schemas: [ScimSchemaType.SCHEMA],
+            id: ScimSchemaType.USER,
+            name: 'User',
+            description: 'User Schema - Lightdash supported attributes',
+            attributes: this.buildUserSchemaAttributes(),
+        };
+
+        const groupSchema: ScimSchema = {
+            schemas: [ScimSchemaType.SCHEMA],
+            id: ScimSchemaType.GROUP,
+            name: 'Group',
+            description: 'Group Schema',
+            attributes: [
+                {
+                    name: 'displayName',
+                    type: 'string',
+                    multiValued: false,
+                    description: 'A human-readable name for the Group',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readWrite',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'members',
+                    type: 'complex',
+                    multiValued: true,
+                    description: 'A list of members of the Group',
+                    required: false,
+                    caseExact: false,
+                    mutability: 'readWrite',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'value',
+                            type: 'string',
+                            multiValued: false,
+                            description:
+                                'Identifier of the member of this Group',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readWrite',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'display',
+                            type: 'string',
+                            multiValued: false,
+                            description:
+                                'A human-readable name for the Group member',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readWrite',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const lightdashUserExtensionSchema: ScimSchema = {
+            schemas: [ScimSchemaType.SCHEMA],
+            id: ScimSchemaType.LIGHTDASH_USER_EXTENSION,
+            name: 'Lightdash User Extension',
+            description: 'Lightdash-specific User attributes',
+            attributes: [
+                {
+                    name: 'role',
+                    type: 'string',
+                    multiValued: false,
+                    description: 'Role of the user in the organization',
+                    required: false,
+                    canonicalValues: [
+                        'admin',
+                        'editor',
+                        'interactive_viewer',
+                        'viewer',
+                    ],
+                    caseExact: false,
+                    mutability: 'readWrite',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+            ],
+        };
+
+        const serviceProviderConfigSchema: ScimSchema = {
+            schemas: [ScimSchemaType.SCHEMA],
+            id: ScimSchemaType.SERVICE_PROVIDER_CONFIG,
+            name: 'Service Provider Configuration',
+            description:
+                "Schema for representing the service provider's configuration",
+            attributes: [
+                {
+                    name: 'documentationUri',
+                    type: 'reference',
+                    multiValued: false,
+                    description:
+                        "An HTTP-addressable URL pointing to the service provider's human-consumable help documentation",
+                    required: false,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'patch',
+                    type: 'complex',
+                    multiValued: false,
+                    description:
+                        'A complex type that specifies PATCH configuration options',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'supported',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value specifying whether or not the operation is supported',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+                {
+                    name: 'bulk',
+                    type: 'complex',
+                    multiValued: false,
+                    description:
+                        'A complex type that specifies bulk configuration options',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'supported',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value specifying whether or not the operation is supported',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'maxOperations',
+                            type: 'integer',
+                            multiValued: false,
+                            description:
+                                'An integer value specifying the maximum number of operations',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'maxPayloadSize',
+                            type: 'integer',
+                            multiValued: false,
+                            description:
+                                'An integer value specifying the maximum payload size in bytes',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+                {
+                    name: 'filter',
+                    type: 'complex',
+                    multiValued: false,
+                    description: 'A complex type that specifies FILTER options',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'supported',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value specifying whether or not the operation is supported',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'maxResults',
+                            type: 'integer',
+                            multiValued: false,
+                            description:
+                                'An integer value specifying the maximum number of resources returned',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+                {
+                    name: 'changePassword',
+                    type: 'complex',
+                    multiValued: false,
+                    description:
+                        'A complex type that specifies configuration options related to changing a password',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'supported',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value specifying whether or not the operation is supported',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+                {
+                    name: 'sort',
+                    type: 'complex',
+                    multiValued: false,
+                    description:
+                        'A complex type that specifies sort result options',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'supported',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value specifying whether or not sorting is supported',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+                {
+                    name: 'etag',
+                    type: 'complex',
+                    multiValued: false,
+                    description:
+                        'A complex type that specifies ETag configuration options',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'supported',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value specifying whether or not the operation is supported',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+                {
+                    name: 'authenticationSchemes',
+                    type: 'complex',
+                    multiValued: true,
+                    description:
+                        'A multi-valued complex type that specifies supported authentication scheme properties',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'type',
+                            type: 'string',
+                            multiValued: false,
+                            description: 'The authentication scheme type',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'name',
+                            type: 'string',
+                            multiValued: false,
+                            description:
+                                'The common authentication scheme name',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'description',
+                            type: 'string',
+                            multiValued: false,
+                            description:
+                                'A description of the authentication scheme',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'specUri',
+                            type: 'reference',
+                            multiValued: false,
+                            description:
+                                'An HTTP-addressable URL pointing to the authentication scheme specification',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'documentationUri',
+                            type: 'reference',
+                            multiValued: false,
+                            description:
+                                'An HTTP-addressable URL pointing to the authentication scheme usage documentation',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'primary',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value indicating the primary authentication scheme',
+                            required: false,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const resourceTypeSchema: ScimSchema = {
+            schemas: [ScimSchemaType.SCHEMA],
+            id: ScimSchemaType.RESOURCE_TYPE,
+            name: 'Resource Type',
+            description:
+                'Specifies the schema that describes a SCIM resource type',
+            attributes: [
+                {
+                    name: 'id',
+                    type: 'string',
+                    multiValued: false,
+                    description: "The resource type's server unique id",
+                    required: false,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'name',
+                    type: 'string',
+                    multiValued: false,
+                    description: 'The resource type name',
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'description',
+                    type: 'string',
+                    multiValued: false,
+                    description:
+                        "The resource type's human-readable description",
+                    required: false,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'endpoint',
+                    type: 'reference',
+                    multiValued: false,
+                    description:
+                        "The resource type's HTTP-addressable endpoint relative to the Base URL",
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'schema',
+                    type: 'reference',
+                    multiValued: false,
+                    description: "The resource type's primary/base schema URI",
+                    required: true,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                },
+                {
+                    name: 'schemaExtensions',
+                    type: 'complex',
+                    multiValued: true,
+                    description:
+                        "A list of URIs of the resource type's schema extensions",
+                    required: false,
+                    caseExact: false,
+                    mutability: 'readOnly',
+                    returned: 'default',
+                    uniqueness: 'none',
+                    subAttributes: [
+                        {
+                            name: 'schema',
+                            type: 'reference',
+                            multiValued: false,
+                            description: 'The URI of a schema extension',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                        {
+                            name: 'required',
+                            type: 'boolean',
+                            multiValued: false,
+                            description:
+                                'A Boolean value that specifies whether or not the schema extension is required',
+                            required: true,
+                            caseExact: false,
+                            mutability: 'readOnly',
+                            returned: 'default',
+                            uniqueness: 'none',
+                        },
+                    ],
+                },
+            ],
+        };
+
+        return [
+            userSchema,
+            groupSchema,
+            lightdashUserExtensionSchema,
+            serviceProviderConfigSchema,
+            resourceTypeSchema,
+        ];
+    }
+
+    static getResourceTypes(): ScimResourceType[] {
+        // Get base URL from environment or use default
+        const baseUrl = process.env.SITE_URL || 'http://localhost:8080';
+
+        return [
+            {
+                schemas: [ScimSchemaType.RESOURCE_TYPE],
+                id: 'User',
+                name: 'User',
+                description: 'User Account',
+                endpoint: '/Users',
+                schema: ScimSchemaType.USER,
+                schemaExtensions: [
+                    {
+                        schema: ScimSchemaType.LIGHTDASH_USER_EXTENSION,
+                        required: false,
+                    },
+                ],
+                meta: {
+                    resourceType: 'ResourceType',
+                    location: `${baseUrl}/api/v1/scim/v2/ResourceTypes/User`,
+                },
+            },
+            {
+                schemas: [ScimSchemaType.RESOURCE_TYPE],
+                id: 'Group',
+                name: 'Group',
+                description: 'Group',
+                endpoint: '/Groups',
+                schema: ScimSchemaType.GROUP,
+                meta: {
+                    resourceType: 'ResourceType',
+                    location: `${baseUrl}/api/v1/scim/v2/ResourceTypes/Group`,
+                },
+            },
+        ];
     }
 }

@@ -1,8 +1,10 @@
 import {
     CreateProjectMember,
+    getErrorMessage,
     InviteLink,
     PasswordResetLink,
     ProjectMemberRole,
+    SchedulerFormat,
     SessionUser,
     SmptError,
 } from '@lightdash/common';
@@ -11,9 +13,17 @@ import * as nodemailer from 'nodemailer';
 import hbs from 'nodemailer-express-handlebars';
 import Mail from 'nodemailer/lib/mailer';
 import { AuthenticationType } from 'nodemailer/lib/smtp-connection';
+import SMTPPool from 'nodemailer/lib/smtp-pool';
 import path from 'path';
 import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
+
+// Timeout configurations based on Nodemailer defaults, adjusted for scheduler compatibility
+export const SMTP_CONNECTION_CONFIG = {
+    connectionTimeout: 120000, // 2 minutes - max time to establish connection (default)
+    greetingTimeout: 30000, // 30 seconds - max time to wait for greeting (default)
+    socketTimeout: 180000, // 3 minutes - reduced from default to allow retry logic within default scheduler timeout (10min)
+} as const;
 
 export type AttachmentUrl = {
     path: string;
@@ -43,80 +53,194 @@ export default class EmailClient {
         this.lightdashConfig = lightdashConfig;
 
         if (this.lightdashConfig.smtp) {
-            Logger.debug(`Create email transporter`);
-
-            let auth: AuthenticationType | undefined;
-
-            if (this.lightdashConfig.smtp.useAuth) {
-                if (this.lightdashConfig.smtp.auth.accessToken) {
-                    auth = {
-                        type: 'OAuth2',
-                        user: this.lightdashConfig.smtp.auth.user,
-                        accessToken: this.lightdashConfig.smtp.auth.accessToken,
-                    };
-                } else {
-                    auth = {
-                        user: this.lightdashConfig.smtp.auth.user,
-                        pass: this.lightdashConfig.smtp.auth.pass,
-                    };
-                }
-            }
-
-            this.transporter = nodemailer.createTransport(
-                {
-                    host: this.lightdashConfig.smtp.host,
-                    port: this.lightdashConfig.smtp.port,
-                    secure: this.lightdashConfig.smtp.port === 465, // false for any port beside 465, other ports use STARTTLS instead.
-                    ...(auth ? { auth } : {}),
-                    requireTLS: this.lightdashConfig.smtp.secure,
-                    tls: this.lightdashConfig.smtp.allowInvalidCertificate
-                        ? { rejectUnauthorized: false }
-                        : undefined,
-                },
-                {
-                    from: `"${this.lightdashConfig.smtp.sender.name}" <${this.lightdashConfig.smtp.sender.email}>`,
-                },
-            );
-            this.transporter.verify((error) => {
-                if (error) {
-                    throw new SmptError(
-                        `Failed to verify email transporter. ${error}`,
-                        {
-                            error,
-                        },
-                    );
-                } else {
-                    Logger.debug(`Email transporter verified with success`);
-                }
-            });
-
-            this.transporter.use(
-                'compile',
-                hbs({
-                    viewEngine: {
-                        partialsDir: path.join(__dirname, './templates/'),
-                        defaultLayout: undefined,
-                        extname: '.html',
-                    },
-                    viewPath: path.join(__dirname, './templates/'),
-                    extName: '.html',
-                }),
-            );
+            this.createTransporter();
         }
+    }
+
+    private static createFileAttachment(
+        attachment: AttachmentUrl,
+        format?: SchedulerFormat,
+    ): Mail.Attachment {
+        const contentType =
+            format === SchedulerFormat.XLSX
+                ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                : 'text/csv';
+
+        const fileExtension =
+            format === SchedulerFormat.XLSX
+                ? SchedulerFormat.XLSX
+                : SchedulerFormat.CSV;
+
+        const fileName = attachment.filename.endsWith(fileExtension)
+            ? attachment.filename
+            : `${attachment.filename}.${fileExtension}`;
+
+        return {
+            filename: fileName,
+            path: attachment.localPath || attachment.path,
+            contentType,
+        };
+    }
+
+    private createTransporter(): void {
+        if (!this.lightdashConfig.smtp) return;
+
+        Logger.debug(`Create email transporter`);
+
+        let auth: AuthenticationType | undefined;
+
+        if (this.lightdashConfig.smtp.useAuth) {
+            if (this.lightdashConfig.smtp.auth.accessToken) {
+                auth = {
+                    type: 'OAuth2',
+                    user: this.lightdashConfig.smtp.auth.user,
+                    accessToken: this.lightdashConfig.smtp.auth.accessToken,
+                };
+            } else {
+                auth = {
+                    user: this.lightdashConfig.smtp.auth.user,
+                    pass: this.lightdashConfig.smtp.auth.pass,
+                };
+            }
+        }
+
+        const options: SMTPPool.Options = {
+            host: this.lightdashConfig.smtp.host,
+            port: this.lightdashConfig.smtp.port,
+            secure: this.lightdashConfig.smtp.port === 465, // false for any port beside 465, other ports use STARTTLS instead.
+            ...(auth ? { auth } : {}),
+            requireTLS: this.lightdashConfig.smtp.secure, // Forces STARTTTLS. Recommended when port is not 465.
+            tls: this.lightdashConfig.smtp.allowInvalidCertificate
+                ? { rejectUnauthorized: false }
+                : undefined,
+            pool: true, // Enable pooled connections
+            maxConnections: 5, // Maximum number of connections (default is 5)
+            maxMessages: 100, // Maximum number of messages per connection (default is 100)
+            connectionTimeout: SMTP_CONNECTION_CONFIG.connectionTimeout,
+            greetingTimeout: SMTP_CONNECTION_CONFIG.greetingTimeout,
+            socketTimeout: SMTP_CONNECTION_CONFIG.socketTimeout,
+        };
+
+        this.transporter = nodemailer.createTransport(options, {
+            from: `"${this.lightdashConfig.smtp.sender.name}" <${this.lightdashConfig.smtp.sender.email}>`,
+        });
+        this.transporter.verify((error) => {
+            if (error) {
+                throw new SmptError(
+                    `Failed to verify email transporter. ${error}`,
+                    {
+                        error,
+                    },
+                );
+            } else {
+                Logger.debug(`Email transporter verified with success`);
+            }
+        });
+
+        this.transporter.use(
+            'compile',
+            hbs({
+                viewEngine: {
+                    partialsDir: path.join(__dirname, './templates/'),
+                    defaultLayout: undefined,
+                    extname: '.html',
+                },
+                viewPath: path.join(__dirname, './templates/'),
+                extName: '.html',
+            }),
+        );
     }
 
     private async sendEmail(
         options: Mail.Options & EmailTemplate,
     ): Promise<void> {
         if (this.transporter) {
-            try {
-                const info = await this.transporter.sendMail(options);
-                Logger.debug(`Email sent: ${info.messageId}`);
-            } catch (error) {
-                throw new SmptError(`Failed to send email. ${error}`, {
-                    error,
-                });
+            const maxRetries = 3;
+            const baseDelay = 1000; // 1 second
+
+            /* eslint-disable no-await-in-loop */
+            for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+                try {
+                    const info = await this.transporter.sendMail(options);
+                    Logger.debug(`Email sent: ${info.messageId}`);
+                    return; // Success, exit retry loop
+                } catch (error) {
+                    const isLastAttempt = attempt === maxRetries;
+                    const isRetryableError =
+                        error instanceof Error &&
+                        (error.message.includes('ECONNRESET') ||
+                            error.message.includes('ETIMEDOUT') ||
+                            error.message.includes('ENOTFOUND') ||
+                            error.message.includes('Connection timeout'));
+
+                    if (isLastAttempt || !isRetryableError) {
+                        const isFileError =
+                            error instanceof Error &&
+                            error.message.includes('ENOENT');
+                        const errorMessage = isFileError
+                            ? 'There was an unexpected error when processing the attached file. Please contact your admin or support team.'
+                            : getErrorMessage(error);
+                        throw new SmptError(
+                            `Failed to send email after ${attempt} attempts. ${errorMessage}`,
+                            {
+                                error, // log the original error
+                            },
+                        );
+                    }
+
+                    // On the last retry attempt, try recreating the transporter to handle stale connections
+                    if (
+                        attempt === maxRetries - 1 &&
+                        error instanceof Error &&
+                        error.message.includes('ECONNRESET')
+                    ) {
+                        Logger.warn(
+                            'Recreating email transporter due to connection reset',
+                        );
+                        try {
+                            await this.recreateTransporter();
+                        } catch (recreateError) {
+                            Logger.error(
+                                `Failed to recreate transporter: ${recreateError}`,
+                            );
+                        }
+                    }
+
+                    // Calculate exponential backoff delay
+                    const delay = baseDelay * 2 ** (attempt - 1);
+                    Logger.warn(
+                        `Email sending failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms: ${error}`,
+                    );
+
+                    await new Promise((resolve) => {
+                        setTimeout(resolve, delay);
+                    });
+                }
             }
+        }
+    }
+
+    public canSendEmail() {
+        return !!this.transporter;
+    }
+
+    public async closeConnections(): Promise<void> {
+        if (this.transporter) {
+            try {
+                this.transporter.close();
+                Logger.debug('Email transporter connections closed');
+            } catch (error) {
+                Logger.warn(`Error closing email transporter: ${error}`);
+            }
+        }
+    }
+
+    public async recreateTransporter(): Promise<void> {
+        await this.closeConnections();
+
+        if (this.lightdashConfig.smtp) {
+            Logger.debug('Recreating email transporter');
+            this.createTransporter();
         }
     }
 
@@ -174,28 +298,35 @@ export default class EmailClient {
 
     public async sendProjectAccessEmail(
         userThatInvited: Pick<SessionUser, 'firstName' | 'lastName'>,
-        projectMember: CreateProjectMember,
+        projectMember:
+            | CreateProjectMember
+            | { email: string; customRoleName: string },
         projectName: string,
         projectUrl: string,
     ) {
-        let roleAction = 'view';
-        switch (projectMember.role) {
-            case ProjectMemberRole.VIEWER:
-                roleAction = 'view';
-                break;
-            case ProjectMemberRole.INTERACTIVE_VIEWER:
-                roleAction = 'explore';
-                break;
-            case ProjectMemberRole.EDITOR:
-            case ProjectMemberRole.DEVELOPER:
-                roleAction = 'edit';
-                break;
-            case ProjectMemberRole.ADMIN:
-                roleAction = 'manage';
-                break;
-            default:
-                const nope: never = projectMember.role;
+        let roleAction = '';
+        if ('customRoleName' in projectMember) {
+            roleAction = ``;
+        } else {
+            switch (projectMember.role) {
+                case ProjectMemberRole.VIEWER:
+                    roleAction = 'view';
+                    break;
+                case ProjectMemberRole.INTERACTIVE_VIEWER:
+                    roleAction = 'explore';
+                    break;
+                case ProjectMemberRole.EDITOR:
+                case ProjectMemberRole.DEVELOPER:
+                    roleAction = 'edit';
+                    break;
+                case ProjectMemberRole.ADMIN:
+                    roleAction = 'manage';
+                    break;
+                default:
+                    const nope: never = projectMember.role;
+            }
         }
+
         return this.sendEmail({
             to: projectMember.email,
             subject: `${userThatInvited.firstName} ${userThatInvited.lastName} invited you to ${projectName}`,
@@ -272,8 +403,17 @@ export default class EmailClient {
         schedulerUrl: string,
         includeLinks: boolean,
         expirationDays?: number,
+        asAttachment?: boolean,
+        format?: SchedulerFormat,
     ) {
         const csvUrl = attachment.path;
+        const attachments =
+            asAttachment &&
+            (attachment.localPath || attachment.path) &&
+            attachment.path !== '#no-results'
+                ? [EmailClient.createFileAttachment(attachment, format)]
+                : undefined;
+
         return this.sendEmail({
             to: recipient,
             subject,
@@ -294,8 +434,11 @@ export default class EmailClient {
                 schedulerUrl,
                 expirationDays,
                 includeLinks,
+                hasAttachment: attachments && attachments.length > 0,
+                attachmentCount: attachments?.length || 0,
             },
             text: title,
+            attachments,
         });
     }
 
@@ -312,6 +455,8 @@ export default class EmailClient {
         schedulerUrl: string,
         includeLinks: boolean,
         expirationDays?: number,
+        asAttachment?: boolean,
+        format?: SchedulerFormat,
     ) {
         const csvUrls = attachments.filter(
             (attachment) => !attachment.truncated,
@@ -320,6 +465,18 @@ export default class EmailClient {
         const truncatedCsvUrls = attachments.filter(
             (attachment) => attachment.truncated,
         );
+
+        const emailAttachments = asAttachment
+            ? csvUrls
+                  .filter(
+                      (attachment) =>
+                          (attachment.localPath || attachment.path) &&
+                          attachment.path !== '#no-results',
+                  )
+                  .map((attachment) =>
+                      EmailClient.createFileAttachment(attachment, format),
+                  )
+            : undefined;
 
         return this.sendEmail({
             to: recipient,
@@ -341,8 +498,11 @@ export default class EmailClient {
                 schedulerUrl,
                 expirationDays,
                 includeLinks,
+                hasAttachments: emailAttachments && emailAttachments.length > 0,
+                attachmentCount: emailAttachments?.length || 0,
             },
             text: title,
+            attachments: emailAttachments,
         });
     }
 
@@ -367,6 +527,27 @@ export default class EmailClient {
                 host: this.lightdashConfig.siteUrl,
             },
             text,
+        });
+    }
+
+    public async sendGenericNotificationEmail(
+        to: string[],
+        subject: string,
+        title: string,
+        message: string,
+        attachments?: Mail.Attachment[],
+    ) {
+        return this.sendEmail({
+            to,
+            subject,
+            template: 'genericNotification',
+            context: {
+                title,
+                message: marked(message),
+                host: this.lightdashConfig.siteUrl,
+            },
+            text: `${title}\n\n${message}`,
+            attachments,
         });
     }
 }

@@ -3,13 +3,12 @@ import {
     CreateDashboardChartTile,
     CreateDashboardLoomTile,
     CreateDashboardMarkdownTile,
-    CreateDashboardSemanticViewerChartTile,
     CreateDashboardSqlChartTile,
     DashboardChartTile,
     DashboardDAO,
     DashboardLoomTile,
     DashboardMarkdownTile,
-    DashboardSemanticViewerChartTile,
+    DashboardParameterValue,
     DashboardSqlChartTile,
     DashboardTab,
     DashboardTileTypes,
@@ -26,11 +25,11 @@ import {
     isDashboardChartTileType,
     isDashboardLoomTileType,
     isDashboardMarkdownTileType,
-    isDashboardSemanticViewerChartTile,
     isDashboardSqlChartTile,
     sanitizeHtml,
     type DashboardBasicDetailsWithTileTypes,
     type DashboardFilters,
+    type DashboardParameters,
 } from '@lightdash/common';
 import { Knex } from 'knex';
 import { v4 as uuidv4 } from 'uuid';
@@ -41,7 +40,6 @@ import {
     DashboardTileChartTableName,
     DashboardTileLoomsTableName,
     DashboardTileMarkdownsTableName,
-    DashboardTileSemanticViewerChartTableName,
     DashboardTileSqlChartTableName,
     DashboardTilesTableName,
     DashboardVersionTable,
@@ -67,7 +65,6 @@ import {
     SavedChartTable,
     SavedChartsTableName,
 } from '../../database/entities/savedCharts';
-import { SavedSemanticViewerChartsTableName } from '../../database/entities/savedSemanticViewerCharts';
 import { SavedSqlTableName } from '../../database/entities/savedSql';
 import { SpaceTableName } from '../../database/entities/spaces';
 import { UserTable, UserTableName } from '../../database/entities/users';
@@ -150,6 +147,7 @@ export class DashboardModel {
                 metrics: [],
                 tableCalculations: [],
             },
+            parameters: version.parameters || null,
         });
 
         if (version.tabs.length > 0) {
@@ -169,7 +167,6 @@ export class DashboardModel {
             | (CreateDashboardMarkdownTile & { uuid: string })
             | (CreateDashboardLoomTile & { uuid: string })
             | (CreateDashboardSqlChartTile & { uuid: string })
-            | (CreateDashboardSemanticViewerChartTile & { uuid: string })
         > = version.tiles.map((tile) => ({
             ...tile,
             uuid: tile.uuid || uuidv4(),
@@ -269,22 +266,6 @@ export class DashboardModel {
             );
         }
 
-        const semanticViewerChartTiles = tilesWithUuids.filter(
-            isDashboardSemanticViewerChartTile,
-        );
-        if (semanticViewerChartTiles.length > 0) {
-            await trx(DashboardTileSemanticViewerChartTableName).insert(
-                semanticViewerChartTiles.map(({ uuid, properties }) => ({
-                    dashboard_version_id: versionId.dashboard_version_id,
-                    dashboard_tile_uuid: uuid,
-                    saved_semantic_viewer_chart_uuid:
-                        properties.savedSemanticViewerChartUuid,
-                    hide_title: properties.hideTitle,
-                    title: properties.title,
-                })),
-            );
-        }
-
         const tileUuids = tilesWithUuids.map((tile) => tile.uuid);
 
         // TODO: remove after resolving a problem with importing lodash-es in the backend
@@ -296,36 +277,45 @@ export class DashboardModel {
                     {},
                 );
 
+        const updateData: {
+            filters: DashboardFilters;
+            parameters?: DashboardParameters;
+        } = {
+            filters: {
+                dimensions:
+                    version.filters?.dimensions.map((filter) => ({
+                        ...filter,
+                        tileTargets: filter.tileTargets
+                            ? pick(filter.tileTargets, tileUuids)
+                            : undefined,
+                    })) ?? [],
+                metrics:
+                    version.filters?.metrics.map((filter) => ({
+                        ...filter,
+                        tileTargets: filter.tileTargets
+                            ? pick(filter.tileTargets, tileUuids)
+                            : undefined,
+                    })) ?? [],
+                tableCalculations:
+                    version.filters?.tableCalculations.map((filter) => ({
+                        ...filter,
+                        tileTargets: filter.tileTargets
+                            ? pick(filter.tileTargets, tileUuids)
+                            : undefined,
+                    })) ?? [],
+            },
+        };
+
+        // Only update parameters if they were provided in the version
+        if (version.parameters !== undefined) {
+            updateData.parameters = version.parameters;
+        }
+
         await trx(DashboardViewsTableName)
-            .update({
-                filters: {
-                    dimensions:
-                        version.filters?.dimensions.map((filter) => ({
-                            ...filter,
-                            tileTargets: filter.tileTargets
-                                ? pick(filter.tileTargets, tileUuids)
-                                : undefined,
-                        })) ?? [],
-                    metrics:
-                        version.filters?.metrics.map((filter) => ({
-                            ...filter,
-                            tileTargets: filter.tileTargets
-                                ? pick(filter.tileTargets, tileUuids)
-                                : undefined,
-                        })) ?? [],
-                    tableCalculations:
-                        version.filters?.tableCalculations.map((filter) => ({
-                            ...filter,
-                            tileTargets: filter.tileTargets
-                                ? pick(filter.tileTargets, tileUuids)
-                                : undefined,
-                        })) ?? [],
-                },
-            })
+            .update(updateData)
             .where({ dashboard_version_id: versionId.dashboard_version_id });
     }
 
-    // TODO: This can be removed once we can have a semantic layer as a project connection
     private async getDashboardVersionTileTypes(dashboardVersionId: number) {
         const tileTypes = await this.database(DashboardTilesTableName)
             .select<
@@ -482,7 +472,6 @@ export class DashboardModel {
                     validation_errors,
                     dashboard_version_id,
                 }) => {
-                    // TODO: This can be removed once we can have a semantic layer as a project connection
                     const tileTypes = await this.getDashboardVersionTileTypes(
                         dashboard_version_id,
                     );
@@ -523,6 +512,7 @@ export class DashboardModel {
             dashboardUuid: string;
             name: string;
             filters: DashboardFilters;
+            parameters: DashboardParameters | null;
             chartUuids: string[];
         }>
     > {
@@ -565,6 +555,7 @@ export class DashboardModel {
                     dashboardUuid: `${cteName}.dashboard_uuid`,
                     name: `${cteName}.name`,
                     filters: `${DashboardViewsTableName}.filters`,
+                    parameters: `${DashboardViewsTableName}.parameters`,
                     chartUuids: this.database.raw(
                         "COALESCE(ARRAY_AGG(DISTINCT saved_queries.saved_query_uuid) FILTER (WHERE saved_queries.saved_query_uuid IS NOT NULL), '{}')",
                     ),
@@ -585,7 +576,7 @@ export class DashboardModel {
                     `${DashboardTileChartTableName}.saved_chart_id`,
                     `${SavedChartsTableName}.saved_query_id`,
                 )
-                .groupBy(1, 2, 3)
+                .groupBy(1, 2, 3, 4)
         );
     }
 
@@ -755,7 +746,6 @@ export class DashboardModel {
                     dashboard_tile_uuid: string;
                     saved_query_uuid: string | null;
                     saved_sql_uuid: string | null;
-                    saved_semantic_viewer_chart_uuid: string | null;
                     url: string | null;
                     content: string | null;
                     hide_title: boolean | null;
@@ -780,20 +770,17 @@ export class DashboardModel {
                 this.database.raw(
                     ` COALESCE(
                         ${SavedChartsTableName}.name,
-                        ${SavedSqlTableName}.name,
-                        ${SavedSemanticViewerChartsTableName}.name
+                        ${SavedSqlTableName}.name
                     ) AS name`,
                 ),
                 this.database.raw(
                     ` COALESCE(
                         ${SavedChartsTableName}.slug,
-                        ${SavedSqlTableName}.slug,
-                        ${SavedSemanticViewerChartsTableName}.slug
+                        ${SavedSqlTableName}.slug
                     ) AS chart_slug`,
                 ),
                 `${SavedChartsTableName}.last_version_chart_kind`,
                 `${DashboardTileSqlChartTableName}.saved_sql_uuid`,
-                `${DashboardTileSemanticViewerChartTableName}.saved_semantic_viewer_chart_uuid`,
                 this.database.raw(
                     `${SavedChartsTableName}.dashboard_uuid IS NOT NULL AS belongs_to_dashboard`,
                 ),
@@ -802,16 +789,14 @@ export class DashboardModel {
                         ${DashboardTileChartTableName}.title,
                         ${DashboardTileLoomsTableName}.title,
                         ${DashboardTileMarkdownsTableName}.title,
-                        ${DashboardTileSqlChartTableName}.title,
-                        ${DashboardTileSemanticViewerChartTableName}.title
+                        ${DashboardTileSqlChartTableName}.title
                     ) AS title`,
                 ),
                 this.database.raw(
                     `COALESCE(
                         ${DashboardTileLoomsTableName}.hide_title,
                         ${DashboardTileChartTableName}.hide_title,
-                        ${DashboardTileSqlChartTableName}.hide_title,
-                        ${DashboardTileSemanticViewerChartTableName}.hide_title
+                        ${DashboardTileSqlChartTableName}.hide_title
                     ) AS hide_title`,
                 ),
                 `${DashboardTileLoomsTableName}.url`,
@@ -841,21 +826,6 @@ export class DashboardModel {
                     `${DashboardTilesTableName}.dashboard_version_id`,
                 );
             })
-            .leftJoin(
-                DashboardTileSemanticViewerChartTableName,
-                function semanticViewerChartsJoin() {
-                    this.on(
-                        `${DashboardTileSemanticViewerChartTableName}.dashboard_tile_uuid`,
-                        '=',
-                        `${DashboardTilesTableName}.dashboard_tile_uuid`,
-                    );
-                    this.andOn(
-                        `${DashboardTileSemanticViewerChartTableName}.dashboard_version_id`,
-                        '=',
-                        `${DashboardTilesTableName}.dashboard_version_id`,
-                    );
-                },
-            )
             .leftJoin(DashboardTileLoomsTableName, function loomsJoin() {
                 this.on(
                     `${DashboardTileLoomsTableName}.dashboard_tile_uuid`,
@@ -886,11 +856,6 @@ export class DashboardModel {
                 `${SavedSqlTableName}.saved_sql_uuid`,
             )
             .leftJoin(
-                SavedSemanticViewerChartsTableName,
-                `${DashboardTileSemanticViewerChartTableName}.saved_semantic_viewer_chart_uuid`,
-                `${SavedSemanticViewerChartsTableName}.saved_semantic_viewer_chart_uuid`,
-            )
-            .leftJoin(
                 SavedChartsTableName,
                 `${DashboardTileChartTableName}.saved_chart_id`,
                 `${SavedChartsTableName}.saved_query_id`,
@@ -898,7 +863,11 @@ export class DashboardModel {
             .where(
                 `${DashboardTilesTableName}.dashboard_version_id`,
                 dashboard.dashboard_version_id,
-            );
+            )
+            .orderBy([
+                { column: `${DashboardTilesTableName}.y_offset` },
+                { column: `${DashboardTilesTableName}.x_offset` },
+            ]);
 
         const tabs = await this.database(DashboardTabsTableName)
             .select<DashboardTab[]>(
@@ -938,7 +907,6 @@ export class DashboardModel {
                     dashboard_tile_uuid,
                     saved_query_uuid,
                     saved_sql_uuid,
-                    saved_semantic_viewer_chart_uuid,
                     title,
                     hide_title,
                     url,
@@ -1009,18 +977,6 @@ export class DashboardModel {
                                     chartSlug: chart_slug,
                                 },
                             };
-                        case DashboardTileTypes.SEMANTIC_VIEWER_CHART:
-                            return <DashboardSemanticViewerChartTile>{
-                                ...base,
-                                type: DashboardTileTypes.SEMANTIC_VIEWER_CHART,
-                                properties: {
-                                    ...commonProperties,
-                                    chartName: name,
-                                    savedSemanticViewerChartUuid:
-                                        saved_semantic_viewer_chart_uuid,
-                                    chartSlug: chart_slug,
-                                },
-                            };
                         default: {
                             return assertUnreachable(
                                 type,
@@ -1038,6 +994,7 @@ export class DashboardModel {
                 metrics: [],
                 tableCalculations: [],
             },
+            parameters: view?.parameters || undefined,
             spaceUuid: dashboard.space_uuid,
             spaceName: dashboard.space_name,
             views: dashboard.views_count,
@@ -1217,6 +1174,70 @@ export class DashboardModel {
         return orphanedCharts.map((chart) => ({
             uuid: chart.saved_query_uuid,
         }));
+    }
+
+    /**
+     * Check if a specific chart exists in the latest version of a specific dashboard within a project
+     */
+    async savedChartExistsInDashboard(
+        projectUuid: string,
+        dashboardUuid: string,
+        chartUuid: string,
+    ): Promise<boolean> {
+        const cteName = 'latest_dashboard_version_cte';
+
+        const result = await this.database
+            .with(cteName, (qb) => {
+                void qb
+                    .select({
+                        dashboard_uuid: `${DashboardsTableName}.dashboard_uuid`,
+                        dashboard_version_id: this.database.raw(
+                            `MAX(${DashboardVersionsTableName}.dashboard_version_id)`,
+                        ),
+                    })
+                    .from(DashboardsTableName)
+                    .innerJoin(
+                        DashboardVersionsTableName,
+                        `${DashboardsTableName}.dashboard_id`,
+                        `${DashboardVersionsTableName}.dashboard_id`,
+                    )
+                    .innerJoin(
+                        SpaceTableName,
+                        `${DashboardsTableName}.space_id`,
+                        `${SpaceTableName}.space_id`,
+                    )
+                    .innerJoin(
+                        ProjectTableName,
+                        `${SpaceTableName}.project_id`,
+                        `${ProjectTableName}.project_id`,
+                    )
+                    .where(
+                        `${DashboardsTableName}.dashboard_uuid`,
+                        dashboardUuid,
+                    )
+                    .where(`${ProjectTableName}.project_uuid`, projectUuid)
+                    .groupBy(`${DashboardsTableName}.dashboard_uuid`);
+            })
+            .select<
+                {
+                    dashboard_uuid: string;
+                }[]
+            >(`${cteName}.dashboard_uuid`)
+            .from(cteName)
+            .innerJoin(
+                DashboardTileChartTableName,
+                `${cteName}.dashboard_version_id`,
+                `${DashboardTileChartTableName}.dashboard_version_id`,
+            )
+            .innerJoin(
+                SavedChartsTableName,
+                `${DashboardTileChartTableName}.saved_chart_id`,
+                `${SavedChartsTableName}.saved_query_id`,
+            )
+            .where(`${SavedChartsTableName}.saved_query_uuid`, chartUuid)
+            .first();
+
+        return !!result;
     }
 
     async findInfoForDbtExposures(projectUuid: string): Promise<

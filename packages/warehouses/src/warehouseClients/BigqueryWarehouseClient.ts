@@ -12,15 +12,15 @@ import {
 import bigquery from '@google-cloud/bigquery/build/src/types';
 import {
     AnyType,
+    BigqueryAuthenticationType,
+    BigqueryDataset,
     CreateBigqueryCredentials,
     DimensionType,
     getErrorMessage,
-    isBigQueryWarehouseQueryMetadata,
     Metric,
     MetricType,
     PartitionColumn,
     PartitionType,
-    sleep,
     SupportedDbtAdapter,
     WarehouseConnectionError,
     WarehouseQueryError,
@@ -32,11 +32,15 @@ import {
     WarehouseCatalog,
     WarehouseExecuteAsyncQuery,
     WarehouseExecuteAsyncQueryArgs,
-    WarehouseGetAsyncQueryResults,
-    WarehouseGetAsyncQueryResultsArgs,
     WarehouseTableSchema,
 } from '../types';
+import {
+    DEFAULT_BATCH_SIZE,
+    processPromisesInBatches,
+} from '../utils/processPromisesInBatches';
+import { normalizeUnicode } from '../utils/sql';
 import WarehouseBaseClient from './WarehouseBaseClient';
+import WarehouseBaseSqlBuilder from './WarehouseBaseSqlBuilder';
 
 export enum BigqueryFieldType {
     STRING = 'STRING',
@@ -128,17 +132,73 @@ type BigqueryError = {
     errors: bigquery.IErrorProto[];
 };
 
+export class BigquerySqlBuilder extends WarehouseBaseSqlBuilder {
+    readonly type = WarehouseTypes.BIGQUERY;
+
+    getAdapterType(): SupportedDbtAdapter {
+        return SupportedDbtAdapter.BIGQUERY;
+    }
+
+    getMetricSql(sql: string, metric: Metric): string {
+        switch (metric.type) {
+            case MetricType.PERCENTILE:
+                return `APPROX_QUANTILES(${sql}, 100)[OFFSET(${
+                    metric.percentile ?? 50
+                })]`;
+            case MetricType.MEDIAN:
+                return `APPROX_QUANTILES(${sql}, 100)[OFFSET(50)]`;
+            default:
+                return super.getMetricSql(sql, metric);
+        }
+    }
+
+    getFieldQuoteChar(): string {
+        return '`';
+    }
+
+    getFloatingType(): string {
+        return 'FLOAT64';
+    }
+
+    escapeString(value: string): string {
+        if (typeof value !== 'string') {
+            return value;
+        }
+
+        return (
+            normalizeUnicode(value)
+                // BigQuery uses backslash escaping for single quotes
+                .replaceAll('\\', '\\\\')
+                .replaceAll("'", "\\'")
+                .replaceAll('"', '\\"')
+                // Remove SQL comments (BigQuery supports --, /* */ comments)
+                .replace(/--.*$/gm, '')
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                // Remove null bytes
+                .replaceAll('\0', '')
+        );
+    }
+}
+
 export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryCredentials> {
     client: BigQuery;
 
     constructor(credentials: CreateBigqueryCredentials) {
-        super(credentials);
+        super(credentials, new BigquerySqlBuilder(credentials.startOfWeek));
         try {
             this.client = new BigQuery({
                 projectId: credentials.executionProject || credentials.project,
-                location: credentials.location,
+                // empty string is not a valid value for location
+                location: credentials.location || undefined,
                 maxRetries: credentials.retries,
-                credentials: credentials.keyfileContents,
+
+                ...(credentials.authenticationType ===
+                BigqueryAuthenticationType.ADC
+                    ? {
+                          // Support ADC via workforce identity federation / external_account configuration.
+                          // In this case we should rely on ADC at runtime and not pass explicit credentials.
+                      }
+                    : { credentials: credentials.keyfileContents }),
             });
         } catch (e: unknown) {
             throw new WarehouseConnectionError(
@@ -202,10 +262,9 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
             query,
             params: options?.values,
             useLegacySql: false,
-            maximumBytesBilled:
-                this.credentials.maximumBytesBilled === undefined
-                    ? undefined
-                    : `${this.credentials.maximumBytesBilled}`,
+            maximumBytesBilled: this.credentials.maximumBytesBilled
+                ? `${this.credentials.maximumBytesBilled}`
+                : undefined,
             priority: this.credentials.priority,
             jobTimeoutMs:
                 this.credentials.timeoutSeconds &&
@@ -316,29 +375,29 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
             table: string;
         }[],
     ) {
-        const tablesMetadataPromises: Promise<
-            [string, string, string, TableSchema] | undefined
-        >[] = requests.map(({ database, schema, table }) => {
-            const dataset: Dataset = new Dataset(this.client, schema, {
-                projectId: database,
-            });
-            return BigqueryWarehouseClient.getTableMetadata(
-                dataset,
-                table,
-            ).catch((e) => {
-                if (e?.code === 404) {
-                    // Ignore error and let UI show invalid table
-                    return undefined;
-                }
-                throw new WarehouseConnectionError(
-                    `Failed to fetch table metadata for '${database}.${schema}.${table}'. ${getErrorMessage(
-                        e,
-                    )}`,
-                );
-            });
-        });
+        const tablesMetadata = await processPromisesInBatches(
+            requests,
+            DEFAULT_BATCH_SIZE,
+            async ({ database, schema, table }) => {
+                const dataset: Dataset = new Dataset(this.client, schema, {
+                    projectId: database,
+                });
 
-        const tablesMetadata = await Promise.all(tablesMetadataPromises);
+                return BigqueryWarehouseClient.getTableMetadata(
+                    dataset,
+                    table,
+                ).catch((e) => {
+                    if (e?.code === 404) {
+                        return undefined;
+                    }
+                    throw new WarehouseConnectionError(
+                        `Failed to fetch table metadata for '${database}.${schema}.${table}'. ${getErrorMessage(
+                            e,
+                        )}`,
+                    );
+                });
+            },
+        );
 
         return tablesMetadata.reduce<WarehouseCatalog>((acc, result) => {
             if (result) {
@@ -357,31 +416,6 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
 
             return acc;
         }, {});
-    }
-
-    getStringQuoteChar() {
-        return "'";
-    }
-
-    getEscapeStringQuoteChar() {
-        return '\\';
-    }
-
-    getAdapterType(): SupportedDbtAdapter {
-        return SupportedDbtAdapter.BIGQUERY;
-    }
-
-    getMetricSql(sql: string, metric: Metric) {
-        switch (metric.type) {
-            case MetricType.PERCENTILE:
-                return `APPROX_QUANTILES(${sql}, 100)[OFFSET(${
-                    metric.percentile ?? 50
-                })]`;
-            case MetricType.MEDIAN:
-                return `APPROX_QUANTILES(${sql}, 100)[OFFSET(50)]`;
-            default:
-                return super.getMetricSql(sql, metric);
-        }
     }
 
     async getAllTables() {
@@ -518,6 +552,39 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
                     break;
                 }
                 break;
+
+            case 'stopped':
+                return new WarehouseQueryError(
+                    `BigQuery job was stopped. ${
+                        error?.message ||
+                        'This may be due to configuration issues such as maximum bytes billed limit, job timeout, or query cancellation. Please check your connection settings.'
+                    }`,
+                );
+
+            case 'invalid':
+                return new WarehouseQueryError(
+                    `BigQuery configuration is invalid. ${
+                        error?.message ||
+                        'Please verify your connection settings and other advanced options.'
+                    }`,
+                );
+
+            case 'quotaExceeded':
+                return new WarehouseQueryError(
+                    `BigQuery quota exceeded. ${
+                        error?.message ||
+                        'You may have reached your query quota, slots quota, or other BigQuery limits. Please check your BigQuery quotas and usage.'
+                    }`,
+                );
+
+            case 'rateLimitExceeded':
+                return new WarehouseQueryError(
+                    `BigQuery rate limit exceeded. ${
+                        error?.message ||
+                        'Please wait a moment and try again, or consider reducing query frequency.'
+                    }`,
+                );
+
             default:
                 break;
         }
@@ -529,13 +596,18 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
             )}`,
         );
         return new WarehouseQueryError(
-            `Bigquery warehouse error: ${error?.reason}`,
+            `Bigquery warehouse error: ${error?.reason}${
+                error?.message ? ` - ${error.message}` : ''
+            }`,
         );
     }
 
     async executeAsyncQuery(
         { sql, tags }: WarehouseExecuteAsyncQueryArgs,
-        resultsStreamCallback?: (rows: WarehouseResults['rows']) => void,
+        resultsStreamCallback: (
+            rows: WarehouseResults['rows'],
+            fields: WarehouseResults['fields'],
+        ) => void,
     ): Promise<WarehouseExecuteAsyncQuery> {
         try {
             const [job] = await this.createJob(sql, {
@@ -562,13 +634,13 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
             const totalRows: number = resultsMetadata?.totalRows
                 ? parseInt(resultsMetadata.totalRows, 10)
                 : 1;
+            const fields =
+                BigqueryWarehouseClient.getFieldsFromResponse(resultsMetadata);
 
             // If a callback is provided, stream the results to the callback
-            if (resultsStreamCallback) {
-                await this.streamResults(job, (row) =>
-                    resultsStreamCallback([row]),
-                );
-            }
+            await this.streamResults(job, (row) =>
+                resultsStreamCallback([row], fields),
+            );
 
             return {
                 queryId: job.id,
@@ -602,84 +674,26 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
         });
     }
 
-    async getAsyncQueryResults<TFormattedRow extends Record<string, unknown>>(
-        queryArgs: WarehouseGetAsyncQueryResultsArgs,
-        rowFormatter?: (row: Record<string, unknown>) => TFormattedRow,
-    ): Promise<WarehouseGetAsyncQueryResults<TFormattedRow>> {
-        try {
-            if (!queryArgs.queryId) {
-                throw new WarehouseQueryError('Invalid query');
-            }
+    static async getDatabases(
+        projectId: string,
+        refresh_token: string,
+    ): Promise<BigqueryDataset[]> {
+        const bigqueryClient = new BigQuery({
+            projectId,
+            credentials: {
+                type: 'authorized_user',
+                client_id: process.env.AUTH_GOOGLE_OAUTH2_CLIENT_ID,
+                client_secret: process.env.AUTH_GOOGLE_OAUTH2_CLIENT_SECRET,
+                refresh_token,
+            },
+        });
 
-            if (!isBigQueryWarehouseQueryMetadata(queryArgs.queryMetadata)) {
-                throw new WarehouseQueryError(
-                    `Invalid warehouse query metadata for query ${queryArgs.queryId}. Please contact support.`,
-                );
-            }
-
-            const job = await this.getJob(
-                queryArgs.queryId,
-                queryArgs.queryMetadata?.jobLocation,
-            );
-
-            if (!job.id) {
-                throw new WarehouseQueryError(
-                    'Missing BigQuery job ID. Please contact support.',
-                );
-            }
-
-            if (!job.location) {
-                throw new WarehouseQueryError(
-                    'Missing BigQuery job location. Please contact support.',
-                );
-            }
-
-            const startIndex = (queryArgs.page - 1) * queryArgs.pageSize;
-            const resultsMetadata = await this.getJobResultsMetadata(job);
-            if (!resultsMetadata) {
-                throw new WarehouseQueryError(
-                    'Missing BigQuery response. Please contact support.',
-                );
-            }
-            const rows: TFormattedRow[] = [];
-            await this.streamResults(
-                job,
-                (row) => {
-                    if (rowFormatter) {
-                        rows.push(rowFormatter(row));
-                    } else {
-                        rows.push(row as TFormattedRow);
-                    }
-                },
-                {
-                    startIndex: startIndex.toString(),
-                    maxResults: queryArgs.pageSize,
-                },
-            );
-
-            const fields =
-                BigqueryWarehouseClient.getFieldsFromResponse(resultsMetadata);
-
-            const totalRows: number = resultsMetadata.totalRows
-                ? parseInt(resultsMetadata.totalRows, 10)
-                : 1;
-
-            return {
-                fields,
-                rows,
-                queryId: job.id,
-                pageCount: Math.ceil(totalRows / queryArgs.pageSize),
-                totalRows,
-            };
-        } catch (e: unknown) {
-            if (BigqueryWarehouseClient.isBigqueryError(e)) {
-                const responseError: bigquery.IErrorProto | undefined =
-                    e?.errors[0];
-                if (responseError) {
-                    throw this.parseError(responseError, queryArgs.sql);
-                }
-            }
-            throw e;
-        }
+        const datasets = await bigqueryClient.getDatasets();
+        const databases = datasets[0].map((d) => ({
+            projectId: d.projectId,
+            location: d.location,
+            datasetId: d.id!,
+        }));
+        return databases;
     }
 }

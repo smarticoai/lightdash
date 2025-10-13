@@ -37,6 +37,10 @@ export class HealthService extends BaseService {
         this.migrationModel = migrationModel;
     }
 
+    private isEnterpriseEnabled(): boolean {
+        return this.lightdashConfig.license.licenseKey !== undefined;
+    }
+
     async getHealthState(user: SessionUser | undefined): Promise<HealthState> {
         const isAuthenticated: boolean = !!user?.userUuid;
 
@@ -97,10 +101,18 @@ export class HealthService extends BaseService {
             siteUrl: this.lightdashConfig.siteUrl,
             staticIp: this.lightdashConfig.staticIp,
             posthog: this.lightdashConfig.posthog,
-            query: this.lightdashConfig.query,
+            query: {
+                csvCellsLimit: this.lightdashConfig.query.csvCellsLimit,
+                maxLimit: this.lightdashConfig.query.maxLimit,
+                maxPageSize: this.lightdashConfig.query.maxPageSize,
+                defaultLimit: this.lightdashConfig.query.defaultLimit,
+            },
             pivotTable: this.lightdashConfig.pivotTable,
             hasSlack: this.hasSlackConfig(),
             hasGithub: process.env.GITHUB_PRIVATE_KEY !== undefined,
+            hasGitlab:
+                this.lightdashConfig.gitlab.clientId !== undefined &&
+                this.lightdashConfig.gitlab.clientSecret !== undefined,
             auth: {
                 disablePasswordAuthentication:
                     this.lightdashConfig.auth.disablePasswordAuthentication,
@@ -111,6 +123,8 @@ export class HealthService extends BaseService {
                     googleDriveApiKey:
                         this.lightdashConfig.auth.google.googleDriveApiKey,
                     enabled: this.isGoogleSSOEnabled(),
+                    enableGCloudADC:
+                        this.lightdashConfig.auth.google.enableGCloudADC,
                 },
                 okta: {
                     loginPath: this.lightdashConfig.auth.okta.loginPath,
@@ -133,6 +147,11 @@ export class HealthService extends BaseService {
                     maxExpirationTimeInDays:
                         this.lightdashConfig.auth.pat.maxExpirationTimeInDays,
                 },
+                snowflake: {
+                    enabled:
+                        !!this.lightdashConfig.auth.snowflake.clientId &&
+                        this.isEnterpriseEnabled(),
+                },
             },
             hasEmailClient: !!this.lightdashConfig.smtp,
             hasHeadlessBrowser:
@@ -150,6 +169,25 @@ export class HealthService extends BaseService {
                     : undefined,
             },
             hasMicrosoftTeams: this.lightdashConfig.microsoftTeams.enabled,
+            isServiceAccountEnabled:
+                this.lightdashConfig.serviceAccount.enabled,
+            isCustomRolesEnabled:
+                this.isEnterpriseEnabled() &&
+                this.lightdashConfig.customRoles.enabled,
+            embedding: {
+                enabled:
+                    this.isEnterpriseEnabled() &&
+                    this.lightdashConfig.embedding.enabled,
+                events: this.isEnterpriseEnabled()
+                    ? this.lightdashConfig.embedding.events
+                    : undefined,
+            },
+            ai: {
+                analyticsProjectUuid:
+                    this.lightdashConfig.ai.analyticsProjectUuid,
+                analyticsDashboardUuid:
+                    this.lightdashConfig.ai.analyticsDashboardUuid,
+            },
         };
     }
 

@@ -3,7 +3,6 @@ import { type Dashboard } from './dashboard';
 import { type Table } from './explore';
 import { type Dimension, type Metric } from './field';
 import { type ChartKind, type SavedChart } from './savedCharts';
-import type { SavedSemanticViewerChart } from './semanticLayer';
 import { type Space } from './space';
 import { type SqlChart } from './sqlRunner';
 import {
@@ -20,21 +19,55 @@ export type SpaceSearchResult = Pick<Space, 'uuid' | 'name' | 'uuid'> &
     RankedItem;
 export type DashboardSearchResult = Pick<
     Dashboard,
-    'uuid' | 'name' | 'description' | 'spaceUuid'
+    'uuid' | 'name' | 'description' | 'spaceUuid' | 'projectUuid'
 > & {
     validationErrors: {
         validationId: ValidationErrorDashboardResponse['validationId'];
+    }[];
+    viewsCount: number;
+    firstViewedAt: string | null;
+    lastModified: string | null;
+    createdBy: {
+        firstName: string;
+        lastName: string;
+        userUuid: string;
+    } | null;
+    lastUpdatedBy: {
+        firstName: string;
+        lastName: string;
+        userUuid: string;
+    } | null;
+    charts: {
+        uuid: string;
+        name: string;
+        description?: string;
+        chartType: ChartKind;
+        viewsCount: number;
     }[];
 } & RankedItem;
 
 export type SavedChartSearchResult = Pick<
     SavedChart,
-    'uuid' | 'name' | 'description' | 'spaceUuid'
+    'uuid' | 'name' | 'description' | 'spaceUuid' | 'projectUuid'
 > & {
     chartType: ChartKind;
     validationErrors: {
         validationId: ValidationErrorChartResponse['validationId'];
     }[];
+    chartSource: 'saved';
+    viewsCount: number;
+    firstViewedAt: string | null;
+    lastModified: string | null;
+    createdBy: {
+        firstName: string;
+        lastName: string;
+        userUuid: string;
+    } | null;
+    lastUpdatedBy: {
+        firstName: string;
+        lastName: string;
+        userUuid: string;
+    } | null;
 } & RankedItem;
 
 export type SqlChartSearchResult = Pick<
@@ -44,16 +77,44 @@ export type SqlChartSearchResult = Pick<
     uuid: SqlChart['savedSqlUuid'];
     chartType: ChartKind;
     spaceUuid: SqlChart['space']['uuid'];
+    projectUuid: SqlChart['project']['projectUuid'];
+    chartSource: 'sql';
+    viewsCount: number;
+    firstViewedAt: string | null;
+    lastModified: string | null;
+    createdBy: {
+        firstName: string;
+        lastName: string;
+        userUuid: string;
+    } | null;
+    lastUpdatedBy: {
+        firstName: string;
+        lastName: string;
+        userUuid: string;
+    } | null;
 } & RankedItem;
 
-export type SemanticViewerChartSearchResults = Pick<
-    SavedSemanticViewerChart,
-    'name' | 'description' | 'slug'
-> & {
-    uuid: SavedSemanticViewerChart['savedSemanticViewerChartUuid'];
-    chartType: ChartKind;
-    spaceUuid: SavedSemanticViewerChart['space']['uuid'];
-} & RankedItem;
+export type AllChartsSearchResult = Pick<
+    SavedChartSearchResult,
+    'uuid' | 'name' | 'description' | 'spaceUuid' | 'projectUuid'
+> &
+    Partial<Pick<SqlChartSearchResult, 'slug'>> & {
+        chartType: ChartKind;
+        chartSource: 'saved' | 'sql';
+        viewsCount: number;
+        firstViewedAt: string | null;
+        lastModified: string | null;
+        createdBy: {
+            firstName: string;
+            lastName: string;
+            userUuid: string;
+        } | null;
+        lastUpdatedBy: {
+            firstName: string;
+            lastName: string;
+            userUuid: string;
+        } | null;
+    } & RankedItem;
 
 export type TableSearchResult = Pick<
     Table,
@@ -111,7 +172,7 @@ export type SearchResult =
     | DashboardTabResult
     | SavedChartSearchResult
     | SqlChartSearchResult
-    | SemanticViewerChartSearchResults
+    | AllChartsSearchResult
     | TableErrorSearchResult
     | TableSearchResult
     | FieldSearchResult
@@ -130,12 +191,21 @@ export const isTableErrorSearchResult = (
 ): value is TableErrorSearchResult =>
     'explore' in value && 'validationErrors' in value;
 
+export const isSavedChartSearchResult = (
+    value: SearchResult,
+): value is SavedChartSearchResult =>
+    'chartSource' in value && value.chartSource === 'saved';
+
+export const isSqlChartSearchResult = (
+    value: SearchResult,
+): value is SqlChartSearchResult =>
+    'chartSource' in value && value.chartSource === 'sql';
+
 export type SearchResults = {
     spaces: SpaceSearchResult[];
     dashboards: DashboardSearchResult[];
     savedCharts: SavedChartSearchResult[];
     sqlCharts: SqlChartSearchResult[];
-    semanticViewerCharts: SemanticViewerChartSearchResults[];
     tables: (TableSearchResult | TableErrorSearchResult)[];
     fields: FieldSearchResult[];
     pages: PageResult[];
@@ -160,7 +230,6 @@ export enum SearchItemType {
     DASHBOARD_TAB = 'dashboard_tab',
     CHART = 'saved_chart',
     SQL_CHART = 'sql_chart',
-    SEMANTIC_VIEWER_CHART = 'semantic_viewer_chart',
     SPACE = 'space',
     TABLE = 'table',
     FIELD = 'field',
@@ -185,8 +254,6 @@ export function getSearchItemTypeFromResultKey(
             return SearchItemType.PAGE;
         case 'sqlCharts':
             return SearchItemType.SQL_CHART;
-        case 'semanticViewerCharts':
-            return SearchItemType.SEMANTIC_VIEWER_CHART;
         case 'dashboardTabs':
             return SearchItemType.DASHBOARD_TAB;
         default:

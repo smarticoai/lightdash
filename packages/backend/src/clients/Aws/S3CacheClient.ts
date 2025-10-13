@@ -18,17 +18,22 @@ import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
 import { wrapSentryTransaction } from '../../utils';
 
-type S3CacheClientArguments = {
+export type S3CacheClientArguments = {
     lightdashConfig: LightdashConfig;
 };
 
 export class S3CacheClient {
     configuration: LightdashConfig['results']['s3'];
 
-    protected readonly s3: S3;
+    protected readonly s3: S3 | undefined;
 
     constructor({ lightdashConfig }: S3CacheClientArguments) {
         this.configuration = lightdashConfig.results.s3;
+
+        if (!this.configuration) {
+            return;
+        }
+
         const { endpoint, region, accessKey, secretKey, forcePathStyle } =
             this.configuration;
 
@@ -47,12 +52,10 @@ export class S3CacheClient {
                 },
             });
             Logger.debug(
-                'Using results cache S3 storage with access key credentials',
+                'Using results S3 storage with access key credentials',
             );
         } else {
-            Logger.debug(
-                'Using results cache S3 storage with IAM role credentials',
-            );
+            Logger.debug('Using results S3 storage with IAM role credentials');
         }
 
         this.s3 = new S3(s3Config);
@@ -64,6 +67,10 @@ export class S3CacheClient {
         metadata: PutObjectCommandInput['Metadata'],
     ) {
         return wrapSentryTransaction('s3.uploadResults', { key }, async () => {
+            if (!this.configuration || !this.s3) {
+                throw new MissingConfigError('S3 configuration is not set');
+            }
+
             try {
                 const sanitizedMetadata = metadata
                     ? Object.fromEntries(
@@ -120,6 +127,10 @@ export class S3CacheClient {
             's3.getResultsMetadata',
             { key },
             async () => {
+                if (!this.configuration || !this.s3) {
+                    throw new MissingConfigError('S3 configuration is not set');
+                }
+
                 try {
                     const command = new HeadObjectCommand({
                         Bucket: this.configuration.bucket,
@@ -162,6 +173,10 @@ export class S3CacheClient {
 
     async getResults(key: string, extension: string = 'json') {
         return wrapSentryTransaction('s3.getResults', { key }, async (span) => {
+            if (!this.configuration || !this.s3) {
+                throw new MissingConfigError('S3 configuration is not set');
+            }
+
             try {
                 const command = new GetObjectCommand({
                     Bucket: this.configuration.bucket,

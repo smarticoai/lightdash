@@ -1,5 +1,4 @@
 import styled, { css } from 'styled-components';
-import { TILE_HEADER_HEIGHT, TILE_HEADER_MARGIN_BOTTOM } from './constants';
 
 interface HeaderContainerProps {
     $isEditMode: boolean;
@@ -10,11 +9,10 @@ interface HeaderContainerProps {
 export const HeaderContainer = styled.div<HeaderContainerProps>`
     display: flex;
     flex-direction: row;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
     gap: 8px;
-    height: ${TILE_HEADER_HEIGHT}px;
-    margin-bottom: ${TILE_HEADER_MARGIN_BOTTOM}px;
+    margin-bottom: 12px;
 
     ${(props) =>
         props.$isEditMode
@@ -100,13 +98,6 @@ export const TileTitleLink = styled.a<TileTitleProps>`
                 }
             }
         `}
-`;
-
-export const ButtonsWrapper = styled.div`
-    display: flex;
-    flex-direction: row;
-    justify-content: flex-end;
-    gap: 8px;
 `;
 
 export const ChartContainer = styled.div`

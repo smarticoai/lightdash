@@ -116,32 +116,9 @@ projectRouter.post(
                     req.body.limit,
                     req.body.filters,
                     req.body.forceRefresh,
+                    req.body.parameters,
                 );
 
-            res.json({
-                status: 'ok',
-                results,
-            });
-        } catch (e) {
-            next(e);
-        }
-    },
-);
-
-projectRouter.post(
-    '/refresh',
-    allowApiKeyAuthentication,
-    isAuthenticated,
-    unauthorisedInDemo,
-    async (req, res, next) => {
-        try {
-            const results = await req.services
-                .getProjectService()
-                .scheduleCompileProject(
-                    req.user!,
-                    getObjectValue(req.params, 'projectUuid'),
-                    getRequestMethod(req.header(LightdashRequestMethodHeader)),
-                );
             res.json({
                 status: 'ok',
                 results,
@@ -287,7 +264,7 @@ projectRouter.get(
             const results: TablesConfiguration = await req.services
                 .getProjectService()
                 .getTablesConfiguration(
-                    req.user!,
+                    req.account!,
                     getObjectValue(req.params, 'projectUuid'),
                 );
             res.json({

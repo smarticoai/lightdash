@@ -1,4 +1,10 @@
 import {
+    ChangesetsTable,
+    ChangesetsTableName,
+    ChangesTable,
+    ChangesTableName,
+} from '../database/entities/changesets';
+import {
     DashboardsTableName,
     DashboardTable,
     DashboardTabsTable,
@@ -117,18 +123,18 @@ import {
 } from '../database/entities/warehouseCredentials';
 
 import {
+    AnalyticsChartViews,
     AnalyticsChartViewsTableName,
+    AnalyticsDashboardViews,
     AnalyticsDashboardViewsTableName,
-    DbAnalyticsChartViews,
-    DbAnalyticsDashboardViews,
 } from '../database/entities/analytics';
 import {
     CatalogTable,
     CatalogTableName,
     CatalogTagsTable,
     CatalogTagsTableName,
-    MetricsTreeEdgesTableName,
     type MetricsTreeEdgesTable,
+    MetricsTreeEdgesTableName,
 } from '../database/entities/catalog';
 import {
     DashboardTileCommentsTable,
@@ -147,6 +153,10 @@ import {
     GithubAppInstallationTableName,
 } from '../database/entities/githubAppInstallation';
 import {
+    GitlabAppInstallationTable,
+    GitlabAppInstallationTableName,
+} from '../database/entities/gitlabAppInstallation';
+import {
     GroupMembershipTable,
     GroupMembershipTableName,
 } from '../database/entities/groupMemberships';
@@ -160,6 +170,10 @@ import {
     OrganizationColorPaletteTableName,
 } from '../database/entities/organizationColorPalettes';
 import {
+    OrganizationWarehouseCredentialsTable,
+    OrganizationWarehouseCredentialsTableName,
+} from '../database/entities/organizationWarehouseCredentials';
+import {
     OrganizationAllowedEmailDomainProjectsTable,
     OrganizationAllowedEmailDomainProjectsTableName,
     OrganizationAllowedEmailDomainsTable,
@@ -170,19 +184,19 @@ import {
     ProjectGroupAccessTableName,
 } from '../database/entities/projectGroupAccess';
 import {
+    ProjectParametersTable,
+    ProjectParametersTableName,
+} from '../database/entities/projectParameters';
+import {
     QueryHistoryTable,
     QueryHistoryTableName,
 } from '../database/entities/queryHistory';
 import {
-    ResultsCacheTable,
-    ResultsCacheTableName,
-} from '../database/entities/resultsFile';
-import {
-    SavedSemanticViewerChartsTable,
-    SavedSemanticViewerChartsTableName,
-    SavedSemanticViewerChartVersionsTable,
-    SavedSemanticViewerChartVersionsTableName,
-} from '../database/entities/savedSemanticViewerCharts';
+    RolesTableName,
+    RoleTable,
+    ScopedRolesTableName,
+    ScopedRoleTable,
+} from '../database/entities/roles';
 import {
     SavedSqlTable,
     SavedSqlTableName,
@@ -211,12 +225,12 @@ import {
 } from '../database/entities/sshKeyPairs';
 import { TagsTable, TagsTableName } from '../database/entities/tags';
 import {
-    DbGroupUserAttribute,
-    DbOrganizationMemberUserAttribute,
-    DbUserAttribute,
     GroupUserAttributesTable,
+    GroupUserAttributeTable,
     OrganizationMemberUserAttributesTable,
+    OrganizationMemberUserAttributeTable,
     UserAttributesTable,
+    UserAttributeTable,
 } from '../database/entities/userAttributes';
 import {
     ProjectUserWarehouseCredentialPreferenceTable,
@@ -225,7 +239,7 @@ import {
     UserWarehouseCredentialsTableName,
 } from '../database/entities/userWarehouseCredentials';
 import {
-    DbValidationTable,
+    ValidationTable,
     ValidationTableName,
 } from '../database/entities/validation';
 import {
@@ -233,6 +247,10 @@ import {
     WarehouseAvailableTablesTableName,
 } from '../database/entities/warehouseAvailableTables';
 import {
+    AiAgentToolCallTable,
+    AiAgentToolCallTableName,
+    AiAgentToolResultTable,
+    AiAgentToolResultTableName,
     AiPromptTable,
     AiPromptTableName,
     AiSlackPromptTable,
@@ -241,15 +259,48 @@ import {
     AiSlackThreadTableName,
     AiThreadTable,
     AiThreadTableName,
+    AiWebAppPromptTable,
+    AiWebAppPromptTableName,
 } from '../ee/database/entities/ai';
+import {
+    AiAgentGroupAccessTable,
+    AiAgentGroupAccessTableName,
+    AiAgentInstructionVersionsTable,
+    AiAgentInstructionVersionsTableName,
+    AiAgentIntegrationTableName,
+    AiAgentSlackIntegrationTable,
+    AiAgentSlackIntegrationTableName,
+    AiAgentTable,
+    AiAgentTableName,
+} from '../ee/database/entities/aiAgent';
+import {
+    AiAgentUserPreferencesTable,
+    AiAgentUserPreferencesTableName,
+} from '../ee/database/entities/aiAgentUserPreferences';
+import {
+    AiArtifactsTable,
+    AiArtifactsTableName,
+    AiArtifactVersionsTable,
+    AiArtifactVersionsTableName,
+} from '../ee/database/entities/aiArtifacts';
+import {
+    AiEvalPromptTable,
+    AiEvalPromptTableName,
+    AiEvalRunResultTable,
+    AiEvalRunResultTableName,
+    AiEvalRunTable,
+    AiEvalRunTableName,
+    AiEvalTable,
+    AiEvalTableName,
+} from '../ee/database/entities/aiEvals';
 import {
     DashboardSummariesTable,
     DashboardSummariesTableName,
 } from '../ee/database/entities/dashboardSummaries';
 import {
-    ScimOrganizationAccessTokenTable,
-    ScimOrganizationAccessTokenTableName,
-} from '../ee/database/entities/scim';
+    ServiceAccountsTableName,
+    ServiceAccountTable,
+} from '../ee/database/entities/serviceAccounts';
 import {
     SlackChannelProjectMappingsTable,
     SlackChannelProjectMappingsTableName,
@@ -274,8 +325,6 @@ declare module 'knex/types/tables' {
         [SavedChartAdditionalMetricTableName]: SavedChartAdditionalMetricTable;
         [SavedSqlTableName]: SavedSqlTable;
         [SavedSqlVersionsTableName]: SavedSqlVersionsTable;
-        [SavedSemanticViewerChartsTableName]: SavedSemanticViewerChartsTable;
-        [SavedSemanticViewerChartVersionsTableName]: SavedSemanticViewerChartVersionsTable;
         [SpaceTableName]: SpaceTable;
         [DashboardsTableName]: DashboardTable;
         [DashboardVersionsTableName]: DashboardVersionTable;
@@ -301,8 +350,8 @@ declare module 'knex/types/tables' {
         [ShareTableName]: ShareTable;
         [SpaceUserAccessTableName]: SpaceUserAccessTable;
         [SlackAuthTokensTableName]: SlackAuthTokensTable;
-        [AnalyticsChartViewsTableName]: DbAnalyticsChartViews;
-        [AnalyticsDashboardViewsTableName]: DbAnalyticsDashboardViews;
+        [AnalyticsChartViewsTableName]: AnalyticsChartViews;
+        [AnalyticsDashboardViewsTableName]: AnalyticsDashboardViews;
         [PinnedListTableName]: PinnedListTable;
         [PinnedChartTableName]: PinnedChartTable;
         [PinnedDashboardTableName]: PinnedDashboardTable;
@@ -315,22 +364,34 @@ declare module 'knex/types/tables' {
         [SchedulerLogTableName]: SchedulerLogTable;
         [OrganizationAllowedEmailDomainsTableName]: OrganizationAllowedEmailDomainsTable;
         [OrganizationAllowedEmailDomainProjectsTableName]: OrganizationAllowedEmailDomainProjectsTable;
-        [ValidationTableName]: DbValidationTable;
+        [ValidationTableName]: ValidationTable;
         [GroupTableName]: GroupTable;
         [GroupMembershipTableName]: GroupMembershipTable;
         [SshKeyPairTableName]: SshKeyPairTable;
-        [UserAttributesTable]: DbUserAttribute;
-        [OrganizationMemberUserAttributesTable]: DbOrganizationMemberUserAttribute;
-        [GroupUserAttributesTable]: DbGroupUserAttribute;
+        [UserAttributesTable]: UserAttributeTable;
+        [OrganizationMemberUserAttributesTable]: OrganizationMemberUserAttributeTable;
+        [GroupUserAttributesTable]: GroupUserAttributeTable;
         [SavedChartCustomDimensionsTableName]: SavedChartCustomDimensionsTable;
         [SavedChartCustomSqlDimensionsTableName]: SavedChartCustomSqlDimensionsTable;
         [DownloadFileTableName]: DownloadFileTable;
         [GithubAppInstallationTableName]: GithubAppInstallationTable;
+        [GitlabAppInstallationTableName]: GitlabAppInstallationTable;
         [DashboardTileCommentsTableName]: DashboardTileCommentsTable;
         [AiThreadTableName]: AiThreadTable;
         [AiSlackThreadTableName]: AiSlackThreadTable;
         [AiPromptTableName]: AiPromptTable;
+        [AiArtifactsTableName]: AiArtifactsTable;
+        [AiArtifactVersionsTableName]: AiArtifactVersionsTable;
         [AiSlackPromptTableName]: AiSlackPromptTable;
+        [AiWebAppPromptTableName]: AiWebAppPromptTable;
+        [AiAgentTableName]: AiAgentTable;
+        [AiAgentGroupAccessTableName]: AiAgentGroupAccessTable;
+        [AiAgentIntegrationTableName]: AiAgentIntegrationTable;
+        [AiAgentSlackIntegrationTableName]: AiAgentSlackIntegrationTable;
+        [AiAgentInstructionVersionsTableName]: AiAgentInstructionVersionsTable;
+        [AiAgentUserPreferencesTableName]: AiAgentUserPreferencesTable;
+        [AiAgentToolCallTableName]: AiAgentToolCallTable;
+        [AiAgentToolResultTableName]: AiAgentToolResultTable;
         [DashboardTabsTableName]: DashboardTabsTable;
         [NotificationsTableName]: NotificationsTable;
         [DashboardSummariesTableName]: DashboardSummariesTable;
@@ -339,11 +400,20 @@ declare module 'knex/types/tables' {
         [WarehouseAvailableTablesTableName]: WarehouseAvailableTablesTable;
         [TagsTableName]: TagsTable;
         [CatalogTagsTableName]: CatalogTagsTable;
-        [ScimOrganizationAccessTokenTableName]: ScimOrganizationAccessTokenTable;
+        [ServiceAccountsTableName]: ServiceAccountTable;
         [MetricsTreeEdgesTableName]: MetricsTreeEdgesTable;
         [SpotlightTableConfigTableName]: SpotlightTableConfigTable;
         [OrganizationColorPaletteTableName]: OrganizationColorPaletteTable;
+        [OrganizationWarehouseCredentialsTableName]: OrganizationWarehouseCredentialsTable;
         [QueryHistoryTableName]: QueryHistoryTable;
-        [ResultsCacheTableName]: ResultsCacheTable;
+        [ProjectParametersTableName]: ProjectParametersTable;
+        [RolesTableName]: RoleTable;
+        [ScopedRolesTableName]: ScopedRoleTable;
+        [AiEvalTableName]: AiEvalTable;
+        [AiEvalPromptTableName]: AiEvalPromptTable;
+        [AiEvalRunTableName]: AiEvalRunTable;
+        [AiEvalRunResultTableName]: AiEvalRunResultTable;
+        [ChangesetsTableName]: ChangesetsTable;
+        [ChangesTableName]: ChangesTable;
     }
 }

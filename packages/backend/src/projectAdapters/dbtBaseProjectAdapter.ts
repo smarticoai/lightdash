@@ -33,7 +33,12 @@ import fs from 'fs/promises';
 import path from 'path';
 import { LightdashAnalytics } from '../analytics/LightdashAnalytics';
 import Logger from '../logging/logger';
-import { CachedWarehouse, DbtClient, ProjectAdapter } from '../types';
+import {
+    CachedWarehouse,
+    DbtClient,
+    ProjectAdapter,
+    type TrackingParams,
+} from '../types';
 
 export class DbtBaseProjectAdapter implements ProjectAdapter {
     dbtClient: DbtClient;
@@ -84,11 +89,9 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
         return undefined;
     }
 
-    public async getLightdashProjectConfig(trackingParams?: {
-        projectUuid: string;
-        organizationUuid: string;
-        userUuid: string;
-    }): Promise<LightdashProjectConfig> {
+    public async getLightdashProjectConfig(
+        trackingParams?: TrackingParams,
+    ): Promise<LightdashProjectConfig> {
         if (!this.dbtProjectDir) {
             return {
                 spotlight: DEFAULT_SPOTLIGHT_CONFIG,
@@ -142,11 +145,7 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
     }
 
     public async compileAllExplores(
-        trackingParams?: {
-            userUuid: string;
-            organizationUuid: string;
-            projectUuid: string;
-        },
+        trackingParams?: TrackingParams,
         loadSources: boolean = false,
     ): Promise<(Explore | ExploreError)[]> {
         Logger.debug('Install dependencies');
@@ -192,7 +191,7 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
         const adapterType = manifest.metadata.adapter_type;
 
         const manifestVersion = getDbtManifestVersion(manifest);
-        Logger.debug(
+        Logger.info(
             `Validate ${models.length} models in manifest with version ${manifestVersion}`,
         );
 
@@ -231,14 +230,14 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     {},
                 );
             }
-            Logger.debug(`Attach types to ${validModels.length} models`);
+            Logger.info(`Attach types to ${validModels.length} models`);
             const lazyTypedModels = attachTypesToModels(
                 validModels,
                 this.cachedWarehouse.warehouseCatalog,
                 true,
                 adapterType !== 'snowflake',
             );
-            Logger.debug('Convert explores');
+            Logger.info('Convert explores');
             const lazyExplores = await convertExplores(
                 lazyTypedModels,
                 loadSources,
@@ -247,15 +246,16 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 this.warehouseClient,
                 lightdashProjectConfig,
             );
+            Logger.info('Finished compiling explores');
             return [...lazyExplores, ...failedExplores];
         } catch (e) {
             if (e instanceof MissingCatalogEntryError) {
-                Logger.debug(
+                Logger.info(
                     'Get warehouse catalog after missing catalog error',
                 );
                 const modelCatalog =
                     getSchemaStructureFromDbtModels(validModels);
-                Logger.debug(
+                Logger.info(
                     `Fetching table metadata for ${modelCatalog.length} tables`,
                 );
 
@@ -266,7 +266,7 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     warehouseCatalog,
                 );
 
-                Logger.debug(
+                Logger.info(
                     'Attach types to models after missing catalog error',
                 );
                 // Some types were missing so refresh the schema and try again
@@ -276,7 +276,7 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     false,
                     adapterType !== 'snowflake',
                 );
-                Logger.debug('Convert explores after missing catalog error');
+                Logger.info('Convert explores after missing catalog error');
                 const explores = await convertExplores(
                     typedModels,
                     loadSources,
@@ -284,6 +284,9 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     metrics,
                     this.warehouseClient,
                     lightdashProjectConfig,
+                );
+                Logger.info(
+                    'Finished compiling explores after missing catalog error',
                 );
                 return [...explores, ...failedExplores];
             }

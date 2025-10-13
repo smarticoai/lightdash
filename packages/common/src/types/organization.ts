@@ -35,6 +35,7 @@ export type Organization = {
      * The project a user sees when they first log in to the organization
      */
     defaultProjectUuid?: string;
+    createdAt?: Date;
 };
 
 export type CreateOrganization = Pick<Organization, 'name'>;
@@ -60,9 +61,10 @@ export type OrganizationProject = {
     name: string;
     type: ProjectType;
     createdByUserUuid: string | null;
+    createdAt: Date;
     upstreamProjectUuid: string | null;
-    warehouseType: WarehouseTypes;
-    requireUserCredentials: boolean;
+    warehouseType?: WarehouseTypes;
+    requireUserCredentials?: boolean;
 };
 
 /**

@@ -1,11 +1,12 @@
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import weekOfYear from 'dayjs/plugin/weekOfYear';
-import { groupBy, mapKeys, type Dictionary } from 'lodash';
+import { type Dictionary } from 'lodash';
+import groupBy from 'lodash/groupBy';
+import mapKeys from 'lodash/mapKeys';
 import { v4 as uuidv4 } from 'uuid';
 import { type AnyType } from '../types/any';
 import type { MetricWithAssociatedTimeDimension } from '../types/catalog';
-import { ConditionalOperator } from '../types/conditionalRule';
 import { type CompiledTable } from '../types/explore';
 import {
     DimensionType,
@@ -15,6 +16,7 @@ import {
     type Dimension,
 } from '../types/field';
 import {
+    FilterOperator,
     type DateFilterSettings,
     type FieldTarget,
     type FilterRule,
@@ -34,7 +36,7 @@ dayjs.extend(isoWeek);
 dayjs.extend(weekOfYear);
 
 type DateFilter = FilterRule<
-    ConditionalOperator,
+    FilterOperator,
     FieldTarget,
     unknown,
     DateFilterSettings
@@ -185,7 +187,7 @@ export const getMetricsExplorerSegmentFilters = (
         {
             id: uuidv4(),
             target: { fieldId: segmentDimension },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: segments,
         },
     ];
@@ -207,7 +209,7 @@ export const getMetricExplorerDateRangeFilters = (
         {
             id: uuidv4(),
             target: { fieldId: targetFieldId },
-            operator: ConditionalOperator.IN_BETWEEN,
+            operator: FilterOperator.IN_BETWEEN,
             values: dateRange.map((date) =>
                 dayjs(date).format(METRICS_EXPLORER_DATE_FORMAT),
             ),

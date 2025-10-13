@@ -12,7 +12,7 @@
     <a href="http://www.lightdash.com"><b>Website</b></a> •
     <a href="https://www.loom.com/share/c0805a236a994de397ac5142fdfe4b7f"><b>Watch demo</b></a> •
     <a href="http://docs.lightdash.com/"><b>Docs</b></a> •
-    <a href="https://join.slack.com/t/lightdash-community/shared_invite/zt-2uwa5s9jl-xTNyjJ7otC8wH3jB8qgCpA"><b>Join Slack Community</b></a>
+    <a href="https://join.slack.com/t/lightdash-community/shared_invite/zt-2wgtavou8-VRhwXI%7EQbjCAHQs0WBac3w"><b>Join Slack Community</b></a>
 </p>
 <div align="center">
 <img src="https://img.shields.io/github/license/lightdash/lightdash" />
@@ -107,7 +107,7 @@ Step 3 - 👩‍💻 [Create your first metric](https://docs.lightdash.com/get-s
 
 ## Community Support
 
-📣 If you want something a bit more, then [head on over to our Slack Community](https://join.slack.com/t/lightdash-community/shared_invite/zt-2uwa5s9jl-xTNyjJ7otC8wH3jB8qgCpA) where you’ll be able to chat directly with all of us at Lightdash and all the other amazing members of our community. We’re happy to talk about anything from feature requests, implementation details or dbt quirks to memes and SQL jokes!
+📣 If you want something a bit more, then [head on over to our Slack Community](https://join.slack.com/t/lightdash-community/shared_invite/zt-2wgtavou8-VRhwXI%7EQbjCAHQs0WBac3w) where you’ll be able to chat directly with all of us at Lightdash and all the other amazing members of our community. We’re happy to talk about anything from feature requests, implementation details or dbt quirks to memes and SQL jokes!
 
 You can also keep up to date with Lightdash by following us here:
 
@@ -403,8 +403,16 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://dub.sh/snxvqzq"><img src="https://avatars.githubusercontent.com/u/76897266?v=4?s=100" width="100px;" alt="Ali Amer"/><br /><sub><b>Ali Amer</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=aliamerj" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/virendrapatil24"><img src="https://avatars.githubusercontent.com/u/70162563?v=4?s=100" width="100px;" alt="Virendra Patil"/><br /><sub><b>Virendra Patil</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=virendrapatil24" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="http://janstepanovsky.cz"><img src="https://avatars.githubusercontent.com/u/854103?v=4?s=100" width="100px;" alt="Honza Stepanovsky"/><br /><sub><b>Honza Stepanovsky</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=hhhonzik" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://pimmey.com"><img src="https://avatars.githubusercontent.com/u/5588929?v=4?s=100" width="100px;" alt="Yegor Borisenco"/><br /><sub><b>Yegor Borisenco</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=pimmey" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://pimmey.com"><img src="https://avatars.githubusercontent.com/u/5588929?v=4?s=100" width="100px;" alt="Yegor Borisenco"/><br /><sub><b>Yegor Borisenco</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=pimmey" title="Code">💻</a> <a href="https://github.com/lightdash/lightdash/issues?q=author%3Apimmey" title="Bug reports">🐛</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lakshz"><img src="https://avatars.githubusercontent.com/u/81241551?v=4?s=100" width="100px;" alt="Lakshya Satpal"/><br /><sub><b>Lakshya Satpal</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=lakshz" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="http://tatiana.inama.dev"><img src="https://avatars.githubusercontent.com/u/8246284?v=4?s=100" width="100px;" alt="Tatiana Inama"/><br /><sub><b>Tatiana Inama</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=tatianainama" title="Code">💻</a> <a href="https://github.com/lightdash/lightdash/issues?q=author%3Atatianainama" title="Bug reports">🐛</a></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Divyansh200102"><img src="https://avatars.githubusercontent.com/u/146909065?v=4?s=100" width="100px;" alt="Divyansh200102"/><br /><sub><b>Divyansh200102</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=Divyansh200102" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/manhnguyen1998"><img src="https://avatars.githubusercontent.com/u/37845948?v=4?s=100" width="100px;" alt="グエン・ヒュー・マイン"/><br /><sub><b>グエン・ヒュー・マイン</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=manhnguyen1998" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://www.linkedin.com/in/raghvendra-singh-rathore-b47a3a161/"><img src="https://avatars.githubusercontent.com/u/35917821?v=4?s=100" width="100px;" alt="raghvendra"/><br /><sub><b>raghvendra</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/issues?q=author%3Afork-boy" title="Bug reports">🐛</a> <a href="https://github.com/lightdash/lightdash/commits?author=fork-boy" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/shanzeim"><img src="https://avatars.githubusercontent.com/u/211318613?v=4?s=100" width="100px;" alt="shanzeim"/><br /><sub><b>shanzeim</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=shanzeim" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jesshitchcock"><img src="https://avatars.githubusercontent.com/u/13378707?v=4?s=100" width="100px;" alt="Jess Hitchcock"/><br /><sub><b>Jess Hitchcock</b></sub></a><br /><a href="https://github.com/lightdash/lightdash/commits?author=jesshitchcock" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

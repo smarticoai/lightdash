@@ -17,7 +17,7 @@ import {
     IconTrash,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { isEqual } from 'lodash';
+import isEqual from 'lodash/isEqual';
 import { useCallback, useMemo, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -28,6 +28,7 @@ import { TitleBreadCrumbs } from '../../../../components/Explorer/SavedChartsHea
 import MantineIcon from '../../../../components/common/MantineIcon';
 import { UpdatedInfo } from '../../../../components/common/PageHeader/UpdatedInfo';
 import { ResourceInfoPopup } from '../../../../components/common/ResourceInfoPopup/ResourceInfoPopup';
+import { DEFAULT_SQL_LIMIT } from '../../constants';
 import { useUpdateSqlChartMutation } from '../../hooks/useSavedSqlCharts';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import {
@@ -88,11 +89,11 @@ export const HeaderEdit: FC = () => {
                 versionedData: {
                     config,
                     sql,
-                    limit,
+                    limit: limit ?? DEFAULT_SQL_LIMIT,
                 },
             });
             setInitialChartConfig(config);
-            setInitialSavedSqlChart({ sql, limit });
+            setInitialSavedSqlChart({ sql, limit: limit ?? DEFAULT_SQL_LIMIT });
         }
     }, [config, sql, mutate, limit]);
 

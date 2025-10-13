@@ -12,6 +12,7 @@ import {
     type ParsedMetric,
 } from './dbtFromSchema';
 import { DbtError, ParseError } from './errors';
+import { type JoinRelationship } from './explore';
 import {
     FieldType,
     friendlyName,
@@ -23,7 +24,7 @@ import {
     type MetricType,
     type Source,
 } from './field';
-import { parseFilters } from './filterGrammar';
+import { parseFilters, type RequiredFilter } from './filterGrammar';
 import { type LightdashProjectConfig } from './lightdashProjectConfig';
 import { type OrderFieldsByStrategy } from './table';
 import { type DefaultTimeDimension, type TimeFrames } from './timeFrames';
@@ -35,6 +36,7 @@ export enum SupportedDbtAdapter {
     REDSHIFT = 'redshift',
     POSTGRES = 'postgres',
     TRINO = 'trino',
+    CLICKHOUSE = 'clickhouse',
 }
 
 export type DbtNodeConfig = {
@@ -60,8 +62,11 @@ export type DbtModelNode = DbtRawModelNode & {
     };
 };
 export type DbtModelColumn = ColumnInfo & {
-    meta: DbtColumnMetadata;
+    meta?: DbtColumnMetadata;
     data_type?: DimensionType;
+    config?: {
+        meta?: DbtColumnMetadata;
+    };
 };
 
 type DbtLightdashFieldTags = {
@@ -70,29 +75,45 @@ type DbtLightdashFieldTags = {
 
 export type DbtModelMetadata = DbtModelLightdashConfig & {};
 
-type DbtModelLightdashConfig = {
+type ExploreConfig = {
     label?: string;
-    joins?: DbtModelJoin[];
-    metrics?: Record<string, DbtModelLightdashMetric>;
-    order_fields_by?: OrderFieldsByStrategy;
+    description?: string;
     group_label?: string;
-    sql_filter?: string;
-    sql_where?: string; // alias for sql_filter
-    sql_from?: string; // overrides dbt model relation_name
-    required_filters?: { [key: string]: AnyType }[];
-    required_attributes?: Record<string, string | string[]>;
-    group_details?: Record<string, DbtModelGroup>;
-    default_time_dimension?: {
-        field: string;
-        interval: TimeFrames;
-    };
-    spotlight?: {
-        visibility?: NonNullable<
-            LightdashProjectConfig['spotlight']
-        >['default_visibility'];
-        categories?: string[]; // yaml_reference
-    };
+    joins?: DbtModelJoin[];
 };
+
+type SharedDbtModelLightdashConfig = {
+    default_filters?: RequiredFilter[];
+    required_filters?: RequiredFilter[]; // Alias for default_filters, for backwards compatibility
+};
+
+type DbtModelLightdashConfig = ExploreConfig &
+    SharedDbtModelLightdashConfig & {
+        metrics?: Record<string, DbtModelLightdashMetric>;
+        order_fields_by?: OrderFieldsByStrategy;
+        group_label?: string;
+        sql_filter?: string;
+        sql_where?: string; // alias for sql_filter
+        sql_from?: string; // overrides dbt model relation_name
+        required_attributes?: Record<string, string | string[]>;
+        group_details?: Record<string, DbtModelGroup>;
+        default_time_dimension?: {
+            field: string;
+            interval: TimeFrames;
+        };
+        spotlight?: {
+            visibility?: NonNullable<
+                LightdashProjectConfig['spotlight']
+            >['default_visibility'];
+            categories?: string[]; // yaml_reference
+        };
+        explores?: Record<
+            string,
+            ExploreConfig & SharedDbtModelLightdashConfig
+        >;
+        ai_hint?: string | string[];
+        parameters?: LightdashProjectConfig['parameters'];
+    };
 
 export type DbtModelGroup = {
     label: string;
@@ -110,6 +131,8 @@ type DbtModelJoin = {
     hidden?: boolean;
     fields?: string[];
     always?: boolean;
+    relationship?: JoinRelationship;
+    primary_key?: string | string[];
 };
 export type DbtColumnMetadata = DbtColumnLightdashConfig & {};
 type DbtColumnLightdashConfig = {
@@ -138,6 +161,7 @@ export type DbtColumnLightdashDimension = {
     colors?: Record<string, string>;
     urls?: FieldUrl[];
     required_attributes?: Record<string, string | string[]>;
+    ai_hint?: string | string[];
 } & DbtLightdashFieldTags;
 
 export type DbtColumnLightdashAdditionalDimension = Omit<
@@ -169,6 +193,7 @@ export type DbtColumnLightdashMetric = {
         >['default_visibility'];
         categories?: string[]; // yaml_reference
     };
+    ai_hint?: string | string[];
 } & DbtLightdashFieldTags;
 
 export type DbtModelLightdashMetric = DbtColumnLightdashMetric &
@@ -191,6 +216,8 @@ export const normaliseModelDatabase = (
                 );
             }
             return { ...model, database: model.database as string };
+        case SupportedDbtAdapter.CLICKHOUSE:
+            return { ...model, database: '' }; // Clickhouse doesn't have a database field
         case SupportedDbtAdapter.DATABRICKS:
             return { ...model, database: model.database || 'DEFAULT' };
         default:
@@ -418,6 +445,18 @@ export const convertToGroups = (
     return groups;
 };
 
+export const convertToAiHints = (
+    aiHint: string | string[] | undefined,
+): string[] | undefined => {
+    if (!aiHint) {
+        return undefined;
+    }
+    if (typeof aiHint === 'string') {
+        return [aiHint];
+    }
+    return aiHint;
+};
+
 export const isDbtRpcRunSqlResults = (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     results: Record<string, any>,
@@ -481,7 +520,6 @@ export const convertModelMetric = ({
         table: modelName,
         tableLabel,
         type: metric.type,
-        isAutoGenerated: false,
         description: metric.description,
         source,
         hidden: !!metric.hidden,
@@ -514,6 +552,7 @@ export const convertModelMetric = ({
             spotlightVisibility,
             spotlightCategories,
         ),
+        ...(metric.ai_hint ? { aiHint: convertToAiHints(metric.ai_hint) } : {}),
     };
 };
 
@@ -654,11 +693,14 @@ export function getCompiledModels(
     manifestModels: DbtModelNode[],
     compiledModelIds?: string[],
 ) {
+    const isAnyModelCompiled = manifestModels.some((model) => model.compiled);
+
     return manifestModels.filter((model) => {
         if (compiledModelIds) {
             return compiledModelIds.includes(model.unique_id);
         }
 
-        return model.compiled;
+        // In case any model is compiled, we only return the compiled models otherwise we return all models (this maintains backwards compatibility + adds ability to use parse)
+        return isAnyModelCompiled ? model.compiled : true;
     });
 }

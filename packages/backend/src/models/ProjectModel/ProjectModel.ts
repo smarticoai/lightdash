@@ -1,15 +1,26 @@
 import {
     AlreadyExistsError,
     AnyType,
+    BigqueryAuthenticationType,
+    Change,
+    ChangesetUtils,
+    ChangesetWithChanges,
+    CompiledDimension,
+    CompiledMetric,
+    CompiledTable,
     CreateProject,
+    CreateProjectOptionalCredentials,
+    CreateSnowflakeCredentials,
     CreateVirtualViewPayload,
     CreateWarehouseCredentials,
     DbtProjectConfig,
     Explore,
     ExploreError,
     ExploreType,
+    ForbiddenError,
     NotExistsError,
     NotFoundError,
+    NotImplementedError,
     OrganizationProject,
     ParameterError,
     PreviewContentMapping,
@@ -19,7 +30,7 @@ import {
     ProjectMemberRole,
     ProjectSummary,
     ProjectType,
-    SemanticLayerType,
+    SnowflakeAuthenticationType,
     SpaceSummary,
     SupportedDbtVersions,
     TablesConfiguration,
@@ -32,22 +43,16 @@ import {
     WarehouseTypes,
     assertUnreachable,
     createVirtualView,
-    generateSlug,
     getLtreePathFromSlug,
     isExploreError,
     sensitiveCredentialsFieldNames,
     sensitiveDbtCredentialsFieldNames,
-    type CubeSemanticLayerConnection,
-    type DbtSemanticLayerConnection,
-    type SemanticLayerConnection,
-    type SemanticLayerConnectionUpdate,
 } from '@lightdash/common';
 import {
     WarehouseCatalog,
     warehouseClientFromCredentials,
 } from '@lightdash/warehouses';
 import { Knex } from 'knex';
-import { merge } from 'lodash';
 import { DatabaseError } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { LightdashConfig } from '../../config/parseConfig';
@@ -91,6 +96,7 @@ import Logger from '../../logging/logger';
 import { wrapSentryTransaction } from '../../utils';
 import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
 import { generateUniqueSpaceSlug } from '../../utils/SlugUtils';
+import { ChangesetModel } from '../ChangesetModel';
 import { ExploreCache } from './ExploreCache';
 import Transaction = Knex.Transaction;
 
@@ -98,6 +104,7 @@ export type ProjectModelArguments = {
     database: Knex;
     lightdashConfig: LightdashConfig;
     encryptionUtil: EncryptionUtil;
+    changesetModel: ChangesetModel;
 };
 
 const CACHED_EXPLORES_PG_LOCK_NAMESPACE = 1;
@@ -107,6 +114,8 @@ export class ProjectModel {
 
     protected lightdashConfig: LightdashConfig;
 
+    protected changesetModel: ChangesetModel;
+
     private encryptionUtil: EncryptionUtil;
 
     private readonly exploreCache: ExploreCache;
@@ -114,6 +123,7 @@ export class ProjectModel {
     constructor(args: ProjectModelArguments) {
         this.database = args.database;
         this.lightdashConfig = args.lightdashConfig;
+        this.changesetModel = args.changesetModel;
         this.encryptionUtil = args.encryptionUtil;
         this.exploreCache = new ExploreCache();
     }
@@ -146,7 +156,13 @@ export class ProjectModel {
     static mergeMissingWarehouseSecrets<
         T extends CreateWarehouseCredentials = CreateWarehouseCredentials,
     >(incompleteConfig: T, completeConfig: CreateWarehouseCredentials): T {
-        if (incompleteConfig.type !== completeConfig.type) {
+        if (
+            incompleteConfig.type !== completeConfig.type ||
+            // BigQuery ADC authentication does not require credentials to be set
+            (incompleteConfig.type === WarehouseTypes.BIGQUERY &&
+                incompleteConfig.authenticationType ===
+                    BigqueryAuthenticationType.ADC)
+        ) {
             return incompleteConfig;
         }
         return {
@@ -195,6 +211,19 @@ export class ProjectModel {
                   )
                 : incompleteProjectConfig.warehouseConnection,
         };
+    }
+
+    async getSingleProjectUuidInInstance(): Promise<string> {
+        const projects = await this.database('projects').select('*');
+        if (projects.length === 0) {
+            throw new NotExistsError('Cannot find project');
+        }
+        if (projects.length > 1) {
+            throw new ParameterError(
+                'There are multiple projects in the instance',
+            );
+        }
+        return projects[0].project_uuid;
     }
 
     async getAllByOrganizationUuid(
@@ -259,6 +288,7 @@ export class ProjectModel {
                 'projects.project_uuid',
                 'projects.name',
                 'projects.project_type',
+                'projects.created_at',
                 `projects.copied_from_project_uuid`,
                 `projects.created_by_user_uuid`,
                 `${WarehouseCredentialTableName}.warehouse_type`,
@@ -294,24 +324,34 @@ export class ProjectModel {
                 name,
                 project_uuid,
                 project_type,
+                created_at,
                 created_by_user_uuid,
                 copied_from_project_uuid,
                 warehouse_type,
                 encrypted_credentials,
             }) => {
                 try {
-                    const warehouseCredentials = JSON.parse(
-                        this.encryptionUtil.decrypt(encrypted_credentials),
-                    ) as CreateWarehouseCredentials;
+                    const warehouseCredentials =
+                        encrypted_credentials !== null
+                            ? (JSON.parse(
+                                  this.encryptionUtil.decrypt(
+                                      encrypted_credentials,
+                                  ),
+                              ) as CreateWarehouseCredentials)
+                            : undefined;
                     return {
                         name,
                         projectUuid: project_uuid,
                         type: project_type,
                         createdByUserUuid: created_by_user_uuid,
+                        createdAt: created_at,
                         upstreamProjectUuid: copied_from_project_uuid,
-                        warehouseType: warehouse_type as WarehouseTypes,
+                        warehouseType:
+                            warehouse_type !== null
+                                ? (warehouse_type as WarehouseTypes)
+                                : undefined,
                         requireUserCredentials:
-                            !!warehouseCredentials.requireUserCredentials,
+                            !!warehouseCredentials?.requireUserCredentials,
                     };
                 } catch (e) {
                     throw new UnexpectedServerError(
@@ -335,6 +375,7 @@ export class ProjectModel {
         } catch (e) {
             throw new UnexpectedServerError('Could not save credentials.');
         }
+
         await trx('warehouse_credentials')
             .insert({
                 project_id: projectId,
@@ -343,6 +384,20 @@ export class ProjectModel {
             })
             .onConflict('project_id')
             .merge();
+    }
+
+    async hasAnyProjects(): Promise<boolean> {
+        const results = await this.database('projects')
+            .count('project_uuid as count')
+            .first<{ count: string }>();
+        return parseInt(results.count, 10) > 0;
+    }
+
+    async getDefaultProjectUuids(): Promise<string[]> {
+        const projects = await this.database('projects')
+            .where('project_type', ProjectType.DEFAULT)
+            .select('project_uuid');
+        return projects.map((project) => project.project_uuid);
     }
 
     async hasProjects(organizationUuid: string): Promise<boolean> {
@@ -364,6 +419,18 @@ export class ProjectModel {
         organizationUuid: string,
         data: CreateProject,
     ): Promise<string> {
+        return this.createWithOptionalCredentials(
+            userUuid,
+            organizationUuid,
+            data,
+        );
+    }
+
+    async createWithOptionalCredentials(
+        userUuid: string,
+        organizationUuid: string,
+        data: CreateProjectOptionalCredentials,
+    ): Promise<string> {
         const orgs = await this.database('organizations')
             .where('organization_uuid', organizationUuid)
             .select('*');
@@ -378,19 +445,6 @@ export class ProjectModel {
                 );
             } catch (e) {
                 throw new UnexpectedServerError('Could not save credentials.');
-            }
-
-            let encryptedSemanticLayerConnection: Buffer | null;
-            try {
-                encryptedSemanticLayerConnection = data.semanticLayerConnection
-                    ? this.encryptionUtil.encrypt(
-                          JSON.stringify(data.semanticLayerConnection),
-                      )
-                    : null;
-            } catch (e) {
-                throw new UnexpectedServerError(
-                    'Could not encrypt semantic layer connection credentials.',
-                );
             }
 
             // Make sure the project to copy exists and is owned by the same organization
@@ -411,7 +465,6 @@ export class ProjectModel {
                             ? copiedProjects[0].project_uuid
                             : null,
                     dbt_version: data.dbtVersion,
-                    semantic_layer_connection: encryptedSemanticLayerConnection,
                     ...(copiedProjects.length === 1
                         ? {
                               scheduler_timezone:
@@ -422,11 +475,13 @@ export class ProjectModel {
                 })
                 .returning('*');
 
-            await this.upsertWarehouseConnection(
-                trx,
-                project.project_id,
-                data.warehouseConnection,
-            );
+            if (data.warehouseConnection) {
+                await this.upsertWarehouseConnection(
+                    trx,
+                    project.project_id,
+                    data.warehouseConnection,
+                );
+            }
 
             if (data.type !== ProjectType.PREVIEW) {
                 const slug = await generateUniqueSpaceSlug(
@@ -535,9 +590,9 @@ export class ProjectModel {
                   pinned_list_uuid?: string;
                   dbt_version: SupportedDbtVersions;
                   copied_from_project_uuid?: string;
-                  semantic_layer_connection: Buffer | null;
                   scheduler_timezone: string;
                   created_by_user_uuid: string | null;
+                  organization_warehouse_credentials_uuid: string | null;
               }
             | {
                   name: string;
@@ -549,9 +604,9 @@ export class ProjectModel {
                   pinned_list_uuid?: string;
                   dbt_version: SupportedDbtVersions;
                   copied_from_project_uuid?: string;
-                  semantic_layer_connection: Buffer | null;
                   scheduler_timezone: string;
                   created_by_user_uuid: string | null;
+                  organization_warehouse_credentials_uuid: string | null;
               }
         )[];
         return wrapSentryTransaction(
@@ -601,13 +656,13 @@ export class ProjectModel {
                             .ref('copied_from_project_uuid')
                             .withSchema(ProjectTableName),
                         this.database
-                            .ref('semantic_layer_connection')
-                            .withSchema(ProjectTableName),
-                        this.database
                             .ref('scheduler_timezone')
                             .withSchema(ProjectTableName),
                         this.database
                             .ref('created_by_user_uuid')
+                            .withSchema(ProjectTableName),
+                        this.database
+                            .ref('organization_warehouse_credentials_uuid')
                             .withSchema(ProjectTableName),
                     ])
                     .select<QueryResult>()
@@ -634,23 +689,6 @@ export class ProjectModel {
                     );
                 }
 
-                let semanticLayerConnection:
-                    | SemanticLayerConnection
-                    | undefined;
-                try {
-                    semanticLayerConnection = project.semantic_layer_connection
-                        ? (JSON.parse(
-                              this.encryptionUtil.decrypt(
-                                  project.semantic_layer_connection,
-                              ),
-                          ) as SemanticLayerConnection)
-                        : undefined;
-                } catch (e) {
-                    throw new UnexpectedServerError(
-                        'Failed to load dbt credentials',
-                    );
-                }
-
                 const result: Omit<Project, 'warehouseConnection'> = {
                     organizationUuid: project.organization_uuid,
                     projectUuid,
@@ -660,10 +698,14 @@ export class ProjectModel {
                     pinnedListUuid: project.pinned_list_uuid,
                     dbtVersion: project.dbt_version,
                     upstreamProjectUuid: project.copied_from_project_uuid,
-                    semanticLayerConnection,
                     schedulerTimezone: project.scheduler_timezone,
                     createdByUserUuid: project.created_by_user_uuid,
+                    organizationWarehouseCredentialsUuid:
+                        project.organization_warehouse_credentials_uuid ??
+                        undefined,
                 };
+
+                // Fall back to project-level credentials
                 if (!project.warehouse_type) {
                     return result;
                 }
@@ -726,36 +768,55 @@ export class ProjectModel {
         };
     }
 
-    private static getSemanticLayerNonSensitiveCredentials(
-        semanticLayerConnection: SemanticLayerConnection,
-    ) {
-        const { type } = semanticLayerConnection;
+    /*
+    This method will load default values for backwards compatibility
+    For example, when we introduce a new authentication type, we need to set the default value for the existing projects
+    */
+    static getConnectionWithDefaults(
+        sensitiveCredentials?: CreateWarehouseCredentials,
+        nonSensitiveCredentials?: WarehouseCredentials,
+    ): WarehouseCredentials | undefined {
+        if (!sensitiveCredentials || !nonSensitiveCredentials) {
+            return nonSensitiveCredentials;
+        }
 
-        switch (type) {
-            case SemanticLayerType.CUBE:
+        switch (nonSensitiveCredentials.type) {
+            case WarehouseTypes.BIGQUERY:
                 return {
-                    type,
-                    domain: semanticLayerConnection.domain,
-                } as CubeSemanticLayerConnection;
-            case SemanticLayerType.DBT:
+                    ...nonSensitiveCredentials,
+                    authenticationType:
+                        nonSensitiveCredentials.authenticationType ??
+                        BigqueryAuthenticationType.PRIVATE_KEY,
+                };
+            case WarehouseTypes.SNOWFLAKE: {
+                const rawCredentials =
+                    sensitiveCredentials as CreateSnowflakeCredentials;
+
+                if (nonSensitiveCredentials.authenticationType !== undefined) {
+                    return nonSensitiveCredentials;
+                }
+
+                if (rawCredentials.privateKey === undefined) {
+                    return {
+                        ...nonSensitiveCredentials,
+                        authenticationType:
+                            SnowflakeAuthenticationType.PASSWORD,
+                    };
+                }
+
                 return {
-                    type,
-                    domain: semanticLayerConnection.domain,
-                    environmentId: semanticLayerConnection.environmentId,
-                } as DbtSemanticLayerConnection;
+                    ...nonSensitiveCredentials,
+                    authenticationType: SnowflakeAuthenticationType.PRIVATE_KEY,
+                };
+            }
             default:
-                return assertUnreachable(
-                    type,
-                    `Unknown semantic layer connection type: ${type}`,
-                );
+                return nonSensitiveCredentials;
         }
     }
 
     async get(projectUuid: string): Promise<Project> {
         const project = await this.getWithSensitiveFields(projectUuid);
         const sensitiveCredentials = project.warehouseConnection;
-        const sensitiveSemanticLayerCredentials =
-            project.semanticLayerConnection;
 
         const nonSensitiveDbtCredentials = Object.fromEntries(
             Object.entries(project.dbtConnection).filter(
@@ -775,12 +836,11 @@ export class ProjectModel {
               ) as WarehouseCredentials)
             : undefined;
 
-        const nonSensitiveSemanticLayerCredentials =
-            sensitiveSemanticLayerCredentials
-                ? ProjectModel.getSemanticLayerNonSensitiveCredentials(
-                      sensitiveSemanticLayerCredentials,
-                  )
-                : undefined;
+        const nonSensitiveCredentialsWithDefaults =
+            ProjectModel.getConnectionWithDefaults(
+                sensitiveCredentials,
+                nonSensitiveCredentials,
+            );
 
         return {
             organizationUuid: project.organizationUuid,
@@ -788,11 +848,10 @@ export class ProjectModel {
             name: project.name,
             type: project.type,
             dbtConnection: nonSensitiveDbtCredentials,
-            warehouseConnection: nonSensitiveCredentials,
+            warehouseConnection: nonSensitiveCredentialsWithDefaults,
             pinnedListUuid: project.pinnedListUuid,
             dbtVersion: project.dbtVersion,
             upstreamProjectUuid: project.upstreamProjectUuid || undefined,
-            semanticLayerConnection: nonSensitiveSemanticLayerCredentials,
             schedulerTimezone: project.schedulerTimezone,
             createdByUserUuid: project.createdByUserUuid ?? null,
         };
@@ -858,10 +917,18 @@ export class ProjectModel {
         return convertedExplore;
     };
 
+    /**
+     * Find explores from cache (cached_explore) from a project.
+     * @param projectUuid - The project uuid.
+     * @param key - The key to represent the Explore dictionary key.
+     * @param exploreNamesWithDuplicates - The explore names with duplicates.
+     * @returns A dictionary of explores with the key being the name or uuid.
+     */
     async findExploresFromCache(
         projectUuid: string,
+        key: 'name' | 'uuid',
         exploreNamesWithDuplicates?: string[],
-    ): Promise<Record<string, Explore | ExploreError>> {
+    ): Promise<{ [exploreNameOrUuid: string]: Explore | ExploreError }> {
         // dedupe values
         const exploreNames = exploreNamesWithDuplicates
             ? [...new Set(exploreNamesWithDuplicates)]
@@ -873,42 +940,78 @@ export class ProjectModel {
                 exploreNames,
             },
             async (span) => {
+                const changeset =
+                    await this.changesetModel.findActiveChangesetWithChangesByProjectUuid(
+                        projectUuid,
+                    );
+
                 // Try to get from cache first
                 const cachedExplores = this.exploreCache?.getExplores(
                     projectUuid,
                     exploreNames,
+                    changeset?.updatedAt,
                 );
-                if (cachedExplores) {
+                // NOTE: Explores are cached with the name key, so we don't need to return the cached explores if the key is uuid
+                if (cachedExplores && key === 'name') {
                     span.setAttribute('cacheHit', true);
                     // Return cached explores
                     return cachedExplores;
                 }
                 // If not in cache, get from database
                 const query = this.database(CachedExploreTableName)
-                    .select('explore')
+                    .select('explore', 'cached_explore_uuid')
                     .where('project_uuid', projectUuid);
                 if (exploreNames) {
                     void query.whereIn('name', exploreNames);
                 }
                 const explores = await query;
                 span.setAttribute('foundExplores', !!explores.length);
-                const finalExplores = explores.reduce<
+
+                let finalExplores = explores.reduce<
                     Record<string, Explore | ExploreError>
-                >((acc, { explore }) => {
-                    acc[explore.name] =
+                >((acc, { explore, cached_explore_uuid }) => {
+                    const exploreKey =
+                        key === 'name' ? explore.name : cached_explore_uuid;
+                    acc[exploreKey] =
                         ProjectModel.convertMetricFiltersFieldIdsToFieldRef(
                             explore,
                         );
                     return acc;
                 }, {});
+
+                if (changeset) {
+                    finalExplores = await ChangesetUtils.applyChangeset(
+                        changeset,
+                        finalExplores,
+                    );
+                }
+
                 // Store in cache
                 this.exploreCache?.setExplores(
                     projectUuid,
                     exploreNames,
+                    changeset?.updatedAt,
                     finalExplores,
                 );
                 return finalExplores;
             },
+        );
+    }
+
+    async findVirtualViewsFromCache(
+        projectUuid: string,
+    ): Promise<Record<string, Explore | ExploreError>> {
+        const virtualViews = await this.database(CachedExploreTableName)
+            .select('explore')
+            .where('project_uuid', projectUuid)
+            .whereRaw("explore->>'type' = ?", [ExploreType.VIRTUAL]);
+
+        return virtualViews.reduce<Record<string, Explore | ExploreError>>(
+            (acc, { explore }) => {
+                acc[explore.name] = explore;
+                return acc;
+            },
+            {},
         );
     }
 
@@ -937,9 +1040,11 @@ export class ProjectModel {
         projectUuid: string,
         exploreName: string,
     ): Promise<Explore | ExploreError> {
-        const cachedExplores = await this.findExploresFromCache(projectUuid, [
-            exploreName,
-        ]);
+        const cachedExplores = await this.findExploresFromCache(
+            projectUuid,
+            'name',
+            [exploreName],
+        );
         const cachedExplore = cachedExplores[exploreName];
         if (cachedExplore === undefined) {
             throw new NotExistsError(
@@ -953,10 +1058,11 @@ export class ProjectModel {
         projectUuid: string,
         tableName: string,
     ): Promise<Explore | ExploreError | undefined> {
-        const cachedExplores = await this.findExploresFromCache(projectUuid, [
-            tableName,
-        ]);
-        
+        const cachedExplores = await this.findExploresFromCache(
+            projectUuid,
+            'name',
+            [tableName],
+        );
         return cachedExplores[tableName];
     }
 
@@ -1146,6 +1252,7 @@ export class ProjectModel {
             role: ProjectMemberRole;
             first_name: string;
             last_name: string;
+            role_uuid: string | null;
         };
         const [projectMemberProfile] = await this.database(
             'project_memberships',
@@ -1172,6 +1279,7 @@ export class ProjectModel {
             email: projectMemberProfile.email,
             firstName: projectMemberProfile.first_name,
             lastName: projectMemberProfile.last_name,
+            roleUuid: projectMemberProfile.role_uuid || undefined,
         };
     }
 
@@ -1184,6 +1292,7 @@ export class ProjectModel {
             role: ProjectMemberRole;
             first_name: string;
             last_name: string;
+            role_uuid: string | null;
         };
         const projectMemberships = await this.database('project_memberships')
             .leftJoin('users', 'project_memberships.user_id', 'users.user_id')
@@ -1204,6 +1313,7 @@ export class ProjectModel {
             firstName: membership.first_name,
             projectUuid,
             lastName: membership.last_name,
+            roleUuid: membership.role_uuid || undefined,
         }));
     }
 
@@ -1317,6 +1427,7 @@ export class ProjectModel {
 
     async getWarehouseCredentialsForProject(
         projectUuid: string,
+        refreshToken?: string, // TODO make this a fucntion to get the refresh token for the user, and use it if bigquery
     ): Promise<CreateWarehouseCredentials> {
         const [row] = await this.database('warehouse_credentials')
             .innerJoin(
@@ -1471,6 +1582,29 @@ export class ProjectModel {
                           )
                           .returning('*')
                     : [];
+
+            const virtualViews = await trx(CachedExploreTableName)
+                .where('project_uuid', projectUuid)
+                .andWhereJsonPath(
+                    'explore',
+                    '$.type',
+                    '=',
+                    ExploreType.VIRTUAL,
+                );
+
+            if (virtualViews.length > 0) {
+                Logger.info(
+                    `Duplicating ${virtualViews.length} virtual views into ${previewProjectUuid}`,
+                );
+
+                await trx(CachedExploreTableName).insert(
+                    virtualViews.map((v) => ({
+                        ...v,
+                        project_uuid: previewProjectUuid,
+                        cached_explore_uuid: undefined,
+                    })),
+                );
+            }
 
             // .dP"Y8    db    Yb    dP 888888 8888b.      .dP"Y8  dP"Yb  88
             // `Ybo."   dPYb    Yb  dP  88__    8I  Yb     `Ybo." dP   Yb 88
@@ -2302,77 +2436,6 @@ export class ProjectModel {
                     [name],
                 ),
             });
-    }
-
-    private static isSemanticLayerConnectionValid(
-        semanticLayerConnection: SemanticLayerConnectionUpdate,
-    ): boolean {
-        const { type } = semanticLayerConnection;
-        switch (type) {
-            case SemanticLayerType.DBT:
-                return Boolean(
-                    semanticLayerConnection.domain &&
-                        semanticLayerConnection.environmentId &&
-                        semanticLayerConnection.token,
-                );
-            case SemanticLayerType.CUBE:
-                return Boolean(
-                    semanticLayerConnection.domain &&
-                        semanticLayerConnection.token,
-                );
-            default:
-                return assertUnreachable(
-                    type,
-                    `Unknown semantic layer connection type: ${type}`,
-                );
-        }
-    }
-
-    async updateSemanticLayerConnection(
-        projectUuid: string,
-        connectionUpdate: SemanticLayerConnectionUpdate,
-    ) {
-        const { semanticLayerConnection: currentSemanticLayerConnection } =
-            await this.getWithSensitiveFields(projectUuid);
-
-        // ? Merging so the partial update only overwrites the existing properties, even when the current connection is undefined since merge will take ALL properties
-        const shouldMerge =
-            !currentSemanticLayerConnection ||
-            connectionUpdate.type === currentSemanticLayerConnection.type;
-
-        const updatedSemanticLayerConnection = shouldMerge
-            ? merge(currentSemanticLayerConnection, connectionUpdate)
-            : connectionUpdate;
-
-        if (
-            !ProjectModel.isSemanticLayerConnectionValid(
-                updatedSemanticLayerConnection,
-            )
-        ) {
-            throw new ParameterError('Invalid semantic layer connection');
-        }
-
-        const [updatedProject] = await this.database(ProjectTableName)
-            .update({
-                semantic_layer_connection: this.encryptionUtil.encrypt(
-                    JSON.stringify(updatedSemanticLayerConnection),
-                ),
-            })
-            .where('project_uuid', projectUuid)
-            .returning('*');
-
-        return updatedProject;
-    }
-
-    async deleteSemanticLayerConnection(projectUuid: string) {
-        const [updatedProject] = await this.database(ProjectTableName)
-            .update({
-                semantic_layer_connection: null,
-            })
-            .where('project_uuid', projectUuid)
-            .returning('*');
-
-        return updatedProject;
     }
 
     async updateDefaultSchedulerTimezone(

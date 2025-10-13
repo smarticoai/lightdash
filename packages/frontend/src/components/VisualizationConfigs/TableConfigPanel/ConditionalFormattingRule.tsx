@@ -7,8 +7,7 @@ import {
     isConditionalFormattingWithValues,
     isNumericItem,
     isStringDimension,
-    type ConditionalFormattingWithConditionalOperator,
-    type ConditionalOperator,
+    type ConditionalFormattingWithFilterOperator,
     type FilterableItem,
 } from '@lightdash/common';
 import {
@@ -25,7 +24,7 @@ import {
 } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
 import { IconChevronDown, IconChevronUp, IconTrash } from '@tabler/icons-react';
-import { differenceBy } from 'lodash';
+import differenceBy from 'lodash/differenceBy';
 import { useCallback, useMemo, useState, type FC } from 'react';
 import { useParams } from 'react-router';
 import FieldSelect from '../../common/FieldSelect';
@@ -40,14 +39,12 @@ import MantineIcon from '../../common/MantineIcon';
 interface ConditionalFormattingRuleProps {
     isDefaultOpen?: boolean;
     ruleIndex: number;
-    rule: ConditionalFormattingWithConditionalOperator;
+    rule: ConditionalFormattingWithFilterOperator;
     field: FilterableItem | undefined;
     fields: FilterableItem[];
     hasRemove?: boolean;
-    onChangeRule: (
-        newRule: ConditionalFormattingWithConditionalOperator,
-    ) => void;
-    onChangeRuleOperator: (newOperator: ConditionalOperator) => void;
+    onChangeRule: (newRule: ConditionalFormattingWithFilterOperator) => void;
+    onChangeRuleOperator: (newOperator: FilterOperator) => void;
     onChangeRuleComparisonType: (
         comparisonType: ConditionalFormattingComparisonType,
     ) => void;
@@ -185,7 +182,7 @@ const ConditionalFormattingRule: FC<ConditionalFormattingRuleProps> = ({
     );
 
     const handleChangeRule = useCallback(
-        (newRule: ConditionalFormattingWithConditionalOperator) => {
+        (newRule: ConditionalFormattingWithFilterOperator) => {
             if (isConditionalFormattingWithValues(newRule)) {
                 onChangeRule({
                     ...newRule,
@@ -311,9 +308,7 @@ const ConditionalFormattingRule: FC<ConditionalFormattingRuleProps> = ({
                             data={filterOperatorOptions}
                             onChange={(value) => {
                                 if (!value) return;
-                                onChangeRuleOperator(
-                                    value as ConditionalOperator,
-                                );
+                                onChangeRuleOperator(value as FilterOperator);
                             }}
                             placeholder="Condition"
                             disabled={!field || !filterType}

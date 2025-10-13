@@ -15,11 +15,13 @@ import {
     type DashboardFilters,
     type ItemsMap,
     type MetricQuery,
+    type ParametersValuesMap,
+    type PivotConfig,
     type PivotData,
     type TableChart,
 } from '@lightdash/common';
 import { createWorkerFactory, useWorker } from '@shopify/react-web-worker';
-import { uniq } from 'lodash';
+import uniq from 'lodash/uniq';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import useEmbed from '../../ee/providers/Embed/useEmbed';
 import { useCalculateSubtotals } from '../useCalculateSubtotals';
@@ -28,7 +30,7 @@ import { type InfiniteQueryResults } from '../useQueryResults';
 import getDataAndColumns from './getDataAndColumns';
 
 const createWorker = createWorkerFactory(
-    () => import('@lightdash/common/src/pivotTable/pivotQueryResults'),
+    () => import('@lightdash/common/src/pivot/pivotQueryResults'),
 );
 
 const useTableConfig = (
@@ -46,6 +48,7 @@ const useTableConfig = (
     savedChartUuid?: string,
     dashboardFilters?: DashboardFilters,
     invalidateCache?: boolean,
+    parameters?: ParametersValuesMap,
 ) => {
     const { embedToken } = useEmbed();
 
@@ -211,6 +214,7 @@ const useTableConfig = (
                   showColumnCalculation:
                       tableChartConfig?.showColumnCalculation,
                   embedToken,
+                  parameters,
               }
             : {
                   metricQuery: resultsData?.metricQuery,
@@ -221,16 +225,31 @@ const useTableConfig = (
                       tableChartConfig?.showColumnCalculation,
                   // embed token is not necessary here because embeds don't use metricQuery for table calculations
                   embedToken: undefined,
+                  parameters,
               },
     );
 
-    const { data: groupedSubtotals } = useCalculateSubtotals({
-        metricQuery: resultsData?.metricQuery,
-        explore: resultsData?.metricQuery?.exploreName,
-        showSubtotals,
-        columnOrder,
-        pivotDimensions,
-    });
+    const { data: groupedSubtotals } = useCalculateSubtotals(
+        embedToken && savedChartUuid
+            ? {
+                  savedChartUuid,
+                  dashboardFilters,
+                  invalidateCache,
+                  showSubtotals,
+                  columnOrder,
+                  pivotDimensions,
+                  embedToken,
+              }
+            : {
+                  metricQuery: resultsData?.metricQuery,
+                  explore: resultsData?.metricQuery?.exploreName,
+                  showSubtotals,
+                  columnOrder,
+                  pivotDimensions,
+                  embedToken: undefined,
+                  parameters,
+              },
+    );
 
     const columns = useMemo(() => {
         if (!selectedItemIds || !itemsMap) {
@@ -302,11 +321,11 @@ const useTableConfig = (
             return;
         }
 
-        setPivotTableData({
+        setPivotTableData((prevState) => ({
+            ...prevState,
             loading: true,
-            data: undefined,
             error: undefined,
-        });
+        }));
 
         const hiddenMetricFieldIds = selectedItemIds?.filter((fieldId) => {
             const field = getField(fieldId);
@@ -319,39 +338,67 @@ const useTableConfig = (
             );
         });
 
-        worker
-            .pivotQueryResults({
-                pivotConfig: {
-                    pivotDimensions,
-                    metricsAsRows,
-                    columnOrder,
-                    hiddenMetricFieldIds,
-                    columnTotals: tableChartConfig?.showColumnCalculation,
-                    rowTotals: tableChartConfig?.showRowCalculation,
-                },
-                metricQuery: resultsData.metricQuery,
-                rows: resultsData.rows,
-                groupedSubtotals,
-                options: {
-                    maxColumns: pivotTableMaxColumnLimit,
-                },
-                getField,
-                getFieldLabel,
-            })
-            .then((data) => {
-                setPivotTableData({
-                    loading: false,
-                    data: data,
-                    error: undefined,
+        const pivotConfig: PivotConfig = {
+            pivotDimensions,
+            metricsAsRows,
+            columnOrder,
+            hiddenMetricFieldIds,
+            columnTotals: tableChartConfig?.showColumnCalculation,
+            rowTotals: tableChartConfig?.showRowCalculation,
+        };
+
+        if (resultsData.pivotDetails) {
+            worker
+                .convertSqlPivotedRowsToPivotData({
+                    rows: resultsData.rows,
+                    pivotDetails: resultsData.pivotDetails,
+                    pivotConfig,
+                    getField,
+                    getFieldLabel,
+                    groupedSubtotals,
+                })
+                .then((data) => {
+                    setPivotTableData({
+                        loading: false,
+                        data: data,
+                        error: undefined,
+                    });
+                })
+                .catch((e) => {
+                    setPivotTableData({
+                        loading: false,
+                        data: undefined,
+                        error: e.message,
+                    });
                 });
-            })
-            .catch((e) => {
-                setPivotTableData({
-                    loading: false,
-                    data: undefined,
-                    error: e.message,
+        } else {
+            worker
+                .pivotQueryResults({
+                    pivotConfig,
+                    metricQuery: resultsData.metricQuery,
+                    rows: resultsData.rows,
+                    groupedSubtotals,
+                    options: {
+                        maxColumns: pivotTableMaxColumnLimit,
+                    },
+                    getField,
+                    getFieldLabel,
+                })
+                .then((data) => {
+                    setPivotTableData({
+                        loading: false,
+                        data: data,
+                        error: undefined,
+                    });
+                })
+                .catch((e) => {
+                    setPivotTableData({
+                        loading: false,
+                        data: undefined,
+                        error: e.message,
+                    });
                 });
-            });
+        }
     }, [
         resultsData,
         pivotDimensions,

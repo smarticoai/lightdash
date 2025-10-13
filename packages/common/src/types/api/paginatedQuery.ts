@@ -1,17 +1,16 @@
-import {
-    type GroupByColumn,
-    type PivotIndexColum,
-    type SortBy,
-    type ValuesColumn,
-} from '../..';
+import { type ParametersValuesMap, type PivotConfiguration } from '../..';
+
 import type { QueryExecutionContext } from '../analytics';
+import type { DownloadFileType } from '../downloadFile';
 import type { DashboardFilters, Filters } from '../filter';
 import type { MetricQueryRequest, SortField } from '../metricQuery';
+import type { PivotConfig } from '../pivot';
 import type { DateGranularity } from '../timeFrames';
 
-type CommonPaginatedQueryRequestParams = {
+type CommonExecuteQueryRequestParams = {
     context?: QueryExecutionContext;
     invalidateCache?: boolean;
+    parameters?: ParametersValuesMap;
 };
 
 export type DateZoom = {
@@ -20,53 +19,57 @@ export type DateZoom = {
 };
 
 export type ExecuteAsyncMetricQueryRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         query: Omit<MetricQueryRequest, 'csvLimit'>;
         dateZoom?: DateZoom;
+        pivotConfiguration?: PivotConfiguration;
     };
 
 export type ExecuteAsyncSavedChartRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         chartUuid: string;
         versionUuid?: string;
+        limit?: number | null | undefined;
+        pivotResults?: boolean;
     };
 
 export type ExecuteAsyncDashboardChartRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         chartUuid: string;
         dashboardUuid: string;
         dashboardFilters: DashboardFilters;
         dashboardSorts: SortField[];
         dateZoom?: DateZoom;
+        limit?: number | null | undefined;
+        pivotResults?: boolean;
     };
 
 export type ExecuteAsyncSqlQueryRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         sql: string;
-        pivotConfiguration?: {
-            indexColumn: PivotIndexColum;
-            valuesColumns: ValuesColumn[];
-            groupByColumns: GroupByColumn[] | undefined;
-            sortBy: SortBy | undefined;
-        };
+        limit?: number;
+        pivotConfiguration?: PivotConfiguration;
     };
 
 export type ExecuteAsyncUnderlyingDataRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         underlyingDataSourceQueryUuid: string;
         underlyingDataItemId?: string;
         filters: Filters;
         dateZoom?: DateZoom;
+        limit?: number;
     };
 
 export type ExecuteAsyncSqlChartByUuidRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         savedSqlUuid: string;
+        limit?: number;
     };
 
 export type ExecuteAsyncSqlChartBySlugRequestParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         slug: string;
+        limit?: number;
     };
 
 export type ExecuteAsyncSqlChartRequestParams =
@@ -79,10 +82,12 @@ export const isExecuteAsyncSqlChartByUuidParams = (
     'savedSqlUuid' in params;
 
 type ExecuteAsyncDashboardSqlChartCommonParams =
-    CommonPaginatedQueryRequestParams & {
+    CommonExecuteQueryRequestParams & {
         dashboardUuid: string;
+        tileUuid: string;
         dashboardFilters: DashboardFilters;
         dashboardSorts: SortField[];
+        limit?: number;
     };
 
 export type ExecuteAsyncDashboardSqlChartByUuidRequestParams =
@@ -103,6 +108,18 @@ export const isExecuteAsyncDashboardSqlChartByUuidParams = (
     params: ExecuteAsyncDashboardSqlChartRequestParams,
 ): params is ExecuteAsyncDashboardSqlChartByUuidRequestParams =>
     'savedSqlUuid' in params;
+
+export type DownloadAsyncQueryResultsRequestParams = {
+    queryUuid: string;
+    type?: DownloadFileType;
+    onlyRaw?: boolean;
+    showTableNames?: boolean;
+    customLabels?: Record<string, string>;
+    columnOrder?: string[];
+    hiddenFields?: string[];
+    pivotConfig?: PivotConfig;
+    attachmentDownloadName?: string;
+};
 
 export type ExecuteAsyncQueryRequestParams =
     | ExecuteAsyncMetricQueryRequestParams

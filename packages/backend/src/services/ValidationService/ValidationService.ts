@@ -15,7 +15,10 @@ import {
     getFilterRules,
     getItemId,
     InlineErrorType,
+    isDashboardFieldTarget,
     isExploreError,
+    isSqlTableCalculation,
+    isTemplateTableCalculation,
     isValidationTargetValid,
     OrganizationMemberRole,
     RequestMethod,
@@ -99,10 +102,23 @@ export class ValidationService extends BaseService {
         >((acc, tc) => {
             const regex = /\$\{([^}]+)\}/g;
 
-            const fieldsInSql = tc.sql.match(regex);
-            if (fieldsInSql != null) {
-                return [...acc, ...fieldsInSql.map(parseTableField)];
+            if (isSqlTableCalculation(tc)) {
+                const fieldsInSql = tc.sql.match(regex);
+                if (fieldsInSql != null) {
+                    return [...acc, ...fieldsInSql.map(parseTableField)];
+                }
             }
+
+            if (isTemplateTableCalculation(tc)) {
+                const fieldsInTemplate = [
+                    tc.template.fieldId,
+                    ...('orderBy' in tc.template
+                        ? tc.template.orderBy.map((o) => o.fieldId)
+                        : []),
+                ];
+                return [...acc, ...fieldsInTemplate];
+            }
+
             return acc;
         }, []);
         return tableCalculationFieldsInSql;
@@ -479,6 +495,13 @@ export class ValidationService extends BaseService {
                         CreateDashboardValidation[]
                     >((acc, filter) => {
                         try {
+                            if (
+                                isDashboardFieldTarget(filter.target) &&
+                                filter.target.isSqlColumn
+                            ) {
+                                // Skip SQL column targets
+                                return acc;
+                            }
                             return containsFieldId({
                                 acc,
                                 fieldIds: existingFieldIds,
@@ -510,7 +533,11 @@ export class ValidationService extends BaseService {
                         CreateDashboardValidation[]
                     >(
                         (acc, tileTarget) => {
-                            if (tileTarget) {
+                            if (
+                                tileTarget &&
+                                isDashboardFieldTarget(tileTarget) &&
+                                !tileTarget.isSqlColumn // Skip SQL column targets
+                            ) {
                                 return containsFieldId({
                                     acc,
                                     fieldIds: existingFieldIds,
@@ -561,6 +588,7 @@ export class ValidationService extends BaseService {
         projectUuid: string,
         compiledExplores?: (Explore | ExploreError)[],
         validationTargets?: Set<ValidationTarget>,
+        onlyValidateExploresInArgs?: boolean,
     ): Promise<CreateValidation[]> {
         const hasValidationTargets =
             validationTargets && validationTargets.size > 0;
@@ -589,14 +617,26 @@ export class ValidationService extends BaseService {
             }`,
         );
 
-        const explores =
-            compiledExplores !== undefined
-                ? compiledExplores
-                : Object.values(
-                      await this.projectModel.findExploresFromCache(
-                          projectUuid,
-                      ),
-                  );
+        let explores: (Explore | ExploreError)[];
+        if (compiledExplores !== undefined) {
+            // For CLI validation, when compiled Explores are provided, merge them with virtual views from cache
+            const virtualViews =
+                await this.projectModel.findVirtualViewsFromCache(projectUuid);
+
+            explores = compiledExplores.concat(Object.values(virtualViews));
+            this.logger.debug(
+                `Merged ${compiledExplores.length} compiled explores with ${
+                    Object.values(virtualViews).length
+                } virtual views for validation`,
+            );
+        } else {
+            explores = Object.values(
+                await this.projectModel.findExploresFromCache(
+                    projectUuid,
+                    'name',
+                ),
+            );
+        }
 
         const exploreFields =
             explores?.reduce<
@@ -655,7 +695,7 @@ export class ValidationService extends BaseService {
                 ? await this.validateCharts(
                       projectUuid,
                       exploreFields,
-                      compiledExplores,
+                      onlyValidateExploresInArgs ? compiledExplores : undefined,
                   )
                 : [];
 
@@ -678,6 +718,7 @@ export class ValidationService extends BaseService {
         context?: RequestMethod,
         explores?: (Explore | ExploreError)[],
         validationTargets?: ValidationTarget[],
+        onlyValidateExploresInArgs?: boolean,
     ): Promise<string> {
         const { organizationUuid } = await this.projectModel.getSummary(
             projectUuid,
@@ -704,6 +745,7 @@ export class ValidationService extends BaseService {
             organizationUuid,
             explores,
             validationTargets,
+            onlyValidateExploresInArgs,
         });
         return jobId;
     }

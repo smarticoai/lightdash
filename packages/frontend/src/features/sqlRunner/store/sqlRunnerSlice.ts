@@ -2,6 +2,8 @@ import {
     ChartKind,
     WarehouseTypes,
     type ApiErrorDetail,
+    type ParameterValue,
+    type ParametersValuesMap,
     type RawResultRow,
     type SqlChart,
     type VizColumn,
@@ -9,7 +11,7 @@ import {
     type VizTableColumnsConfig,
     type VizTableConfig,
 } from '@lightdash/common';
-import type { PayloadAction } from '@reduxjs/toolkit';
+import type { PayloadAction, SerializedError } from '@reduxjs/toolkit';
 import { createSlice } from '@reduxjs/toolkit';
 import { createSelector } from 'reselect';
 import { format, type FormatOptionsWithLanguage } from 'sql-formatter';
@@ -28,7 +30,7 @@ export enum SidebarTabs {
     VISUALIZATION = 'visualization',
 }
 
-const getLanguage = (
+export const getLanguage = (
     warehouseConnectionType?: WarehouseTypes,
 ): FormatOptionsWithLanguage['language'] => {
     switch (warehouseConnectionType) {
@@ -84,13 +86,14 @@ export interface SqlRunnerState {
     activeTable: string | undefined;
     activeSchema: string | undefined;
     savedSqlChart: SqlChart | undefined;
+    queryUuid: string | undefined;
     fileUrl: string | undefined;
     name: string;
     description: string;
     sql: string;
     successfulSqlQueries: WithHistory<string | undefined>;
     hasUnrunChanges: boolean;
-    limit: number;
+    limit: number | undefined;
     activeSidebarTab: SidebarTabs;
     activeEditorTab: EditorTabs;
     selectedChartType: ChartKind | undefined;
@@ -127,8 +130,9 @@ export interface SqlRunnerState {
     fetchResultsOnLoad: boolean;
     mode: 'default' | 'virtualView';
     queryIsLoading: boolean;
-    queryError: ApiErrorDetail | undefined;
+    queryError: ApiErrorDetail | SerializedError | Error | undefined;
     editorHighlightError: MonacoHighlightChar | undefined;
+    parameterValues: ParametersValuesMap;
 }
 
 export const initialState: SqlRunnerState = {
@@ -137,13 +141,14 @@ export const initialState: SqlRunnerState = {
     activeTable: undefined,
     activeSchema: undefined,
     savedSqlChart: undefined,
+    queryUuid: undefined,
     fileUrl: undefined,
     name: '',
     description: '',
     sql: '',
     successfulSqlQueries: withHistory(undefined),
     hasUnrunChanges: false,
-    limit: 500,
+    limit: undefined,
     activeSidebarTab: SidebarTabs.TABLES,
     activeEditorTab: EditorTabs.SQL,
     selectedChartType: ChartKind.VERTICAL_BAR,
@@ -181,6 +186,7 @@ export const initialState: SqlRunnerState = {
     queryIsLoading: false,
     queryError: undefined,
     editorHighlightError: undefined,
+    parameterValues: {},
 };
 
 const sqlHistoryReducer = createHistoryReducer<string | undefined>({
@@ -194,6 +200,7 @@ export const sqlRunnerSlice = createSlice({
         selectFetchResultsOnLoad: (state) => state.fetchResultsOnLoad,
         selectProjectUuid: (state) => state.projectUuid,
         selectSql: (state) => state.sql,
+        selectQueryUuid: (state) => state.queryUuid,
         selectActiveChartType: (state) => state.selectedChartType,
         selectActiveEditorTab: (state) => state.activeEditorTab,
         selectLimit: (state) => state.limit,
@@ -201,6 +208,7 @@ export const sqlRunnerSlice = createSlice({
         selectSavedSqlChart: (state) => state.savedSqlChart,
         selectColumns: (state) => state.sqlColumns,
         selectRows: (state) => state.sqlRows,
+        selectParameterValues: (state) => state.parameterValues,
         selectSqlQueryResults: (state) => {
             if (state.sqlColumns === undefined || state.sqlRows === undefined) {
                 return undefined;
@@ -219,6 +227,28 @@ export const sqlRunnerSlice = createSlice({
         },
         setProjectUuid: (state, action: PayloadAction<string>) => {
             state.projectUuid = action.payload;
+        },
+        updateParameterValue: (
+            state,
+            action: PayloadAction<{
+                key: string;
+                value: ParameterValue | null;
+            }>,
+        ) => {
+            const { key, value } = action.payload;
+            if (value) {
+                state.parameterValues = {
+                    ...state.parameterValues,
+                    [key]: value,
+                };
+            } else {
+                const newValues = { ...state.parameterValues };
+                delete newValues[key];
+                state.parameterValues = newValues;
+            }
+        },
+        clearParameterValues: (state) => {
+            state.parameterValues = {};
         },
         setFetchResultsOnLoad: (
             state,
@@ -343,6 +373,7 @@ export const sqlRunnerSlice = createSlice({
                 state.queryIsLoading = false;
                 state.sqlColumns = action.payload.columns;
                 state.sqlRows = action.payload.results;
+                state.queryUuid = action.payload.queryUuid;
                 state.fileUrl = action.payload.fileUrl;
                 state.editorHighlightError = undefined;
 
@@ -400,7 +431,10 @@ export const sqlRunnerSlice = createSlice({
             })
             .addCase(runSqlQuery.rejected, (state, action) => {
                 state.queryIsLoading = false;
-                state.queryError = action.payload ?? undefined;
+                state.queryError =
+                    action.payload ??
+                    action.error ??
+                    new Error('Unexpected query error');
 
                 state.editorHighlightError = action.payload?.data
                     ? {
@@ -430,11 +464,14 @@ export const {
     setMode,
     setEditorHighlightError,
     setState,
+    updateParameterValue,
+    clearParameterValues,
 } = sqlRunnerSlice.actions;
 
 export const {
     selectFetchResultsOnLoad,
     selectSql,
+    selectQueryUuid,
     selectProjectUuid,
     selectActiveChartType,
     selectLimit,
@@ -442,6 +479,7 @@ export const {
     selectActiveEditorTab,
     selectSavedSqlChart,
     selectSqlQueryResults,
+    selectParameterValues,
 } = sqlRunnerSlice.selectors;
 
 export const selectSqlRunnerResultsRunner = createSelector(
@@ -452,8 +490,9 @@ export const selectSqlRunnerResultsRunner = createSelector(
         selectLimit,
         selectSql,
         (_state, sortBy?: VizSortBy[]) => sortBy,
+        selectParameterValues,
     ],
-    (columns, rows, projectUuid, limit, sql, sortBy) => {
+    (columns, rows, projectUuid, limit, sql, sortBy, parameterValues) => {
         return new SqlRunnerResultsRunnerFrontend({
             columns: columns || [],
             rows: rows || [],
@@ -461,6 +500,7 @@ export const selectSqlRunnerResultsRunner = createSelector(
             limit,
             sql,
             sortBy,
+            parameters: parameterValues,
         });
     },
 );

@@ -4,12 +4,14 @@ import {
     CartesianChartConfig,
     ChartType,
     ConditionalFormattingConfigWithSingleColor,
-    ConditionalOperator,
     CustomVisConfig,
     DashboardDAO,
     DashboardFilterRule,
     FilterGroup,
+    FilterOperator,
     isFilterRuleDefinedForFieldId,
+    isSqlTableCalculation,
+    isTemplateTableCalculation,
     MetricFilterRule,
     MetricType,
     removeFieldFromFilterGroup,
@@ -17,6 +19,8 @@ import {
     SavedChartDAO,
     SchedulerAndTargets,
     SchedulerFormat,
+    TableCalculationTemplate,
+    TableCalculationTemplateType,
     TableChartConfig,
     ThresholdOperator,
 } from '@lightdash/common';
@@ -34,7 +38,10 @@ import {
 } from './rename';
 import {
     chartMocked,
+    chartWithCustomMetric,
+    chartWithCustomMetricWithSimilarName,
     expectedRenamedChartMocked,
+    expectedRenamedChartWithCustomMetric,
     fieldRename,
     tableRename,
 } from './rename.mock';
@@ -49,7 +56,7 @@ describe('removeFieldFromFilterGroup', () => {
                 target: {
                     fieldId: fieldToBeRemoved,
                 },
-                operator: ConditionalOperator.EQUALS,
+                operator: FilterOperator.EQUALS,
                 values: ['metric_value_1'],
             },
             {
@@ -60,7 +67,7 @@ describe('removeFieldFromFilterGroup', () => {
                         target: {
                             fieldId: fieldToBeRemoved,
                         },
-                        operator: ConditionalOperator.EQUALS,
+                        operator: FilterOperator.EQUALS,
                         values: ['metric_value_2'],
                     },
                 ],
@@ -82,7 +89,7 @@ describe('removeFieldFromFilterGroup', () => {
             target: {
                 fieldId: 'metric_field_id_3',
             },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: ['metric_value_3'],
         };
         const filterGroupWithRemainingMetrics = cloneDeep(filterGroup);
@@ -119,7 +126,7 @@ describe('isFilterRuleDefinedForFieldId', () => {
                 target: {
                     fieldId: fieldToBeFound1,
                 },
-                operator: ConditionalOperator.EQUALS,
+                operator: FilterOperator.EQUALS,
                 values: ['metric_value_1'],
             },
             {
@@ -127,7 +134,7 @@ describe('isFilterRuleDefinedForFieldId', () => {
                 target: {
                     fieldId: `${fieldToBeFound3}_to_be_found`,
                 },
-                operator: ConditionalOperator.EQUALS,
+                operator: FilterOperator.EQUALS,
                 values: ['metric_value_3'],
             },
             {
@@ -138,7 +145,7 @@ describe('isFilterRuleDefinedForFieldId', () => {
                         target: {
                             fieldId: fieldToBeFound2,
                         },
-                        operator: ConditionalOperator.EQUALS,
+                        operator: FilterOperator.EQUALS,
                         values: ['metric_value_2'],
                     },
                 ],
@@ -362,7 +369,7 @@ describe('renameMetricQuery', () => {
                             target: {
                                 fieldId: 'payment_id',
                             },
-                            operator: ConditionalOperator.EQUALS,
+                            operator: FilterOperator.EQUALS,
                             values: ['123'],
                         },
                     ],
@@ -412,7 +419,11 @@ describe('renameMetricQuery', () => {
         expect(
             (result.filters?.dimensions as AnyType).and[0].target?.fieldId,
         ).toBe('invoice_id');
-        expect(result.tableCalculations[0].sql).toBe('${invoice.amount} * 2');
+        expect(
+            isSqlTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].sql
+                : undefined,
+        ).toBe('${invoice.amount} * 2');
         expect(result.additionalMetrics?.[0].table).toBe('invoice');
         expect(result.additionalMetrics?.[0].sql).toBe('${TABLE}.status'); // Same
         expect(
@@ -436,7 +447,7 @@ describe('renameMetricQuery', () => {
                             target: {
                                 fieldId: 'payment_amount',
                             },
-                            operator: ConditionalOperator.EQUALS,
+                            operator: FilterOperator.EQUALS,
                             values: ['123'],
                         },
                     ],
@@ -495,12 +506,171 @@ describe('renameMetricQuery', () => {
         expect(
             (result.filters?.dimensions as AnyType).and[0].target?.fieldId,
         ).toBe('payment_cost');
-        expect(result.tableCalculations[0].sql).toBe('${payment.cost} * 2');
+        expect(
+            isSqlTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].sql
+                : undefined,
+        ).toBe('${payment.cost} * 2');
         expect(result.additionalMetrics?.[0].sql).toBe('${TABLE}.cost');
         expect(
             result.additionalMetrics?.[0].filters?.[0].target?.fieldRef,
         ).toBe('payment.cost');
         expect(result.sorts[0].fieldId).toBe('payment_cost');
+    });
+
+    test('should rename table calculation templates with sql', () => {
+        const metricQuery = {
+            exploreName: 'payment',
+            dimensions: ['payment_id'],
+            metrics: ['payment_amount'],
+            filters: {},
+            tableCalculations: [
+                {
+                    name: 'calc_with_sql',
+                    sql: '${payment.amount} * 2',
+                    displayName: 'Calculation with SQL',
+                },
+            ],
+            sorts: [],
+            limit: 100,
+        };
+
+        const result = renameMetricQuery(metricQuery, tableRename);
+
+        expect(
+            isSqlTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].sql
+                : undefined,
+        ).toBe('${invoice.amount} * 2');
+    });
+
+    test('should rename table calculation templates with template fieldId', () => {
+        const metricQuery = {
+            exploreName: 'payment',
+            dimensions: ['payment_id'],
+            metrics: ['payment_amount'],
+            filters: {},
+            tableCalculations: [
+                {
+                    name: 'percent_change_calc',
+                    sql: '', // Make sql present but empty since it's required by type
+                    displayName: 'Percent Change',
+                    template: {
+                        type: TableCalculationTemplateType.PERCENT_CHANGE_FROM_PREVIOUS,
+                        fieldId: 'payment_amount',
+                        orderBy: [
+                            { fieldId: 'payment_date', order: 'asc' },
+                            { fieldId: 'payment_id', order: 'desc' },
+                        ],
+                    } satisfies TableCalculationTemplate,
+                },
+            ],
+            sorts: [],
+            limit: 100,
+        };
+
+        const result = renameMetricQuery(metricQuery, tableRename);
+
+        expect(
+            isTemplateTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].template
+                : undefined,
+        ).toEqual({
+            type: TableCalculationTemplateType.PERCENT_CHANGE_FROM_PREVIOUS,
+            fieldId: 'invoice_amount',
+            orderBy: [
+                { fieldId: 'invoice_date', order: 'asc' },
+                { fieldId: 'invoice_id', order: 'desc' },
+            ],
+        });
+    });
+
+    test('should rename table calculation templates with field rename', () => {
+        const metricQuery = {
+            exploreName: 'payment',
+            dimensions: ['payment_id'],
+            metrics: ['payment_amount'],
+            filters: {},
+            tableCalculations: [
+                {
+                    name: 'running_total_calc',
+                    sql: '', // Make sql present but empty since it's required by type
+                    displayName: 'Running Total',
+                    template: {
+                        type: TableCalculationTemplateType.PERCENT_CHANGE_FROM_PREVIOUS,
+                        fieldId: 'payment_amount',
+                        orderBy: [
+                            {
+                                fieldId: 'payment_amount',
+                                order: 'asc',
+                            },
+                        ],
+                    } satisfies TableCalculationTemplate,
+                },
+            ],
+            sorts: [],
+            limit: 100,
+        };
+
+        const fr = createRenameFactory({
+            from: 'payment_amount',
+            to: 'payment_cost',
+            fromReference: 'payment.amount',
+            toReference: 'payment.cost',
+            isPrefix: false,
+            fromFieldName: 'amount',
+            toFieldName: 'cost',
+        });
+
+        const result = renameMetricQuery(metricQuery, fr);
+
+        expect(
+            isTemplateTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].template
+                : undefined,
+        ).toEqual({
+            type: TableCalculationTemplateType.PERCENT_CHANGE_FROM_PREVIOUS,
+            fieldId: 'payment_cost',
+            orderBy: [{ fieldId: 'payment_cost', order: 'asc' as const }],
+        });
+    });
+
+    test('should handle table calculation with both sql and template', () => {
+        const metricQuery = {
+            exploreName: 'payment',
+            dimensions: ['payment_id'],
+            metrics: ['payment_amount'],
+            filters: {},
+            tableCalculations: [
+                {
+                    name: 'mixed_calc',
+                    sql: '${payment.amount} * 2',
+                    displayName: 'Mixed Calculation',
+                    template: {
+                        type: TableCalculationTemplateType.RANK_IN_COLUMN,
+                        fieldId: 'payment_amount',
+                    } satisfies TableCalculationTemplate,
+                },
+            ],
+            sorts: [],
+            limit: 100,
+        };
+
+        const result = renameMetricQuery(metricQuery, tableRename);
+
+        expect(
+            isSqlTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].sql
+                : undefined,
+        ).toBe('${invoice.amount} * 2');
+        expect(
+            isTemplateTableCalculation(result.tableCalculations[0])
+                ? result.tableCalculations[0].template
+                : undefined,
+        ).toEqual({
+            type: TableCalculationTemplateType.RANK_IN_COLUMN,
+            fieldId: 'invoice_amount',
+        });
     });
 });
 
@@ -641,7 +811,7 @@ describe('renameChartConfigType', () => {
                         rules: [
                             {
                                 id: 'rule_id',
-                                operator: ConditionalOperator.GREATER_THAN,
+                                operator: FilterOperator.GREATER_THAN,
                                 values: [100],
                             },
                         ],
@@ -703,6 +873,147 @@ describe('renameSavedChart', () => {
         expect(hasChanges).toBe(true);
         expect(updatedChart).toEqual(expectedRenamedChartMocked); // toEqual doesn't check extra `undefined` fields
     });
+    test('should rename mocked saved chart field with custom metric', () => {
+        const { updatedChart, hasChanges } = renameSavedChart({
+            type: RenameType.FIELD,
+            chart: chartWithCustomMetric,
+            nameChanges: {
+                from: 'customers_Customer_ID',
+                to: 'customers_customer_id',
+                fromReference: 'customers.Customer_ID',
+                toReference: 'customers.customer_id',
+                fromFieldName: 'Customer_ID',
+                toFieldName: 'customer_id',
+            },
+            validate: false,
+        });
+
+        expect(hasChanges).toBe(true);
+        expect(updatedChart).toEqual(expectedRenamedChartWithCustomMetric);
+    });
+    test('should not update chart with custom metric with similar name', () => {
+        const { updatedChart, hasChanges } = renameSavedChart({
+            type: RenameType.FIELD,
+            chart: chartWithCustomMetricWithSimilarName,
+            nameChanges: {
+                from: 'customers_Customer_ID',
+                to: 'customers_customer_id',
+                fromReference: 'customers.Customer_ID',
+                toReference: 'customers.customer_id',
+                fromFieldName: 'Customer_ID',
+                toFieldName: 'customer_id',
+            },
+            validate: false,
+        });
+
+        expect(hasChanges).toBe(false);
+        expect(updatedChart).toEqual(chartWithCustomMetricWithSimilarName);
+    });
+
+    test('should rename subscriptions saved chart model', () => {
+        const { updatedChart, hasChanges } = renameSavedChart({
+            type: RenameType.MODEL,
+            chart: {
+                ...chartMocked,
+
+                uuid: '8ecff9f3-e197-46f9-86f0-c61aa4328685',
+                projectUuid: 'a5d16d37-1360-45b5-b3f5-681fc814bc04',
+                name: 'Cloud subscription status',
+                description: 'Shows cloud subscriptions for each organization',
+                tableName: 'stripe_subscriptions',
+
+                metricQuery: {
+                    exploreName: 'stripe_subscriptions',
+                    dimensions: [
+                        'stripe_subscriptions_lightdash_organization_id',
+                        'organizations_organization_name',
+                        'stripe_subscriptions_monthly_plan_unit_amount',
+                        'stripe_subscriptions_lightdash_product_name',
+                    ],
+                    metrics: [],
+                    filters: {},
+                    sorts: [
+                        {
+                            fieldId:
+                                'stripe_subscriptions_lightdash_organization_id',
+                            descending: false,
+                        },
+                    ],
+                    limit: 500,
+                    tableCalculations: [],
+                    additionalMetrics: [],
+                    customDimensions: [],
+                },
+                chartConfig: {
+                    type: ChartType.TABLE,
+                    config: {
+                        columns: {
+                            stripe_subscriptions_lightdash_organization_id: {
+                                visible: false,
+                            },
+                        },
+                        metricsAsRows: false,
+                        hideRowNumbers: false,
+                        showTableNames: true,
+                        showResultsTotal: false,
+                        showRowCalculation: false,
+                        showColumnCalculation: false,
+                        conditionalFormattings: [],
+                    },
+                },
+                tableConfig: {
+                    columnOrder: [
+                        'stripe_subscriptions_lightdash_organization_id',
+                        'organizations_organization_name',
+                        'stripe_subscriptions_monthly_plan_unit_amount',
+                        'stripe_subscriptions_lightdash_product_name',
+                    ],
+                },
+                organizationUuid: 'd413dcea-4c8f-46b6-baa5-23885490e08b',
+                spaceUuid: '1ac19157-777b-41b1-8c75-f070c7cfc8e8',
+                spaceName: 'Shared',
+                pinnedListUuid: null,
+                pinnedListOrder: null,
+                dashboardUuid: null,
+                dashboardName: null,
+                colorPalette: ['#FF6464'],
+                slug: 'cloud-subscription-status',
+            },
+            nameChanges: {
+                from: 'stripe_subscriptions',
+                to: 'subscriptions',
+                fromReference: 'stripe_subscriptions',
+                toReference: 'subscriptions',
+                fromFieldName: undefined,
+                toFieldName: undefined,
+            },
+            validate: false,
+        });
+
+        expect(hasChanges).toBe(true);
+        expect(updatedChart.tableName).toBe('subscriptions');
+        expect(updatedChart.metricQuery).toEqual({
+            exploreName: 'subscriptions',
+            dimensions: [
+                'subscriptions_lightdash_organization_id',
+                'organizations_organization_name',
+                'subscriptions_monthly_plan_unit_amount',
+                'subscriptions_lightdash_product_name',
+            ],
+            metrics: [],
+            filters: {},
+            sorts: [
+                {
+                    fieldId: 'subscriptions_lightdash_organization_id',
+                    descending: false,
+                },
+            ],
+            limit: 500,
+            tableCalculations: [],
+            additionalMetrics: [],
+            customDimensions: [],
+        }); // toEqual doesn't check extra `undefined` fields
+    });
 
     test('should rename mocked saved chart model', () => {
         const { updatedChart, hasChanges } = renameSavedChart({
@@ -714,7 +1025,12 @@ describe('renameSavedChart', () => {
                     dimensions: ['purchases_type'],
                     metrics: [],
                     filters: {},
-                    sorts: [{ fieldId: 'purchases_type', descending: false }],
+                    sorts: [
+                        {
+                            fieldId: 'purchases_type',
+                            descending: false,
+                        },
+                    ],
                     limit: 500,
                     tableCalculations: [],
                     additionalMetrics: [],
@@ -737,7 +1053,12 @@ describe('renameSavedChart', () => {
             dimensions: ['orders_type'],
             metrics: [],
             filters: {},
-            sorts: [{ fieldId: 'orders_type', descending: false }],
+            sorts: [
+                {
+                    fieldId: 'orders_type',
+                    descending: false,
+                },
+            ],
             limit: 500,
             tableCalculations: [],
             additionalMetrics: [],
@@ -989,7 +1310,7 @@ describe('validateRename', () => {
         const original = { id: 'payment_123', name: 'Payment' };
         const updated = { id: 'invoice_123', name: 'Payment' };
 
-        validateRename(original, updated, 'Test Object', nameChanges);
+        validateRename(original, updated, 'Test Object', 'chart', nameChanges);
 
         expect(console.warn).not.toHaveBeenCalled();
     });
@@ -1000,7 +1321,7 @@ describe('validateRename', () => {
         // We want to log a warning about it
         const updated = { id: 'invoice_123', newProperty: 'payment_123' };
 
-        validateRename(original, updated, 'Test Object', nameChanges);
+        validateRename(original, updated, 'Test Object', 'chart', nameChanges);
 
         expect(console.warn).toHaveBeenCalled();
     });

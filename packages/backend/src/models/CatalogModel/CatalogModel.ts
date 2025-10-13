@@ -3,12 +3,19 @@ import {
     CatalogItemIcon,
     CatalogItemsWithIcons,
     CatalogType,
+    ChangesetUtils,
+    ChangesetWithChanges,
+    CompiledDimension,
+    CompiledMetric,
+    CompiledTable,
     Explore,
     FieldType,
     NotFoundError,
     TableSelectionType,
     UNCATEGORIZED_TAG_UUID,
     UnexpectedServerError,
+    assertUnreachable,
+    convertToAiHints,
     isExploreError,
     type ApiCatalogSearch,
     type ApiSort,
@@ -28,6 +35,7 @@ import {
     type UserAttributeValueMap,
 } from '@lightdash/common';
 import { Knex } from 'knex';
+import { uniqBy } from 'lodash';
 import type { LightdashConfig } from '../../config/parseConfig';
 import {
     CatalogTableName,
@@ -57,6 +65,8 @@ export enum CatalogSearchContext {
     SPOTLIGHT = 'spotlight',
     CATALOG = 'catalog',
     METRICS_EXPLORER = 'metricsExplorer',
+    AI_AGENT = 'aiAgent',
+    MCP = 'mcp',
 }
 
 export type CatalogModelArguments = {
@@ -135,6 +145,7 @@ export class CatalogModel {
                                     .delete();
 
                                 const BATCH_SIZE = 3000;
+
                                 const results = await trx
                                     .batchInsert<DbCatalog>(
                                         CatalogTableName,
@@ -197,6 +208,163 @@ export class CatalogModel {
         }
     }
 
+    async indexCatalogUpdates({
+        projectUuid,
+        cachedExploreMap,
+        changeset,
+    }: {
+        projectUuid: string;
+        cachedExploreMap: { [exploreUuid: string]: Explore | ExploreError };
+        changeset: ChangesetWithChanges;
+    }): Promise<{
+        catalogUpdates: DbCatalog[];
+    }> {
+        const catalogUpdates = await wrapSentryTransaction(
+            'indexCatalog.updateCatalogItems',
+            {
+                projectUuid,
+                changesetLength: changeset?.changes.length,
+            },
+            () =>
+                this.database.transaction(async (trx) => {
+                    const catalogUpdatesResult: DbCatalog[] = [];
+
+                    const changesetChangesMap = uniqBy(
+                        changeset?.changes,
+                        (change) =>
+                            `${change.entityTableName}:${change.entityType}:${change.entityName}`,
+                    );
+                    const updatePromises = changesetChangesMap.map(
+                        async (change) => {
+                            const cachedExploreTable =
+                                cachedExploreMap[change.entityTableName];
+
+                            if (
+                                !cachedExploreTable ||
+                                !cachedExploreTable.tables
+                            ) {
+                                return null;
+                            }
+
+                            if (change.type === 'create') {
+                                const isMetric = change.entityType === 'metric';
+
+                                if (isMetric) {
+                                    const metricData = change.payload.value;
+
+                                    const cachedExplore = await trx(
+                                        CatalogTableName,
+                                    )
+                                        .select('cached_explore_uuid')
+                                        .where(
+                                            'table_name',
+                                            change.entityTableName,
+                                        )
+                                        .where('project_uuid', projectUuid)
+                                        .first('cached_explore_uuid');
+
+                                    if (!cachedExplore) {
+                                        return null;
+                                    }
+
+                                    const [result] = await trx(CatalogTableName)
+                                        .insert({
+                                            name: metricData.name,
+                                            label: metricData.label,
+                                            description:
+                                                metricData.description ?? null,
+                                            cached_explore_uuid:
+                                                cachedExplore.cached_explore_uuid,
+                                            project_uuid: projectUuid,
+                                            type: CatalogType.Field,
+                                            field_type: FieldType.METRIC,
+                                            required_attributes: {},
+                                            yaml_tags: [],
+                                            ai_hints: null,
+                                            chart_usage: 0,
+                                            table_name: change.entityTableName,
+                                            spotlight_show: true,
+                                            joined_tables: [],
+                                        })
+                                        .returning('*');
+
+                                    catalogUpdatesResult.push(result);
+                                    return result;
+                                }
+                            }
+
+                            let fieldToUpdate:
+                                | CompiledDimension
+                                | CompiledMetric
+                                | CompiledTable;
+                            const isTable = change.entityType === 'table';
+                            const table =
+                                cachedExploreTable.tables[
+                                    change.entityTableName
+                                ];
+                            if (!table) {
+                                return null;
+                            }
+
+                            switch (change.entityType) {
+                                case 'table': {
+                                    fieldToUpdate = table;
+                                    break;
+                                }
+                                case 'dimension': {
+                                    fieldToUpdate =
+                                        table.dimensions[change.entityName];
+                                    break;
+                                }
+                                case 'metric': {
+                                    fieldToUpdate =
+                                        table.metrics[change.entityName];
+                                    break;
+                                }
+                                default:
+                                    assertUnreachable(
+                                        change.entityType,
+                                        `Unknown entity type ${change.entityType}`,
+                                    );
+                            }
+
+                            const [result] = await trx(CatalogTableName)
+                                .where('table_name', change.entityTableName)
+                                .andWhere('project_uuid', projectUuid)
+                                .andWhere('name', change.entityName)
+                                .andWhere(
+                                    'type',
+                                    isTable
+                                        ? CatalogType.Table
+                                        : CatalogType.Field,
+                                )
+                                .update({
+                                    label: fieldToUpdate.label ?? null,
+                                    description:
+                                        fieldToUpdate.description ?? null,
+                                    ai_hints:
+                                        convertToAiHints(
+                                            fieldToUpdate.aiHint,
+                                        ) ?? null,
+                                })
+                                .returning('*');
+
+                            catalogUpdatesResult.push(result);
+                            return result;
+                        },
+                    );
+
+                    await Promise.all(updatePromises);
+
+                    return catalogUpdatesResult;
+                }),
+        );
+
+        return {
+            catalogUpdates,
+        };
+    }
+
     private async getTagsPerItem(catalogSearchUuids: string[]) {
         const itemTags = await this.database(CatalogTagsTableName)
             .select()
@@ -232,39 +400,35 @@ export class CatalogModel {
     async search({
         projectUuid,
         exploreName,
-        catalogSearch: { catalogTags, filter, searchQuery = '', type },
-        limit = 50,
+        catalogSearch: {
+            catalogTags,
+            filter,
+            searchQuery = '',
+            type,
+            yamlTags,
+            tables,
+        },
         excludeUnmatched = true,
-        searchRankFunction = getFullTextSearchRankCalcSql,
         tablesConfiguration,
         userAttributes,
         paginateArgs,
         sortArgs,
         context,
+        fullTextSearchOperator = 'AND',
+        exploreCacheMap,
     }: {
         projectUuid: string;
         exploreName?: string;
         catalogSearch: ApiCatalogSearch;
-        limit?: number;
         excludeUnmatched?: boolean;
-        searchRankFunction?: (args: {
-            database: Knex;
-            variables: Record<string, string>;
-        }) => Knex.Raw;
         tablesConfiguration: TablesConfiguration;
         userAttributes: UserAttributeValueMap;
         paginateArgs?: KnexPaginateArgs;
         sortArgs?: ApiSort;
         context: CatalogSearchContext;
+        fullTextSearchOperator?: 'OR' | 'AND';
+        exploreCacheMap: { [exploreUuid: string]: Explore | ExploreError };
     }): Promise<KnexPaginatedData<CatalogItem[]>> {
-        const searchRankRawSql = searchRankFunction({
-            database: this.database,
-            variables: {
-                searchVectorColumn: `${CatalogTableName}.search_vector`,
-                searchQuery,
-            },
-        });
-
         let catalogItemsQuery = this.database(CatalogTableName)
             .column(
                 `${CatalogTableName}.catalog_search_uuid`,
@@ -275,10 +439,17 @@ export class CatalogModel {
                 `${CachedExploreTableName}.explore`,
                 `required_attributes`,
                 `chart_usage`,
+                `${CatalogTableName}.joined_tables`,
                 `icon`,
-                // Add tags as an aggregated JSON array
                 {
-                    search_rank: searchRankRawSql,
+                    search_rank: getFullTextSearchRankCalcSql({
+                        database: this.database,
+                        variables: {
+                            searchVectorColumn: `${CatalogTableName}.search_vector`,
+                            searchQuery,
+                        },
+                        fullTextSearchOperator,
+                    }),
                 },
             )
             .leftJoin(
@@ -460,16 +631,126 @@ export class CatalogModel {
             );
         }
 
-        if (excludeUnmatched && searchQuery) {
-            catalogItemsQuery = catalogItemsQuery.andWhereRaw(
-                `"${CatalogTableName}".search_vector @@ to_tsquery('lightdash_english_config', ?)`,
-                getFullTextSearchQuery(searchQuery),
+        if (yamlTags) {
+            catalogItemsQuery = catalogItemsQuery.andWhere(
+                function yamlTagsFiltering() {
+                    void this
+                        // Condition 1: The item itself has a matching tag.
+                        // This is the highest priority rule. It includes any
+                        // field or table that is explicitly tagged.
+                        .whereRaw(
+                            `${CatalogTableName}.yaml_tags && ?::text[]`,
+                            [yamlTags],
+                        )
+
+                        // Condition 2: The item is part of an explore where ONLY the explore's
+                        // base table is tagged, making all items in that explore visible.
+                        // This handles the "show all fields" scenario.
+                        .orWhere(function exploreTaggedButFieldsAreNot() {
+                            void this
+                                // Check that the explore's base table has a matching tag.
+                                .whereExists(function exploreIsTagged() {
+                                    void this.select('name')
+                                        .from(
+                                            `${CatalogTableName} as explore_table`,
+                                        )
+                                        .andWhere(
+                                            'explore_table.project_uuid',
+                                            projectUuid,
+                                        )
+                                        .whereRaw(
+                                            `explore_table.cached_explore_uuid = ${CatalogTableName}.cached_explore_uuid`,
+                                        )
+                                        .andWhere('explore_table.type', 'table')
+                                        .andWhereRaw(
+                                            `explore_table.yaml_tags && ?::text[]`,
+                                            [yamlTags],
+                                        );
+                                })
+                                // AND crucially, check that NO fields within that same explore have any tags.
+                                // This enforces the precedence rule.
+                                .whereNotExists(function anyFieldIsTagged() {
+                                    void this.select('name')
+                                        .from(
+                                            `${CatalogTableName} as any_field_in_explore`,
+                                        )
+                                        .andWhereRaw(
+                                            `any_field_in_explore.cached_explore_uuid = ${CatalogTableName}.cached_explore_uuid`,
+                                        )
+                                        .andWhere(
+                                            'any_field_in_explore.project_uuid',
+                                            projectUuid,
+                                        )
+                                        .andWhere(
+                                            'any_field_in_explore.type',
+                                            'field',
+                                        )
+                                        .whereNotNull(
+                                            `any_field_in_explore.yaml_tags`,
+                                        );
+                                });
+                        })
+
+                        // Condition 3: The item is a table, and at least one of its
+                        // child fields has a matching tag. This ensures the parent table is
+                        // always included if any of its fields are visible.
+                        .orWhere(function isTableWithTaggedChildren() {
+                            void this.where(
+                                `${CatalogTableName}.type`,
+                                'table',
+                            ).whereExists(function hasTaggedChild() {
+                                void this.select('name')
+                                    .from(`${CatalogTableName} as child_field`)
+                                    .andWhere(
+                                        'child_field.project_uuid',
+                                        projectUuid,
+                                    )
+                                    .whereRaw(
+                                        `child_field.cached_explore_uuid = ${CatalogTableName}.cached_explore_uuid`,
+                                    )
+                                    .andWhereNot('child_field.type', 'table')
+                                    .andWhereRaw(
+                                        `child_field.yaml_tags && ?::text[]`,
+                                        [yamlTags],
+                                    );
+                            });
+                        });
+                },
             );
         }
 
-        catalogItemsQuery = catalogItemsQuery
-            .orderBy('search_rank', 'desc')
-            .limit(limit ?? 50);
+        if (tables) {
+            catalogItemsQuery = catalogItemsQuery.andWhere(
+                function joinedTablesFiltering() {
+                    // Condition 1: The item's own table is in the list.
+                    // This includes the table itself, and any fields belonging to it.
+                    void this.whereIn(`${CatalogTableName}.table_name`, tables);
+
+                    // Condition 2: The item belongs to a table whose joined_tables array
+                    // contains any of the specified tables
+                    void this.orWhereExists(function tableJoinsToSelected() {
+                        void this.select('name')
+                            .from(`${CatalogTableName} as parent_table`)
+                            .whereRaw(
+                                `parent_table.table_name = ANY(?::text[])`,
+                                [tables],
+                            )
+                            .andWhereRaw(
+                                `parent_table.joined_tables @> ARRAY[${CatalogTableName}.table_name]::text[]`,
+                            );
+                    });
+                },
+            );
+        }
+
+        if (excludeUnmatched && searchQuery) {
+            catalogItemsQuery = catalogItemsQuery.andWhereRaw(
+                `"${CatalogTableName}".search_vector @@ to_tsquery('lightdash_english_config', ?)`,
+                getFullTextSearchQuery(searchQuery, fullTextSearchOperator),
+            );
+        }
+
+        catalogItemsQuery = catalogItemsQuery.orderBy('search_rank', 'desc');
 
         if (sortArgs) {
             const { sort, order } = sortArgs;
@@ -483,11 +764,12 @@ export class CatalogModel {
 
         const paginatedCatalogItems = await KnexPaginate.paginate(
             catalogItemsQuery.select<
-                (DbCatalog & {
-                    explore: Explore;
-                })[]
+                (DbCatalog & { explore: Explore; search_rank: number })[]
             >(),
-            paginateArgs,
+            {
+                page: paginateArgs?.page ?? 1,
+                pageSize: paginateArgs?.pageSize ?? 50,
+            },
         );
 
         const tagsPerItem = await this.getTagsPerItem(
@@ -503,6 +785,7 @@ export class CatalogModel {
                 paginatedCatalogItems.data.map((item) =>
                     parseCatalog({
                         ...item,
+                        explore: exploreCacheMap[item.explore.name] as Explore,
                         catalog_tags:
                             tagsPerItem[item.catalog_search_uuid] ?? [],
                     }),

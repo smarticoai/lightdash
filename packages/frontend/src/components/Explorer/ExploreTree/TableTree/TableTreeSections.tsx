@@ -17,7 +17,7 @@ import {
     Tooltip,
 } from '@mantine/core';
 import { IconAlertTriangle, IconCode, IconPlus } from '@tabler/icons-react';
-import { useMemo, type FC } from 'react';
+import { useCallback, useMemo, type FC } from 'react';
 import { useParams } from 'react-router';
 import { useGitIntegration } from '../../../../hooks/gitIntegration/useGitIntegration';
 import { useFeatureFlagEnabled } from '../../../../hooks/useFeatureFlagEnabled';
@@ -30,7 +30,6 @@ import DocumentationHelpButton from '../../../DocumentationHelpButton';
 import MantineIcon from '../../../common/MantineIcon';
 import { TreeProvider } from './Tree/TreeProvider';
 import TreeRoot from './Tree/TreeRoot';
-import { getSearchResults } from './Tree/utils';
 
 type Props = {
     searchQuery?: string;
@@ -45,6 +44,8 @@ type Props = {
         customMetrics: AdditionalMetric[] | undefined;
     };
     selectedDimensions?: string[];
+    searchResults: string[];
+    isSearching: boolean;
 };
 const TableTreeSections: FC<Props> = ({
     searchQuery,
@@ -55,6 +56,8 @@ const TableTreeSections: FC<Props> = ({
     missingFields,
     selectedDimensions,
     onSelectedNodeChange,
+    searchResults,
+    isSearching,
 }) => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const { user } = useApp();
@@ -120,8 +123,6 @@ const TableTreeSections: FC<Props> = ({
             );
     }, [customDimensions, table]);
 
-    const isSearching = !!searchQuery && searchQuery !== '';
-
     const hasMetrics = Object.keys(table.metrics).length > 0;
     const hasDimensions = Object.keys(table.dimensions).length > 0;
     const hasCustomMetrics = additionalMetrics.length > 0;
@@ -164,9 +165,77 @@ const TableTreeSections: FC<Props> = ({
         }, {});
     }, [metrics, additionalMetrics]);
 
-    const searchResults = useMemo(
-        () => getSearchResults(dimensions, searchQuery),
-        [dimensions, searchQuery],
+    const handleItemClickDimension = useCallback(
+        (key: string) => onSelectedNodeChange(key, true),
+        [onSelectedNodeChange],
+    );
+
+    const handleItemClickMetric = useCallback(
+        (key: string) => onSelectedNodeChange(key, false),
+        [onSelectedNodeChange],
+    );
+
+    const handleAddCustomDimension = useCallback(() => {
+        toggleCustomDimensionModal({
+            isEditing: false,
+            table: table.name,
+            item: undefined,
+        });
+    }, [toggleCustomDimensionModal, table.name]);
+
+    const handleWriteBackCustomMetrics = useCallback(() => {
+        if (projectUuid && user.data?.organizationUuid) {
+            track({
+                name: EventName.WRITE_BACK_FROM_CUSTOM_METRIC_HEADER_CLICKED,
+                properties: {
+                    userId: user.data.userUuid,
+                    projectId: projectUuid,
+                    organizationId: user.data.organizationUuid,
+                    customMetricsCount: allAdditionalMetrics?.length || 0,
+                    customDimensionsCount: 0,
+                },
+            });
+        }
+        toggleWriteBackModal({ items: allAdditionalMetrics });
+    }, [
+        projectUuid,
+        user.data,
+        allAdditionalMetrics,
+        toggleWriteBackModal,
+        track,
+    ]);
+
+    const handleWriteBackCustomDimensions = useCallback(() => {
+        if (projectUuid && user.data?.organizationUuid) {
+            track({
+                name: EventName.WRITE_BACK_FROM_CUSTOM_DIMENSION_HEADER_CLICKED,
+                properties: {
+                    userId: user.data.userUuid,
+                    projectId: projectUuid,
+                    organizationId: user.data.organizationUuid,
+                    customMetricsCount: 0,
+                    customDimensionsCount:
+                        customDimensionsToWriteBack?.length || 0,
+                },
+            });
+        }
+        toggleWriteBackModal({
+            items: customDimensionsToWriteBack || [],
+        });
+    }, [
+        projectUuid,
+        user.data,
+        customDimensionsToWriteBack,
+        toggleWriteBackModal,
+        track,
+    ]);
+
+    const getMissingFieldClickHandler = useCallback(
+        (field: string) => () => {
+            const isDimension = !!selectedDimensions?.includes(field);
+            onSelectedNodeChange(field, isDimension);
+        },
+        [onSelectedNodeChange, selectedDimensions],
     );
 
     return (
@@ -190,16 +259,9 @@ const TableTreeSections: FC<Props> = ({
                                 maw={700}
                             >
                                 <Group
-                                    onClick={() => {
-                                        const isDimension =
-                                            !!selectedDimensions?.includes(
-                                                missingField,
-                                            );
-                                        onSelectedNodeChange(
-                                            missingField,
-                                            isDimension,
-                                        );
-                                    }}
+                                    onClick={getMissingFieldClickHandler(
+                                        missingField,
+                                    )}
                                     ml={12}
                                     my="xs"
                                     sx={{ cursor: 'pointer' }}
@@ -236,13 +298,8 @@ const TableTreeSections: FC<Props> = ({
                                 variant={'subtle'}
                                 compact
                                 leftIcon={<MantineIcon icon={IconPlus} />}
-                                onClick={() =>
-                                    toggleCustomDimensionModal({
-                                        isEditing: false,
-                                        table: table.name,
-                                        item: undefined,
-                                    })
-                                }
+                                onClick={handleAddCustomDimension}
+                                data-testid="TableTreeSections/AddCustomDimensionButton"
                             >
                                 Add
                             </Button>
@@ -258,7 +315,8 @@ const TableTreeSections: FC<Props> = ({
                     itemsMap={dimensions}
                     selectedItems={selectedItems}
                     groupDetails={table.groupDetails}
-                    onItemClick={(key) => onSelectedNodeChange(key, true)}
+                    onItemClick={handleItemClickDimension}
+                    searchResults={searchResults}
                 >
                     <TreeRoot />
                 </TreeProvider>
@@ -306,7 +364,8 @@ const TableTreeSections: FC<Props> = ({
                     itemsMap={metrics}
                     selectedItems={selectedItems}
                     groupDetails={table.groupDetails}
-                    onItemClick={(key) => onSelectedNodeChange(key, false)}
+                    onItemClick={handleItemClickMetric}
+                    searchResults={searchResults}
                 >
                     <TreeRoot />
                 </TreeProvider>
@@ -338,31 +397,7 @@ const TableTreeSections: FC<Props> = ({
                     </Group>
                     {hasCustomMetrics && (
                         <Tooltip label="Write back custom metrics">
-                            <ActionIcon
-                                onClick={() => {
-                                    if (
-                                        projectUuid &&
-                                        user.data?.organizationUuid
-                                    ) {
-                                        track({
-                                            name: EventName.WRITE_BACK_FROM_CUSTOM_METRIC_HEADER_CLICKED,
-                                            properties: {
-                                                userId: user.data.userUuid,
-                                                projectId: projectUuid,
-                                                organizationId:
-                                                    user.data.organizationUuid,
-                                                customMetricsCount:
-                                                    allAdditionalMetrics?.length ||
-                                                    0,
-                                                customDimensionsCount: 0,
-                                            },
-                                        });
-                                    }
-                                    toggleWriteBackModal({
-                                        items: allAdditionalMetrics,
-                                    });
-                                }}
-                            >
+                            <ActionIcon onClick={handleWriteBackCustomMetrics}>
                                 <MantineIcon icon={IconCode} />
                             </ActionIcon>
                         </Tooltip>
@@ -379,9 +414,10 @@ const TableTreeSections: FC<Props> = ({
                     missingCustomMetrics={missingFields?.customMetrics}
                     itemsAlerts={customMetricsIssues}
                     groupDetails={table.groupDetails}
-                    onItemClick={(key) => onSelectedNodeChange(key, false)}
+                    onItemClick={handleItemClickMetric}
                     isGithubIntegrationEnabled={isGithubProject}
                     gitIntegration={gitIntegration}
+                    searchResults={searchResults}
                 >
                     <TreeRoot />
                 </TreeProvider>
@@ -416,30 +452,7 @@ const TableTreeSections: FC<Props> = ({
                     {hasCustomDimensionsToWriteBack && (
                         <Tooltip label="Write back custom dimensions">
                             <ActionIcon
-                                onClick={() => {
-                                    if (
-                                        projectUuid &&
-                                        user.data?.organizationUuid
-                                    ) {
-                                        track({
-                                            name: EventName.WRITE_BACK_FROM_CUSTOM_DIMENSION_HEADER_CLICKED,
-                                            properties: {
-                                                userId: user.data.userUuid,
-                                                projectId: projectUuid,
-                                                organizationId:
-                                                    user.data.organizationUuid,
-                                                customMetricsCount: 0,
-                                                customDimensionsCount:
-                                                    customDimensionsToWriteBack?.length ||
-                                                    0,
-                                            },
-                                        });
-                                    }
-                                    toggleWriteBackModal({
-                                        items:
-                                            customDimensionsToWriteBack || [],
-                                    });
-                                }}
+                                onClick={handleWriteBackCustomDimensions}
                             >
                                 <MantineIcon icon={IconCode} />
                             </ActionIcon>
@@ -456,7 +469,8 @@ const TableTreeSections: FC<Props> = ({
                     missingCustomDimensions={missingFields?.customDimensions}
                     selectedItems={selectedItems}
                     groupDetails={table.groupDetails}
-                    onItemClick={(key) => onSelectedNodeChange(key, true)}
+                    onItemClick={handleItemClickDimension}
+                    searchResults={searchResults}
                 >
                     <TreeRoot />
                 </TreeProvider>

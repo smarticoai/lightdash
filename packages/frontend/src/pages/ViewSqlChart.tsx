@@ -1,4 +1,8 @@
-import { isVizTableConfig } from '@lightdash/common';
+import {
+    getParameterReferences,
+    isVizTableConfig,
+    type ParameterValue,
+} from '@lightdash/common';
 import {
     Box,
     Group,
@@ -9,7 +13,7 @@ import {
 } from '@mantine/core';
 import { IconChartHistogram, IconTable } from '@tabler/icons-react';
 import type { EChartsInstance } from 'echarts-for-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Provider } from 'react-redux';
 import { useParams } from 'react-router';
 import { ChartDataTable } from '../components/DataViz/visualizations/ChartDataTable';
@@ -19,16 +23,22 @@ import { ConditionalVisibility } from '../components/common/ConditionalVisibilit
 import ErrorState from '../components/common/ErrorState';
 import MantineIcon from '../components/common/MantineIcon';
 import Page from '../components/common/Page/Page';
+import { Parameters, useParameters } from '../features/parameters';
 import { ChartDownload } from '../features/sqlRunner/components/Download/ChartDownload';
-import { ResultsDownloadFromData } from '../features/sqlRunner/components/Download/ResultsDownloadFromData';
-import { ResultsDownloadFromUrl } from '../features/sqlRunner/components/Download/ResultsDownloadFromUrl';
+import ResultsDownloadButton from '../features/sqlRunner/components/Download/ResultsDownloadButton';
 import { Header } from '../features/sqlRunner/components/Header';
 import { useSavedSqlChartResults } from '../features/sqlRunner/hooks/useSavedSqlChartResults';
 import { store } from '../features/sqlRunner/store';
-import { useAppDispatch } from '../features/sqlRunner/store/hooks';
 import {
+    useAppDispatch,
+    useAppSelector,
+} from '../features/sqlRunner/store/hooks';
+import {
+    clearParameterValues,
+    selectParameterValues,
     setProjectUuid,
     setSavedChartData,
+    updateParameterValue,
 } from '../features/sqlRunner/store/sqlRunnerSlice';
 
 enum TabOption {
@@ -44,6 +54,9 @@ const ViewSqlChart = () => {
 
     const [echartsInstance, setEchartsInstance] = useState<EChartsInstance>();
 
+    // Parameter state management for SQL Runner context
+    const parameterValues = useAppSelector(selectParameterValues);
+
     const {
         chartQuery: {
             data: chartData,
@@ -56,10 +69,27 @@ const ViewSqlChart = () => {
             error: chartResultsError,
             isFetching: isChartResultsFetching,
         },
+        getDownloadQueryUuid,
     } = useSavedSqlChartResults({
         projectUuid: params.projectUuid,
         slug: params.slug,
+        parameters: parameterValues,
     });
+
+    const handleParameterChange = useCallback(
+        (key: string, value: ParameterValue | null) => {
+            dispatch(updateParameterValue({ key, value }));
+        },
+        [dispatch],
+    );
+
+    const parameterReferences = useMemo(() => {
+        return new Set(getParameterReferences(chartData?.sql ?? ''));
+    }, [chartData]);
+
+    const clearAllParameters = useCallback(() => {
+        dispatch(clearParameterValues());
+    }, [dispatch]);
 
     // TODO: remove state sync - this is because the <Header /> component depends on the Redux state
     useEffect(() => {
@@ -70,6 +100,15 @@ const ViewSqlChart = () => {
             dispatch(setProjectUuid(params.projectUuid));
         }
     }, [dispatch, chartData, params.projectUuid]);
+
+    const {
+        data: projectParameters,
+        isLoading: isProjectParametersLoading,
+        isError: isProjectParametersError,
+    } = useParameters(
+        params.projectUuid,
+        Array.from(parameterReferences ?? []),
+    );
 
     return (
         <Page
@@ -126,50 +165,68 @@ const ViewSqlChart = () => {
                                 onChange={(val: TabOption) => setActiveTab(val)}
                             />
                         </Group>
-                        {(activeTab === TabOption.RESULTS ||
-                            (activeTab === TabOption.CHART &&
-                                isVizTableConfig(chartData?.config))) &&
-                            chartResultsData &&
-                            // Table charts don't have a fileUrl,
-                            // So we will download the file directly from the resultsData
-                            (chartResultsData?.fileUrl ? (
-                                <ResultsDownloadFromUrl
-                                    fileUrl={chartResultsData.fileUrl}
-                                    columnNames={
-                                        chartResultsData.chartUnderlyingData
-                                            ?.columns ?? []
-                                    }
-                                    chartName={chartData?.name}
-                                />
-                            ) : (
-                                <ResultsDownloadFromData
-                                    rows={
-                                        chartResultsData.chartUnderlyingData
-                                            ?.rows ?? []
-                                    }
-                                    columns={
-                                        // visible columns are sorted and filtered, we need to respect this order
-                                        chartResultsData.chartSpec.spec
-                                            ?.visibleColumns ?? []
-                                    }
-                                    columnsConfig={
-                                        chartResultsData.chartSpec.spec
-                                            ?.columns ?? []
-                                    }
-                                    chartName={chartData?.name}
-                                />
-                            ))}
-                        {activeTab === TabOption.CHART && echartsInstance && (
-                            <ChartDownload
-                                echartsInstance={echartsInstance}
-                                fileUrl={chartResultsData?.fileUrl}
-                                columnNames={
-                                    chartResultsData?.chartUnderlyingData
-                                        ?.columns ?? []
-                                }
-                                chartName={chartData?.name}
+                        <Group position="apart">
+                            <Parameters
+                                isEditMode={false}
+                                parameters={projectParameters}
+                                parameterValues={parameterValues}
+                                onParameterChange={handleParameterChange}
+                                onClearAll={clearAllParameters}
+                                isLoading={isProjectParametersLoading}
+                                isError={isProjectParametersError}
                             />
-                        )}
+                            {(activeTab === TabOption.RESULTS ||
+                                (activeTab === TabOption.CHART &&
+                                    isVizTableConfig(chartData?.config))) &&
+                                params.projectUuid && (
+                                    <ResultsDownloadButton
+                                        projectUuid={params.projectUuid}
+                                        disabled={!chartResultsData}
+                                        vizTableConfig={
+                                            isVizTableConfig(chartData?.config)
+                                                ? chartData.config
+                                                : undefined
+                                        }
+                                        chartName={chartData?.name}
+                                        totalResults={
+                                            chartResultsData
+                                                ?.chartUnderlyingData?.rows
+                                                .length ?? 0
+                                        }
+                                        columnOrder={
+                                            chartResultsData
+                                                ?.chartUnderlyingData
+                                                ?.columns ?? []
+                                        }
+                                        getDownloadQueryUuid={
+                                            getDownloadQueryUuid
+                                        }
+                                    />
+                                )}
+                            {activeTab === TabOption.CHART &&
+                                echartsInstance &&
+                                params.projectUuid && (
+                                    <ChartDownload
+                                        echartsInstance={echartsInstance}
+                                        chartName={chartData?.name}
+                                        projectUuid={params.projectUuid}
+                                        disabled={!chartResultsData}
+                                        totalResults={
+                                            chartResultsData
+                                                ?.chartUnderlyingData?.rows
+                                                .length ?? 0
+                                        }
+                                        columnOrder={
+                                            chartResultsData
+                                                ?.chartUnderlyingData
+                                                ?.columns ?? []
+                                        }
+                                        getDownloadQueryUuid={
+                                            getDownloadQueryUuid
+                                        }
+                                    />
+                                )}
+                        </Group>
                     </Group>
 
                     {chartError && <ErrorState error={chartError.error} />}

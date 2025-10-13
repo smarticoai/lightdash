@@ -34,7 +34,7 @@ describe('SQL Runner (new)', () => {
         cy.contains('Run query').click();
 
         cy.get('#sql-runner-panel-results').within(() => {
-            cy.get('table thead th').should('have.length', 12);
+            cy.get('table thead th').should('have.length', 22);
             cy.get('table thead th').eq(0).should('contain.text', 'order_id');
             cy.get('table thead th')
                 .eq(1)
@@ -48,7 +48,7 @@ describe('SQL Runner (new)', () => {
                     cy.get('td').eq(1).should('contain.text', '1');
                     cy.get('td')
                         .eq(2)
-                        .should('contain.text', '2018-01-01T00:00:00.000Z');
+                        .should('contain.text', '2023-03-15T00:00:00.000Z');
                     cy.get('td').eq(3).should('contain.text', 'returned');
                 });
         });
@@ -106,18 +106,18 @@ describe('SQL Runner (new)', () => {
             .should('be.visible');
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('Customer id sum')
+            .contains('Age sum')
             .should('be.visible');
 
         // Add a new series
         cy.get('button[data-testid="add-y-axis-field"]').click();
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('Customer id sum')
+            .contains('Age sum')
             .should('be.visible');
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('First name count')
+            .contains('Last name count')
             .should('be.visible');
 
         // Group by first_name
@@ -125,7 +125,7 @@ describe('SQL Runner (new)', () => {
         cy.get('div[role="option"]').contains('first_name').click();
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('Customer id sum frances')
+            .contains('Age sum amy')
             .should('be.visible');
 
         // Verify that the chart is not displayed when the configuration is incomplete
@@ -156,7 +156,7 @@ describe('SQL Runner (new)', () => {
             .should('be.visible');
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('Customer id sum')
+            .contains('Age sum')
             .should('be.visible');
 
         // Verify that the table is displayed
@@ -229,7 +229,7 @@ describe('SQL Runner (new)', () => {
         ).should('exist');
         cy.get('div[data-testid="chart-data-table"]').should(
             'contain.text',
-            'customer_id_sum',
+            'age_sum',
         );
 
         cy.contains('label', 'SQL').click();
@@ -251,11 +251,9 @@ describe('SQL Runner (new)', () => {
             .contains('Fix errors')
             .click();
         cy.get('input[placeholder="Select X axis"]').click();
+        cy.get('div[role="option"]').contains('status').click();
+        cy.get('input[placeholder="Select Y axis"]').click();
         cy.get('div[role="option"]').contains('customer_id').click();
-        cy.get('.echarts-for-react')
-            .find('text')
-            .contains('Customer id')
-            .should('be.visible');
 
         // Verify that saving changes and going back to view page displays the chart
         cy.contains('Save').click();
@@ -265,7 +263,11 @@ describe('SQL Runner (new)', () => {
         ).should('exist');
         cy.get('.echarts-for-react')
             .find('text')
-            .contains('Customer id')
+            .contains('Customer id avg')
+            .should('be.visible');
+        cy.get('.echarts-for-react')
+            .find('text')
+            .contains('Status')
             .should('be.visible');
     });
 

@@ -22,21 +22,27 @@ import {
     DashboardAsCode,
     DbtExposure,
     DbtProjectEnvironmentVariable,
+    LightdashRequestMethodHeader,
     ParameterError,
     RequestMethod,
     UpdateMetadata,
     UpdateProjectMember,
     UserWarehouseCredentials,
+    getRequestMethod,
     isDuplicateDashboardParams,
     type ApiCalculateSubtotalsResponse,
     type ApiCreateDashboardResponse,
+    type ApiCreateDashboardWithChartsResponse,
+    type ApiCreatePreviewResults,
     type ApiGetDashboardsResponse,
     type ApiGetTagsResponse,
+    type ApiRefreshResults,
+    type ApiSuccess,
     type ApiUpdateDashboardsResponse,
     type CalculateSubtotalsFromQuery,
     type CreateDashboard,
+    type CreateDashboardWithCharts,
     type DuplicateDashboardParams,
-    type SemanticLayerConnectionUpdate,
     type Tag,
     type UpdateMultipleDashboards,
     type UpdateSchedulerSettings,
@@ -89,7 +95,7 @@ export class ProjectController extends BaseController {
             status: 'ok',
             results: await this.services
                 .getProjectService()
-                .getProject(projectUuid, req.user!),
+                .getProject(projectUuid, req.account!),
         };
     }
 
@@ -246,6 +252,7 @@ export class ProjectController extends BaseController {
 
     /**
      * Update a user's access to a project
+     * @deprecated use ProjectRolesController.UpdateProjectUserRoleAssignment instead
      */
     @Middlewares([
         allowApiKeyAuthentication,
@@ -274,6 +281,7 @@ export class ProjectController extends BaseController {
 
     /**
      * Remove a user's access to a project
+     * @deprecated use ProjectRolesController.DeleteProjectUserRoleAssignment instead
      */
     @Middlewares([
         allowApiKeyAuthentication,
@@ -369,7 +377,7 @@ export class ProjectController extends BaseController {
         this.setStatus(200);
         const totalResult = await this.services
             .getProjectService()
-            .calculateTotalFromQuery(req.user!, projectUuid, body);
+            .calculateTotalFromQuery(req.account!, projectUuid, body);
         return {
             status: 'ok',
             results: totalResult,
@@ -388,7 +396,7 @@ export class ProjectController extends BaseController {
         this.setStatus(200);
         const subtotalsResult = await this.services
             .getProjectService()
-            .calculateSubtotalsFromQuery(req.user!, projectUuid, body);
+            .calculateSubtotalsFromQuery(req.account!, projectUuid, body);
         return {
             status: 'ok',
             results: subtotalsResult,
@@ -511,55 +519,6 @@ export class ProjectController extends BaseController {
         };
     }
 
-    @Middlewares([
-        allowApiKeyAuthentication,
-        isAuthenticated,
-        unauthorisedInDemo,
-    ])
-    @SuccessResponse('200', 'Success')
-    @Patch('{projectUuid}/semantic-layer-connection')
-    @OperationId('updateProjectSemanticLayerConnection')
-    async updateProjectSemanticLayerConnection(
-        @Path() projectUuid: string,
-        @Body() body: SemanticLayerConnectionUpdate,
-        @Request() req: express.Request,
-    ): Promise<ApiSuccessEmpty> {
-        this.setStatus(200);
-
-        await this.services
-            .getProjectService()
-            .updateSemanticLayerConnection(req.user!, projectUuid, body);
-
-        return {
-            status: 'ok',
-            results: undefined,
-        };
-    }
-
-    @Middlewares([
-        allowApiKeyAuthentication,
-        isAuthenticated,
-        unauthorisedInDemo,
-    ])
-    @SuccessResponse('200', 'Success')
-    @Delete('{projectUuid}/semantic-layer-connection')
-    @OperationId('deleteProjectSemanticLayerConnection')
-    async deleteProjectSemanticLayerConnection(
-        @Path() projectUuid: string,
-        @Request() req: express.Request,
-    ): Promise<ApiSuccessEmpty> {
-        this.setStatus(200);
-
-        await this.services
-            .getProjectService()
-            .deleteSemanticLayerConnection(req.user!, projectUuid);
-
-        return {
-            status: 'ok',
-            results: undefined,
-        };
-    }
-
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('{projectUuid}/dashboards')
@@ -644,6 +603,34 @@ export class ProjectController extends BaseController {
         isAuthenticated,
         unauthorisedInDemo,
     ])
+    @SuccessResponse('201', 'Created')
+    @Post('{projectUuid}/dashboards/with-charts')
+    @OperationId('createDashboardWithCharts')
+    async createDashboardWithCharts(
+        @Path() projectUuid: string,
+        @Body() body: CreateDashboardWithCharts,
+        @Request() req: express.Request,
+    ): Promise<ApiCreateDashboardWithChartsResponse> {
+        const dashboardService = this.services.getDashboardService();
+        this.setStatus(201);
+
+        const results = await dashboardService.createDashboardWithCharts(
+            req.user!,
+            projectUuid,
+            body,
+        );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
     @SuccessResponse('200', 'Updated')
     @Patch('{projectUuid}/dashboards')
     @OperationId('updateDashboards')
@@ -681,11 +668,12 @@ export class ProjectController extends BaseController {
             dbtConnectionOverrides?: {
                 branch?: string;
                 environment?: DbtProjectEnvironmentVariable[];
+                manifest?: string;
             };
             warehouseConnectionOverrides?: { schema?: string };
         },
         @Request() req: express.Request,
-    ): Promise<{ status: 'ok'; results: string }> {
+    ): Promise<{ status: 'ok'; results: ApiCreatePreviewResults }> {
         this.setStatus(200);
 
         const results = await this.services
@@ -716,7 +704,7 @@ export class ProjectController extends BaseController {
         const { schedulerTimezone: oldDefaultProjectTimezone } =
             await this.services
                 .getProjectService()
-                .getProject(projectUuid, req.user!);
+                .getProject(projectUuid, req.account!);
 
         await this.services
             .getProjectService()
@@ -932,6 +920,7 @@ export class ProjectController extends BaseController {
             ChartAsCode,
             'metricQuery' | 'chartConfig' | 'description'
         > & {
+            skipSpaceCreate?: boolean;
             chartConfig: AnyType;
             metricQuery: AnyType;
             description?: string | null; // Allow both undefined and null
@@ -941,12 +930,16 @@ export class ProjectController extends BaseController {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await this.services
-                .getCoderService()
-                .upsertChart(req.user!, projectUuid, slug, {
+            results: await this.services.getCoderService().upsertChart(
+                req.user!,
+                projectUuid,
+                slug,
+                {
                     ...chart,
                     description: chart.description ?? undefined,
-                }),
+                },
+                chart.skipSpaceCreate,
+            ),
         };
     }
 
@@ -962,6 +955,7 @@ export class ProjectController extends BaseController {
             DashboardAsCode,
             'filters' | 'tiles' | 'description'
         > & {
+            skipSpaceCreate?: boolean;
             filters: AnyType;
             tiles: AnyType;
             description?: string | null; // Allow both undefined and null
@@ -971,12 +965,16 @@ export class ProjectController extends BaseController {
         this.setStatus(200);
         return {
             status: 'ok',
-            results: await this.services
-                .getCoderService()
-                .upsertDashboard(req.user!, projectUuid, slug, {
+            results: await this.services.getCoderService().upsertDashboard(
+                req.user!,
+                projectUuid,
+                slug,
+                {
                     ...dashboard,
                     description: dashboard.description ?? undefined,
-                }),
+                },
+                dashboard.skipSpaceCreate,
+            ),
         };
     }
 
@@ -1003,6 +1001,31 @@ export class ProjectController extends BaseController {
         this.setStatus(200);
         return {
             status: 'ok',
+        };
+    }
+
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('{projectUuid}/refresh')
+    @OperationId('refresh')
+    async refresh(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccess<ApiRefreshResults>> {
+        this.setStatus(200);
+        const context = getRequestMethod(
+            req.header(LightdashRequestMethodHeader),
+        );
+        const results = await this.services
+            .getProjectService()
+            .scheduleCompileProject(req.user!, projectUuid, context);
+        return {
+            status: 'ok',
+            results,
         };
     }
 }

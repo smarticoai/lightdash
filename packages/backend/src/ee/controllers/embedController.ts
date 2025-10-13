@@ -2,31 +2,35 @@ import {
     AdditionalMetric,
     AndFilterGroup,
     AnyType,
+    ApiCalculateSubtotalsResponse,
     ApiCalculateTotalResponse,
     ApiErrorPayload,
+    ApiExecuteAsyncDashboardChartQueryResults,
     ApiSuccessEmpty,
+    assertEmbeddedAuth,
     CacheMetadata,
-    CreateEmbed,
     CreateEmbedJwt,
+    CreateEmbedRequestBody,
     Dashboard,
     DashboardAvailableFilters,
     DashboardFilters,
     DateGranularity,
     DecodedEmbed,
     EmbedUrl,
+    ExecuteAsyncDashboardChartRequestParams,
     Explore,
     FieldValueSearchResult,
-    FilterInteractivityValues,
     Item,
     MetricQueryResponse,
     SavedChart,
     SavedChartsInfoForDashboardAvailableFilters,
+    SortField,
     UpdateEmbed,
 } from '@lightdash/common';
 import {
     Body,
+    Deprecated,
     Get,
-    Header,
     Hidden,
     Middlewares,
     OperationId,
@@ -50,10 +54,7 @@ export type ApiEmbedDashboardResponse = {
     status: 'ok';
     results: Dashboard & {
         // declare type as TSOA doesn't understand zod type InteractivityOptions
-        dashboardFiltersInteractivity?: {
-            enabled: boolean | FilterInteractivityValues;
-            allowedFilters?: string[];
-        };
+        dashboardFiltersInteractivity?: CreateEmbedJwt['content']['dashboardFiltersInteractivity'];
         canExportCsv?: boolean;
         canExportImages?: boolean;
     };
@@ -116,7 +117,7 @@ export class EmbedController extends BaseController {
     async saveEmbedConfig(
         @Request() req: express.Request,
         @Path() projectUuid: string,
-        @Body() body: CreateEmbed,
+        @Body() body: CreateEmbedRequestBody,
     ): Promise<ApiEmbedConfigResponse> {
         this.setStatus(201);
         return {
@@ -174,15 +175,18 @@ export class EmbedController extends BaseController {
     @Post('/dashboard')
     @OperationId('getEmbedDashboard')
     async getEmbedDashboard(
+        @Request() req: express.Request,
         @Path() projectUuid: string,
-        @Header('Lightdash-Embed-Token') embedToken: string,
     ): Promise<ApiEmbedDashboardResponse> {
         this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
         return {
             status: 'ok',
             results: await this.getEmbedService().getDashboard(
                 projectUuid,
-                embedToken,
+                req.account,
             ),
         };
     }
@@ -191,45 +195,96 @@ export class EmbedController extends BaseController {
     @Post('/dashboard/availableFilters')
     @OperationId('getEmbedDashboardFilters')
     async getEmbedDashboardAvailableFilters(
+        @Request() req: express.Request,
         @Path() projectUuid: string,
-        @Header('Lightdash-Embed-Token') embedToken: string,
         @Body() body: SavedChartsInfoForDashboardAvailableFilters,
     ): Promise<ApiEmbedDashboardAvailableFiltersResponse> {
         this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
         return {
             status: 'ok',
             results:
                 await this.getEmbedService().getAvailableFiltersForSavedQueries(
                     projectUuid,
-                    embedToken,
+                    req.account,
                     body,
                 ),
         };
     }
 
+    @Deprecated()
     @SuccessResponse('200', 'Success')
     @Post('/chart-and-results')
     @OperationId('getEmbedChartResults')
     async getEmbedChartResults(
+        @Request() req: express.Request,
         @Path() projectUuid: string,
-        @Header('Lightdash-Embed-Token') embedToken: string,
         @Body()
         body: {
             tileUuid: string;
             dashboardFilters?: DashboardFilters;
             dateZoomGranularity?: DateGranularity;
+            dashboardSorts?: SortField[];
         },
     ): Promise<ApiEmbedChartAndResultsResponse> {
         this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
         return {
             status: 'ok',
             results: await this.getEmbedService().getChartAndResults(
                 projectUuid,
-                embedToken,
+                req.account,
                 body.tileUuid,
                 body.dashboardFilters,
                 body.dateZoomGranularity,
+                body.dashboardSorts,
             ),
+        };
+    }
+
+    @SuccessResponse('200', 'Success')
+    @Post('/query/dashboard-tile')
+    @OperationId('executeAsyncDashboardTileQuery')
+    async executeAsyncDashboardTileQuery(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Body()
+        body: {
+            tileUuid: string;
+        } & Pick<
+            ExecuteAsyncDashboardChartRequestParams,
+            | 'dashboardFilters'
+            | 'dashboardSorts'
+            | 'pivotResults'
+            | 'invalidateCache'
+            | 'dateZoom'
+        >,
+    ): Promise<{
+        status: 'ok';
+        results: ApiExecuteAsyncDashboardChartQueryResults;
+    }> {
+        this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
+        const results =
+            await this.getEmbedService().executeAsyncDashboardTileQuery({
+                account: req.account!,
+                projectUuid,
+                tileUuid: body.tileUuid,
+                dashboardFilters: body.dashboardFilters,
+                dateZoom: body.dateZoom,
+                invalidateCache: body.invalidateCache,
+                dashboardSorts: body.dashboardSorts,
+            });
+
+        return {
+            status: 'ok',
+            results,
         };
     }
 
@@ -237,7 +292,7 @@ export class EmbedController extends BaseController {
     @Post('/chart/:savedChartUuid/calculate-total')
     @OperationId('embedCalculateTotalFromSavedChart')
     async embedCalculateTotalFromSavedChart(
-        @Header('Lightdash-Embed-Token') embedToken: string,
+        @Request() req: express.Request,
         @Path() projectUuid: string,
         @Path() savedChartUuid: string,
         @Body()
@@ -247,10 +302,13 @@ export class EmbedController extends BaseController {
         },
     ): Promise<ApiCalculateTotalResponse> {
         this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
         return {
             status: 'ok',
             results: await this.getEmbedService().calculateTotalFromSavedChart(
-                embedToken,
+                req.account,
                 projectUuid,
                 savedChartUuid,
                 body.dashboardFilters,
@@ -260,11 +318,45 @@ export class EmbedController extends BaseController {
     }
 
     @SuccessResponse('200', 'Success')
+    @Post('/chart/:savedChartUuid/calculate-subtotals')
+    @OperationId('embedCalculateSubtotalsFromSavedChart')
+    async embedCalculateSubtotalsFromSavedChart(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Path() savedChartUuid: string,
+        @Body()
+        body: {
+            dashboardFilters?: DashboardFilters;
+            columnOrder: string[];
+            pivotDimensions?: string[];
+            invalidateCache?: boolean;
+        },
+    ): Promise<ApiCalculateSubtotalsResponse> {
+        this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
+        return {
+            status: 'ok',
+            results:
+                await this.getEmbedService().calculateSubtotalsFromSavedChart(
+                    req.account,
+                    projectUuid,
+                    savedChartUuid,
+                    body.dashboardFilters,
+                    body.columnOrder,
+                    body.pivotDimensions,
+                    body.invalidateCache,
+                ),
+        };
+    }
+
+    @SuccessResponse('200', 'Success')
     @Post('/filter/:filterUuid/search')
     @OperationId('searchFilterValues')
     async searchFilterValues(
+        @Request() req: express.Request,
         @Path() projectUuid: string,
-        @Header('Lightdash-Embed-Token') embedToken: string,
         @Path() filterUuid: string,
         @Body()
         body: {
@@ -279,8 +371,11 @@ export class EmbedController extends BaseController {
     }> {
         this.setStatus(200);
         const { search, limit, filters, forceRefresh } = body;
+
+        assertEmbeddedAuth(req.account);
+
         const results = await this.getEmbedService().searchFilterValues({
-            embedToken,
+            account: req.account,
             projectUuid,
             filterUuid,
             search,

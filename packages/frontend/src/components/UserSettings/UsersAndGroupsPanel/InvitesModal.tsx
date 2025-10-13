@@ -3,7 +3,14 @@ import {
     getEmailSchema,
     type CreateInviteLink,
 } from '@lightdash/common';
-import { Button, Group, Modal, Select, TextInput, Title } from '@mantine/core';
+import {
+    Button,
+    Group,
+    Modal,
+    Select,
+    TextInput,
+    Title,
+} from '@mantine-8/core';
 import { useForm, zodResolver } from '@mantine/form';
 import { IconUser } from '@tabler/icons-react';
 import React, { type FC } from 'react';
@@ -58,7 +65,7 @@ const InvitesModal: FC<{
             opened={opened}
             onClose={onClose}
             title={
-                <Group spacing="xs">
+                <Group gap="xs">
                     <MantineIcon size="lg" icon={IconUser} />
                     <Title order={4}>Add user</Title>
                 </Group>
@@ -76,48 +83,44 @@ const InvitesModal: FC<{
                         handleSubmit(values),
                     )}
                 >
-                    <Group
-                        spacing="xs"
-                        align={form.errors.email ? 'center' : 'end'}
-                    >
+                    <Group gap="xs" align="start" wrap="nowrap">
                         <TextInput
                             name="email"
                             label="Enter user email address"
                             placeholder="example@gmail.com"
                             required
                             disabled={isLoading}
-                            w="43%"
+                            style={{ flex: 1 }}
                             {...form.getInputProps('email')}
                         />
-                        <Group
-                            spacing="xs"
-                            align={form.errors.email ? 'center' : 'end'}
-                        >
-                            {user.data?.ability?.can(
-                                'manage',
-                                'Organization',
-                            ) && (
-                                <Select
-                                    data={Object.values(
-                                        OrganizationMemberRole,
-                                    ).map((orgMemberRole) => ({
+                        {user.data?.ability?.can('manage', 'Organization') && (
+                            <Select
+                                data={Object.values(OrganizationMemberRole).map(
+                                    (orgMemberRole) => ({
                                         value: orgMemberRole,
                                         label: orgMemberRole.replace('_', ' '),
-                                    }))}
-                                    disabled={isLoading}
-                                    required
-                                    placeholder="Select role"
-                                    dropdownPosition="bottom"
-                                    withinPortal
-                                    {...form.getInputProps('role')}
-                                />
-                            )}
-                            <Button disabled={isLoading} type="submit">
-                                {health.data?.hasEmailClient
-                                    ? 'Send invite'
-                                    : 'Generate invite'}
-                            </Button>
-                        </Group>
+                                    }),
+                                )}
+                                disabled={isLoading}
+                                required
+                                placeholder="Select role"
+                                comboboxProps={{
+                                    position: 'bottom',
+                                    withinPortal: true,
+                                }}
+                                style={{ marginTop: 20, width: 180 }}
+                                {...form.getInputProps('role')}
+                            />
+                        )}
+                        <Button
+                            disabled={isLoading}
+                            type="submit"
+                            style={{ marginTop: 20 }}
+                        >
+                            {health.data?.hasEmailClient
+                                ? 'Send invite'
+                                : 'Generate invite'}
+                        </Button>
                     </Group>
                 </form>
                 {inviteLink && (

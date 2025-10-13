@@ -91,6 +91,10 @@ const applyOrganizationMemberStaticAbilities: Record<
         can('view', 'SpotlightTableConfig', {
             organizationUuid: member.organizationUuid,
         });
+        can('view', 'AiAgentThread', {
+            organizationUuid: member.organizationUuid,
+            userUuid: member.userUuid,
+        });
     },
     interactive_viewer(member, { can }) {
         applyOrganizationMemberStaticAbilities.viewer(member, { can });
@@ -111,6 +115,10 @@ const applyOrganizationMemberStaticAbilities: Record<
         can('create', 'ScheduledDeliveries', {
             organizationUuid: member.organizationUuid,
         });
+        can('manage', 'GoogleSheets', {
+            organizationUuid: member.organizationUuid,
+        });
+
         can('create', 'DashboardComments', {
             organizationUuid: member.organizationUuid,
         });
@@ -169,6 +177,13 @@ const applyOrganizationMemberStaticAbilities: Record<
                     role: SpaceMemberRole.ADMIN,
                 },
             },
+        });
+
+        can('view', 'AiAgent', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('create', 'AiAgentThread', {
+            organizationUuid: member.organizationUuid,
         });
     },
     editor(member, { can }) {
@@ -257,6 +272,13 @@ const applyOrganizationMemberStaticAbilities: Record<
         can('view', 'JobStatus', {
             organizationUuid: member.organizationUuid,
         });
+        can('manage', 'AiAgent', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'AiAgentThread', {
+            organizationUuid: member.organizationUuid,
+            userUuid: member.userUuid,
+        });
     },
     admin(member, { can }) {
         applyOrganizationMemberStaticAbilities.developer(member, { can });
@@ -295,6 +317,15 @@ const applyOrganizationMemberStaticAbilities: Record<
             organizationUuid: member.organizationUuid,
         });
         can('manage', 'Group', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'OrganizationWarehouseCredentials', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('view', 'AiAgentThread', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'AiAgentThread', {
             organizationUuid: member.organizationUuid,
         });
     },

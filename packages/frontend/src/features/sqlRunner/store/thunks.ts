@@ -5,10 +5,8 @@ import type * as rtk from '@reduxjs/toolkit';
 import {
     ChartKind,
     isApiError,
-    isApiSqlRunnerJobSuccessResponse,
-    isErrorDetails,
     type ApiErrorDetail,
-    type RawResultRow,
+    type ParametersValuesMap,
 } from '@lightdash/common';
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import { type RootState } from '.';
@@ -18,12 +16,8 @@ import {
     selectCompleteConfigByKind,
 } from '../../../components/DataViz/store/selectors';
 import getChartDataModel from '../../../components/DataViz/transformers/getChartDataModel';
-import { getResultsFromStream } from '../../../utils/request';
-import { getSqlRunnerCompleteJob } from '../hooks/requestUtils';
-import {
-    scheduleSqlJob,
-    type ResultsAndColumns,
-} from '../hooks/useSqlQueryRun';
+import { executeSqlQuery } from '../../queryRunner/executeQuery';
+import { type ResultsAndColumns } from '../hooks/useSqlQueryRun';
 import { selectSqlRunnerResultsRunner } from './sqlRunnerSlice';
 
 /**
@@ -35,40 +29,26 @@ import { selectSqlRunnerResultsRunner } from './sqlRunnerSlice';
  */
 export const runSqlQuery = createAsyncThunk<
     ResultsAndColumns,
-    { sql: string; limit: number; projectUuid: string },
+    {
+        sql: string;
+        limit: number;
+        projectUuid: string;
+        parameterValues: ParametersValuesMap;
+    },
     { rejectValue: ApiErrorDetail }
 >(
     'sqlRunner/runSqlQuery',
-    async ({ sql, limit, projectUuid }, { rejectWithValue }) => {
+    async (
+        { sql, limit, projectUuid, parameterValues },
+        { rejectWithValue },
+    ) => {
         try {
-            const scheduledJob = await scheduleSqlJob({
+            return await executeSqlQuery(
                 projectUuid,
                 sql,
                 limit,
-            });
-
-            const job = await getSqlRunnerCompleteJob(scheduledJob.jobId);
-            if (isApiSqlRunnerJobSuccessResponse(job)) {
-                const url =
-                    job.details && !isErrorDetails(job.details)
-                        ? job.details.fileUrl
-                        : undefined;
-
-                const results = await getResultsFromStream<RawResultRow>(url);
-
-                const columns =
-                    job.details && !isErrorDetails(job.details)
-                        ? job.details.columns
-                        : [];
-
-                return {
-                    fileUrl: url,
-                    results,
-                    columns,
-                };
-            } else {
-                return rejectWithValue(job.error);
-            }
+                parameterValues,
+            );
         } catch (error) {
             if (isApiError(error)) {
                 return rejectWithValue(error.error);

@@ -2,10 +2,17 @@ import {
     type ApiCompiledQueryResults,
     type ApiError,
     type MetricQuery,
+    type ParametersValuesMap,
 } from '@lightdash/common';
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 import { lightdashApi } from '../api';
+import {
+    selectFilters,
+    selectSorts,
+    selectTableName,
+    useExplorerSelector,
+} from '../features/explorer/store';
 import useExplorerContext from '../providers/Explorer/useExplorerContext';
 import { convertDateFilters } from '../utils/dateFilter';
 import useQueryError from './useQueryError';
@@ -14,10 +21,12 @@ const getCompiledQuery = async (
     projectUuid: string,
     tableId: string,
     query: MetricQuery,
+    queryParameters?: ParametersValuesMap,
 ) => {
     const timezoneFixQuery = {
         ...query,
         filters: convertDateFilters(query.filters),
+        parameters: queryParameters,
     };
 
     return lightdashApi<ApiCompiledQueryResults>({
@@ -31,14 +40,12 @@ export const useCompiledSql = (
     queryOptions?: UseQueryOptions<ApiCompiledQueryResults, ApiError>,
 ) => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const tableId = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.tableName,
-    );
+    const tableId = useExplorerSelector(selectTableName);
+    const filters = useExplorerSelector(selectFilters);
+    const sorts = useExplorerSelector(selectSorts);
     const {
         dimensions,
         metrics,
-        sorts,
-        filters,
         limit,
         tableCalculations,
         additionalMetrics,
@@ -46,6 +53,10 @@ export const useCompiledSql = (
         timezone,
     } = useExplorerContext(
         (context) => context.state.unsavedChartVersion.metricQuery,
+    );
+
+    const queryParameters = useExplorerContext(
+        (context) => context.state.unsavedChartVersion.parameters || {},
     );
 
     const setErrorResponse = useQueryError();
@@ -67,13 +78,37 @@ export const useCompiledSql = (
         metricQuery,
         projectUuid,
         timezone,
+        queryParameters,
     ];
     return useQuery<ApiCompiledQueryResults, ApiError>({
-        enabled: tableId !== undefined,
         queryKey,
         queryFn: () =>
-            getCompiledQuery(projectUuid!, tableId || '', metricQuery),
+            getCompiledQuery(
+                projectUuid!,
+                tableId || '',
+                metricQuery,
+                queryParameters,
+            ),
         onError: (result) => setErrorResponse(result),
+        keepPreviousData: true,
         ...queryOptions,
+        // Ensure enabled check happens AFTER spread to prevent override
+        enabled: (queryOptions?.enabled ?? true) && !!tableId && !!projectUuid,
+    });
+};
+
+export const useCompiledSqlFromMetricQuery = ({
+    tableName,
+    projectUuid,
+    metricQuery,
+}: Partial<{
+    tableName: string;
+    projectUuid: string;
+    metricQuery: MetricQuery;
+}>) => {
+    return useQuery<ApiCompiledQueryResults, ApiError>({
+        queryKey: ['compiledQuery', tableName, metricQuery, projectUuid],
+        queryFn: () => getCompiledQuery(projectUuid!, tableName!, metricQuery!),
+        enabled: !!tableName && !!projectUuid && !!metricQuery,
     });
 };

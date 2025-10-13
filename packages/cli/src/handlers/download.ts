@@ -9,6 +9,7 @@ import {
     ChartAsCode,
     DashboardAsCode,
     getErrorMessage,
+    LightdashError,
     PromotionAction,
     PromotionChanges,
 } from '@lightdash/common';
@@ -29,6 +30,8 @@ export type DownloadHandlerOptions = {
     path?: string; // New optional path parameter
     project?: string;
     languageMap: boolean;
+    skipSpaceCreate: boolean;
+    includeCharts: boolean;
 };
 
 const getDownloadFolder = (customPath?: string): string => {
@@ -202,7 +205,7 @@ export const downloadContent = async (
             `Downloaded ${contentAsCode.offset} of ${contentAsCode.total} ${type}`,
         );
         contentAsCode.missingIds.forEach((missingId) => {
-            console.warn(styles.warning(`\nNo chart with id "${missingId}"`));
+            console.warn(styles.warning(`\nNo ${type} with id "${missingId}"`));
         });
 
         if ('dashboards' in contentAsCode) {
@@ -242,7 +245,7 @@ export const downloadContent = async (
                         ),
                     ];
                 },
-                chartSlugs,
+                [],
             );
         } else {
             const outputDir = await createDirForContent(
@@ -344,7 +347,7 @@ export const downloadHandler = async (
 
             // If any filter is provided, we download all charts for these dashboard
             // We don't need to do this if we download everything (no filters)
-            if (hasFilters) {
+            if (hasFilters && chartSlugs.length > 0) {
                 spinner.start(
                     `Downloading ${chartSlugs.length} charts linked to dashboards`,
                 );
@@ -459,6 +462,7 @@ const upsertResources = async <T extends ChartAsCode | DashboardAsCode>(
     force: boolean,
     slugs: string[],
     customPath?: string,
+    skipSpaceCreate?: boolean,
 ): Promise<{ changes: Record<string, number>; total: number }> => {
     const config = await getConfig();
 
@@ -509,7 +513,10 @@ const upsertResources = async <T extends ChartAsCode | DashboardAsCode>(
             >({
                 method: 'POST',
                 url: `/api/v1/projects/${projectId}/${type}/${item.slug}/code`,
-                body: JSON.stringify(item),
+                body: JSON.stringify({
+                    ...item,
+                    skipSpaceCreate,
+                }),
             });
 
             GlobalState.debug(
@@ -517,28 +524,74 @@ const upsertResources = async <T extends ChartAsCode | DashboardAsCode>(
             );
 
             changes = storeUploadChanges(changes, upsertData);
-        } catch (error) {
-            changes[`${type} with errors`] =
-                (changes[`${type} with errors`] ?? 0) + 1;
-            console.error(
-                styles.error(
-                    `Error upserting ${type}: ${getErrorMessage(error)}`,
-                ),
-            );
+        } catch (error: unknown) {
+            if (
+                error instanceof LightdashError &&
+                error.name === 'NotFoundError' &&
+                skipSpaceCreate
+            ) {
+                console.warn(
+                    styles.warning(
+                        `Skipping ${type} "${item.slug}" because space "${item.spaceSlug}" does not exist and --skip-space-create is true`,
+                    ),
+                );
+                changes[`${type} skipped`] =
+                    (changes[`${type} skipped`] ?? 0) + 1;
+            } else {
+                changes[`${type} with errors`] =
+                    (changes[`${type} with errors`] ?? 0) + 1;
+                console.error(
+                    styles.error(
+                        `Error upserting ${type}: ${getErrorMessage(error)}`,
+                    ),
+                );
 
-            await LightdashAnalytics.track({
-                event: 'download.error',
-                properties: {
-                    userId: config.user?.userUuid,
-                    organizationId: config.user?.organizationUuid,
-                    projectId,
-                    type,
-                    error: getErrorMessage(error),
-                },
-            });
+                await LightdashAnalytics.track({
+                    event: 'download.error',
+                    properties: {
+                        userId: config.user?.userUuid,
+                        organizationId: config.user?.organizationUuid,
+                        projectId,
+                        type,
+                        error: getErrorMessage(error),
+                    },
+                });
+            }
         }
     }
     return { changes, total: filteredItems.length };
+};
+
+const getDashboardChartSlugs = async (
+    dashboardSlugs: string[],
+    customPath?: string,
+) => {
+    const dashboardItems = await readCodeFiles<DashboardAsCode>(
+        'dashboards',
+        customPath,
+    );
+
+    const filteredDashboardItems =
+        dashboardSlugs.length > 0
+            ? dashboardItems.filter((dashboard) =>
+                  dashboardSlugs.includes(dashboard.slug),
+              )
+            : dashboardItems;
+
+    return filteredDashboardItems.reduce<string[]>((acc, dashboard) => {
+        const dashboardChartSlugs = dashboard.tiles
+            .map((tile) =>
+                'chartSlug' in tile.properties
+                    ? tile.properties.chartSlug
+                    : undefined,
+            )
+            .filter(
+                (dashboardChartSlug): dashboardChartSlug is string =>
+                    !!dashboardChartSlug,
+            );
+
+        return [...acc, ...dashboardChartSlugs];
+    }, []);
 };
 
 export const uploadHandler = async (
@@ -581,7 +634,20 @@ export const uploadHandler = async (
         const hasFilters =
             options.charts.length > 0 || options.dashboards.length > 0;
 
-        if (hasFilters && options.charts.length === 0) {
+        // Always include the charts from dashboards if includeCharts is true regardless of the charts filters
+        const chartSlugs = options.includeCharts
+            ? Array.from(
+                  new Set([
+                      ...options.charts,
+                      ...(await getDashboardChartSlugs(
+                          options.dashboards,
+                          options.path,
+                      )),
+                  ]),
+              )
+            : options.charts;
+
+        if (hasFilters && chartSlugs.length === 0) {
             console.info(
                 styles.warning(`No charts filters provided, skipping`),
             );
@@ -592,8 +658,9 @@ export const uploadHandler = async (
                     projectId,
                     changes,
                     options.force,
-                    options.charts,
+                    chartSlugs,
                     options.path,
+                    options.skipSpaceCreate,
                 );
             changes = chartChanges;
             chartTotal = total;
@@ -612,6 +679,7 @@ export const uploadHandler = async (
                     options.force,
                     options.dashboards,
                     options.path,
+                    options.skipSpaceCreate,
                 );
             changes = dashboardChanges;
             dashboardTotal = total;

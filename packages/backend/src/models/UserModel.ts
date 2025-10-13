@@ -1,3 +1,4 @@
+import { AbilityBuilder } from '@casl/ability';
 import {
     ActivateUser,
     AlreadyExistsError,
@@ -10,6 +11,7 @@ import {
     LightdashMode,
     LightdashUser,
     LightdashUserWithAbilityRules,
+    MemberAbility,
     NotExistsError,
     NotFoundError,
     OpenIdIdentityIssuerType,
@@ -19,6 +21,8 @@ import {
     PersonalAccessToken,
     ProjectMemberProfile,
     ProjectMemberRole,
+    Role,
+    RoleWithScopes,
     SessionUser,
     UpdateUserArgs,
     validatePassword,
@@ -44,11 +48,16 @@ import {
 } from '../database/entities/passwordLogins';
 import { DbPersonalAccessToken } from '../database/entities/personalAccessTokens';
 import {
+    RolesTableName,
+    ScopedRolesTableName,
+} from '../database/entities/roles';
+import {
     DbUser,
     DbUserIn,
     DbUserUpdate,
     UserTableName,
 } from '../database/entities/users';
+import { deprecatedHash, hash } from '../utils/hash';
 import { PersonalAccessTokenModel } from './DashboardModel/PersonalAccessTokenModel';
 import Transaction = Knex.Transaction;
 
@@ -67,6 +76,7 @@ export type DbUserDetails = {
     organization_id: number;
     is_setup_complete: boolean;
     role?: OrganizationMemberRole;
+    role_uuid?: string;
     is_active: boolean;
     updated_at: Date;
 };
@@ -76,6 +86,7 @@ export const mapDbUserDetailsToLightdashUser = (
     hasAuthentication: boolean,
 ): LightdashUser => ({
     userUuid: user.user_uuid,
+    userId: user.user_id,
     email: user.email,
     firstName: user.first_name,
     lastName: user.last_name,
@@ -214,15 +225,17 @@ export class UserModel {
         trx: Transaction,
         createUser: (Omit<CreateUserWithRole, 'role'> | OpenIdUser) & {
             isActive: boolean;
+            isVerified?: boolean;
         },
     ) {
+        const canSkipSetupForAnalytics = !this.lightdashConfig.rudder.writeKey;
         const userIn: DbUserIn = isOpenIdUser(createUser)
             ? {
                   first_name: createUser.openId.firstName || '',
                   last_name: createUser.openId.lastName || '',
                   is_marketing_opted_in: false,
                   is_tracking_anonymized: this.canTrackingBeAnonymized(),
-                  is_setup_complete: false,
+                  is_setup_complete: canSkipSetupForAnalytics,
                   is_active: createUser.isActive,
               }
             : {
@@ -230,7 +243,7 @@ export class UserModel {
                   last_name: createUser.lastName.trim(),
                   is_marketing_opted_in: false,
                   is_tracking_anonymized: this.canTrackingBeAnonymized(),
-                  is_setup_complete: false,
+                  is_setup_complete: canSkipSetupForAnalytics,
                   is_active: createUser.isActive,
               };
         const [newUser] = await trx<DbUser>('users')
@@ -472,7 +485,10 @@ export class UserModel {
         userId: number,
         userUuid: string,
     ): Promise<
-        Pick<ProjectMemberProfile, 'projectUuid' | 'role' | 'userUuid'>[]
+        Pick<
+            ProjectMemberProfile,
+            'projectUuid' | 'role' | 'userUuid' | 'roleUuid'
+        >[]
     > {
         const projectMemberships = await this.database('project_memberships')
             .leftJoin(
@@ -485,8 +501,9 @@ export class UserModel {
 
         return projectMemberships.map((membership) => ({
             projectUuid: membership.project_uuid,
-            role: membership.role,
+            role: membership.role || ProjectMemberRole.VIEWER,
             userUuid,
+            roleUuid: membership.role_uuid || undefined,
         }));
     }
 
@@ -495,7 +512,10 @@ export class UserModel {
         organizationId: number,
         userUuid: string,
     ): Promise<
-        Pick<ProjectMemberProfile, 'projectUuid' | 'role' | 'userUuid'>[]
+        Pick<
+            ProjectMemberProfile,
+            'projectUuid' | 'role' | 'userUuid' | 'roleUuid'
+        >[]
     > {
         // Remember: primary key for an organization is organization_id,user_id - not user_id alone
         const query = this.database('group_memberships')
@@ -511,13 +531,85 @@ export class UserModel {
             )
             .where('group_memberships.organization_id', organizationId)
             .andWhere('group_memberships.user_id', userId)
-            .select('projects.project_uuid', 'project_group_access.role');
+            .select(
+                'projects.project_uuid',
+                'project_group_access.role',
+                'project_group_access.role_uuid',
+            );
         const projectMemberships = await query;
         return projectMemberships.map((membership) => ({
             projectUuid: membership.project_uuid,
             role: membership.role,
             userUuid,
+            roleUuid: membership.role_uuid || undefined,
         }));
+    }
+
+    private async customRoleScopes(
+        roleUuids: string[],
+    ): Promise<Record<Role['roleUuid'], RoleWithScopes['scopes']>> {
+        if (roleUuids.length === 0) {
+            return {};
+        }
+
+        const scopeData = await this.database(ScopedRolesTableName)
+            .select('role_uuid', 'scope_name')
+            .whereIn('role_uuid', roleUuids);
+
+        const scopesRecord: Record<string, string[]> = {};
+
+        scopeData.forEach((row) => {
+            const roleUuid = row.role_uuid;
+            const scopeName = row.scope_name;
+
+            if (!scopesRecord[roleUuid]) {
+                scopesRecord[roleUuid] = [];
+            }
+            scopesRecord[roleUuid].push(scopeName);
+        });
+
+        return scopesRecord;
+    }
+
+    private async generateUserAbilityBuilder(user: DbUserDetails): Promise<{
+        abilityBuilder: AbilityBuilder<MemberAbility>;
+        lightdashUser: LightdashUser;
+    }> {
+        const [hasAuthentication, projectRoles, groupProjectRoles] =
+            await Promise.all([
+                this.hasAuthentication(user.user_uuid),
+                this.getUserProjectRoles(user.user_id, user.user_uuid),
+                this.getUserGroupProjectRoles(
+                    user.user_id,
+                    user.organization_id,
+                    user.user_uuid,
+                ),
+            ]);
+        const lightdashUser = mapDbUserDetailsToLightdashUser(
+            user,
+            hasAuthentication,
+        );
+
+        // Fetch scopes for custom roles
+        const customRoleUuids = [...projectRoles, ...groupProjectRoles]
+            .map((role) => role.roleUuid)
+            .filter(Boolean) as string[];
+        const customRoleScopes = await this.customRoleScopes(customRoleUuids);
+        const abilityBuilder = getUserAbilityBuilder({
+            user: lightdashUser,
+            projectProfiles: [...projectRoles, ...groupProjectRoles],
+            permissionsConfig: {
+                pat: this.lightdashConfig.auth.pat,
+            },
+            customRoleScopes,
+            customRolesEnabled: this.lightdashConfig.customRoles?.enabled,
+            isEnterprise: this.lightdashConfig.license.licenseKey !== undefined,
+        });
+
+        return {
+            abilityBuilder,
+            lightdashUser,
+        };
     }
 
     async findSessionUserByOpenId(
@@ -539,29 +631,10 @@ export class UserModel {
         if (user === undefined) {
             return user;
         }
-        const lightdashUser = mapDbUserDetailsToLightdashUser(
-            user,
-            await this.hasAuthentication(user.user_uuid),
-        );
-        const projectRoles = await this.getUserProjectRoles(
-            user.user_id,
-            user.user_uuid,
-        );
-        const groupProjectRoles = await this.getUserGroupProjectRoles(
-            user.user_id,
-            user.organization_id,
-            user.user_uuid,
-        );
-        const abilityBuilder = getUserAbilityBuilder({
-            user: lightdashUser,
-            projectProfiles: [...projectRoles, ...groupProjectRoles],
-            permissionsConfig: {
-                pat: this.lightdashConfig.auth.pat,
-            },
-        });
+        const { abilityBuilder, lightdashUser } =
+            await this.generateUserAbilityBuilder(user);
 
         return {
-            userId: user.user_id,
             abilityRules: abilityBuilder.rules,
             ability: abilityBuilder.build(),
             ...lightdashUser,
@@ -578,7 +651,6 @@ export class UserModel {
         if (!org) {
             throw new NotExistsError('Cannot find organization');
         }
-
         const email = isOpenIdUser(createUser)
             ? createUser.openId.email
             : createUser.email;
@@ -702,26 +774,9 @@ export class UserModel {
         if (user === undefined) {
             throw new NotFoundError(`Cannot find user with uuid ${userUuid}`);
         }
-        const lightdashUser = mapDbUserDetailsToLightdashUser(
-            user,
-            await this.hasAuthentication(user.user_uuid),
-        );
-        const projectRoles = await this.getUserProjectRoles(
-            user.user_id,
-            user.user_uuid,
-        );
-        const groupProjectRoles = await this.getUserGroupProjectRoles(
-            user.user_id,
-            user.organization_id,
-            user.user_uuid,
-        );
-        const abilityBuilder = getUserAbilityBuilder({
-            user: lightdashUser,
-            projectProfiles: [...projectRoles, ...groupProjectRoles],
-            permissionsConfig: {
-                pat: this.lightdashConfig.auth.pat,
-            },
-        });
+        const { abilityBuilder, lightdashUser } =
+            await this.generateUserAbilityBuilder(user);
+
         return {
             ...lightdashUser,
             userId: user.user_id,
@@ -744,27 +799,9 @@ export class UserModel {
                 `Cannot find user with uuid ${userUuid} and org ${organizationUuid}`,
             );
         }
-        const [hasAuthentication, projectRoles, groupProjectRoles] =
-            await Promise.all([
-                await this.hasAuthentication(user.user_uuid),
-                this.getUserProjectRoles(user.user_id, user.user_uuid),
-                this.getUserGroupProjectRoles(
-                    user.user_id,
-                    user.organization_id,
-                    user.user_uuid,
-                ),
-            ]);
-        const lightdashUser = mapDbUserDetailsToLightdashUser(
-            user,
-            hasAuthentication,
-        );
-        const abilityBuilder = getUserAbilityBuilder({
-            user: lightdashUser,
-            projectProfiles: [...projectRoles, ...groupProjectRoles],
-            permissionsConfig: {
-                pat: this.lightdashConfig.auth.pat,
-            },
-        });
+        const { abilityBuilder, lightdashUser } =
+            await this.generateUserAbilityBuilder(user);
+
         return {
             ...lightdashUser,
             userId: user.user_id,
@@ -783,26 +820,8 @@ export class UserModel {
         if (user === undefined) {
             return undefined;
         }
-        const lightdashUser = mapDbUserDetailsToLightdashUser(
-            user,
-            await this.hasAuthentication(user.user_uuid),
-        );
-        const projectRoles = await this.getUserProjectRoles(
-            user.user_id,
-            user.user_uuid,
-        );
-        const groupProjectRoles = await this.getUserGroupProjectRoles(
-            user.user_id,
-            user.organization_id,
-            user.user_uuid,
-        );
-        const abilityBuilder = getUserAbilityBuilder({
-            user: lightdashUser,
-            projectProfiles: [...projectRoles, ...groupProjectRoles],
-            permissionsConfig: {
-                pat: this.lightdashConfig.auth.pat,
-            },
-        });
+        const { abilityBuilder, lightdashUser } =
+            await this.generateUserAbilityBuilder(user);
 
         return {
             ...lightdashUser,
@@ -815,7 +834,7 @@ export class UserModel {
     static lightdashUserFromSession(
         sessionUser: SessionUser,
     ): LightdashUserWithAbilityRules {
-        const { userId, ability, ...lightdashUser } = sessionUser;
+        const { ability, ...lightdashUser } = sessionUser;
         return lightdashUser;
     }
 
@@ -836,6 +855,11 @@ export class UserModel {
             throw new ParameterError("Password doesn't meet requirements");
         }
         const user = await this.findSessionUserByUUID(userUuid);
+
+        if (!user?.userId) {
+            throw new NotExistsError('User is missing user_id');
+        }
+
         await this.database(PasswordLoginTableName)
             .insert({
                 user_id: user.userId,
@@ -855,7 +879,7 @@ export class UserModel {
         | { user: SessionUser; personalAccessToken: PersonalAccessToken }
         | undefined
     > {
-        const tokenHash = noHash ? token : PersonalAccessTokenModel._hash(token);
+        const tokenHash = noHash ? token :  await hash(token);
 
         const [row] = await userDetailsQueryBuilder(this.database)
             .innerJoin(
@@ -864,6 +888,7 @@ export class UserModel {
                 'users.user_id',
             )
             .where('token_hash', tokenHash)
+            .orWhere('token_hash', deprecatedHash(token)) // Adding old sha256 hash for backwards compatibility
             .select<(DbUserDetails & DbPersonalAccessToken)[]>(
                 '*',
                 'organizations.created_at as organization_created_at',
@@ -871,32 +896,12 @@ export class UserModel {
         if (row === undefined) {
             return undefined;
         }
-        const lightdashUser = mapDbUserDetailsToLightdashUser(
-            row,
-            await this.hasAuthentication(row.user_uuid),
-        );
-        const projectRoles = await this.getUserProjectRoles(
-            row.user_id,
-            row.user_uuid,
-        );
-        const groupProjectRoles = await this.getUserGroupProjectRoles(
-            row.user_id,
-            row.organization_id,
-            row.user_uuid,
-        );
-        const abilityBuilder = getUserAbilityBuilder({
-            user: lightdashUser,
-            projectProfiles: [...projectRoles, ...groupProjectRoles],
-            permissionsConfig: {
-                pat: this.lightdashConfig.auth.pat,
-            },
-        });
+        const { abilityBuilder, lightdashUser } =
+            await this.generateUserAbilityBuilder(row);
+
         return {
             user: {
-                ...mapDbUserDetailsToLightdashUser(
-                    row,
-                    await this.hasAuthentication(row.user_uuid),
-                ),
+                ...lightdashUser,
                 abilityRules: abilityBuilder.rules,
                 ability: abilityBuilder.build(),
                 userId: row.user_id,
@@ -1003,7 +1008,10 @@ export class UserModel {
         return this.getUserDetailsByUuid(userUuid);
     }
 
-    async getRefreshToken(userUuid: string): Promise<string> {
+    async getRefreshToken(
+        userUuid: string,
+        issuerType: OpenIdIdentityIssuerType = OpenIdIdentityIssuerType.GOOGLE,
+    ): Promise<string> {
         const [row] = await this.database(UserTableName)
             .leftJoin(
                 'openid_identities',
@@ -1012,6 +1020,7 @@ export class UserModel {
             )
             .where('user_uuid', userUuid)
             .whereNotNull('refresh_token')
+            .where('issuer_type', issuerType)
             .select('refresh_token');
 
         if (!row) {
@@ -1037,5 +1046,24 @@ export class UserModel {
             .andWhere('emails.is_primary', true)
             .select('openid_identities.issuer_type');
         return rows.map((row) => row.issuer_type);
+    }
+
+    async getOpenIdByIssuerType(
+        userUuid: string,
+        issuerType: OpenIdIdentityIssuerType,
+    ) {
+        const rows = await this.database(OpenIdIdentitiesTableName)
+            .leftJoin('users', 'openid_identities.user_id', 'users.user_id')
+            .where('users.user_uuid', userUuid)
+            .where('issuer_type', issuerType)
+            .select('*');
+
+        if (rows.length === 0) {
+            throw new NotFoundError('OpenID identity not found');
+        }
+        if (rows.length > 1) {
+            throw new Error('Multiple OpenID identities found');
+        }
+        return rows[0];
     }
 }

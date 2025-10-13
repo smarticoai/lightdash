@@ -22,6 +22,7 @@ export class CommercialFeatureFlagModel extends FeatureFlagModel {
             [CommercialFeatureFlags.Scim]: this.getScimFlag.bind(this),
             [CommercialFeatureFlags.AiCopilot]:
                 this.getAiCopilotFlag.bind(this),
+            [CommercialFeatureFlags.AiAgent]: this.getAiAgentFlag.bind(this),
         };
     }
 
@@ -37,6 +38,7 @@ export class CommercialFeatureFlagModel extends FeatureFlagModel {
                       {
                           userUuid: user.userUuid,
                           organizationUuid: user.organizationUuid,
+                          organizationName: user.organizationName,
                       },
                       {
                           throwOnTimeout: false,
@@ -91,6 +93,7 @@ export class CommercialFeatureFlagModel extends FeatureFlagModel {
                 {
                     userUuid: user.userUuid,
                     organizationUuid: user.organizationUuid,
+                    organizationName: user.organizationName,
                 },
             );
         } else {
@@ -100,6 +103,41 @@ export class CommercialFeatureFlagModel extends FeatureFlagModel {
         return {
             id: featureFlagId,
             enabled,
+        };
+    }
+
+    private async getAiAgentFlag({
+        featureFlagId,
+        user,
+    }: FeatureFlagLogicArgs) {
+        if (!user) {
+            throw new Error('User is required to check if AI agent is enabled');
+        }
+
+        if (!this.lightdashConfig.ai.copilot.enabled) {
+            return {
+                id: featureFlagId,
+                enabled: false,
+            };
+        }
+
+        if (this.lightdashConfig.ai.copilot.askAiButtonEnabled) {
+            return {
+                id: featureFlagId,
+                enabled: true,
+            };
+        }
+
+        return {
+            id: featureFlagId,
+            enabled: await isFeatureFlagEnabled(
+                CommercialFeatureFlags.AiAgent as AnyType as FeatureFlags,
+                {
+                    userUuid: user.userUuid,
+                    organizationUuid: user.organizationUuid,
+                    organizationName: user.organizationName,
+                },
+            ),
         };
     }
 }

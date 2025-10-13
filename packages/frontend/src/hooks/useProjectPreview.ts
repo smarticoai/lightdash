@@ -1,10 +1,12 @@
 import {
+    type ApiCreatePreviewResults,
     type ApiError,
     type DbtProjectEnvironmentVariable,
 } from '@lightdash/common';
 import { IconArrowRight } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { lightdashApi } from '../api';
+import useActiveJob from '../providers/ActiveJob/useActiveJob';
 import useToaster from './toaster/useToaster';
 
 const createPreviewProject = async ({
@@ -18,10 +20,11 @@ const createPreviewProject = async ({
     dbtConnectionOverrides?: {
         branch?: string;
         environment?: DbtProjectEnvironmentVariable[];
+        manifest?: string;
     };
     warehouseConnectionOverrides?: { schema?: string };
 }) =>
-    lightdashApi<string>({
+    lightdashApi<ApiCreatePreviewResults>({
         url: `/projects/${projectUuid}/createPreview`,
         method: 'POST',
         body: JSON.stringify({
@@ -34,10 +37,10 @@ const createPreviewProject = async ({
 
 export const useCreatePreviewMutation = () => {
     const queryClient = useQueryClient();
-
+    const { setActiveJobId } = useActiveJob();
     const { showToastApiError, showToastSuccess } = useToaster();
     return useMutation<
-        string,
+        ApiCreatePreviewResults,
         ApiError,
         {
             projectUuid: string;
@@ -45,14 +48,15 @@ export const useCreatePreviewMutation = () => {
             dbtConnectionOverrides?: {
                 branch?: string;
                 environment?: DbtProjectEnvironmentVariable[];
+                manifest?: string;
             };
             warehouseConnectionOverrides?: { schema?: string };
         }
     >((data) => createPreviewProject(data), {
         mutationKey: ['preview_project_create'],
-        onSuccess: async (projectUuid) => {
+        onSuccess: async ({ projectUuid, compileJobUuid }) => {
             await queryClient.invalidateQueries(['projects']);
-
+            setActiveJobId(compileJobUuid);
             showToastSuccess({
                 title: `Preview project created`,
                 action: {

@@ -23,8 +23,8 @@ import { IconRotate2 } from '@tabler/icons-react';
 import { useCallback, useMemo, type FC, type ReactNode } from 'react';
 import useDashboardContext from '../../../providers/Dashboard/useDashboardContext';
 import MantineIcon from '../../common/MantineIcon';
-import Filter from '../Filter';
 import InvalidFilter from '../InvalidFilter';
+import Filter from './Filter';
 
 interface ActiveFiltersProps {
     isEditMode: boolean;
@@ -233,6 +233,7 @@ const ActiveFilters: FC<ActiveFiltersProps> = ({
                     <Button
                         size="xs"
                         variant="default"
+                        radius="md"
                         color="gray"
                         onClick={() => {
                             setHaveFiltersChanged(false);
@@ -258,7 +259,7 @@ const ActiveFilters: FC<ActiveFiltersProps> = ({
                                 id={item.id}
                                 disabled={!isEditMode || !!openPopoverId}
                             >
-                                {field ? (
+                                {field || item.target.isSqlColumn ? (
                                     <Filter
                                         key={item.id}
                                         isEditMode={isEditMode}
@@ -307,7 +308,7 @@ const ActiveFilters: FC<ActiveFiltersProps> = ({
             {dashboardTemporaryFilters.dimensions.map((item, index) => {
                 const field = allFilterableFieldsMap[item.target.fieldId];
                 const appliesToTabs = getTabsUsingTemporaryFilter(item.id);
-                return field ? (
+                return field || item.target.isSqlColumn ? (
                     <Filter
                         key={item.id}
                         isTemporary

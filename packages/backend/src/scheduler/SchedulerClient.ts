@@ -19,7 +19,6 @@ import {
     SchedulerFormat,
     SchedulerJobStatus,
     SchedulerTaskName,
-    SemanticLayerQueryPayload,
     SlackNotificationPayload,
     SqlRunnerPayload,
     SqlRunnerPivotQueryPayload,
@@ -33,6 +32,7 @@ import {
     isCreateScheduler,
     isCreateSchedulerMsTeamsTarget,
     isCreateSchedulerSlackTarget,
+    type DownloadAsyncQueryResultsPayload,
     type SchedulerCreateProjectWithCompilePayload,
     type SchedulerIndexCatalogJobPayload,
 } from '@lightdash/common';
@@ -473,6 +473,27 @@ export class SchedulerClient {
         return { target, jobId: id };
     }
 
+    private async deleteOverlappingScheduledJobs(
+        schedulerUuid: string,
+        dates: Date[],
+    ) {
+        // Delete any existing scheduled jobs for this scheduler that overlap with the dates we're about to create
+        // This prevents duplicates if the generateDailyJobs task runs multiple times or retries
+        const existingJobs = await this.getScheduledJobs(schedulerUuid);
+        const datesToCreate = new Set(dates.map((d) => d.toISOString()));
+        const jobsToDelete = existingJobs.filter((job) =>
+            datesToCreate.has(new Date(job.date).toISOString()),
+        );
+
+        if (jobsToDelete.length > 0) {
+            Logger.info(
+                `Removing ${jobsToDelete.length} existing scheduled jobs for scheduler ${schedulerUuid} to prevent duplicates`,
+            );
+            const graphileClient = await this.graphileUtils;
+            await graphileClient.completeJobs(jobsToDelete.map((j) => j.id));
+        }
+    }
+
     async generateDailyJobsForScheduler(
         scheduler: SchedulerAndTargets,
         traceProperties: TraceTaskBase,
@@ -493,6 +514,11 @@ export class SchedulerClient {
         );
 
         try {
+            await this.deleteOverlappingScheduledJobs(
+                scheduler.schedulerUuid,
+                dates,
+            );
+
             const promises = dates.map((date: Date) =>
                 this.addScheduledDeliveryJob(
                     date,
@@ -673,31 +699,7 @@ export class SchedulerClient {
                 projectUuid: payload.projectUuid,
                 organizationUuid: payload.organizationUuid,
                 context: payload.context,
-            },
-        });
-
-        return jobId;
-    }
-
-    async semanticLayerStreamingResults(payload: SemanticLayerQueryPayload) {
-        const graphileClient = await this.graphileUtils;
-        const now = new Date();
-        const jobId = await SchedulerClient.addJob(
-            graphileClient,
-            SCHEDULER_TASKS.SEMANTIC_LAYER_QUERY,
-            payload,
-            now,
-            JobPriority.HIGH,
-        );
-        await this.schedulerModel.logSchedulerJob({
-            task: SCHEDULER_TASKS.SEMANTIC_LAYER_QUERY,
-            jobId,
-            scheduledTime: now,
-            status: SchedulerJobStatus.SCHEDULED,
-            details: {
-                createdByUserUuid: payload.userUuid,
-                projectUuid: payload.projectUuid,
-                organizationUuid: payload.organizationUuid,
+                onlyValidateExploresInArgs: payload.onlyValidateExploresInArgs,
             },
         });
 
@@ -950,5 +952,32 @@ export class SchedulerClient {
             return rows;
         });
         return stats;
+    }
+
+    async downloadAsyncQueryResults(payload: DownloadAsyncQueryResultsPayload) {
+        const graphileClient = await this.graphileUtils;
+        const now = new Date();
+        const jobId = await SchedulerClient.addJob(
+            graphileClient,
+            SCHEDULER_TASKS.DOWNLOAD_ASYNC_QUERY_RESULTS,
+            payload,
+            now,
+            JobPriority.MEDIUM,
+            1,
+        );
+
+        await this.schedulerModel.logSchedulerJob({
+            task: SCHEDULER_TASKS.DOWNLOAD_ASYNC_QUERY_RESULTS,
+            jobId,
+            scheduledTime: now,
+            status: SchedulerJobStatus.SCHEDULED,
+            details: {
+                createdByUserUuid: payload.userUuid,
+                projectUuid: payload.projectUuid,
+                organizationUuid: payload.organizationUuid,
+            },
+        });
+
+        return jobId;
     }
 }

@@ -7,7 +7,6 @@ import {
 import { Installation, InstallationQuery } from '@slack/bolt';
 import { Knex } from 'knex';
 import isNil from 'lodash/isNil';
-import { DbOrganization } from '../database/entities/organizations';
 import {
     DbSlackAuthTokens,
     SlackAuthTokensTableName,
@@ -112,7 +111,7 @@ export class SlackAuthenticationModel {
 
     async getInstallationFromOrganizationUuid(
         organizationUuid: string,
-    ): Promise<SlackSettings | undefined> {
+    ): Promise<Omit<SlackSettings, 'hasRequiredScopes'> | undefined> {
         const [row] = await this.database(SlackAuthTokensTableName)
             .leftJoin(
                 'organizations',
@@ -133,6 +132,21 @@ export class SlackAuthenticationModel {
             notificationChannel: row.notification_channel ?? undefined,
             appProfilePhotoUrl: row.app_profile_photo_url ?? undefined,
         };
+    }
+
+    async getRawInstallationFromOrganizationUuid(
+        organizationUuid: string,
+    ): Promise<Installation<'v1' | 'v2', boolean> | undefined> {
+        const [row] = await this.database(SlackAuthTokensTableName)
+            .leftJoin(
+                'organizations',
+                'slack_auth_tokens.organization_id',
+                'organizations.organization_id',
+            )
+            .select('*')
+            .where('organization_uuid', organizationUuid);
+
+        return row?.installation;
     }
 
     async deleteInstallation(installQuery: AnyType) {

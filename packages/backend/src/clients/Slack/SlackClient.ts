@@ -1,13 +1,20 @@
 import {
+    AnyType,
     friendlyName,
     MissingConfigError,
     SlackAppCustomSettings,
     SlackChannel,
+    SlackError,
     SlackInstallationNotFoundError,
     SlackSettings,
     UnexpectedServerError,
 } from '@lightdash/common';
-import { Block } from '@slack/bolt';
+import {
+    App,
+    Block,
+    ExpressReceiver,
+    LogLevel as SlackLogLevel,
+} from '@slack/bolt';
 import {
     ChatPostMessageArguments,
     ChatUpdateArguments,
@@ -18,15 +25,13 @@ import {
     WebClient,
     type FilesUploadV2Arguments,
 } from '@slack/web-api';
-import { LightdashConfig } from '../../config/parseConfig';
+import { Express } from 'express';
+import { without } from 'lodash';
+import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
+import { LightdashConfig, LoggingLevel } from '../../config/parseConfig';
 import { slackErrorHandler } from '../../errors';
 import Logger from '../../logging/logger';
 import { SlackAuthenticationModel } from '../../models/SlackAuthenticationModel';
-
-type SlackClientArguments = {
-    slackAuthenticationModel: SlackAuthenticationModel;
-    lightdashConfig: LightdashConfig;
-};
 
 const DEFAULT_CACHE_TIME = 1000 * 60 * 10; // 10 minutes
 const MAX_CHANNELS_LIMIT = 100000;
@@ -42,12 +47,39 @@ export type PostSlackFile = {
     fileType?: string;
 };
 
+export type SlackClientArguments = {
+    slackAuthenticationModel: SlackAuthenticationModel;
+    lightdashConfig: LightdashConfig;
+    analytics: LightdashAnalytics;
+};
+
+const lightdashLogLevelToSlackLogLevel = (
+    level: LoggingLevel,
+): SlackLogLevel => {
+    switch (level) {
+        case 'error':
+            return SlackLogLevel.ERROR;
+        case 'warn':
+            return SlackLogLevel.WARN;
+        case 'info':
+            return SlackLogLevel.INFO;
+        case 'debug':
+            return SlackLogLevel.DEBUG;
+        default:
+            return SlackLogLevel.INFO;
+    }
+};
+
 export class SlackClient {
     slackAuthenticationModel: SlackAuthenticationModel;
 
     lightdashConfig: LightdashConfig;
 
+    analytics: LightdashAnalytics;
+
     public isEnabled: boolean = false;
+
+    private slackApp: App | undefined;
 
     private channelsCache: Map<
         string,
@@ -57,12 +89,59 @@ export class SlackClient {
     constructor({
         slackAuthenticationModel,
         lightdashConfig,
+        analytics,
     }: SlackClientArguments) {
         this.lightdashConfig = lightdashConfig;
+        this.analytics = analytics;
         this.slackAuthenticationModel = slackAuthenticationModel;
+
         if (this.lightdashConfig.slack?.clientId) {
             this.isEnabled = true;
         }
+    }
+
+    public getApp(): App | undefined {
+        return this.slackApp;
+    }
+
+    // eslint-disable-next-line class-methods-use-this
+    public getRequiredScopes() {
+        return [
+            'links:read',
+            'links:write',
+            'chat:write',
+            'chat:write.customize',
+            'channels:read',
+            'groups:read',
+            'users:read',
+            'app_mentions:read',
+            'files:write',
+            'files:read',
+            // 'channels:join', - Made optional since users can manually add the app to channels
+        ];
+    }
+
+    public getSlackOptions() {
+        return {
+            signingSecret: this.lightdashConfig.slack?.signingSecret || '',
+            clientId: this.lightdashConfig.slack?.clientId || '',
+            clientSecret: this.lightdashConfig.slack?.clientSecret || '',
+            stateSecret: this.lightdashConfig.slack?.stateSecret || '',
+
+            redirectUri: `${this.lightdashConfig.siteUrl}/api/v1/slack/oauth_redirect`,
+            installerOptions: {
+                directInstall: true,
+                // The default value for redirectUriPath is ‘/slack/oauth_redirect’, but we override it to match the existing redirect route in the Slack app manifest files.
+                redirectUriPath: '/api/v1/slack/oauth_redirect',
+                userScopes: [],
+            },
+            scopes: this.getRequiredScopes(),
+        };
+    }
+
+    public hasRequiredScopes(installationScopes: string[]) {
+        const requiredScopes = this.getRequiredScopes();
+        return without(requiredScopes, ...installationScopes).length === 0;
     }
 
     private async getWebClient(organizationUuid: string): Promise<WebClient> {
@@ -84,12 +163,26 @@ export class SlackClient {
     async getChannels(
         organizationUuid: string,
         search?: string,
-        filter: { excludeArchived?: boolean; forceRefresh?: boolean } = {
+        filter: {
+            excludeArchived?: boolean;
+            excludeDms?: boolean;
+            excludeGroups?: boolean;
+            forceRefresh?: boolean;
+        } = {
             excludeArchived: true,
+            excludeDms: false,
+            excludeGroups: false,
         },
     ): Promise<SlackChannel[] | undefined> {
+        // Create cache key that includes filters that affect API calls
+        const cacheKey = `${organizationUuid}:${JSON.stringify({
+            excludeArchived: filter.excludeArchived,
+            excludeDms: filter.excludeDms,
+            excludeGroups: filter.excludeGroups,
+        })}`;
+
         const getCachedChannels = () => {
-            const cached = this.channelsCache.get(organizationUuid);
+            const cached = this.channelsCache.get(cacheKey);
             if (!cached) return undefined;
 
             let finalResults = cached.channels;
@@ -103,7 +196,7 @@ export class SlackClient {
 
         const isCacheValid = () => {
             if (filter.forceRefresh) return false;
-            const cached = this.channelsCache.get(organizationUuid);
+            const cached = this.channelsCache.get(cacheKey);
             if (!cached) return false;
 
             const cacheAge = new Date().getTime() - cached.lastCached.getTime();
@@ -157,30 +250,35 @@ export class SlackClient {
         } while (nextCursor);
         Logger.debug(`Total slack channels ${allChannels.length}`);
 
-        nextCursor = undefined;
         let allUsers: UsersListResponse['members'] = [];
-        do {
-            try {
-                Logger.debug(`Fetching slack users with cursor ${nextCursor}`);
+        if (!filter.excludeDms) {
+            nextCursor = undefined;
+            do {
+                try {
+                    Logger.debug(
+                        `Fetching slack users with cursor ${nextCursor}`,
+                    );
 
-                const users: UsersListResponse =
-                    // eslint-disable-next-line no-await-in-loop
-                    await webClient.users.list({
-                        limit: 900,
-                        cursor: nextCursor,
-                    });
-                nextCursor = users.response_metadata?.next_cursor;
-                allUsers = users.members
-                    ? [...allUsers, ...users.members]
-                    : allUsers;
-            } catch (e) {
-                slackErrorHandler(e, 'Unable to fetch slack users');
-            }
-        } while (nextCursor);
-        Logger.debug(`Total slack users ${allUsers.length}`);
+                    const users: UsersListResponse =
+                        // eslint-disable-next-line no-await-in-loop
+                        await webClient.users.list({
+                            limit: 900,
+                            cursor: nextCursor,
+                        });
+                    nextCursor = users.response_metadata?.next_cursor;
+                    allUsers = users.members
+                        ? [...allUsers, ...users.members]
+                        : allUsers;
+                } catch (e) {
+                    slackErrorHandler(e, 'Unable to fetch slack users');
+                }
+            } while (nextCursor);
+            Logger.debug(`Total slack users ${allUsers.length}`);
+        }
 
         const sortedChannels = allChannels
             .filter(({ id, name }) => id && name)
+            .filter(({ id }) => !filter.excludeGroups || !id!.startsWith('G'))
             .map<SlackChannel>(({ id, name }) => ({
                 id: id!,
                 name: `#${name!}`,
@@ -196,7 +294,7 @@ export class SlackClient {
             .sort((a, b) => a.name.localeCompare(b.name));
 
         const channels = [...sortedChannels, ...sortedUsers];
-        this.channelsCache.set(organizationUuid, {
+        this.channelsCache.set(cacheKey, {
             lastCached: new Date(),
             channels,
         });
@@ -217,7 +315,16 @@ export class SlackClient {
                 });
             });
             await Promise.all(joinPromises);
-        } catch (e) {
+        } catch (e: AnyType) {
+            // If the channels:join scope is missing, log a warning but don't throw
+            if (e?.data?.error === 'missing_scope') {
+                Logger.warn(
+                    `Unable to join channels ${channels} on organization ${organizationUuid}: missing channels:join scope. The app can still be added to channels manually.`,
+                );
+                throw new SlackError(
+                    `Unable to join channel(s): missing channels:join scope. Add the app to the channel(s) manually.`,
+                );
+            }
             slackErrorHandler(
                 e,
                 `Unable to join channels ${channels} on organization ${organizationUuid}`,
@@ -408,8 +515,8 @@ export class SlackClient {
         }
     }
 
-    /* 
-    This method will try to upload an image to slack, so it can be used in blocks, 
+    /*
+    This method will try to upload an image to slack, so it can be used in blocks,
     instead of sharing the file directly on a channel or a thread
     It returns a promise that resolves to the file url, but it takes a while for the file to be uploaded
     Note: method sharedPublicURL will not work here because it requires a user token, and we only use bot tokens
@@ -471,6 +578,70 @@ export class SlackClient {
         return fileUrl;
     }
 
+    async getUserInfo(
+        organizationUuid: string,
+        userId: string,
+    ): Promise<{
+        id: string;
+        name?: string;
+        image?: string;
+    }> {
+        const webClient = await this.getWebClient(organizationUuid);
+        const response = await webClient.users.info({ user: userId });
+
+        if (!response.ok) {
+            throw new UnexpectedServerError(
+                `Failed to get user info for ${userId}: ${response.error}`,
+            );
+        }
+        if (!response.user?.profile) {
+            throw new UnexpectedServerError(
+                `Failed to get user info for ${userId}: No profile found`,
+            );
+        }
+
+        return {
+            id: userId,
+            name: response.user.profile.real_name,
+            image: response.user.profile.image_512,
+        };
+    }
+
+    async getAppName(organizationUuid: string): Promise<string | undefined> {
+        const webClient = await this.getWebClient(organizationUuid);
+
+        // Get the raw installation data from the database which includes bot.id
+        const installation =
+            await this.slackAuthenticationModel.getRawInstallationFromOrganizationUuid(
+                organizationUuid,
+            );
+
+        if (!installation) {
+            throw new SlackInstallationNotFoundError();
+        }
+
+        try {
+            // Try to get bot info using the bot ID from the installation
+            const botId = installation?.bot?.id;
+            if (botId) {
+                const botResponse = await webClient.bots.info({
+                    bot: botId,
+                });
+
+                if (botResponse.ok && botResponse.bot) {
+                    return botResponse.bot.name;
+                }
+            }
+
+            return undefined;
+        } catch (error) {
+            Logger.warn(
+                `Failed to get app info for organization ${organizationUuid}: ${error}`,
+            );
+            return undefined;
+        }
+    }
+
     /**
      * Helper method to try to upload an image to slack, so it can be used in blocks without expiration
      * If it fails, we will keep using the same URL (s3)
@@ -495,6 +666,65 @@ export class SlackClient {
         } catch (e) {
             slackErrorHandler(e, 'Failed to upload image to slack');
             return { url: imageUrl, expiring: true };
+        }
+    }
+
+    async start(expressApp: Express) {
+        if (!this.lightdashConfig.slack?.clientId) {
+            Logger.warn(`Missing "SLACK_CLIENT_ID", Slack App will not run`);
+            return;
+        }
+
+        let app: App | undefined;
+
+        try {
+            if (this.lightdashConfig.slack?.socketMode) {
+                app = new App({
+                    ...this.getSlackOptions(),
+                    installationStore: {
+                        storeInstallation: (i) =>
+                            this.slackAuthenticationModel.createInstallation(i),
+                        fetchInstallation: (i) =>
+                            this.slackAuthenticationModel.getInstallation(i),
+                        deleteInstallation: (i) =>
+                            this.slackAuthenticationModel.deleteInstallation(i),
+                    },
+                    logLevel: lightdashLogLevelToSlackLogLevel(
+                        this.lightdashConfig.logging.level ?? 'info',
+                    ),
+                    port: this.lightdashConfig.slack.port,
+                    socketMode: this.lightdashConfig.slack.socketMode,
+                    appToken: this.lightdashConfig.slack.appToken,
+                });
+            } else {
+                const slackReceiver = new ExpressReceiver({
+                    ...this.getSlackOptions(),
+                    installationStore: {
+                        storeInstallation: (i) =>
+                            this.slackAuthenticationModel.createInstallation(i),
+                        fetchInstallation: (i) =>
+                            this.slackAuthenticationModel.getInstallation(i),
+                        deleteInstallation: (i) =>
+                            this.slackAuthenticationModel.deleteInstallation(i),
+                    },
+                    logLevel: lightdashLogLevelToSlackLogLevel(
+                        this.lightdashConfig.logging.level ?? 'info',
+                    ),
+                    app: expressApp,
+                });
+
+                app = new App({
+                    ...this.getSlackOptions(),
+                    receiver: slackReceiver,
+                });
+            }
+        } catch (e: unknown) {
+            Logger.error(`Unable to start Slack app ${e}`);
+        }
+
+        if (app) {
+            this.slackApp = app;
+            Logger.info('Slack app initialized successfully');
         }
     }
 }

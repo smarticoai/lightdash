@@ -1,12 +1,22 @@
+import { subject } from '@casl/ability';
 import { FeatureFlags } from '@lightdash/common';
-import { Badge, Box, Group, Tooltip } from '@mantine/core';
-import { IconAlertCircle } from '@tabler/icons-react';
+import { Badge, Box, Button, Group, Tooltip } from '@mantine/core';
+import { IconAlertCircle, IconArrowLeft } from '@tabler/icons-react';
 import { useFeatureFlagEnabled } from 'posthog-js/react';
 import { memo, useEffect, useMemo, type FC } from 'react';
 import { useParams } from 'react-router';
+import useEmbed from '../../../ee/providers/Embed/useEmbed';
+import {
+    selectQueryLimit,
+    selectTimezone,
+    useExplorerSelector,
+} from '../../../features/explorer/store';
 import useDashboardStorage from '../../../hooks/dashboard/useDashboardStorage';
+import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../../hooks/useExplorerRoute';
 import useCreateInAnySpaceAccess from '../../../hooks/user/useCreateInAnySpaceAccess';
+import { Can } from '../../../providers/Ability';
+import useApp from '../../../providers/App/useApp';
 import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import { RefreshButton } from '../../RefreshButton';
 import RefreshDbtButton from '../../RefreshDbtButton';
@@ -14,30 +24,30 @@ import MantineIcon from '../../common/MantineIcon';
 import ShareShortLinkButton from '../../common/ShareShortLinkButton';
 import TimeZonePicker from '../../common/TimeZonePicker';
 import SaveChartButton from '../SaveChartButton';
+import QueryWarnings from './QueryWarnings';
 
 const ExplorerHeader: FC = memo(() => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
+    const { user } = useApp();
+    const { onBackToDashboard } = useEmbed();
+
+    // Get state from Redux and new hook
+    const limit = useExplorerSelector(selectQueryLimit);
+    const selectedTimezone = useExplorerSelector(selectTimezone);
+    const { query, queryResults, isValidQuery } = useExplorerQuery();
+
+    // Compute values from new hook data
+    const showLimitWarning = useMemo(
+        () => queryResults.totalResults && queryResults.totalResults >= limit,
+        [queryResults.totalResults, limit],
+    );
+    const queryWarnings = query.data?.warnings;
+
     const savedChart = useExplorerContext(
         (context) => context.state.savedChart,
     );
     const unsavedChartVersion = useExplorerContext(
         (context) => context.state.unsavedChartVersion,
-    );
-    const isValidQuery = useExplorerContext(
-        (context) => context.state.isValidQuery,
-    );
-    const showLimitWarning = useExplorerContext(
-        (context) =>
-            context.queryResults.totalResults &&
-            context.queryResults.totalResults >=
-                context.state.unsavedChartVersion.metricQuery.limit,
-    );
-    const limit = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.metricQuery.limit,
-    );
-
-    const selectedTimezone = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.metricQuery.timezone,
     );
     const setTimeZone = useExplorerContext(
         (context) => context.actions.setTimeZone,
@@ -84,8 +94,23 @@ const ExplorerHeader: FC = memo(() => {
         FeatureFlags.EnableUserTimezones,
     );
 
+    const userCanManageCompileProject = user?.data?.ability?.can(
+        'manage',
+        'CompileProject',
+    );
+
     return (
         <Group position="apart">
+            {typeof onBackToDashboard === 'function' && (
+                <Button
+                    variant="light"
+                    leftIcon={<MantineIcon icon={IconArrowLeft} />}
+                    onClick={onBackToDashboard}
+                >
+                    Back to Dashboard
+                </Button>
+            )}
+
             <Box>
                 <RefreshDbtButton />
             </Box>
@@ -115,10 +140,16 @@ const ExplorerHeader: FC = memo(() => {
                     </Tooltip>
                 )}
 
+                {userCanManageCompileProject &&
+                    queryWarnings &&
+                    queryWarnings.length > 0 && (
+                        <QueryWarnings queryWarnings={queryWarnings} />
+                    )}
+
                 {userTimeZonesEnabled && (
                     <TimeZonePicker
                         onChange={setTimeZone}
-                        value={selectedTimezone}
+                        value={selectedTimezone as string}
                     />
                 )}
 
@@ -127,10 +158,18 @@ const ExplorerHeader: FC = memo(() => {
                 {!savedChart && userCanCreateCharts && (
                     <SaveChartButton isExplorer />
                 )}
-                <ShareShortLinkButton
-                    disabled={!isValidQuery}
-                    url={urlToShare}
-                />
+                <Can
+                    I="update"
+                    this={subject('Explore', {
+                        organizationUuid: user.data?.organizationUuid,
+                        projectUuid,
+                    })}
+                >
+                    <ShareShortLinkButton
+                        disabled={!isValidQuery}
+                        url={urlToShare}
+                    />
+                </Can>
             </Group>
         </Group>
     );

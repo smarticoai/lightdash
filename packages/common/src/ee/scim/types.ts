@@ -1,4 +1,4 @@
-import { type ScimSchemaType } from '..';
+import { type ScimSchemaType, type ServiceAccount } from '..';
 
 export type SessionServiceAccount = {
     organizationUuid: string;
@@ -16,6 +16,10 @@ export interface ScimResource {
     };
 }
 
+export interface LightdashScimExtension {
+    role?: string;
+}
+
 export interface ScimUser extends ScimResource {
     schemas: string[];
     userName: string;
@@ -28,6 +32,7 @@ export interface ScimUser extends ScimResource {
         value: string;
         primary: boolean;
     }[];
+    [ScimSchemaType.LIGHTDASH_USER_EXTENSION]?: LightdashScimExtension;
 }
 
 export interface ScimGroup extends ScimResource {
@@ -122,32 +127,81 @@ export type ScimUpsertUser = Omit<ScimUser, 'id'> & {
     title?: string; // okta sends this on create
 };
 
-export type ScimOrganizationAccessToken = {
-    uuid: string;
-    organizationUuid: string;
-    createdAt: Date;
-    expiresAt: Date | null;
-    description: string;
-    lastUsedAt: Date | null;
-    rotatedAt: Date | null;
-};
-
-export type ScimOrganizationAccessTokenWithToken =
-    ScimOrganizationAccessToken & {
-        token: string;
-    };
-
-export type ApiCreateScimTokenRequest = Pick<
-    ScimOrganizationAccessToken,
+export type ApiCreateScimServiceAccountRequest = Pick<
+    ServiceAccount,
     'expiresAt' | 'description'
 >;
 
-export type ApiCreateScimTokenResponse = {
-    token: string;
-    expiresAt: Date;
-};
+export interface ScimServiceProviderConfig {
+    schemas: ScimSchemaType.SERVICE_PROVIDER_CONFIG[];
+    documentationUri?: string;
+    patch: {
+        supported: boolean;
+    };
+    bulk: {
+        supported: boolean;
+        maxOperations?: number;
+        maxPayloadSize?: number;
+    };
+    filter: {
+        supported: boolean;
+        maxResults?: number;
+    };
+    changePassword: {
+        supported: boolean;
+    };
+    sort: {
+        supported: boolean;
+    };
+    etag: {
+        supported: boolean;
+    };
+    authenticationSchemes: {
+        type: string;
+        name: string;
+        description: string;
+        specUri?: string;
+        documentationUri?: string;
+        primary?: boolean;
+    }[];
+}
 
-export type CreateScimOrganizationAccessToken = Pick<
-    ScimOrganizationAccessToken,
-    'organizationUuid' | 'expiresAt' | 'description'
->;
+export interface ScimSchema extends ScimResource {
+    schemas: ScimSchemaType.SCHEMA[];
+    name?: string;
+    description?: string;
+    attributes: ScimSchemaAttribute[];
+}
+
+export interface ScimSchemaAttribute {
+    name: string;
+    type:
+        | 'string'
+        | 'boolean'
+        | 'decimal'
+        | 'integer'
+        | 'dateTime'
+        | 'reference'
+        | 'complex';
+    multiValued: boolean;
+    description?: string;
+    required: boolean;
+    canonicalValues?: string[];
+    caseExact: boolean;
+    mutability: 'readOnly' | 'readWrite' | 'immutable' | 'writeOnly';
+    returned: 'always' | 'never' | 'default' | 'request';
+    uniqueness: 'none' | 'server' | 'global';
+    subAttributes?: ScimSchemaAttribute[];
+}
+
+export interface ScimResourceType extends ScimResource {
+    schemas: ScimSchemaType.RESOURCE_TYPE[];
+    name: string;
+    description?: string;
+    endpoint: string;
+    schema: string;
+    schemaExtensions?: {
+        schema: string;
+        required: boolean;
+    }[];
+}

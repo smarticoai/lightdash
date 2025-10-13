@@ -153,7 +153,8 @@ export const DashboardMinimalDownloadCsv: FC<{
             );
         });
 
-        const blob = new Blob([csvContent], {
+        const csvWithBOM = '\uFEFF' + csvContent;
+        const blob = new Blob([csvWithBOM], {
             type: 'text/csv;charset=utf-8;',
         });
         const url = URL.createObjectURL(blob);
@@ -176,7 +177,7 @@ export const DashboardMinimalDownloadCsv: FC<{
                 await handleDownload();
             }}
         >
-            Export CSV
+            Download data
         </Menu.Item>
     );
 };

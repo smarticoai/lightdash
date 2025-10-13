@@ -4,8 +4,13 @@ import {
     type Dashboard,
     type DashboardFilterRule,
     type DashboardFilters,
+    type DashboardParameters,
     type DateGranularity,
     type FilterableDimension,
+    type ParameterDefinitions,
+    type ParametersValuesMap,
+    type ParameterValue,
+    type ResultColumn,
     type SortField,
 } from '@lightdash/common';
 import { type Dispatch, type SetStateAction } from 'react';
@@ -14,6 +19,9 @@ import {
     type useGetComments,
 } from '../../features/comments';
 
+export type SqlChartTileMetadata = {
+    columns: ResultColumn[];
+};
 export type DashboardContextType = {
     projectUuid?: string;
     isDashboardLoading: boolean;
@@ -28,6 +36,10 @@ export type DashboardContextType = {
     setHaveTabsChanged: Dispatch<SetStateAction<boolean>>;
     dashboardTabs: Dashboard['tabs'];
     setDashboardTabs: Dispatch<SetStateAction<Dashboard['tabs']>>;
+    activeTab: Dashboard['tabs'][number] | undefined;
+    setActiveTab: Dispatch<
+        SetStateAction<Dashboard['tabs'][number] | undefined>
+    >;
     dashboardFilters: DashboardFilters;
     dashboardTemporaryFilters: DashboardFilters;
     allFilters: DashboardFilters;
@@ -67,9 +79,14 @@ export type DashboardContextType = {
     filterableFieldsByTileUuid:
         | Record<string, FilterableDimension[]>
         | undefined;
-    hasChartTiles: boolean;
+    hasTilesThatSupportFilters: boolean;
     chartSort: Record<string, SortField[]>;
     setChartSort: (sort: Record<string, SortField[]>) => void;
+    sqlChartTilesMetadata: Record<string, SqlChartTileMetadata>;
+    updateSqlChartTilesMetadata: (
+        tileUuid: string,
+        metadata: SqlChartTileMetadata,
+    ) => void;
     dateZoomGranularity: DateGranularity | undefined;
     setDateZoomGranularity: Dispatch<
         SetStateAction<DateGranularity | undefined>
@@ -84,4 +101,25 @@ export type DashboardContextType = {
     requiredDashboardFilters: Pick<DashboardFilterRule, 'id' | 'label'>[];
     isDateZoomDisabled: boolean;
     setIsDateZoomDisabled: Dispatch<SetStateAction<boolean>>;
+    setSavedParameters: Dispatch<SetStateAction<DashboardParameters>>;
+    parametersHaveChanged: boolean;
+    dashboardParameters: DashboardParameters;
+    parameterValues: ParametersValuesMap;
+    clearAllParameters: () => void;
+    setParameter: (key: string, value: ParameterValue | null) => void;
+    dashboardParameterReferences: Set<string>;
+    addParameterReferences: (tileUuid: string, references: string[]) => void;
+    tileParameterReferences: Record<string, string[]>;
+    areAllChartsLoaded: boolean;
+    parameterDefinitions: ParameterDefinitions;
+    addParameterDefinitions: (parameters: ParameterDefinitions) => void;
+    missingRequiredParameters: string[];
+    pinnedParameters: string[];
+    setPinnedParameters: (parameters: string[]) => void;
+    toggleParameterPin: (parameterKey: string) => void;
+    havePinnedParametersChanged: boolean;
+    setHavePinnedParametersChanged: Dispatch<SetStateAction<boolean>>;
+    tileNamesById: Record<string, string>;
+    refreshDashboardVersion: () => Promise<void>;
+    isRefreshingDashboardVersion: boolean;
 };

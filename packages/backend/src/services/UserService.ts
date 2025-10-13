@@ -5,6 +5,7 @@ import {
     ArgumentsOf,
     assertUnreachable,
     AuthorizationError,
+    BigqueryAuthenticationType,
     CompleteUserArgs,
     CreateInviteLink,
     CreatePasswordResetLink,
@@ -26,8 +27,10 @@ import {
     LocalIssuerTypes,
     LoginOptions,
     LoginOptionTypes,
+    MissingConfigError,
     NotExistsError,
     NotFoundError,
+    NotImplementedError,
     OpenIdIdentityIssuerType,
     OpenIdIdentitySummary,
     OpenIdUser,
@@ -36,11 +39,13 @@ import {
     PasswordReset,
     RegisterOrActivateUser,
     SessionUser,
+    SnowflakeAuthenticationType,
     UpdateUserArgs,
     UpsertUserWarehouseCredentials,
     UserAllowedOrganization,
     validateOrganizationEmailDomains,
     validateOrganizationNameOrThrow,
+    WarehouseTypes,
 } from '@lightdash/common';
 import { randomInt } from 'crypto';
 import { uniq } from 'lodash';
@@ -864,7 +869,7 @@ export class UserService extends BaseService {
         return this.userModel.findSessionUserByUUID(user.userUuid);
     }
 
-    private async linkOpenIdIdentityToUser(
+    async linkOpenIdIdentityToUser(
         sessionUser: SessionUser,
         openIdUser: OpenIdUser,
         refreshToken?: string,
@@ -876,6 +881,7 @@ export class UserService extends BaseService {
             email: openIdUser.openId.email,
             issuerType: openIdUser.openId.issuerType,
             refreshToken,
+            teamId: openIdUser.openId.teamId,
         });
         await this.tryVerifyUserEmail(sessionUser, openIdUser.openId.email);
         this.analytics.track({
@@ -1517,8 +1523,9 @@ export class UserService extends BaseService {
         );
     }
 
-    private static async generateGoogleAccessToken(
+    static async generateGoogleAccessToken(
         refreshToken: string,
+        type: 'gdrive' | 'bigquery' = 'gdrive',
     ): Promise<string> {
         return new Promise((resolve, reject) => {
             refresh.requestNewAccessToken(
@@ -1526,10 +1533,28 @@ export class UserService extends BaseService {
                 refreshToken,
                 (err: AnyType, accessToken: string, _refreshToken, result) => {
                     if (err || !accessToken) {
-                        reject(err);
+                        // Make sure you are passing a google's refresh token, and not a snowflake refresh token by mistake
+                        // othwerise this will throw a `invalid_grant` error
+                        const lastFourDigits = refreshToken.slice(-4);
+
+                        // Extract meaningful error message from the error object
+                        const errorMessage =
+                            err?.data?.error ||
+                            err?.message ||
+                            err?.error ||
+                            'Unknown error';
+
+                        console.error(
+                            `Unable to get google "${type}" access token for "xxxx${lastFourDigits}": "${errorMessage}"`,
+                            err,
+                        );
+                        reject(
+                            new AuthorizationError(
+                                `Authentication failed with Google: ${errorMessage}`,
+                            ),
+                        );
                         return;
                     }
-
                     const scopes: string[] = hasProperty<string>(
                         result,
                         'scope',
@@ -1537,39 +1562,94 @@ export class UserService extends BaseService {
                         ? result.scope.split(' ')
                         : [];
 
-                    if (
-                        scopes.includes(
-                            'https://www.googleapis.com/auth/drive.file',
-                        ) &&
-                        scopes.includes(
-                            'https://www.googleapis.com/auth/spreadsheets',
-                        )
-                    ) {
-                        resolve(accessToken);
+                    if (type === 'gdrive') {
+                        if (
+                            scopes.includes(
+                                'https://www.googleapis.com/auth/drive.file',
+                            ) &&
+                            scopes.includes(
+                                'https://www.googleapis.com/auth/spreadsheets',
+                            )
+                        ) {
+                            resolve(accessToken);
+                        }
+                        reject(
+                            new AuthorizationError(
+                                'Missing authorization to access Google Drive',
+                            ),
+                        );
+                    } else if (type === 'bigquery') {
+                        if (
+                            scopes.includes(
+                                'https://www.googleapis.com/auth/bigquery',
+                            )
+                        ) {
+                            resolve(accessToken);
+                        }
+                        reject(
+                            new AuthorizationError(
+                                'Missing authorization to access BigQuery',
+                            ),
+                        );
                     }
-                    reject(
-                        new AuthorizationError(
-                            'Missing authorization to access Google Drive',
-                        ),
-                    );
                 },
             );
         });
     }
 
     /**
-     * This method is used on the gdrive API to get the accessToken for listing files on the user's drive
+     * This method returns an access token for different sso providers, like snowflake or google
+     * this is used on the gdrive API to get the accessToken for listing files on the user's drive
      * @param user
      * @returns accessToken
      */
-    async getAccessToken(user: SessionUser): Promise<string> {
+    async getAccessToken(
+        user: SessionUser,
+        type: 'gdrive' | 'bigquery' | 'snowflake' = 'gdrive',
+    ): Promise<string> {
+        if (type === 'snowflake') {
+            if (this.lightdashConfig.auth.snowflake.clientId === undefined) {
+                // If snowflake oauth is not configured, refresh strategy will not be loaded
+                throw new MissingConfigError(
+                    'Snowflake client is not configured',
+                );
+            }
+            const refreshToken: string = await this.userModel.getRefreshToken(
+                user.userUuid,
+                OpenIdIdentityIssuerType.SNOWFLAKE,
+            );
+            const accessToken = await UserService.generateSnowflakeAccessToken(
+                refreshToken,
+            );
+            return accessToken;
+        }
         const refreshToken: string = await this.userModel.getRefreshToken(
             user.userUuid,
+            OpenIdIdentityIssuerType.GOOGLE,
         );
         const accessToken = await UserService.generateGoogleAccessToken(
             refreshToken,
+            type,
         );
         return accessToken;
+    }
+
+    static async generateSnowflakeAccessToken(
+        refreshToken: string,
+    ): Promise<string> {
+        return new Promise((resolve, reject) => {
+            refresh.requestNewAccessToken(
+                'snowflake',
+                refreshToken,
+                (err: AnyType, accessToken: string, _refreshToken, result) => {
+                    if (err || !accessToken) {
+                        reject(err);
+                        return;
+                    }
+                    resolve(accessToken);
+                },
+            );
+        });
     }
 
     async isLoginMethodAllowed(_email: string, loginMethod: LoginOptionTypes) {
@@ -1582,7 +1662,10 @@ export class UserService extends BaseService {
             case OpenIdIdentityIssuerType.ONELOGIN:
             case OpenIdIdentityIssuerType.AZUREAD:
             case OpenIdIdentityIssuerType.GENERIC_OIDC:
+            case OpenIdIdentityIssuerType.SNOWFLAKE:
                 return true;
+            case OpenIdIdentityIssuerType.SLACK:
+                return false;
             default:
                 assertUnreachable(
                     loginMethod,
@@ -1605,6 +1688,49 @@ export class UserService extends BaseService {
         return this.userWarehouseCredentialsModel.getAllByUserUuid(
             user.userUuid,
         );
+    }
+
+    async createBigqueryWarehouseCredentials(
+        user: SessionUser,
+        refreshToken: string,
+    ) {
+        const bigqueryCredentials: UpsertUserWarehouseCredentials = {
+            name: 'Default',
+            credentials: {
+                type: WarehouseTypes.BIGQUERY,
+                authenticationType: BigqueryAuthenticationType.SSO,
+                keyfileContents: {
+                    type: 'authorized_user',
+                    client_id: this.lightdashConfig.auth.google.oauth2ClientId!,
+                    client_secret:
+                        this.lightdashConfig.auth.google.oauth2ClientSecret!,
+                    refresh_token: refreshToken,
+                },
+            },
+        };
+        await this.createWarehouseCredentials(user, bigqueryCredentials);
+    }
+
+    async createSnowflakeWarehouseCredentials(
+        user: SessionUser,
+        refreshToken: string,
+    ) {
+        // Remove old Snowflake credentials to prevent duplicates on re-authentication
+        await this.userWarehouseCredentialsModel.deleteAllByUserAndWarehouseType(
+            user.userUuid,
+            WarehouseTypes.SNOWFLAKE,
+        );
+
+        const snowflakeCredentials: UpsertUserWarehouseCredentials = {
+            name: 'Default',
+            credentials: {
+                user: user.userUuid,
+                type: WarehouseTypes.SNOWFLAKE,
+                authenticationType: SnowflakeAuthenticationType.SSO,
+                token: refreshToken,
+            },
+        };
+        await this.createWarehouseCredentials(user, snowflakeCredentials);
     }
 
     async createWarehouseCredentials(
@@ -1681,6 +1807,10 @@ export class UserService extends BaseService {
                 return this.lightdashConfig.auth.oneLogin.loginPath;
             case OpenIdIdentityIssuerType.GENERIC_OIDC:
                 return this.lightdashConfig.auth.oidc.loginPath;
+            case OpenIdIdentityIssuerType.SNOWFLAKE:
+                return this.lightdashConfig.auth.snowflake.loginPath;
+            case OpenIdIdentityIssuerType.SLACK:
+                throw new NotImplementedError('Slack login is not supported');
             default:
                 assertUnreachable(
                     issuer,
@@ -1761,5 +1891,52 @@ export class UserService extends BaseService {
             forceRedirect: false,
             redirectUri: undefined,
         };
+    }
+
+    /* 
+    For service accounts, we get the admin user from the userUuid who created the user 
+    if this user no longer exist, then we will get another admin user from the org
+    */
+    async getAdminUser(userUuid: string | null, organizationUuid: string) {
+        try {
+            if (!userUuid) {
+                throw new Error('User uuid is required');
+            }
+            return await this.userModel.findSessionUserAndOrgByUuid(
+                userUuid,
+                organizationUuid,
+            );
+        } catch (error) {
+            const members =
+                await this.organizationMemberProfileModel.getOrganizationMembers(
+                    {
+                        organizationUuid,
+                        searchQuery: 'admin', // Filtering by role
+                    },
+                );
+
+            const adminUser = members.data.find(
+                (member) => member.role === 'admin',
+            );
+            if (adminUser) {
+                return await this.userModel.findSessionUserAndOrgByUuid(
+                    adminUser.userUuid,
+                    organizationUuid,
+                );
+            }
+            throw new Error('No admin user found');
+        }
+    }
+
+    async isOpenIdLinked(
+        userUuid: string,
+        issuerType: OpenIdIdentityIssuerType,
+    ): Promise<boolean> {
+        const openId = await this.userModel.getOpenIdByIssuerType(
+            userUuid,
+            issuerType,
+        );
+
+        return openId !== undefined;
     }
 }

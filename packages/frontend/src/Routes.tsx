@@ -31,13 +31,12 @@ import Register from './pages/Register';
 import SavedDashboards from './pages/SavedDashboards';
 import SavedExplorer from './pages/SavedExplorer';
 import SavedQueries from './pages/SavedQueries';
-import SemanticViewerEditPage from './pages/SemanticViewerEdit';
-import SemanticViewerViewPage from './pages/SemanticViewerView';
 import Settings from './pages/Settings';
 import ShareRedirect from './pages/ShareRedirect';
 import Space from './pages/Space';
 import Spaces from './pages/Spaces';
 import SqlRunner from './pages/SqlRunner';
+import UnusedContent from './pages/UnusedContent';
 import UserActivity from './pages/UserActivity';
 import VerifyEmailPage from './pages/VerifyEmail';
 import ViewSqlChart from './pages/ViewSqlChart';
@@ -244,52 +243,6 @@ const SQL_RUNNER_ROUTES: RouteObject[] = [
     },
 ];
 
-const SEMANTIC_VIEWER_ROUTES: RouteObject[] = [
-    {
-        path: '/projects/:projectUuid/semantic-viewer',
-        element: (
-            <>
-                <NavBar />
-                <Outlet />
-            </>
-        ),
-        children: [
-            {
-                path: '/projects/:projectUuid/semantic-viewer',
-                element: (
-                    <TrackPage name={PageName.SEMANTIC_VIEWER_EDIT}>
-                        <SemanticViewerEditPage />
-                    </TrackPage>
-                ),
-            },
-            {
-                path: '/projects/:projectUuid/semantic-viewer/new',
-                element: (
-                    <TrackPage name={PageName.SEMANTIC_VIEWER_EDIT}>
-                        <SemanticViewerEditPage />
-                    </TrackPage>
-                ),
-            },
-            {
-                path: '/projects/:projectUuid/semantic-viewer/:savedSemanticViewerChartSlug',
-                element: (
-                    <TrackPage name={PageName.SEMANTIC_VIEWER_VIEW}>
-                        <SemanticViewerViewPage />
-                    </TrackPage>
-                ),
-            },
-            {
-                path: '/projects/:projectUuid/semantic-viewer/:savedSemanticViewerChartSlug/edit',
-                element: (
-                    <TrackPage name={PageName.SEMANTIC_VIEWER_EDIT}>
-                        <SemanticViewerEditPage />
-                    </TrackPage>
-                ),
-            },
-        ],
-    },
-];
-
 const TABLES_ROUTES: RouteObject[] = [
     {
         path: '/projects/:projectUuid/tables',
@@ -403,7 +356,6 @@ const APP_ROUTES: RouteObject[] = [
                     ...SQL_RUNNER_ROUTES,
                     ...CHART_ROUTES,
                     ...DASHBOARD_ROUTES,
-                    ...SEMANTIC_VIEWER_ROUTES,
                     ...SPACES_ROUTES,
                     ...METRICS_ROUTES,
                     {
@@ -424,6 +376,17 @@ const APP_ROUTES: RouteObject[] = [
                                 <NavBar />
                                 <TrackPage name={PageName.USER_ACTIVITY}>
                                     <UserActivity />
+                                </TrackPage>
+                            </>
+                        ),
+                    },
+                    {
+                        path: '/projects/:projectUuid/unused-content',
+                        element: (
+                            <>
+                                <NavBar />
+                                <TrackPage name={PageName.USER_ACTIVITY}>
+                                    <UnusedContent />
                                 </TrackPage>
                             </>
                         ),

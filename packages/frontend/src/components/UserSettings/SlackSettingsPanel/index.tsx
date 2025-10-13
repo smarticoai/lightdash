@@ -15,6 +15,7 @@ import {
     Loader,
     Select,
     Stack,
+    Switch,
     Text,
     TextInput,
     Title,
@@ -28,22 +29,21 @@ import {
     IconRefresh,
     IconTrash,
 } from '@tabler/icons-react';
-import { debounce } from 'lodash';
+import debounce from 'lodash/debounce';
 import { useEffect, useMemo, useState, type FC } from 'react';
+import { Link } from 'react-router';
 import { z } from 'zod';
-import ChannelProjectMappings from '../../../ee/features/aiCopilot/components/ChannelProjectMappings';
 import {
     useDeleteSlack,
     useGetSlack,
     useSlackChannels,
     useUpdateSlackAppCustomSettingsMutation,
 } from '../../../hooks/slack/useSlack';
+import { useActiveProjectUuid } from '../../../hooks/useActiveProject';
 import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
-import { useProjects } from '../../../hooks/useProjects';
 import slackSvg from '../../../svgs/slack.svg';
 import MantineIcon from '../../common/MantineIcon';
 import { SettingsGridCard } from '../../common/Settings/SettingsCard';
-import { hasRequiredScopes } from './utils';
 
 const SLACK_INSTALL_URL = `/api/v1/slack/install/`;
 const MAX_SLACK_CHANNELS = 100000;
@@ -64,9 +64,12 @@ const formSchema = z.object({
             availableTags: z.array(z.string().min(1)).nullable(),
         }),
     ),
+    aiThreadAccessConsent: z.boolean().optional(),
+    aiRequireOAuth: z.boolean().optional(),
 });
 
 const SlackSettingsPanel: FC = () => {
+    const { activeProjectUuid } = useActiveProjectUuid();
     const { data: aiCopilotFlag } = useFeatureFlag(
         CommercialFeatureFlags.AiCopilot,
     );
@@ -78,9 +81,15 @@ const SlackSettingsPanel: FC = () => {
     const debounceSetSearch = debounce((val) => setSearch(val), 1500);
 
     const { data: slackChannels, isInitialLoading: isLoadingSlackChannels } =
-        useSlackChannels(search, true, {
-            enabled: organizationHasSlack,
-        });
+        useSlackChannels(
+            search,
+            {
+                excludeArchived: true,
+                excludeDms: true,
+                excludeGroups: true,
+            },
+            { enabled: organizationHasSlack },
+        );
 
     const { mutate: deleteSlack } = useDeleteSlack();
     const { mutate: updateCustomSettings } =
@@ -91,6 +100,8 @@ const SlackSettingsPanel: FC = () => {
             notificationChannel: null,
             appProfilePhotoUrl: null,
             slackChannelProjectMappings: [],
+            aiThreadAccessConsent: false,
+            aiRequireOAuth: false,
         },
         validate: zodResolver(formSchema),
     });
@@ -105,6 +116,9 @@ const SlackSettingsPanel: FC = () => {
             appProfilePhotoUrl: slackInstallation.appProfilePhotoUrl ?? null,
             slackChannelProjectMappings:
                 slackInstallation.slackChannelProjectMappings ?? [],
+            aiThreadAccessConsent:
+                slackInstallation.aiThreadAccessConsent ?? false,
+            aiRequireOAuth: slackInstallation.aiRequireOAuth ?? false,
         };
 
         if (form.initialized) {
@@ -124,17 +138,6 @@ const SlackSettingsPanel: FC = () => {
             })) ?? []
         );
     }, [slackChannels]);
-
-    const { data: projects } = useProjects();
-
-    const projectOptions = useMemo(() => {
-        return (
-            projects?.map((project) => ({
-                value: project.projectUuid,
-                label: project.name,
-            })) ?? []
-        );
-    }, [projects]);
 
     let responsiveChannelsSearchEnabled =
         slackChannelOptions.length >= MAX_SLACK_CHANNELS || search.length > 0; // enable responvive channels search if there are more than MAX_SLACK_CHANNELS defined channels
@@ -209,9 +212,17 @@ const SlackSettingsPanel: FC = () => {
                                         </Tooltip>
                                     </Group>
                                 }
-                                disabled={isLoadingSlackChannels}
                                 size="xs"
-                                placeholder="Select a channel"
+                                rightSection={
+                                    isLoadingSlackChannels ? (
+                                        <Loader size="xs" />
+                                    ) : null
+                                }
+                                placeholder={
+                                    isLoadingSlackChannels
+                                        ? 'Loading channels, this might take a while.'
+                                        : 'Select a channel'
+                                }
                                 searchable
                                 clearable
                                 limit={500}
@@ -254,11 +265,85 @@ const SlackSettingsPanel: FC = () => {
                                 />
                             </Group>
                             {aiCopilotFlag?.enabled && (
-                                <ChannelProjectMappings
-                                    form={form}
-                                    channelOptions={slackChannelOptions}
-                                    projectOptions={projectOptions}
-                                />
+                                <Stack spacing="sm">
+                                    <Group spacing="two">
+                                        <Title order={6} fw={500}>
+                                            AI Agents thread access consent
+                                        </Title>
+
+                                        <Tooltip
+                                            multiline
+                                            variant="xs"
+                                            maw={250}
+                                            label="The longer the thread, the more context the AI Agents will have to work with."
+                                        >
+                                            <MantineIcon
+                                                icon={IconHelpCircle}
+                                            />
+                                        </Tooltip>
+                                    </Group>
+
+                                    <Text c="dimmed" fz="xs">
+                                        Allow the AI Agents to access thread
+                                        messages when a user mentions the bot in
+                                        a thread.
+                                    </Text>
+
+                                    <Switch
+                                        label="Allow AI to access thread messages"
+                                        checked={
+                                            form.values.aiThreadAccessConsent ??
+                                            false
+                                        }
+                                        onChange={(event) => {
+                                            setFieldValue(
+                                                'aiThreadAccessConsent',
+                                                event.currentTarget.checked,
+                                            );
+                                        }}
+                                    />
+                                    <Text fz="xs" c="dimmed">
+                                        Configure which channels your AI Agents
+                                        can access{' '}
+                                        <Anchor
+                                            component={Link}
+                                            to={`/projects/${activeProjectUuid}/ai-agents`}
+                                        >
+                                            here
+                                        </Anchor>
+                                        .
+                                    </Text>
+
+                                    <Stack spacing="sm">
+                                        <Group spacing="two">
+                                            <Title order={6} fw={500}>
+                                                AI Agents OAuth requirement
+                                            </Title>
+
+                                            <Tooltip
+                                                multiline
+                                                variant="xs"
+                                                maw={250}
+                                                label="When enabled, users must authenticate with OAuth to use AI Agent features."
+                                            >
+                                                <MantineIcon
+                                                    icon={IconHelpCircle}
+                                                />
+                                            </Tooltip>
+                                        </Group>
+
+                                        <Switch
+                                            label="Require OAuth for AI Agent"
+                                            checked={form.values.aiRequireOAuth}
+                                            onChange={(event) => {
+                                                setFieldValue(
+                                                    'aiRequireOAuth',
+                                                    event.currentTarget.checked,
+                                                );
+                                            }}
+                                        />
+                                    </Stack>
+                                </Stack>
                             )}
                         </Stack>
                         <Stack align="end" mt="xl">
@@ -299,9 +384,9 @@ const SlackSettingsPanel: FC = () => {
                             </Group>
 
                             {organizationHasSlack &&
-                                !hasRequiredScopes(slackInstallation) && (
+                                !slackInstallation.hasRequiredScopes && (
                                     <Alert
-                                        color="blue"
+                                        color="yellow"
                                         icon={
                                             <MantineIcon
                                                 icon={IconAlertCircle}

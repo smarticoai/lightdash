@@ -8,7 +8,7 @@ const warehouseConfig = {
     postgresSQL: {
         name: 'Jaffle PostgreSQL test',
         host: Cypress.env('PGHOST') || 'db-dev',
-        user: 'postgres',
+        user: Cypress.env('PGUSER') || 'postgres',
         password: Cypress.env('PGPASSWORD') || 'password',
         database: 'postgres',
         port: '5432',
@@ -88,6 +88,12 @@ const configureBigqueryWarehouse = (
     cy.get('input[name="warehouse.location"]').type(config.location, {
         log: false,
     });
+    /*
+    cy.selectMantine(
+        'warehouse.authenticationType',
+        'Service Account (JSON key file)',
+    ); */
+
     cy.get('[type="file"]').attachFile(warehouseConfig.bigQuery.keyFile);
 
     // DBT
@@ -163,7 +169,7 @@ const testCompile = (): Cypress.Chainable<string> => {
     cy.contains('Step 2/3', { timeout: 60000 });
     cy.contains('Successfully synced dbt project!', { timeout: 60000 });
 
-    cy.contains('selected 11 models');
+    cy.contains(/selected \d+ models/);
     // Configure
     cy.contains('button', 'Save changes').click();
     cy.url().should('include', '/home', { timeout: 30000 });
@@ -200,7 +206,12 @@ const testFilterStringEscaping = (projectUuid: string) => {
                     ],
                 },
             },
-            sorts: [{ fieldId: 'customers_first_name', descending: false }],
+            sorts: [
+                {
+                    fieldId: 'customers_first_name',
+                    descending: false,
+                },
+            ],
             limit: 500,
             tableCalculations: [],
             additionalMetrics: [],
@@ -258,7 +269,12 @@ const testPercentile = (
                 'events_percentile_75',
             ],
             filters: {},
-            sorts: [{ fieldId: 'events_timestamp_tz_day', descending: true }],
+            sorts: [
+                {
+                    fieldId: 'events_timestamp_tz_day',
+                    descending: true,
+                },
+            ],
             limit: 500,
             tableCalculations: [],
             additionalMetrics: [],
@@ -311,7 +327,12 @@ const testTimeIntervalsResults = (
             ],
             metrics: [],
             filters: {},
-            sorts: [{ fieldId: 'events_timestamp_tz_raw', descending: true }],
+            sorts: [
+                {
+                    fieldId: 'events_timestamp_tz_raw',
+                    descending: true,
+                },
+            ],
             limit: 500,
             tableCalculations: [],
             additionalMetrics: [],
@@ -331,7 +352,7 @@ const testTimeIntervalsResults = (
 
 const apiUrl = '/api/v1';
 
-const createCustomDimensionChart = (projectUuid) => {
+const createCustomDimensionChart = (projectUuid: string) => {
     // This is used by create project to quickly create a custom dimension chart
     // because we don't have charts on new projects created by the e2e tests
 
@@ -349,7 +370,10 @@ const createCustomDimensionChart = (projectUuid) => {
                 metrics: ['orders_total_order_amount'],
                 filters: {},
                 sorts: [
-                    { fieldId: 'orders_total_order_amount', descending: true },
+                    {
+                        fieldId: 'orders_total_order_amount',
+                        descending: true,
+                    },
                 ],
                 limit: 500,
                 tableCalculations: [],
@@ -406,7 +430,7 @@ const createCustomDimensionChart = (projectUuid) => {
     });
 };
 
-const testCustomDimensions = (projectUuid) => {
+const testCustomDimensions = (projectUuid: string) => {
     // Test custom dimension by going into an existing chart with custom dimensions and running the query
     // This is also used in createProject.cy.ts to test custom dimensions against all warehouses
     cy.visit(`/projects/${projectUuid}/saved`);

@@ -20,6 +20,8 @@ import {
     isCustomBinDimension,
     isCustomSqlDimension,
     isFormat,
+    isSqlTableCalculation,
+    isTemplateTableCalculation,
     LightdashUser,
     MetricFilterRule,
     MetricOverrides,
@@ -30,6 +32,7 @@ import {
     SessionUser,
     SortField,
     Space,
+    TableCalculation,
     TimeZone,
     UpdatedByUser,
     UpdateMultipleSavedChart,
@@ -86,6 +89,7 @@ type DbSavedChartDetails = {
     chart_type: ChartConfig['type'];
     chart_config: ChartConfig['config'] | undefined;
     pivot_dimensions: string[] | undefined;
+    parameters: AnyType | null;
     created_at: Date;
     organization_uuid: string;
     user_uuid: string;
@@ -188,6 +192,7 @@ const createSavedChartVersion = async (
         chartConfig,
         tableConfig,
         pivotConfig,
+        parameters,
         updatedByUser,
     }: CreateSavedChartVersion,
 ): Promise<void> => {
@@ -208,6 +213,7 @@ const createSavedChartVersion = async (
                 pivot_dimensions: pivotConfig ? pivotConfig.columns : null,
                 chart_type: chartConfig.type,
                 chart_config: chartConfig.config,
+                parameters: parameters ? JSON.stringify(parameters) : null,
                 updated_by_user_uuid: updatedByUser?.userUuid || null,
                 timezone: timezone || null,
             })
@@ -240,6 +246,7 @@ const createSavedChartVersion = async (
                 field_name: sort.fieldId,
                 descending: sort.descending,
                 saved_queries_version_id: version.saved_queries_version_id,
+                nulls_first: sort.nullsFirst ?? null,
                 order: index,
             })),
         );
@@ -248,13 +255,18 @@ const createSavedChartVersion = async (
             tableCalculations.map((tableCalculation) => ({
                 name: tableCalculation.name,
                 display_name: tableCalculation.displayName,
-                calculation_raw_sql: tableCalculation.sql,
+                calculation_raw_sql: isSqlTableCalculation(tableCalculation)
+                    ? tableCalculation.sql
+                    : '',
                 saved_queries_version_id: version.saved_queries_version_id,
                 format: tableCalculation.format,
                 order: tableConfig.columnOrder.findIndex(
                     (column) => column === tableCalculation.name,
                 ),
                 type: tableCalculation.type,
+                template: isTemplateTableCalculation(tableCalculation)
+                    ? tableCalculation.template
+                    : undefined,
             })),
         );
         await createSavedChartVersionCustomDimensions(
@@ -337,6 +349,7 @@ export const createSavedChart = async (
         chartConfig,
         tableConfig,
         pivotConfig,
+        parameters,
         updatedByUser,
         spaceUuid,
         dashboardUuid,
@@ -409,6 +422,7 @@ export const createSavedChart = async (
             chartConfig,
             tableConfig,
             pivotConfig,
+            parameters,
             updatedByUser,
         });
         return newSavedChart.saved_query_uuid;
@@ -852,6 +866,7 @@ export class SavedChartModel {
                         'saved_queries_versions.chart_config',
                         'saved_queries_versions.pivot_dimensions',
                         'saved_queries_versions.timezone',
+                        'saved_queries_versions.parameters',
                         `${OrganizationTableName}.organization_uuid`,
                         `${OrganizationColorPaletteTableName}.colors as color_palette`,
                         `${UserTableName}.user_uuid`,
@@ -891,7 +906,7 @@ export class SavedChartModel {
                     .orderBy('order', 'asc');
 
                 const sortsQuery = this.database('saved_queries_version_sorts')
-                    .select(['field_name', 'descending'])
+                    .select(['field_name', 'descending', 'nulls_first'])
                     .where('saved_queries_version_id', savedQueriesVersionId)
                     .orderBy('order', 'asc');
                 const tableCalculationsQuery = this.database(
@@ -904,6 +919,7 @@ export class SavedChartModel {
                         'order',
                         'format',
                         'type',
+                        'template',
                     ])
                     .where('saved_queries_version_id', savedQueriesVersionId);
 
@@ -1030,18 +1046,25 @@ export class SavedChartModel {
                         sorts: sorts.map<SortField>((sort) => ({
                             fieldId: sort.field_name,
                             descending: sort.descending,
+                            nullsFirst: sort.nulls_first ?? undefined,
                         })),
                         limit: savedQuery.row_limit,
                         metricOverrides:
                             savedQuery.metric_overrides || undefined,
                         tableCalculations: tableCalculations.map(
-                            (tableCalculation) => ({
-                                name: tableCalculation.name,
-                                displayName: tableCalculation.display_name,
-                                sql: tableCalculation.calculation_raw_sql,
-                                format: tableCalculation.format || undefined,
-                                type: tableCalculation.type || undefined,
-                            }),
+                            (tableCalculation) =>
+                                ({
+                                    name: tableCalculation.name,
+                                    displayName: tableCalculation.display_name,
+                                    sql:
+                                        tableCalculation.calculation_raw_sql ||
+                                        undefined,
+                                    format:
+                                        tableCalculation.format || undefined,
+                                    type: tableCalculation.type || undefined,
+                                    template:
+                                        tableCalculation.template || undefined,
+                                } as TableCalculation),
                         ),
                         additionalMetrics,
                         customDimensions: [
@@ -1071,6 +1094,7 @@ export class SavedChartModel {
                         ],
                         timezone: savedQuery.timezone || undefined,
                     },
+                    parameters: savedQuery.parameters || undefined,
                     chartConfig,
                     tableConfig: {
                         columnOrder,
@@ -1139,9 +1163,10 @@ export class SavedChartModel {
                 // filter by last version
                 `${DashboardVersionsTableName}.dashboard_version_id`,
                 this.database.raw(`(select dashboard_version_id
-                            from ${DashboardVersionsTableName}
-                            order by ${DashboardVersionsTableName}.created_at desc
-                            limit 1)`),
+                    from ${DashboardVersionsTableName} dv
+                    where dv.dashboard_id = ${DashboardsTableName}.dashboard_id
+                    order by dv.created_at desc
+                    limit 1)`),
             );
 
         const chartsNotInTilesUuids = await this.database(SavedChartsTableName)
@@ -1247,6 +1272,7 @@ export class SavedChartModel {
                 dashboardUuid: `${cteName}.dashboard_uuid`,
                 tableName: 'saved_queries_versions.explore_name',
                 filters: 'saved_queries_versions.filters',
+                parameters: 'saved_queries_versions.parameters',
                 dimensions: this.database.raw(
                     "COALESCE(ARRAY_AGG(DISTINCT svf.name) FILTER (WHERE svf.field_type = 'dimension'), '{}')",
                 ),
@@ -1311,7 +1337,7 @@ export class SavedChartModel {
                 'saved_queries_versions.saved_queries_version_id',
                 'sqvs.saved_queries_version_id',
             )
-            .groupBy(1, 2, 3, 4, 5);
+            .groupBy(1, 2, 3, 4, 5, 6);
 
         // Filter out charts that are saved in a dashboard and don't belong to any tile in their dashboard last version
         const chartsNotInTilesUuids = await this.getChartsNotInTilesUuids(

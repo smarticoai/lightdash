@@ -2,8 +2,8 @@ import {
     BinType,
     CartesianSeriesType,
     ChartType,
-    ConditionalOperator,
     CustomDimensionType,
+    FilterOperator,
     generateSlug,
     SEED_ORG_1_ADMIN,
     SEED_PROJECT,
@@ -239,7 +239,10 @@ export async function seed(knex: Knex): Promise<void> {
                 filters: {},
                 limit: 500,
                 sorts: [
-                    { fieldId: 'orders_average_order_size', descending: true },
+                    {
+                        fieldId: 'orders_average_order_size',
+                        descending: true,
+                    },
                 ],
                 tableCalculations: [],
             },
@@ -331,11 +334,11 @@ export async function seed(knex: Knex): Promise<void> {
         SEED_PROJECT.project_uuid,
         SEED_ORG_1_ADMIN.user_uuid,
         {
-            slug: generateSlug(`How many orders did we get on February?`),
+            slug: generateSlug(`How many orders did we get in June?`),
 
-            name: 'How many orders did we get on February?',
+            name: 'How many orders did we get in June?',
             description:
-                'A single value of the total number of orders received in February',
+                'A single value of the total number of orders received in June',
             tableName: 'orders',
             metricQuery: {
                 exploreName: 'orders',
@@ -353,8 +356,8 @@ export async function seed(knex: Knex): Promise<void> {
                                 target: {
                                     fieldId: 'orders_order_date_month',
                                 },
-                                operator: ConditionalOperator.EQUALS,
-                                values: ['2018-02-01T00:00:00Z'],
+                                operator: FilterOperator.EQUALS,
+                                values: ['2024-06-01T00:00:00Z'],
                             },
                         ],
                     },
@@ -428,7 +431,7 @@ export async function seed(knex: Knex): Promise<void> {
                             rules: [
                                 {
                                     id: '2f4bf13c-861b-41e7-bad8-7f553fb93197',
-                                    operator: ConditionalOperator.GREATER_THAN,
+                                    operator: FilterOperator.GREATER_THAN,
                                     values: [300],
                                 },
                             ],
@@ -523,7 +526,10 @@ export async function seed(knex: Knex): Promise<void> {
                 metrics: ['orders_total_order_amount'],
                 filters: {},
                 sorts: [
-                    { fieldId: 'orders_total_order_amount', descending: true },
+                    {
+                        fieldId: 'orders_total_order_amount',
+                        descending: true,
+                    },
                 ],
                 limit: 500,
                 tableCalculations: [],

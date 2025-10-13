@@ -1,6 +1,6 @@
-import { Box, Flex } from '@mantine/core';
+import { Box, Button, Flex, Text } from '@mantine/core';
 import { noop } from '@mantine/utils';
-import { IconAlertCircle } from '@tabler/icons-react';
+import { IconAlertCircle, IconRefresh } from '@tabler/icons-react';
 import { type FC, useCallback, useEffect, useMemo } from 'react';
 import { isTableVisualizationConfig } from '../LightdashVisualization/types';
 import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
@@ -34,8 +34,13 @@ const SimpleTable: FC<SimpleTableProps> = ({
     minimal = false,
     ...rest
 }) => {
-    const { columnOrder, itemsMap, visualizationConfig, resultsData } =
-        useVisualizationContext();
+    const {
+        columnOrder,
+        itemsMap,
+        visualizationConfig,
+        resultsData,
+        isLoading,
+    } = useVisualizationContext();
 
     const shouldPaginateResults = useMemo(() => {
         return Boolean(
@@ -52,6 +57,14 @@ const SimpleTable: FC<SimpleTableProps> = ({
             return 'loading';
         }
 
+        if (
+            !isLoading &&
+            resultsData.rows.length === 0 &&
+            !resultsData.hasFetchedAllRows
+        ) {
+            return 'idle';
+        }
+
         // When paginated, it's success as soon as there are rows
         // When not paginated, it's success as soon as all rows have been fetched
         const isSuccess = shouldPaginateResults
@@ -59,7 +72,7 @@ const SimpleTable: FC<SimpleTableProps> = ({
             : resultsData.hasFetchedAllRows;
 
         return isSuccess ? 'success' : 'loading';
-    }, [resultsData, shouldPaginateResults]);
+    }, [resultsData, shouldPaginateResults, isLoading]);
 
     const showColumnCalculation = useMemo(() => {
         if (!isTableVisualizationConfig(visualizationConfig)) {
@@ -79,7 +92,7 @@ const SimpleTable: FC<SimpleTableProps> = ({
         FC<React.PropsWithChildren<HeaderProps>>
     >(
         (props) => {
-            if (!minimal && isDashboard && tileUuid)
+            if (isDashboard && tileUuid)
                 return (
                     <DashboardHeaderContextMenu
                         {...props}
@@ -88,7 +101,7 @@ const SimpleTable: FC<SimpleTableProps> = ({
                 );
             return null;
         },
-        [isDashboard, minimal, tileUuid],
+        [isDashboard, tileUuid],
     );
 
     const cellContextMenu = useCallback<
@@ -130,6 +143,39 @@ const SimpleTable: FC<SimpleTableProps> = ({
     } = visualizationConfig.chartConfig;
 
     if (pivotTableData.error) {
+        const isWorkerFetchError = pivotTableData.error.includes(
+            'Failed to fetch dynamically imported module',
+        );
+        if (isWorkerFetchError) {
+            return (
+                <SuboptimalState
+                    icon={IconAlertCircle}
+                    title="Application update required"
+                    description={
+                        <Box>
+                            <Text mb="xs">
+                                Refresh your browser to load the latest version
+                                and display this visualization correctly.
+                            </Text>
+                            <Text size="sm" color="dimmed">
+                                If this persists after refreshing, contact
+                                support.
+                            </Text>
+                        </Box>
+                    }
+                    action={
+                        <Button
+                            variant="default"
+                            size={'xs'}
+                            leftIcon={<IconRefresh size={16} />}
+                            onClick={() => window.location.reload()}
+                        >
+                            Refresh page
+                        </Button>
+                    }
+                />
+            );
+        }
         return (
             <SuboptimalState
                 title="Results not available"

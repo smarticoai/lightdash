@@ -1,22 +1,17 @@
 import { z } from 'zod';
-import { type LightdashUser } from '../../types/user';
+import type { OssEmbed } from '../../types/auth';
 import assertUnreachable from '../../utils/assertUnreachable';
 
-export type Embed = {
-    projectUuid: string;
-    encodedSecret: string;
-    dashboardUuids: string[];
-    allowAllDashboards: boolean;
-    createdAt: string;
-    user: Pick<LightdashUser, 'userUuid' | 'firstName' | 'lastName'>;
-};
+/** @deprecated Use OssEmbed instead */
+export type Embed = OssEmbed;
 
 export type DecodedEmbed = Omit<Embed, 'encodedSecret'> & {
     encodedSecret: undefined;
     secret: string;
 };
 
-export type CreateEmbed = {
+// tsoa can't differentiate betwen CreateEmbed and CreatedEmbedJwt so we opt for a more unique name
+export type CreateEmbedRequestBody = {
     dashboardUuids: string[];
 };
 
@@ -39,7 +34,8 @@ export const FilterInteractivityValuesSchema = z.enum([
 
 export const DashboardFilterInteractivityOptionsSchema = z.object({
     enabled: z.union([z.boolean(), FilterInteractivityValuesSchema]),
-    allowedFilters: z.array(z.string()).optional(),
+    // Nullish because we have python clients that serialize None to null
+    allowedFilters: z.array(z.string()).nullish(),
 });
 
 export type DashboardFilterInteractivityOptions = z.infer<
@@ -53,6 +49,8 @@ export const InteractivityOptionsSchema = z.object({
     canExportImages: z.boolean().optional(),
     canExportPagePdf: z.boolean().optional(),
     canDateZoom: z.boolean().optional(),
+    canExplore: z.boolean().optional(),
+    canViewUnderlyingData: z.boolean().optional(),
 });
 
 export type InteractivityOptions = z.infer<typeof InteractivityOptionsSchema>;
@@ -94,19 +92,20 @@ export const EmbedJwtSchema = z
 export type EmbedJwt = z.infer<typeof EmbedJwtSchema>;
 
 // Note: we can't extend zod types since tsoa doesn't support it
-
 type CommonEmbedJwtContent = {
     type: 'dashboard';
     projectUuid?: string;
     isPreview?: boolean;
     dashboardFiltersInteractivity?: {
         enabled: FilterInteractivityValues | boolean;
-        allowedFilters?: string[];
+        allowedFilters?: string[] | null;
     };
     canExportCsv?: boolean;
     canExportImages?: boolean;
     canDateZoom?: boolean;
     canExportPagePdf?: boolean;
+    canExplore?: boolean;
+    canViewUnderlyingData?: boolean;
 };
 
 type EmbedJwtContentDashboardUuid = CommonEmbedJwtContent & {
@@ -125,6 +124,8 @@ export type CreateEmbedJwt = {
         externalId?: string;
     };
     expiresIn?: string;
+    iat?: number;
+    exp?: number;
 };
 
 export function isDashboardUuidContent(

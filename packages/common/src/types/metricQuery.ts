@@ -83,6 +83,7 @@ export type CompiledMetricQuery = Omit<MetricQuery, 'customDimensions'> & {
 export type SortField = {
     fieldId: string; // Field must exist in the explore
     descending: boolean; // Direction of the sort
+    nullsFirst?: boolean; // Whether to sort nulls first
 };
 
 export const getAdditionalMetricLabel = (item: AdditionalMetric) =>
@@ -170,4 +171,10 @@ export type MetricQueryRequest = {
     metadata?: MetricQuery['metadata'];
     timezone?: string;
     metricOverrides?: MetricOverrides;
+};
+
+export type QueryWarning = {
+    message: string; // message, in markdown, to be shown to the user
+    fields?: string[]; // fields that relate to this message
+    tables?: string[]; // tables that relate to this message
 };

@@ -24,6 +24,7 @@ import {
     IconTrash,
 } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
+import { useDelayedHover } from '../../../hooks/useDelayedHover';
 import MantineIcon from '../../common/MantineIcon';
 import DeleteChartTileThatBelongsToDashboardModal from '../../common/modal/DeleteChartTileThatBelongsToDashboardModal';
 import ChartUpdateModal from '../TileForms/ChartUpdateModal';
@@ -31,7 +32,6 @@ import MoveTileToTabModal from '../TileForms/MoveTileToTabModal';
 import TileUpdateModal from '../TileForms/TileUpdateModal';
 
 import {
-    ButtonsWrapper,
     ChartContainer,
     HeaderContainer,
     TileTitleLink,
@@ -87,8 +87,10 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
         setIsDeletingChartThatBelongsToDashboard,
     ] = useState(false);
     const { hovered: containerHovered, ref: containerRef } = useHover();
-    const { hovered: titleHovered, ref: titleRef } =
-        useHover<HTMLAnchorElement>();
+    const { isHovered: chartHovered, ...chartHoveredProps } = useDelayedHover({
+        delay: 500,
+    });
+    const { hovered: titleHovered, ref: titleRef } = useHover<HTMLAnchorElement>();
     const [isMenuOpen, toggleMenu] = useToggle([false, true]);
 
     const hideTitle =
@@ -114,9 +116,6 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
             shadow={isEditMode ? 'xs' : undefined}
             sx={(theme) => {
                 let border = `1px solid ${theme.colors.gray[1]}`;
-                if (tabs && tabs.length > 1) {
-                    border = `1px solid ${theme.colors.gray[3]}`;
-                }
                 if (isEditMode) {
                     border = `1px dashed ${theme.colors.blue[5]}`;
                 }
@@ -132,7 +131,6 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
                 visible={isLoading ?? false}
                 zIndex={getDefaultZIndex('modal') - 10}
             />
-
             <HeaderContainer
                 $isEditMode={isEditMode}
                 $isEmpty={isMarkdownTileTitleEmpty || hideTitle}
@@ -204,14 +202,17 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
                         </TitleWrapper>
                     </Tooltip>
                 )}
-                {visibleHeaderElement && (
-                    <ButtonsWrapper className="non-draggable">
-                        {visibleHeaderElement}
-                    </ButtonsWrapper>
-                )}
-
-                <ButtonsWrapper className="non-draggable">
-                    {(containerHovered && !titleHovered) ||
+                <Group
+                    spacing="xs"
+                    className="non-draggable"
+                    sx={{ marginLeft: 'auto' }}
+                >
+                    {visibleHeaderElement && (
+                        <Group spacing="xs" className="non-draggable">
+                            {visibleHeaderElement}
+                        </Group>
+                    )}
+                    {(containerHovered && !titleHovered && !chartHovered) ||
                     isMenuOpen ||
                     lockHeaderVisibility ? (
                         <>
@@ -320,13 +321,19 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
                             )}
                         </>
                     ) : null}
-                </ButtonsWrapper>
+                </Group>
             </HeaderContainer>
-
-            <ChartContainer className="non-draggable sentry-block ph-no-capture">
+            <ChartContainer
+                className="non-draggable sentry-block ph-no-capture"
+                onMouseEnter={
+                    hideTitle ? chartHoveredProps.handleMouseEnter : undefined
+                }
+                onMouseLeave={
+                    hideTitle ? chartHoveredProps.handleMouseLeave : undefined
+                }
+            >
                 {children}
             </ChartContainer>
-
             {isEditingTileContent &&
                 (tile.type === DashboardTileTypes.SAVED_CHART ||
                 tile.type === DashboardTileTypes.SQL_CHART ? (
@@ -360,7 +367,6 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
                         }}
                     />
                 ))}
-
             <DeleteChartTileThatBelongsToDashboardModal
                 className={'non-draggable'}
                 name={chartName ?? ''}

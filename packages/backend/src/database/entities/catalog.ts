@@ -22,6 +22,9 @@ export type DbCatalog = {
     icon: CatalogItemIcon | null;
     table_name: string;
     spotlight_show: boolean;
+    yaml_tags: string[] | null;
+    ai_hints: string[] | null;
+    joined_tables: string[] | null;
 };
 
 export type DbCatalogIn = Pick<
@@ -37,13 +40,23 @@ export type DbCatalogIn = Pick<
     | 'chart_usage'
     | 'table_name'
     | 'spotlight_show'
+    | 'yaml_tags'
+    | 'ai_hints'
+    | 'joined_tables'
 >;
 export type DbCatalogRemove = Pick<DbCatalog, 'project_uuid' | 'name'>;
-export type DbCatalogUpdate =
-    | Pick<DbCatalog, 'embedding_vector'>
-    | Pick<DbCatalog, 'chart_usage'>
-    | Pick<DbCatalog, 'icon'>
-    | Pick<DbCatalog, 'table_name'>;
+export type DbCatalogUpdate = Partial<
+    Pick<
+        DbCatalog,
+        | 'label'
+        | 'description'
+        | 'ai_hints'
+        | 'embedding_vector'
+        | 'chart_usage'
+        | 'icon'
+        | 'table_name'
+    >
+>;
 export type CatalogTable = Knex.CompositeTableType<
     DbCatalog,
     DbCatalogIn,
@@ -69,8 +82,11 @@ export function getDbCatalogColumnFromCatalogProperty(
             return 'required_attributes';
         case 'catalogSearchUuid':
             return 'catalog_search_uuid';
+        case 'aiHints':
+            return 'ai_hints';
         case 'icon':
             return 'icon';
+        case 'searchRank':
         case 'categories':
         case 'tags':
             throw new Error(

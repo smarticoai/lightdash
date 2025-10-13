@@ -1,7 +1,9 @@
 import {
     AnyType,
     assertUnreachable,
+    BigqueryAuthenticationType,
     CreateWarehouseCredentials,
+    SnowflakeAuthenticationType,
     WarehouseTypes,
 } from '@lightdash/common';
 import * as yaml from 'js-yaml';
@@ -25,31 +27,51 @@ const credentialsTarget = (
 ): CredentialsTarget => {
     switch (credentials.type) {
         case WarehouseTypes.BIGQUERY:
-            return {
+            const bqResult: CredentialsTarget = {
                 target: {
                     type: credentials.type,
-                    method: 'service-account-json',
                     project: credentials.project,
                     dataset: credentials.dataset,
                     threads: DEFAULT_THREADS,
                     timeout_seconds: credentials.timeoutSeconds,
                     priority: credentials.priority,
                     retries: credentials.retries,
-                    maximum_bytes_billed: credentials.maximumBytesBilled,
-                    keyfile_json: Object.fromEntries(
+                    maximum_bytes_billed:
+                        credentials.maximumBytesBilled || undefined, // form allows empty string, converting to undefined here
+                    execution_project: credentials.executionProject,
+                },
+                environment: {},
+            };
+            switch (credentials.authenticationType) {
+                // for backwards compatibility, handle undefined authenticationType as private key.
+                case BigqueryAuthenticationType.PRIVATE_KEY:
+                case BigqueryAuthenticationType.SSO:
+                case undefined:
+                    bqResult.target.method = 'service-account-json';
+                    bqResult.target.keyfile_json = Object.fromEntries(
                         Object.keys(credentials.keyfileContents).map((key) => [
                             key,
                             envVarReference(key),
                         ]),
-                    ),
-                    execution_project: credentials.executionProject,
-                },
-                environment: Object.fromEntries(
-                    Object.entries(credentials.keyfileContents).map(
-                        ([key, value]) => [envVar(key), value],
-                    ),
-                ),
-            };
+                    );
+                    bqResult.environment = Object.fromEntries(
+                        Object.entries(credentials.keyfileContents).map(
+                            ([key, value]) => [envVar(key), value],
+                        ),
+                    );
+                    return bqResult;
+                case BigqueryAuthenticationType.ADC:
+                    // With oauth method and no keyfile contents, dbt will use the
+                    // application default credentials (ADC) to authenticate
+                    bqResult.target.method = 'oauth';
+                    return bqResult;
+                default:
+                    const { authenticationType } = credentials;
+                    return assertUnreachable(
+                        credentials,
+                        `Incorrect BigQuery profile. Received authenticationType: ${authenticationType}`,
+                    );
+            }
         case WarehouseTypes.REDSHIFT:
             return {
                 target: {
@@ -140,6 +162,12 @@ const credentialsTarget = (
                 },
             };
             if (
+                credentials.authenticationType ===
+                SnowflakeAuthenticationType.SSO
+            ) {
+                // Credentials from SSO will be loaded on _resolveWarehouseClientCredentials in ProjectService
+                console.debug('Snowflake authentication type is SSO');
+            } else if (
                 (!credentials.authenticationType ||
                     credentials.authenticationType === 'password') &&
                 credentials.password
@@ -159,7 +187,7 @@ const credentialsTarget = (
                 }
             } else {
                 throw new Error(
-                    `Incorrect snowflake profile. Profile should have password or private key.`,
+                    `Incorrect snowflake profile. Profile should have SSO credentials, password or private key.`,
                 );
             }
             return result;
@@ -177,6 +205,22 @@ const credentialsTarget = (
                 },
                 environment: {
                     [envVar('token')]: credentials.personalAccessToken,
+                },
+            };
+        case WarehouseTypes.CLICKHOUSE:
+            return {
+                target: {
+                    type: WarehouseTypes.CLICKHOUSE,
+                    host: credentials.host,
+                    port: credentials.port,
+                    user: envVarReference('user'),
+                    password: envVarReference('password'),
+                    schema: credentials.schema,
+                    secure: credentials.secure,
+                },
+                environment: {
+                    [envVar('user')]: credentials.user,
+                    [envVar('password')]: credentials.password,
                 },
             };
         default:

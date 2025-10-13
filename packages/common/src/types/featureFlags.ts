@@ -6,24 +6,13 @@
  */
 export enum FeatureFlags {
     /**/
-    PassthroughLogin = 'passthrough-login',
-
-    /**/
     ShowDbtCloudProjectOption = 'show-dbt-cloud-project-option',
 
     /* Show user groups */
     UserGroupsEnabled = 'user-groups-enabled',
 
-    /** Enable dashboard tabs */
-    DashboardTabs = 'dashboard_tabs',
-
     /* Send local timezone to the warehouse session */
     EnableUserTimezones = 'enable-user-timezones',
-
-    /**
-     * Enable the semantic layer
-     */
-    SemanticLayerEnabled = 'semantic-layer-enabled',
 
     /**
      * Enable dashboard comments
@@ -48,11 +37,6 @@ export enum FeatureFlags {
     WriteBackCustomBinDimensions = 'write-back-custom-bin-dimensions',
 
     /**
-     * Enable a new API endpoint that requests results page by page.
-     */
-    QueryPagination = 'query-pagination',
-
-    /**
      * Enable the ability to show the warehouse execution time and total time in the chart tile.
      */
     ShowExecutionTime = 'show-execution-time',
@@ -61,6 +45,28 @@ export enum FeatureFlags {
      * Enable the ability to create custom visualizations with AI
      */
     AiCustomViz = 'ai-custom-viz',
+
+    BigquerySSO = 'bigquery-sso',
+
+    /**
+     * Use workers for async query execution
+     */
+    WorkerQueryExecution = 'worker-query-execution',
+
+    /**
+     * Enable SQL pivot results conversion to PivotData format
+     */
+    UseSqlPivotResults = 'use-sql-pivot-results',
+
+    /**
+     * Enable the unused content dashboard showing least viewed charts and dashboards
+     */
+    UnusedContentDashboard = 'unused-content-dashboard',
+
+    /**
+     * Enable Redux state management for Explorer (gradual migration from Context API)
+     */
+    UseRedux = 'use-redux',
 }
 
 export type FeatureFlag = {

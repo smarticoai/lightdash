@@ -1,5 +1,5 @@
-import { ConditionalOperator } from '../types/conditionalRule';
-import { type Table } from '../types/explore';
+import { SupportedDbtAdapter } from '../types/dbt';
+import { type Explore, type Table } from '../types/explore';
 import {
     CustomDimensionType,
     DimensionType,
@@ -14,7 +14,8 @@ import {
     type FilterGroup,
     type FilterRule,
     type Filters,
-    type MetricFilterRule,
+    type JoinModelRequiredFilterRule,
+    type ModelRequiredFilterRule,
     type OrFilterGroup,
 } from '../types/filter';
 import type { MetricQuery } from '../types/metricQuery';
@@ -28,14 +29,14 @@ export const chartAndFilterGroup: AndFilterGroup = {
             target: { fieldId: 'field-1' },
             values: ['1'],
             disabled: false,
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
         },
         {
             id: '2',
             target: { fieldId: 'field-2' },
             values: ['2'],
             disabled: false,
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
         },
     ],
 };
@@ -48,14 +49,14 @@ export const chartOrFilterGroup: OrFilterGroup = {
             target: { fieldId: 'field-1' },
             values: ['1'],
             disabled: false,
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
         },
         {
             id: '4',
             target: { fieldId: 'field-2' },
             values: ['2'],
             disabled: false,
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
         },
     ],
 };
@@ -66,7 +67,7 @@ export const dashboardFilterWithSameTargetAndOperator: FilterRule[] = [
         target: { fieldId: 'field-1' },
         values: ['1', '2', '3'],
         disabled: false,
-        operator: ConditionalOperator.EQUALS,
+        operator: FilterOperator.EQUALS,
     },
 ];
 
@@ -76,7 +77,7 @@ export const dashboardFilterWithSameTargetButDifferentOperator: FilterRule[] = [
         target: { fieldId: 'field-1' },
         values: ['1', '2', '3'],
         disabled: false,
-        operator: ConditionalOperator.NOT_EQUALS,
+        operator: FilterOperator.NOT_EQUALS,
     },
 ];
 
@@ -137,7 +138,7 @@ export const dashboardFilters: DashboardFilters = {
                 fieldId: 'a_dim1',
                 tableName: 'test',
             },
-            operator: ConditionalOperator.EQUALS,
+            operator: FilterOperator.EQUALS,
             values: ['1', '2', '3'],
         },
     ],
@@ -228,7 +229,7 @@ export const expectedFiltersWithCustomSqlDimension: Filters = {
         and: [
             {
                 id: 'uuid',
-                operator: ConditionalOperator.EQUALS,
+                operator: FilterOperator.EQUALS,
                 target: {
                     fieldId: 'custom-sql-dimension',
                 },
@@ -280,7 +281,9 @@ export const filterRule: FilterRule = {
     values: ['mockValue1', 'mockValue2'],
 };
 
-export const metricFilterRule = (inputFieldRef: string): MetricFilterRule => ({
+export const modelRequiredFilterRule = (
+    inputFieldRef: string,
+): ModelRequiredFilterRule => ({
     id: 'uuid',
     operator: FilterOperator.IN_THE_NEXT,
     settings: {
@@ -291,6 +294,20 @@ export const metricFilterRule = (inputFieldRef: string): MetricFilterRule => ({
     },
     values: [14],
 });
+
+export const joinedModelRequiredFilterRule = (
+    inputFieldRef: string,
+    tableName: string,
+): JoinModelRequiredFilterRule => {
+    const requiredFilterRule = modelRequiredFilterRule(inputFieldRef);
+    return {
+        ...requiredFilterRule,
+        target: {
+            ...requiredFilterRule.target,
+            tableName,
+        },
+    };
+};
 
 export const baseTable: Omit<Table, 'lineageGraph'> = {
     name: 'table',
@@ -317,7 +334,7 @@ export const expectedRequiredResetResult: FilterGroup = {
             target: {
                 fieldId: 'table_mockFieldRef1',
             },
-            operator: ConditionalOperator.IN_THE_NEXT,
+            operator: FilterOperator.IN_THE_NEXT,
             values: [14],
             required: true,
             settings: {
@@ -329,12 +346,153 @@ export const expectedRequiredResetResult: FilterGroup = {
             target: {
                 fieldId: 'table_mockFieldRef2',
             },
-            operator: ConditionalOperator.IN_THE_NEXT,
+            operator: FilterOperator.IN_THE_NEXT,
             values: [14],
             required: false,
             settings: {
                 unitOfTime: 'years',
             },
+        },
+    ],
+};
+
+export const mockExplore: Explore = {
+    name: 'test',
+    label: 'Test',
+    tags: [],
+    baseTable: 'orders',
+    targetDatabase: SupportedDbtAdapter.POSTGRES,
+    joinedTables: [],
+    tables: {
+        orders: {
+            name: 'orders',
+            label: 'Orders',
+            database: 'test',
+            schema: 'public',
+            sqlTable: 'orders',
+            metrics: {},
+            lineageGraph: {},
+            dimensions: {
+                order_date_year: {
+                    name: 'order_date_year',
+                    label: 'Order Date Year',
+                    table: 'orders',
+                    tableLabel: 'Orders',
+                    compiledSql: 'order_date_year',
+                    tablesReferences: [],
+                    sql: 'order_date_year',
+                    hidden: false,
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    timeIntervalBaseDimensionName: 'order_date',
+                },
+                order_date_month: {
+                    name: 'order_date_month',
+                    label: 'Order Date Month',
+                    table: 'orders',
+                    tableLabel: 'Orders',
+                    compiledSql: 'order_date_month',
+                    tablesReferences: [],
+                    sql: 'order_date_month',
+                    hidden: false,
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    timeIntervalBaseDimensionName: 'order_date',
+                },
+                order_date_week: {
+                    name: 'order_date_week',
+                    label: 'Order Date Week',
+                    table: 'orders',
+                    tableLabel: 'Orders',
+                    compiledSql: 'order_date_week',
+                    sql: 'order_date_week',
+                    hidden: false,
+                    tablesReferences: [],
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    timeIntervalBaseDimensionName: 'order_date',
+                },
+                status: {
+                    name: 'status',
+                    label: 'Status',
+                    table: 'orders',
+                    tableLabel: 'Orders',
+                    compiledSql: 'status',
+                    sql: 'status',
+                    hidden: false,
+                    tablesReferences: [],
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.BOOLEAN,
+                },
+            },
+        },
+    },
+};
+
+export const mockExploreWithJoinedTable: Explore = {
+    ...mockExplore,
+    tables: {
+        orders: {
+            ...mockExplore.tables.orders,
+            dimensions: {
+                ...mockExplore.tables.orders.dimensions,
+                customer_id: {
+                    name: 'customer_id',
+                    label: 'Customer ID',
+                    table: 'orders',
+                    tableLabel: 'Orders',
+                    compiledSql: 'customer_id',
+                    sql: 'customer_id',
+                    hidden: false,
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.NUMBER,
+                    tablesReferences: [],
+                },
+            },
+        },
+        customers: {
+            name: 'customers',
+            label: 'Customers',
+            database: 'test',
+            schema: 'public',
+            sqlTable: 'customers',
+            metrics: {},
+            lineageGraph: {},
+            dimensions: {
+                id: {
+                    name: 'id',
+                    label: 'ID',
+                    table: 'customers',
+                    tableLabel: 'Customers',
+                    compiledSql: 'id',
+                    tablesReferences: [],
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.STRING,
+                    sql: 'id',
+                    hidden: false,
+                },
+                created_at_week: {
+                    name: 'created_at_week',
+                    label: 'Created At Week',
+                    table: 'customers',
+                    tableLabel: 'Customers',
+                    compiledSql: 'created_at_week',
+                    sql: 'created_at_week',
+                    hidden: false,
+                    tablesReferences: [],
+                    fieldType: FieldType.DIMENSION,
+                    type: DimensionType.DATE,
+                    timeIntervalBaseDimensionName: 'created_at',
+                },
+            },
+        },
+    },
+    joinedTables: [
+        {
+            table: 'customers',
+            sqlOn: '${orders.customer_id} = ${customers.id}',
+            compiledSqlOn: '(orders.customer_id) = (customers.id)',
+            type: undefined,
         },
     ],
 };

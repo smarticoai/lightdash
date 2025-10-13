@@ -20,6 +20,7 @@ import {
     getLtreePathFromContentAsCodePath,
     getLtreePathFromSlug,
     NotFoundError,
+    ParameterError,
     Project,
     PromotionAction,
     PromotionChanges,
@@ -29,6 +30,7 @@ import {
     SpaceMemberRole,
     SpaceSummary,
     UpdatedByUser,
+    type DashboardTileWithSlug,
 } from '@lightdash/common';
 import { v4 as uuidv4 } from 'uuid';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
@@ -56,11 +58,10 @@ type CoderServiceArguments = {
 const isAnyChartTile = (
     tile: DashboardTileAsCode | DashboardTile,
 ): tile is DashboardTile & {
-    properties: { chartSlug: string; hideTitle: boolean };
+    properties: { chartSlug: string; hideTitle: boolean; chartName?: string };
 } =>
     tile.type === DashboardTileTypes.SAVED_CHART ||
-    tile.type === DashboardTileTypes.SQL_CHART ||
-    tile.type === DashboardTileTypes.SEMANTIC_VIEWER_CHART;
+    tile.type === DashboardTileTypes.SQL_CHART;
 
 export class CoderService extends BaseService {
     lightdashConfig: LightdashConfig;
@@ -209,7 +210,7 @@ export class CoderService extends BaseService {
      */
     static getFiltersWithTileUuids(
         dashboardAsCode: DashboardAsCode,
-        tilesWithUuids: DashboardTile[],
+        tilesWithUuids: DashboardTileWithSlug[],
     ): DashboardDAO['filters'] {
         const dimensionFiltersWithUuids: DashboardDAO['filters']['dimensions'] =
             dashboardAsCode.filters.dimensions.map((filter) => {
@@ -220,7 +221,9 @@ export class CoderService extends BaseService {
                         const tileUuid = tilesWithUuids.find(
                             (t) =>
                                 isAnyChartTile(t) &&
-                                t.properties.chartSlug === tileSlug,
+                                // Match first by tileSlug, then by chartSlug (for the case of tile not having a slug)
+                                (t.tileSlug === tileSlug ||
+                                    t.properties.chartSlug === tileSlug),
                         )?.uuid;
                         if (!tileUuid) {
                             console.error(
@@ -274,6 +277,7 @@ export class CoderService extends BaseService {
                             title: tile.properties.title,
                             hideTitle: tile.properties.hideTitle,
                             chartSlug: tile.properties.chartSlug,
+                            chartName: tile.properties.chartName,
                         },
                     };
                 }
@@ -309,7 +313,7 @@ export class CoderService extends BaseService {
     async convertTileWithSlugsToUuids(
         projectUuid: string,
         tiles: DashboardTileAsCode[],
-    ): Promise<DashboardTile[]> {
+    ): Promise<DashboardTileWithSlug[]> {
         const chartSlugs: string[] = tiles.reduce<string[]>(
             (acc, tile) =>
                 isAnyChartTile(tile)
@@ -343,9 +347,10 @@ export class CoderService extends BaseService {
                         ...tile.properties,
                         savedChartUuid: savedChart.uuid,
                     },
-                } as DashboardTile;
+                } as DashboardTileWithSlug;
             }
-            return tile as DashboardTile;
+
+            return tile as DashboardTileWithSlug;
         });
     }
 
@@ -677,6 +682,7 @@ export class CoderService extends BaseService {
         projectUuid: string,
         slug: string,
         chartAsCode: ChartAsCode,
+        skipSpaceCreate?: boolean,
     ) {
         const project = await this.projectModel.get(projectUuid);
 
@@ -706,6 +712,7 @@ export class CoderService extends BaseService {
                     projectUuid,
                     chartAsCode.spaceSlug,
                     user,
+                    skipSpaceCreate,
                 );
 
             console.info(
@@ -805,7 +812,9 @@ export class CoderService extends BaseService {
             projectUuid,
             chartAsCode.spaceSlug,
             user,
+            skipSpaceCreate,
         );
+
         const { promotedChart, upstreamChart } =
             await this.promoteService.getPromoteCharts(
                 user,
@@ -846,6 +855,7 @@ export class CoderService extends BaseService {
         projectUuid: string,
         spaceSlug: string,
         user: SessionUser,
+        skipSpaceCreate?: boolean,
     ): Promise<{ space: Omit<SpaceSummary, 'userAccess'>; created: boolean }> {
         const [existingSpace] = await this.spaceModel.find({
             path: getLtreePathFromContentAsCodePath(spaceSlug),
@@ -870,7 +880,11 @@ export class CoderService extends BaseService {
                 "You don't have access to a private space",
             );
         }
-
+        if (skipSpaceCreate) {
+            throw new NotFoundError(
+                `Space ${spaceSlug} does not exist, skipping creation`,
+            );
+        }
         const path = getLtreePathFromContentAsCodePath(spaceSlug);
 
         const closestAncestorSpaceUuid =
@@ -969,6 +983,7 @@ export class CoderService extends BaseService {
         projectUuid: string,
         slug: string,
         dashboardAsCode: DashboardAsCode,
+        skipSpaceCreate?: boolean,
     ): Promise<PromotionChanges> {
         const project = await this.projectModel.get(projectUuid);
 
@@ -1004,6 +1019,7 @@ export class CoderService extends BaseService {
                     projectUuid,
                     dashboardAsCode.spaceSlug,
                     user,
+                    skipSpaceCreate,
                 );
 
             const newDashboard = await this.dashboardModel.create(
@@ -1076,6 +1092,7 @@ export class CoderService extends BaseService {
             projectUuid,
             dashboardAsCode.spaceSlug,
             user,
+            skipSpaceCreate,
         );
 
         //  we force the new space on the upstreamDashboard

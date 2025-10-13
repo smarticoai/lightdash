@@ -1,9 +1,11 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 /.cursor
+# version control
+.git
 
 # dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.js
 
@@ -13,6 +15,10 @@
 /packages/e2e/cypress/screenshots/**/*
 /packages/e2e/cypress/videos/**/*
 /packages/e2e/cypress/downloads/**/*
+/packages/e2e/cypress/artifacts/**/*
+
+# eval reports
+/packages/backend/eval-reports/**/*
 
 # logs
 /packages/backend/logs
@@ -32,7 +38,11 @@ lightdash_dev.yml
 /packages/warehouses/dist
 /packages/sdk/dist
 /packages/sdk-test-app/dist
-/packages/mantine-v7/dist
+
+# CLI binary build artifacts
+/packages/cli/bundle/
+/packages/cli/bin/
+
 # misc
 .DS_Store
 .env.local
@@ -53,6 +63,8 @@ package-lock.json
 
 # examples
 /examples/full-jaffle-shop-demo/dbt/target
+/examples/full-jaffle-shop-demo/dbt/dbt_packages
+/examples/full-jaffle-shop-demo/dbt/dbt_internal_packages/
 /dbt
 /profile*
 
@@ -64,12 +76,19 @@ credentials.json
 /target
 packages/backend/target/
 venv/
+.venv/
+.venvs/
 dbt_modules/
 logs/
-/.envrc
 
-# dangerfile
-dangerfile.development.ts
+# direnv
+/.envrc
+.direnv/
+
+# nix flakes
+flake.nix
+flake.lock
+
 
 # Charts as code
 lightdash
@@ -78,3 +97,10 @@ lightdash
 # Prometheus
 prometheus.yml
 data/
+
+# environment
+.env*
+
+.local/*
+
+CLAUDE.local.md

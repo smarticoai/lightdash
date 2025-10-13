@@ -57,11 +57,13 @@ import { useChartViewStats } from '../../../hooks/chart/useChartViewStats';
 import useDashboardStorage from '../../../hooks/dashboard/useDashboardStorage';
 import { useChartPinningMutation } from '../../../hooks/pinning/useChartPinningMutation';
 import { useContentAction } from '../../../hooks/useContent';
+import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
 import { useFeatureFlagEnabled } from '../../../hooks/useFeatureFlagEnabled';
 import { useProject } from '../../../hooks/useProject';
 import { useUpdateMutation } from '../../../hooks/useSavedQuery';
 import useSearchParams from '../../../hooks/useSearchParams';
 import { useSpaceSummaries } from '../../../hooks/useSpaces';
+import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
@@ -119,9 +121,10 @@ const SavedChartsHeader: FC = () => {
     );
     const reset = useExplorerContext((context) => context.actions.reset);
 
-    const itemsMap = useExplorerContext(
-        (context) => context.query.data?.fields,
-    );
+    // Get query state from hook instead of Context
+    const { query } = useExplorerQuery();
+    const itemsMap = query.data?.fields;
+
     const isValidQuery = useExplorerContext(
         (context) => context.state.isValidQuery,
     );
@@ -334,7 +337,13 @@ const SavedChartsHeader: FC = () => {
                                     dashboardUuid={savedChart.dashboardUuid}
                                     dashboardName={savedChart.dashboardName}
                                 />
-                                <Title c="dark.6" order={5} fw={600}>
+                                <Title
+                                    c="dark.6"
+                                    order={5}
+                                    fw={600}
+                                    truncate
+                                    maw={500}
+                                >
                                     {savedChart.name}
                                 </Title>
                                 {isEditMode && userCanManageChart && (
@@ -631,20 +640,32 @@ const SavedChartsHeader: FC = () => {
                                         Alerts
                                     </Menu.Item>
                                 )}
-                                {userCanManageChart && hasGoogleDriveEnabled ? (
-                                    <Menu.Item
-                                        icon={
-                                            <MantineIcon
-                                                icon={IconCirclesRelation}
-                                            />
-                                        }
-                                        onClick={
-                                            syncWithGoogleSheetsModalHandlers.open
-                                        }
-                                    >
-                                        Google Sheets Sync
-                                    </Menu.Item>
-                                ) : null}
+                                {userCanManageChart &&
+                                    hasGoogleDriveEnabled && (
+                                        <Can
+                                            I="manage"
+                                            this={subject('GoogleSheets', {
+                                                organizationUuid:
+                                                    user.data?.organizationUuid,
+                                                projectUuid,
+                                            })}
+                                        >
+                                            <Menu.Item
+                                                icon={
+                                                    <MantineIcon
+                                                        icon={
+                                                            IconCirclesRelation
+                                                        }
+                                                    />
+                                                }
+                                                onClick={
+                                                    syncWithGoogleSheetsModalHandlers.open
+                                                }
+                                            >
+                                                Google Sheets Sync
+                                            </Menu.Item>
+                                        </Can>
+                                    )}
 
                                 {userCanManageChart && (
                                     <>
