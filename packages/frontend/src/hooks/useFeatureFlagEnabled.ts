@@ -1,6 +1,5 @@
 import {
     type ApiError,
-    type CommercialFeatureFlags,
     type FeatureFlag,
     FeatureFlags,
 } from '@lightdash/common';

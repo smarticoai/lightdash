@@ -839,7 +839,7 @@ export class ProjectService extends BaseService {
         const userAttributes = await this.userAttributesModel.getAttributeValuesForOrgMember(
             {
                 organizationUuid,
-                userUuid
+                userUuid: userId,
             },
         );     
         
@@ -2753,8 +2753,8 @@ export class ProjectService extends BaseService {
                         await this.getAvailableParameters(projectUuid, explore);
 
                     // SMR-START
-                    if (explore.tables && (user?.userAttributes?.bq_project_id || userAttributes?.bq_project_id)) {
-                        const bqProjectId: string = (user?.userAttributes?.bq_project_id || userAttributes?.bq_project_id) as unknown as string;
+                    if (explore.tables && (userAttributes?.bq_project_id)) {
+                        const bqProjectId: string = (userAttributes?.bq_project_id) as unknown as string;
                         // console.log('bqProjectId3', bqProjectId);
                         for (const [, compiledTable] of Object.entries(explore.tables)) {
                             compiledTable.database = bqProjectId;
@@ -3990,9 +3990,12 @@ export class ProjectService extends BaseService {
                 });
                 const explore = exploresMap[exploreName];
 
+                const { userAttributes } = await this.getUserAttributes({ account });
+                
+
                 // SMR-START
-                if (explore.tables && user.userAttributes?.bq_project_id) {
-                    const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
+                if (explore.tables && userAttributes?.bq_project_id) {
+                    const bqProjectId: string = userAttributes.bq_project_id as unknown as string;
                     // console.log('bqProjectId2', bqProjectId);
                     for (const [, compiledTable] of Object.entries(explore.tables)) {
                         compiledTable.database = bqProjectId;
