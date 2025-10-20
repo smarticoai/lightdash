@@ -1,16 +1,18 @@
 import {
     type ApiError,
     type FeatureFlag,
+    type CommercialFeatureFlags,
     FeatureFlags,
 } from '@lightdash/common';
 import { useQuery } from '@tanstack/react-query';
 import { lightdashApi } from '../api';
 
+
 /**
  * Thin wrapper around posthog's useFeatureFlagEnabled hook that is aware
  * of our FeatureFlags enum.
  */
-export const useFeatureFlagEnabled = (featureFlag: FeatureFlags) => {
+export const useFeatureFlagEnabled = (featureFlag: FeatureFlags | CommercialFeatureFlags) => {
     switch (featureFlag) {
         case FeatureFlags.PassthroughLogin:
             return true;
