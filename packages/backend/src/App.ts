@@ -690,13 +690,16 @@ export default class App {
 
                 // Check if this is an OAuth endpoint and return OAuth2-compliant error response
                 if (error instanceof OauthAuthenticationError) {
-                    const oauthErrorResponse = {
-                        error: errorResponse.data?.error || 'server_error',
-                        error_description: errorResponse.message,
-                    };
-                    res.status(errorResponse.statusCode).send(
-                        oauthErrorResponse,
-                    );
+                    if (!res.headersSent) {
+                        const oauthErrorResponse = {
+                            error:
+                                errorResponse.data?.error || 'server_error',
+                            error_description: errorResponse.message,
+                        };
+                        res.status(errorResponse.statusCode).send(
+                            oauthErrorResponse,
+                        );
+                    }
                     return;
                 }
 
@@ -720,7 +723,9 @@ export default class App {
                     },
                 };
 
-                res.status(errorResponse.statusCode).send(apiErrorResponse);
+                if (!res.headersSent) {
+                    res.status(errorResponse.statusCode).send(apiErrorResponse);
+                }
             },
         );
 

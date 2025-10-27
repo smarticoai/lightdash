@@ -44,7 +44,7 @@ enum TokenEnvironmentVariable {
 
 const tokenConfigs = {
     [TokenEnvironmentVariable.SERVICE_ACCOUNT]: {
-        prefix: AuthTokenPrefix.SERVICE_ACCOUNT,
+        prefix: AuthTokenPrefix?.SERVICE_ACCOUNT,
     },
 };
 

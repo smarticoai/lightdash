@@ -6,6 +6,7 @@ import {
     DeactivatedAccountError,
     InvalidUser,
     LightdashMode,
+    SessionUser,
 } from '@lightdash/common';
 import OAuth2Server from '@node-oauth/oauth2-server';
 import { ErrorRequestHandler, Request, RequestHandler } from 'express';
@@ -111,10 +112,15 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
         if (!lightdashConfig.auth.pat.enabled) {
             throw new AuthorizationError('Personal access tokens are disabled');
         }
-        passport.authenticate('headerapikey', { session: false })(
-            req,
-            res,
-            () => {
+        // Use a custom callback so passport does not send a response on failure
+        passport.authenticate(
+            'headerapikey',
+            { session: false },
+            (err: unknown, user?: SessionUser | false | null) => {
+                if (err) {
+                    return next();
+                }
+
                 if (req?.account?.isAuthenticated()) {
                     Logger.warn(
                         buildAccountExistsWarning('ApiKey'),
@@ -122,28 +128,23 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
                     );
                 }
 
-                if (req.user) {
+                if (user) {
+                    req.user = user;
                     req.account = fromApiKey(
-                        req.user!,
+                        user,
                         req.headers.authorization || '',
                     );
                 }
-                next();
+                return next();
             },
-        );
+        )(req, res, next);
     };
     try {
         authenticateServiceAccount(req, res, authenticateWithPat);
     } catch (e) {
         authenticateWithPat();
     }
-    passport.authenticate('headerapikey', { session: false }, (err: unknown, user: null) => {
-        if (err) {
-            return next(); // If authentication fails, proceed without user
-        }
-        req.user = user || undefined; // Set user if authenticated, else null
-        return next();
-    })(req, res, next);
+    // Do not invoke passport again here; authenticateWithPat already handled PATs via callback
 };
 
 export const storeOIDCRedirect: RequestHandler = (req, res, next) => {
@@ -252,6 +253,7 @@ export const invalidUserErrorHandler: ErrorRequestHandler = (
 
     req.session.destroy((error) => {
         if (error) Logger.error(error);
+        if (res.headersSent) return;
         if (req.url.includes('/api')) {
             const apiErrorResponse: ApiError = {
                 status: 'error',

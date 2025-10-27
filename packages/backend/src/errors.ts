@@ -36,7 +36,9 @@ export const scimErrorHandler = (
     if (error instanceof ScimError) {
         const statusInt = parseInt(error.status, 10);
         // Return a response that aligns with the SCIM spec
-        res.status(statusInt).json(error.toJSON());
+        if (!res.headersSent) {
+            res.status(statusInt).json(error.toJSON());
+        }
     } else {
         next(error); // Pass the error to the next middleware if it's not a ScimError
     }

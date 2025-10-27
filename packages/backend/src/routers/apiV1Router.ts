@@ -31,16 +31,16 @@ apiV1Router.get('/livez', async (req, res, next) => {
 });
 
 apiV1Router.get('/health', allowApiKeyAuthentication, async (req, res, next) => {
-    req.services
-        .getHealthService()
-        .getHealthState(req.user)
-        .then((state) =>
-            res.json({
-                status: 'ok',
-                results: state,
-            }),
-        )
-        .catch(next);
+    try {
+        const state = await req.services
+            .getHealthService()
+            .getHealthState(req.user);
+        if (!res.headersSent) {
+            res.json({ status: 'ok', results: state });
+        }
+    } catch (e) {
+        next(e);
+    }
 });
 
 apiV1Router.get('/flash', (req, res) => {
