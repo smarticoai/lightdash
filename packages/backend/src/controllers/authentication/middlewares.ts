@@ -109,6 +109,17 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
             next();
             return;
         }
+        const authorizationHeader =
+            typeof req.headers.authorization === 'string'
+                ? req.headers.authorization
+                : undefined;
+        const hasApiKeyHeader =
+            authorizationHeader?.startsWith('ApiKey ') === true;
+        if (!hasApiKeyHeader) {
+            // Permissive: no PAT header present, continue without attempting PAT
+            next();
+            return;
+        }
         if (!lightdashConfig.auth.pat.enabled) {
             throw new AuthorizationError('Personal access tokens are disabled');
         }
@@ -126,7 +137,7 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
                 if (req.user) {
                     req.account = fromApiKey(
                         req.user!,
-                        req.headers.authorization || '',
+                        authorizationHeader || '',
                     );
                 }
                 next();
