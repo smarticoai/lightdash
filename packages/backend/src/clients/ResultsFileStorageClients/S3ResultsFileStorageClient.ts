@@ -7,7 +7,7 @@ import {
     WarehouseResults,
 } from '@lightdash/common';
 import fs from 'fs';
-import { PassThrough, Readable, Writable } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import Logger from '../../logging/logger';
 import { createContentDispositionHeader } from '../../utils/FileDownloadUtils/FileDownloadUtils';
 import {
@@ -52,6 +52,14 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
 
         const passThrough = new PassThrough();
 
+        const contentDisposition = createContentDispositionHeader(
+            attachmentDownloadName || fileName,
+        );
+
+        Logger.debug(
+            `Creating upload stream for ${this.configuration.bucket}/${fileName} with content disposition: ${contentDisposition} and contentType: ${opts.contentType}`,
+        );
+
         const upload = new Upload({
             client: this.s3,
             params: {
@@ -59,9 +67,7 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
                 Key: fileName,
                 Body: passThrough,
                 ContentType: opts.contentType,
-                ContentDisposition: createContentDispositionHeader(
-                    attachmentDownloadName || fileName,
-                ),
+                ContentDisposition: contentDisposition,
             },
         });
 
@@ -77,14 +83,15 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
                 passThrough.end(); // signal EOF
                 await upload.done(); // wait for upload to finish
                 Logger.debug(
-                    `Successfully closed upload stream to s3://${this.configuration.bucket}/${fileName}`,
+                    `Successfully closed upload stream to ${this.configuration.bucket}/${fileName}`,
                 );
             } catch (error) {
                 Logger.error(
-                    `Error closing upload stream to s3://${
+                    `Error closing upload stream to ${
                         this.configuration.bucket
                     }/${fileName}: ${getErrorMessage(error)}`,
                 );
+                Logger.debug(`Full error: ${JSON.stringify(error)}`);
                 throw error;
             }
         };
@@ -108,7 +115,7 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
         return { write, close, writeStream: passThrough };
     }
 
-    async getDowloadStream(
+    async getDownloadStream(
         cacheKey: string,
         fileExtension = 'jsonl',
     ): Promise<Readable> {
@@ -155,64 +162,6 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
         return url;
     }
 
-    async transformResultsIntoNewFile(
-        sourceResultsFileWithoutExtension: string,
-        sinkFileName: string,
-        streamProcessor: (
-            readStream: Readable,
-            writeStream: Writable,
-        ) => Promise<{ truncated: boolean }>,
-        attachmentDownloadName?: string,
-    ): Promise<{ fileUrl: string; truncated: boolean }> {
-        // File format configuration map
-        const formatConfig = new Map([
-            ['csv', { contentType: 'text/csv', extension: 'csv' }],
-            [
-                'xlsx',
-                {
-                    contentType:
-                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    extension: 'xlsx',
-                },
-            ],
-            ['jsonl', { contentType: 'application/jsonl', extension: 'jsonl' }],
-        ]);
-
-        // Determine file format from extension
-        const fileExtension =
-            sinkFileName.toLowerCase().split('.').pop() || 'jsonl';
-        const config =
-            formatConfig.get(fileExtension) || formatConfig.get('jsonl')!;
-
-        // Create upload stream
-        const { writeStream, close } = this.createUploadStream(
-            sinkFileName,
-            {
-                contentType: config.contentType,
-            },
-            attachmentDownloadName
-                ? `${attachmentDownloadName}.${config.extension}`
-                : undefined,
-        );
-
-        // Get the results stream
-        const resultsStream = await this.getDowloadStream(
-            sourceResultsFileWithoutExtension,
-        );
-
-        // Process the stream
-        const { truncated } = await streamProcessor(resultsStream, writeStream);
-
-        await close();
-
-        const url = await this.getFileUrl(sinkFileName, config.extension);
-
-        return {
-            fileUrl: url,
-            truncated,
-        };
-    }
-
     /**
      * Upload a file directly to S3 from a local file path
      * Useful for uploading pre-generated files like Excel files
@@ -247,7 +196,7 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
         try {
             await upload.done();
             Logger.debug(
-                `Successfully uploaded file to s3://${this.configuration.bucket}/${fileName}`,
+                `Successfully uploaded file to ${this.configuration.bucket}/${fileName}`,
             );
 
             // Determine file extension for URL generation
@@ -256,7 +205,7 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
             return await this.getFileUrl(fileName, fileExtension);
         } catch (error) {
             Logger.error(
-                `Failed to upload file to s3://${
+                `Failed to upload file to ${
                     this.configuration.bucket
                 }/${fileName}: ${getErrorMessage(error)}`,
             );

@@ -3,6 +3,7 @@ import { useActiveProject } from '../../../../hooks/useActiveProject';
 import { useFeatureFlag } from '../../../../hooks/useFeatureFlagEnabled';
 import useApp from '../../../../providers/App/useApp';
 import { useAiAgentPermission } from './useAiAgentPermission';
+import { useAiOrganizationSettings } from './useAiOrganizationSettings';
 import { useProjectAiAgents } from './useProjectAiAgents';
 
 /**
@@ -10,51 +11,52 @@ import { useProjectAiAgents } from './useProjectAiAgents';
  * @returns true if the ai agent button should be visible
  */
 export const useAiAgentButtonVisibility = () => {
-    const { data: projectUuid } = useActiveProject();
-    const canViewAiAgents = useAiAgentPermission({
-        action: 'view',
-        projectUuid: projectUuid ?? undefined,
-    });
+    const activeProjectQuery = useActiveProject();
+    const projectUuid = activeProjectQuery.data ?? undefined;
+
     const appQuery = useApp();
-    const canManageAiAgents = useAiAgentPermission({
-        action: 'manage',
-        projectUuid: projectUuid ?? undefined,
-    });
-    const aiCopilotFlagQuery = useFeatureFlag(CommercialFeatureFlags.AiCopilot);
-    const aiAgentFlagQuery = useFeatureFlag(CommercialFeatureFlags.AiAgent);
-    const agents = useProjectAiAgents({
+    const organizationSettingsQuery = useAiOrganizationSettings();
+    const agentsQuery = useProjectAiAgents({
         projectUuid,
         options: {
             enabled:
-                aiAgentFlagQuery.isSuccess && aiAgentFlagQuery.data.enabled,
+                organizationSettingsQuery.isSuccess &&
+                organizationSettingsQuery.data?.aiAgentsVisible,
         },
         redirectOnUnauthorized: false,
     });
 
-    const canViewButton =
-        (canViewAiAgents &&
-            agents.isSuccess &&
-            agents.data?.length &&
-            agents.data.length > 0) ||
-        canManageAiAgents;
+    const canViewAiAgents = useAiAgentPermission({
+        action: 'view',
+        projectUuid,
+    });
+    const canManageAiAgents = useAiAgentPermission({
+        action: 'manage',
+        projectUuid,
+    });
+
+    const aiCopilotFlagQuery = useFeatureFlag(CommercialFeatureFlags.AiCopilot);
 
     if (
-        !appQuery.user.isSuccess ||
-        !aiCopilotFlagQuery.isSuccess ||
-        !aiAgentFlagQuery.isSuccess
+        agentsQuery.isLoading ||
+        organizationSettingsQuery.isLoading ||
+        appQuery.user.isLoading ||
+        appQuery.health.isLoading ||
+        aiCopilotFlagQuery.isLoading
     ) {
         return false;
     }
 
-    const isAiCopilotEnabled = aiCopilotFlagQuery.data.enabled;
-    const isAiAgentEnabled = aiAgentFlagQuery.data.enabled;
+    const hasAgents = agentsQuery.data && agentsQuery.data.length > 0;
+    const canViewButton = (canViewAiAgents && hasAgents) || canManageAiAgents;
+    const isAiAgentEnabled = organizationSettingsQuery.data?.aiAgentsVisible;
 
     if (
         !canViewButton ||
         !canViewAiAgents ||
-        !isAiCopilotEnabled ||
         !isAiAgentEnabled ||
-        !projectUuid
+        !projectUuid ||
+        !aiCopilotFlagQuery.data?.enabled
     ) {
         return false;
     }

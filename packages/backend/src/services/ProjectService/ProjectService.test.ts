@@ -22,6 +22,8 @@ import { FeatureFlagModel } from '../../models/FeatureFlagModel/FeatureFlagModel
 import { GroupsModel } from '../../models/GroupsModel';
 import { JobModel } from '../../models/JobModel/JobModel';
 import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
+import { OrganizationWarehouseCredentialsModel } from '../../models/OrganizationWarehouseCredentialsModel';
+import { ProjectCompileLogModel } from '../../models/ProjectCompileLogModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { ProjectParametersModel } from '../../models/ProjectParametersModel';
 import { SavedChartModel } from '../../models/SavedChartModel';
@@ -50,6 +52,8 @@ import {
     expectedCatalog,
     expectedExploreSummaryFilteredByName,
     expectedExploreSummaryFilteredByTags,
+    exploreToSummaryWithAttributes,
+    exploreWithRequiredAttributes,
     job,
     lightdashConfigWithNoSMTP,
     metricQueryMock,
@@ -64,6 +68,7 @@ import {
     tablesConfigurationWithTags,
     user,
     validExplore,
+    virtualExplore,
 } from './ProjectService.mock';
 
 jest.mock('@lightdash/warehouses', () => ({
@@ -81,6 +86,9 @@ const projectModel = {
     updateTablesConfiguration: jest.fn(),
     getExploreFromCache: jest.fn(async () => validExplore),
     findExploresFromCache: jest.fn(async () => allExplores),
+    getAllExploreSummaries: jest.fn(async () =>
+        allExplores.map(exploreToSummaryWithAttributes),
+    ),
     lockProcess: jest.fn((projectUuid, fun) => fun()),
     getWarehouseCredentialsForProject: jest.fn(
         async () => warehouseClientMock.credentials,
@@ -149,6 +157,9 @@ const getMockedProjectService = (lightdashConfig: LightdashConfig) =>
         projectParametersModel: {
             find: jest.fn(async () => []),
         } as unknown as ProjectParametersModel,
+        organizationWarehouseCredentialsModel:
+            {} as unknown as OrganizationWarehouseCredentialsModel,
+        projectCompileLogModel: {} as ProjectCompileLogModel,
     });
 
 const account = buildAccount({
@@ -280,6 +291,128 @@ describe('ProjectService', () => {
                 false,
             );
             expect(result).toEqual(expectedAllExploreSummaryWithoutErrors);
+        });
+
+        test('should include virtual explores when filtered by tags even if they do not match', async () => {
+            const exploresWithVirtual = [...allExplores, virtualExplore];
+            (
+                projectModel.getAllExploreSummaries as jest.Mock
+            ).mockImplementationOnce(async () =>
+                exploresWithVirtual.map(exploreToSummaryWithAttributes),
+            );
+            (
+                projectModel.getTablesConfiguration as jest.Mock
+            ).mockImplementationOnce(async () => ({
+                tableSelection: {
+                    type: 'WITH_TAGS',
+                    value: ['non_existent_tag'], // Tag that doesn't match any explore
+                },
+            }));
+
+            const result = await service.getAllExploresSummary(
+                account,
+                projectUuid,
+                true,
+            );
+
+            // Should only include virtual explore since no other explores have the tag
+            expect(result).toHaveLength(1);
+            expect(result[0].name).toEqual('virtual_explore');
+            expect(result[0].type).toEqual('virtual');
+        });
+
+        test('should include virtual explores when filtered by names even if they do not match', async () => {
+            const exploresWithVirtual = [...allExplores, virtualExplore];
+            (
+                projectModel.getAllExploreSummaries as jest.Mock
+            ).mockImplementationOnce(async () =>
+                exploresWithVirtual.map(exploreToSummaryWithAttributes),
+            );
+            (
+                projectModel.getTablesConfiguration as jest.Mock
+            ).mockImplementationOnce(async () => ({
+                tableSelection: {
+                    type: 'WITH_NAMES',
+                    value: ['non_existent_explore'], // Name that doesn't match any explore
+                },
+            }));
+
+            const result = await service.getAllExploresSummary(
+                account,
+                projectUuid,
+                true,
+            );
+
+            // Should only include virtual explore since no other explores match the name
+            expect(result).toHaveLength(1);
+            expect(result[0].name).toEqual('virtual_explore');
+            expect(result[0].type).toEqual('virtual');
+        });
+
+        test('should exclude explores when user does not have required attributes', async () => {
+            const exploresWithRequiredAttrs = [
+                validExplore,
+                exploreWithRequiredAttributes,
+            ];
+            (
+                projectModel.getAllExploreSummaries as jest.Mock
+            ).mockImplementationOnce(async () =>
+                exploresWithRequiredAttrs.map(exploreToSummaryWithAttributes),
+            );
+
+            // Mock user attributes to NOT have is_admin: 'true'
+            (
+                userAttributesModel.getAttributeValuesForOrgMember as jest.Mock
+            ).mockImplementationOnce(async () => ({
+                is_admin: 'false',
+            }));
+
+            const result = await service.getAllExploresSummary(
+                account,
+                projectUuid,
+                false,
+            );
+
+            // Should only include validExplore, not exploreWithRequiredAttributes
+            expect(result).toHaveLength(1);
+            expect(result[0].name).toEqual('valid_explore');
+            expect(
+                result.find(
+                    (e) => e.name === 'explore_with_required_attributes',
+                ),
+            ).toBeUndefined();
+        });
+
+        test('should include explores when user has required attributes', async () => {
+            const exploresWithRequiredAttrs = [
+                validExplore,
+                exploreWithRequiredAttributes,
+            ];
+            (
+                projectModel.getAllExploreSummaries as jest.Mock
+            ).mockImplementationOnce(async () =>
+                exploresWithRequiredAttrs.map(exploreToSummaryWithAttributes),
+            );
+
+            // Mock user attributes to have is_admin: 'true'
+            (
+                userAttributesModel.getAttributeValuesForOrgMember as jest.Mock
+            ).mockImplementationOnce(async () => ({
+                is_admin: 'true',
+            }));
+
+            const result = await service.getAllExploresSummary(
+                account,
+                projectUuid,
+                false,
+            );
+
+            // Should include both explores
+            expect(result).toHaveLength(2);
+            expect(result.map((e) => e.name)).toContain('valid_explore');
+            expect(result.map((e) => e.name)).toContain(
+                'explore_with_required_attributes',
+            );
         });
     });
     describe('getJobStatus', () => {

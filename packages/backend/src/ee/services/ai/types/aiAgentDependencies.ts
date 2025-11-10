@@ -9,6 +9,7 @@ import {
     CacheMetadata,
     CatalogField,
     CatalogTable,
+    ChangesetWithChanges,
     CreateChangeParams,
     DashboardSearchResult,
     Explore,
@@ -16,8 +17,10 @@ import {
     Filters,
     ItemsMap,
     KnexPaginateArgs,
+    SearchResult,
     SlackPrompt,
     ToolFindChartsArgs,
+    ToolFindContentArgs,
     ToolFindDashboardsArgs,
     ToolFindFieldsArgs,
     UpdateSlackResponse,
@@ -34,22 +37,17 @@ type Pagination = KnexPaginateArgs & {
     totalResults: number;
 };
 
-export type FindExploresFn = (
-    args: {
-        tableName: string | null;
-        fieldOverviewSearchSize?: number;
-        fieldSearchSize?: number;
-        includeFields: boolean;
-    } & KnexPaginateArgs,
-) => Promise<{
-    tablesWithFields: {
-        table: CatalogTable;
-        dimensions?: CatalogField[];
-        metrics?: CatalogField[];
-        dimensionsPagination?: Pagination;
-        metricsPagination?: Pagination;
-    }[];
-    pagination: Pagination | undefined;
+export type ListExploresFn = () => Promise<Explore[]>;
+
+export type FindExploresFn = (args: {
+    exploreName: string;
+    fieldSearchSize: number;
+}) => Promise<{
+    explore: Explore;
+    catalogFields: {
+        dimensions: CatalogField[];
+        metrics: CatalogField[];
+    };
 }>;
 
 export type FindFieldFn = (
@@ -78,6 +76,12 @@ export type FindChartsFn = (
 ) => Promise<{
     charts: AllChartsSearchResult[];
     pagination: Pagination | undefined;
+}>;
+
+export type FindContentFn = (args: {
+    searchQuery: ToolFindContentArgs['searchQueries'][number];
+}) => Promise<{
+    content: (AllChartsSearchResult | DashboardSearchResult)[];
 }>;
 
 export type GetExploreFn = (args: { exploreName: string }) => Promise<Explore>;
@@ -116,6 +120,14 @@ export type StoreToolResultsFn = (
         toolName: string;
         result: string;
         metadata?: AgentToolOutput['metadata'];
+    }>,
+) => Promise<void>;
+
+export type StoreReasoningFn = (
+    promptUuid: string,
+    reasonings: Array<{
+        reasoningId: string;
+        text: string;
     }>,
 ) => Promise<void>;
 

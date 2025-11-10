@@ -1,8 +1,8 @@
 import {
+    FeatureFlags,
     getItemId,
     type AdditionalMetric,
     type CompiledTable,
-    type CustomDimension,
     type Dimension,
     type Explore,
     type Metric,
@@ -18,42 +18,59 @@ import {
 import { useDebouncedValue } from '@mantine/hooks';
 import { IconSearch, IconX } from '@tabler/icons-react';
 import {
+    memo,
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
     useTransition,
     type FC,
 } from 'react';
+import {
+    selectActiveFields,
+    selectAdditionalMetrics,
+    selectCustomDimensions,
+    selectMissingCustomDimensions,
+    selectMissingCustomMetrics,
+    selectMissingFieldIds,
+    useExplorerSelector,
+} from '../../../features/explorer/store';
+import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import MantineIcon from '../../common/MantineIcon';
 import TableTree from './TableTree';
 import { getSearchResults } from './TableTree/Tree/utils';
+import {
+    flattenTreeForVirtualization,
+    getNodeMapsForVirtualization,
+} from './TableTree/Virtualization/flattenTree';
+import VirtualizedTreeList from './TableTree/Virtualization/VirtualizedTreeList';
 
 type ExploreTreeProps = {
     explore: Explore;
-    additionalMetrics: AdditionalMetric[];
     onSelectedFieldChange: (fieldId: string, isDimension: boolean) => void;
-    selectedNodes: Set<string>;
-    customDimensions?: CustomDimension[];
-    selectedDimensions?: string[];
-    missingFields?: {
-        all: string[];
-        customDimensions: CustomDimension[] | undefined;
-        customMetrics: AdditionalMetric[] | undefined;
-    };
 };
 
 type Records = Record<string, AdditionalMetric | Dimension | Metric>;
 
-const ExploreTree: FC<ExploreTreeProps> = ({
+const ExploreTreeComponent: FC<ExploreTreeProps> = ({
     explore,
-    additionalMetrics,
-    selectedNodes,
     onSelectedFieldChange,
-    customDimensions,
-    selectedDimensions,
-    missingFields,
 }) => {
+    const additionalMetrics = useExplorerSelector(selectAdditionalMetrics);
+    const customDimensions = useExplorerSelector(selectCustomDimensions);
+
+    const missingCustomMetrics = useExplorerSelector((state) =>
+        selectMissingCustomMetrics(state, explore),
+    );
+    const missingCustomDimensions = useExplorerSelector((state) =>
+        selectMissingCustomDimensions(state, explore),
+    );
+    const missingFieldIds = useExplorerSelector((state) =>
+        selectMissingFieldIds(state, explore),
+    );
+    const activeFields = useExplorerSelector(selectActiveFields);
+
     const [search, setSearch] = useState<string>('');
     const [isPending, startTransition] = useTransition();
     const [searchResultsMap, setSearchResultsMap] = useState<
@@ -61,9 +78,29 @@ const ExploreTree: FC<ExploreTreeProps> = ({
     >({});
     const [debouncedSearch] = useDebouncedValue(search, 300);
     const isSearching = useMemo(() => {
-        const trimmedSearch = search.trim();
+        const trimmedSearch = debouncedSearch.trim();
         return !!trimmedSearch && trimmedSearch !== '';
-    }, [search]);
+    }, [debouncedSearch]);
+    const scrollAreaViewportRef = useRef<HTMLDivElement>(null);
+    const savedScrollTopRef = useRef<number>(0);
+    const previousActiveFieldsRef = useRef(activeFields);
+
+    const { data: experimentalExplorerImprovements } = useFeatureFlag(
+        FeatureFlags.ExperimentalExplorerImprovements,
+    );
+
+    const { data: experimentalVirtualizedSideBar } = useFeatureFlag(
+        FeatureFlags.ExperimentalVirtualizedSideBar,
+    );
+
+    // Pre-compute node maps for all sections to avoid expensive recomputation during rendering
+    const sectionNodeMaps = useMemo(() => {
+        return getNodeMapsForVirtualization(
+            explore,
+            additionalMetrics,
+            customDimensions,
+        );
+    }, [explore, additionalMetrics, customDimensions]);
 
     const handleSearchChange = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,6 +133,7 @@ const ExploreTree: FC<ExploreTreeProps> = ({
 
     useEffect(() => {
         startTransition(() => {
+            if (!isSearching) return;
             setSearchResultsMap(
                 Object.values(explore.tables).reduce<Record<string, string[]>>(
                     (acc, table) => {
@@ -105,7 +143,7 @@ const ExploreTree: FC<ExploreTreeProps> = ({
                 ),
             );
         });
-    }, [explore, searchResults]);
+    }, [explore, isSearching, searchResults]);
 
     const tableTrees = useMemo(() => {
         return Object.values(explore.tables)
@@ -123,6 +161,157 @@ const ExploreTree: FC<ExploreTreeProps> = ({
                     ) && !table.hidden,
             );
     }, [explore, isSearching, searchResultsMap]);
+
+    // Manage table expansion state
+    const [expandedTables, setExpandedTables] = useState<Set<string>>(() => {
+        // Initialize with first table expanded
+        const firstTable = tableTrees[0];
+        return firstTable ? new Set([firstTable.name]) : new Set();
+    });
+
+    // Manage group expansion state
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
+        new Set(),
+    );
+
+    const toggleTable = useCallback((tableName: string) => {
+        setExpandedTables((prev) => {
+            const next = new Set(prev);
+            if (next.has(tableName)) {
+                next.delete(tableName);
+            } else {
+                next.add(tableName);
+            }
+            return next;
+        });
+    }, []);
+
+    const toggleGroup = useCallback((groupKey: string) => {
+        setExpandedGroups((prev) => {
+            const next = new Set(prev);
+            if (next.has(groupKey)) {
+                next.delete(groupKey);
+            } else {
+                next.add(groupKey);
+            }
+            return next;
+        });
+    }, []);
+
+    /**
+     * Preserve scroll position when fields are selected/deselected
+     *
+     * When a field is selected, it gets pinned to the top of the sidebar list.
+     * Without preservation, this DOM reordering causes the scroll to jump back to the top.
+     */
+
+    // Capture scroll position before activeFields changes
+    if (
+        experimentalExplorerImprovements?.enabled &&
+        previousActiveFieldsRef.current !== activeFields &&
+        scrollAreaViewportRef.current
+    ) {
+        savedScrollTopRef.current = scrollAreaViewportRef.current.scrollTop;
+        previousActiveFieldsRef.current = activeFields;
+    }
+
+    // Restore scroll position after DOM updates
+    useEffect(() => {
+        if (!experimentalExplorerImprovements?.enabled) {
+            return;
+        }
+
+        const viewport = scrollAreaViewportRef.current;
+        if (viewport) {
+            viewport.scrollTop = savedScrollTopRef.current;
+        }
+    }, [activeFields, experimentalExplorerImprovements]);
+
+    const tableTreeComponents = useMemo(
+        () =>
+            tableTrees.length > 0 ? (
+                tableTrees.map((table) => (
+                    <TableTree
+                        key={table.name}
+                        isExpanded={expandedTables.has(table.name)}
+                        onToggle={() => toggleTable(table.name)}
+                        searchQuery={debouncedSearch}
+                        showTableLabel={Object.keys(explore.tables).length > 1}
+                        table={table}
+                        additionalMetrics={additionalMetrics}
+                        onSelectedNodeChange={onSelectedFieldChange}
+                        customDimensions={customDimensions}
+                        missingCustomMetrics={missingCustomMetrics}
+                        missingCustomDimensions={missingCustomDimensions}
+                        missingFieldIds={missingFieldIds}
+                        searchResults={searchResultsMap[table.name] ?? []}
+                        isSearching={isSearching}
+                        expandedGroups={expandedGroups}
+                        onToggleGroup={toggleGroup}
+                    />
+                ))
+            ) : (
+                <Center display={isSearching ? 'none' : 'flex'}>
+                    <Text color="dimmed">No fields found...</Text>
+                </Center>
+            ),
+        [
+            additionalMetrics,
+            customDimensions,
+            debouncedSearch,
+            expandedGroups,
+            expandedTables,
+            explore.tables,
+            isSearching,
+            missingCustomDimensions,
+            missingCustomMetrics,
+            missingFieldIds,
+            onSelectedFieldChange,
+            searchResultsMap,
+            tableTrees,
+            toggleGroup,
+            toggleTable,
+        ],
+    );
+    // Prepare virtualized tree data when experimental improvements are enabled
+    const virtualizedTreeData = useMemo(() => {
+        if (!experimentalVirtualizedSideBar?.enabled) {
+            return null;
+        }
+
+        return flattenTreeForVirtualization({
+            tables: tableTrees,
+            showMultipleTables: Object.keys(explore.tables).length > 1,
+            expandedTables,
+            expandedGroups,
+            searchQuery: debouncedSearch,
+            searchResultsMap,
+            isSearching,
+            additionalMetrics,
+            customDimensions: customDimensions ?? [],
+            missingCustomMetrics,
+            missingCustomDimensions,
+            missingFieldIds,
+            activeFields,
+            sectionNodeMaps,
+        });
+    }, [
+        activeFields,
+        additionalMetrics,
+        customDimensions,
+        debouncedSearch,
+        expandedGroups,
+        expandedTables,
+        experimentalVirtualizedSideBar?.enabled,
+        explore.tables,
+        isSearching,
+        missingCustomDimensions,
+        missingCustomMetrics,
+        missingFieldIds,
+        searchResultsMap,
+        sectionNodeMaps,
+        tableTrees,
+    ]);
 
     return (
         <>
@@ -146,52 +335,30 @@ const ExploreTree: FC<ExploreTreeProps> = ({
                 data-testid="ExploreTree/SearchInput"
             />
 
-            <ScrollArea
-                variant="primary"
-                className="only-vertical"
-                offsetScrollbars
-                scrollbarSize={8}
-            >
-                {tableTrees.length > 0 ? (
-                    tableTrees.map((table, index) => (
-                        <TableTree
-                            key={table.name}
-                            isOpenByDefault={index === 0}
-                            searchQuery={debouncedSearch}
-                            showTableLabel={
-                                Object.keys(explore.tables).length > 1
-                            }
-                            table={table}
-                            additionalMetrics={additionalMetrics}
-                            selectedItems={selectedNodes}
-                            onSelectedNodeChange={onSelectedFieldChange}
-                            customDimensions={customDimensions}
-                            missingCustomMetrics={
-                                table.name === explore.baseTable &&
-                                missingFields?.customMetrics
-                                    ? missingFields.customMetrics
-                                    : []
-                            }
-                            missingCustomDimensions={
-                                table.name === explore.baseTable &&
-                                missingFields?.customDimensions
-                                    ? missingFields.customDimensions
-                                    : []
-                            }
-                            missingFields={missingFields}
-                            selectedDimensions={selectedDimensions}
-                            searchResults={searchResultsMap[table.name]}
-                            isSearching={isSearching}
-                        />
-                    ))
-                ) : (
-                    <Center display={isSearching ? 'none' : 'flex'}>
-                        <Text color="dimmed">No fields found...</Text>
-                    </Center>
-                )}
-            </ScrollArea>
+            {experimentalVirtualizedSideBar?.enabled && virtualizedTreeData ? (
+                <VirtualizedTreeList
+                    data={virtualizedTreeData}
+                    onToggleTable={toggleTable}
+                    onToggleGroup={toggleGroup}
+                    onSelectedFieldChange={onSelectedFieldChange}
+                />
+            ) : (
+                <ScrollArea
+                    variant="primary"
+                    className="only-vertical"
+                    offsetScrollbars
+                    scrollbarSize={8}
+                    viewportRef={scrollAreaViewportRef}
+                >
+                    {tableTreeComponents}
+                </ScrollArea>
+            )}
         </>
     );
 };
+
+const ExploreTree = memo(ExploreTreeComponent);
+
+ExploreTree.displayName = 'ExploreTree';
 
 export default ExploreTree;

@@ -75,7 +75,10 @@ const VerifyEmailPage: FC = () => {
                     my="lg"
                 />
                 <Card p="xl" radius="xs" withBorder shadow="xs">
-                    <VerifyEmailForm />
+                    <VerifyEmailForm
+                        emailStatusData={data}
+                        statusLoading={statusLoading}
+                    />
                 </Card>
                 {!smrMode() &&
                 <Text color="gray.6" ta="center" px="xs">

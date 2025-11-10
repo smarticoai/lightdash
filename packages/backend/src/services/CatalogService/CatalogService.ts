@@ -134,7 +134,12 @@ export class CatalogService<
             if (isExploreError(explore)) {
                 return acc;
             }
-            if (doesExploreMatchRequiredAttributes(explore, userAttributes)) {
+            if (
+                doesExploreMatchRequiredAttributes(
+                    explore.tables[explore.baseTable].requiredAttributes,
+                    userAttributes,
+                )
+            ) {
                 const fields: CatalogField[] = Object.values(
                     explore.tables,
                 ).flatMap((t) => parseFieldsFromCompiledTable(t));
@@ -214,7 +219,12 @@ export class CatalogService<
             ) {
                 return acc;
             }
-            if (doesExploreMatchRequiredAttributes(explore, userAttributes)) {
+            if (
+                doesExploreMatchRequiredAttributes(
+                    explore.tables[explore.baseTable].requiredAttributes,
+                    userAttributes,
+                )
+            ) {
                 return [
                     ...acc,
                     {
@@ -250,7 +260,12 @@ export class CatalogService<
         sortArgs?: ApiSort;
         excludeUnmatched?: boolean;
         fullTextSearchOperator?: 'OR' | 'AND';
+        filteredExplore?: Explore;
     }): Promise<KnexPaginatedData<CatalogItem[]>> {
+        const changeset =
+            await this.changesetModel.findActiveChangesetWithChangesByProjectUuid(
+                args.projectUuid,
+            );
         return wrapSentryTransaction(
             'CatalogService.searchCatalog',
             {
@@ -259,11 +274,6 @@ export class CatalogService<
                 searchQuery: args.catalogSearch.searchQuery,
             },
             async () => {
-                const exploreCacheMap =
-                    await this.projectModel.findExploresFromCache(
-                        args.projectUuid,
-                        'name',
-                    );
                 const tablesConfiguration =
                     await this.projectModel.getTablesConfiguration(
                         args.projectUuid,
@@ -275,6 +285,7 @@ export class CatalogService<
                     () =>
                         this.catalogModel.search({
                             projectUuid: args.projectUuid,
+                            changeset,
                             catalogSearch: args.catalogSearch,
                             paginateArgs: args.paginateArgs,
                             userAttributes: args.userAttributes,
@@ -283,7 +294,7 @@ export class CatalogService<
                             tablesConfiguration,
                             excludeUnmatched: args.excludeUnmatched,
                             fullTextSearchOperator: args.fullTextSearchOperator,
-                            exploreCacheMap,
+                            filteredExplore: args.filteredExplore,
                         }),
                 );
             },
@@ -308,7 +319,6 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             });
 
         // We keep errors in the list of explores
@@ -328,7 +338,10 @@ export class CatalogService<
                     return [...acc, explore];
                 }
                 if (
-                    !doesExploreMatchRequiredAttributes(explore, userAttributes)
+                    !doesExploreMatchRequiredAttributes(
+                        explore.tables[explore.baseTable].requiredAttributes,
+                        userAttributes,
+                    )
                 ) {
                     return acc;
                 }
@@ -623,7 +636,6 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             });
 
         if (catalogSearch.searchQuery) {
@@ -676,10 +688,14 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             });
 
-        if (!doesExploreMatchRequiredAttributes(explore, userAttributes)) {
+        if (
+            !doesExploreMatchRequiredAttributes(
+                explore.tables[explore.baseTable].requiredAttributes,
+                userAttributes,
+            )
+        ) {
             throw new ForbiddenError(
                 `You don't have access to the explore ${explore.name}`,
             );
@@ -836,7 +852,6 @@ export class CatalogService<
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             });
 
         const paginatedCatalog = await this.searchCatalog({
@@ -1057,7 +1072,6 @@ export class CatalogService<
             (await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             }));
 
         const explores = await this.projectModel.findExploresFromCache(
@@ -1295,16 +1309,11 @@ export class CatalogService<
         ) {
             throw new ForbiddenError();
         }
-        const exploreCacheMap = await this.projectModel.findExploresFromCache(
-            projectUuid,
-            'name',
-        );
 
         const userAttributes =
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             });
 
         const allCatalogMetrics = await this.catalogModel.search({
@@ -1318,7 +1327,6 @@ export class CatalogService<
             tablesConfiguration: await this.projectModel.getTablesConfiguration(
                 projectUuid,
             ),
-            exploreCacheMap,
         });
 
         const filteredMetrics = allCatalogMetrics.data.filter(
@@ -1358,17 +1366,15 @@ export class CatalogService<
             throw new ForbiddenError();
         }
 
-        const exploreCacheMap = await this.projectModel.findExploresFromCache(
+        const explore = await this.projectModel.getExploreFromCache(
             projectUuid,
-            'name',
-            [tableName],
+            tableName,
         );
 
         const userAttributes =
             await this.userAttributesModel.getAttributeValuesForOrgMember({
                 organizationUuid,
                 userUuid: user.userUuid,
-                user
             });
 
         const catalogDimensions = await this.catalogModel.search({
@@ -1383,15 +1389,10 @@ export class CatalogService<
             tablesConfiguration: await this.projectModel.getTablesConfiguration(
                 projectUuid,
             ),
-            exploreCacheMap,
         });
 
         const allDimensions = catalogDimensions.data
-            .map(
-                (d) =>
-                    exploreCacheMap[tableName]?.tables?.[tableName]
-                        ?.dimensions?.[d.name],
-            )
+            .map((d) => explore?.tables?.[tableName]?.dimensions?.[d.name])
             .filter((d): d is CompiledDimension => d !== undefined);
 
         return getAvailableSegmentDimensions(allDimensions);

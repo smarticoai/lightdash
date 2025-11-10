@@ -1,5 +1,7 @@
 import {
+    AiResultType,
     convertAiTableCalcsSchemaToTableCalcs,
+    getSlackAiEchartsConfig,
     isSlackPrompt,
     metricQueryTimeSeriesViz,
     toolTimeSeriesArgsSchema,
@@ -7,6 +9,7 @@ import {
     toolTimeSeriesOutputSchema,
 } from '@lightdash/common';
 import { tool } from 'ai';
+import { NO_RESULTS_RETRY_PROMPT } from '../prompts/noResultsRetry';
 import type {
     CreateOrUpdateArtifactFn,
     GetExploreFn,
@@ -16,13 +19,13 @@ import type {
     UpdateProgressFn,
 } from '../types/aiAgentDependencies';
 import { convertQueryResultsToCsv } from '../utils/convertQueryResultsToCsv';
+import { getPivotedResults } from '../utils/getPivotedResults';
 import { populateCustomMetricsSQL } from '../utils/populateCustomMetricsSQL';
 import { renderEcharts } from '../utils/renderEcharts';
 import { serializeData } from '../utils/serializeData';
 import { toModelOutput } from '../utils/toModelOutput';
 import { toolErrorHandler } from '../utils/toolErrorHandler';
 import { validateTimeSeriesVizConfig } from '../utils/validateTimeSeriesVizConfig';
-import { renderTimeSeriesViz } from '../visualizations/vizTimeSeries';
 
 type Dependencies = {
     getExplore: GetExploreFn;
@@ -66,15 +69,15 @@ export const getGenerateTimeSeriesVizConfig = ({
 
                 const prompt = await getPrompt();
 
-                // Create or update artifact
-                await createOrUpdateArtifact({
-                    threadUuid: prompt.threadUuid,
-                    promptUuid: prompt.promptUuid,
-                    artifactType: 'chart',
-                    title: toolArgs.title,
-                    description: toolArgs.description,
-                    vizConfig: toolArgs,
-                });
+                const createOrUpdateArtifactHook = () =>
+                    createOrUpdateArtifact({
+                        threadUuid: prompt.threadUuid,
+                        promptUuid: prompt.promptUuid,
+                        artifactType: 'chart',
+                        title: toolArgs.title,
+                        description: toolArgs.description,
+                        vizConfig: toolArgs,
+                    });
 
                 const selfImprovementResultFollowUp =
                     enableSelfImprovement &&
@@ -84,6 +87,8 @@ export const getGenerateTimeSeriesVizConfig = ({
                         : '';
 
                 if (!enableDataAccess && !isSlackPrompt(prompt)) {
+                    await createOrUpdateArtifactHook();
+
                     return {
                         result: `Success`,
                         metadata: {
@@ -101,17 +106,32 @@ export const getGenerateTimeSeriesVizConfig = ({
                         vizTool.tableCalculations,
                     ),
                 });
+
                 const queryResults = await runMiniMetricQuery(
                     metricQuery,
                     maxLimit,
                     populateCustomMetricsSQL(vizTool.customMetrics, explore),
                 );
 
+                if (queryResults.rows.length === 0) {
+                    return {
+                        result: NO_RESULTS_RETRY_PROMPT,
+                        metadata: {
+                            status: 'success',
+                        },
+                    };
+                }
+
+                await createOrUpdateArtifactHook();
+
                 if (isSlackPrompt(prompt)) {
-                    const { chartOptions } = await renderTimeSeriesViz({
+                    const chartOptions = await getSlackAiEchartsConfig({
+                        toolArgs: {
+                            type: AiResultType.TIME_SERIES_RESULT,
+                            tool: vizTool,
+                        },
                         queryResults,
-                        vizTool,
-                        metricQuery,
+                        getPivotedResults,
                     });
 
                     const file = await renderEcharts(chartOptions);

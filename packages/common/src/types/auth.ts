@@ -1,6 +1,7 @@
 import {
     type CreateEmbedJwt,
     type DashboardFilterInteractivityOptions,
+    type ParameterInteractivityOptions,
 } from '../ee';
 import { ForbiddenError } from './errors';
 import { type Organization } from './organization';
@@ -63,6 +64,8 @@ export type OssEmbed = {
     encodedSecret: string;
     dashboardUuids: string[];
     allowAllDashboards: boolean;
+    chartUuids: string[];
+    allowAllCharts: boolean;
     createdAt: string;
     user: Pick<LightdashUser, 'userUuid' | 'firstName' | 'lastName'>;
 };
@@ -86,6 +89,8 @@ export type DashboardAccess = {
     filtering?: DashboardFilterInteractivityOptions;
     /** User-specific access controls */
     controls?: UserAccessControls;
+    /** Dashboard parameter interactivity options */
+    parameters?: ParameterInteractivityOptions;
 };
 
 export type AccountHelpers = {
@@ -195,15 +200,17 @@ export function isJwtUser(account?: Account): account is AnonymousAccount {
     return account.isJwtUser();
 }
 
-export const assertIsAccountWithOrg = (
-    account: Account,
-): asserts account is Account & {
+type AccountWithOrg = Account & {
     organization: {
         organizationUuid: string;
         name: string;
         createdAt: Date;
     };
-} => {
+};
+
+export function assertIsAccountWithOrg(
+    account: Account,
+): asserts account is AccountWithOrg {
     const { organization } = account;
     const isValidOrg =
         typeof organization.organizationUuid === 'string' &&
@@ -221,4 +228,4 @@ export const assertIsAccountWithOrg = (
                 'Session user does not have a role in an organization',
             );
     }
-};
+}

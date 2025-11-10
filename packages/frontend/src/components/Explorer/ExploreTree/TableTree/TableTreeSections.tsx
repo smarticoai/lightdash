@@ -18,47 +18,57 @@ import {
 } from '@mantine/core';
 import { IconAlertTriangle, IconCode, IconPlus } from '@tabler/icons-react';
 import { useCallback, useMemo, type FC } from 'react';
+import { shallowEqual } from 'react-redux';
 import { useParams } from 'react-router';
+import {
+    explorerActions,
+    selectAdditionalMetrics as selectAllAdditionalMetrics,
+    selectCustomDimensions as selectAllCustomDimensions,
+    selectDimensions,
+    useExplorerDispatch,
+    useExplorerSelector,
+} from '../../../../features/explorer/store';
 import { useGitIntegration } from '../../../../hooks/gitIntegration/useGitIntegration';
 import { useFeatureFlagEnabled } from '../../../../hooks/useFeatureFlagEnabled';
 import { useProject } from '../../../../hooks/useProject';
 import useApp from '../../../../providers/App/useApp';
-import useExplorerContext from '../../../../providers/Explorer/useExplorerContext';
 import useTracking from '../../../../providers/Tracking/useTracking';
 import { EventName } from '../../../../types/Events';
 import DocumentationHelpButton from '../../../DocumentationHelpButton';
 import MantineIcon from '../../../common/MantineIcon';
 import { TreeProvider } from './Tree/TreeProvider';
 import TreeRoot from './Tree/TreeRoot';
+import { TreeSection } from './Virtualization/types';
 
 type Props = {
     searchQuery?: string;
     table: CompiledTable;
     additionalMetrics: AdditionalMetric[];
-    selectedItems: Set<string>;
     onSelectedNodeChange: (itemId: string, isDimension: boolean) => void;
     customDimensions?: CustomDimension[];
-    missingFields?: {
-        all: string[];
-        customDimensions: CustomDimension[] | undefined;
-        customMetrics: AdditionalMetric[] | undefined;
-    };
-    selectedDimensions?: string[];
+    missingCustomMetrics: AdditionalMetric[];
+    missingCustomDimensions: CustomDimension[];
+    missingFieldIds: string[];
     searchResults: string[];
     isSearching: boolean;
+    expandedGroups: Set<string>;
+    onToggleGroup: (groupKey: string) => void;
 };
 const TableTreeSections: FC<Props> = ({
     searchQuery,
     table,
     additionalMetrics,
     customDimensions,
-    selectedItems,
-    missingFields,
-    selectedDimensions,
+    missingCustomMetrics,
+    missingCustomDimensions,
+    missingFieldIds,
     onSelectedNodeChange,
     searchResults,
     isSearching,
+    expandedGroups,
+    onToggleGroup,
 }) => {
+    const selectedDimensions = useExplorerSelector(selectDimensions);
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const { user } = useApp();
     const { track } = useTracking();
@@ -69,20 +79,16 @@ const TableTreeSections: FC<Props> = ({
             projectUuid,
         }),
     );
-    const toggleCustomDimensionModal = useExplorerContext(
-        (context) => context.actions.toggleCustomDimensionModal,
-    );
-    const toggleWriteBackModal = useExplorerContext(
-        (context) => context.actions.toggleWriteBackModal,
-    );
 
-    const allAdditionalMetrics = useExplorerContext(
-        (context) =>
-            context.state.unsavedChartVersion.metricQuery.additionalMetrics,
+    const dispatch = useExplorerDispatch();
+
+    const allAdditionalMetrics = useExplorerSelector(
+        selectAllAdditionalMetrics,
+        shallowEqual,
     );
-    const allCustomDimensions = useExplorerContext(
-        (context) =>
-            context.state.unsavedChartVersion.metricQuery.customDimensions,
+    const allCustomDimensions = useExplorerSelector(
+        selectAllCustomDimensions,
+        shallowEqual,
     );
 
     const dimensions = useMemo(() => {
@@ -104,14 +110,10 @@ const TableTreeSections: FC<Props> = ({
             (metric) => metric.table === table.name,
         );
 
-        return [
-            ...customMetricsTable,
-            ...(missingFields?.customMetrics ?? []),
-        ].reduce<Record<string, AdditionalMetric>>(
-            (acc, item) => ({ ...acc, [getItemId(item)]: item }),
-            {},
-        );
-    }, [additionalMetrics, missingFields?.customMetrics, table.name]);
+        return [...customMetricsTable, ...missingCustomMetrics].reduce<
+            Record<string, AdditionalMetric>
+        >((acc, item) => ({ ...acc, [getItemId(item)]: item }), {});
+    }, [additionalMetrics, missingCustomMetrics, table.name]);
 
     const customDimensionsMap = useMemo(() => {
         if (customDimensions === undefined) return undefined;
@@ -176,12 +178,14 @@ const TableTreeSections: FC<Props> = ({
     );
 
     const handleAddCustomDimension = useCallback(() => {
-        toggleCustomDimensionModal({
-            isEditing: false,
-            table: table.name,
-            item: undefined,
-        });
-    }, [toggleCustomDimensionModal, table.name]);
+        dispatch(
+            explorerActions.toggleCustomDimensionModal({
+                isEditing: false,
+                table: table.name,
+                item: undefined,
+            }),
+        );
+    }, [dispatch, table.name]);
 
     const handleWriteBackCustomMetrics = useCallback(() => {
         if (projectUuid && user.data?.organizationUuid) {
@@ -196,14 +200,12 @@ const TableTreeSections: FC<Props> = ({
                 },
             });
         }
-        toggleWriteBackModal({ items: allAdditionalMetrics });
-    }, [
-        projectUuid,
-        user.data,
-        allAdditionalMetrics,
-        toggleWriteBackModal,
-        track,
-    ]);
+        dispatch(
+            explorerActions.toggleWriteBackModal({
+                items: allAdditionalMetrics,
+            }),
+        );
+    }, [projectUuid, user.data, allAdditionalMetrics, dispatch, track]);
 
     const handleWriteBackCustomDimensions = useCallback(() => {
         if (projectUuid && user.data?.organizationUuid) {
@@ -219,16 +221,12 @@ const TableTreeSections: FC<Props> = ({
                 },
             });
         }
-        toggleWriteBackModal({
-            items: customDimensionsToWriteBack || [],
-        });
-    }, [
-        projectUuid,
-        user.data,
-        customDimensionsToWriteBack,
-        toggleWriteBackModal,
-        track,
-    ]);
+        dispatch(
+            explorerActions.toggleWriteBackModal({
+                items: customDimensionsToWriteBack || [],
+            }),
+        );
+    }, [projectUuid, user.data, customDimensionsToWriteBack, dispatch, track]);
 
     const getMissingFieldClickHandler = useCallback(
         (field: string) => () => {
@@ -240,7 +238,7 @@ const TableTreeSections: FC<Props> = ({
 
     return (
         <>
-            {missingFields && missingFields.all.length > 0 && (
+            {missingFieldIds.length > 0 && (
                 <>
                     <Group mt="sm" mb="xs">
                         <Text fw={600} color="gray.6">
@@ -248,7 +246,7 @@ const TableTreeSections: FC<Props> = ({
                         </Text>
                     </Group>
 
-                    {missingFields.all.map((missingField) => {
+                    {missingFieldIds.map((missingField) => {
                         return (
                             <Tooltip
                                 key={missingField}
@@ -313,10 +311,13 @@ const TableTreeSections: FC<Props> = ({
                     orderFieldsBy={table.orderFieldsBy}
                     searchQuery={searchQuery}
                     itemsMap={dimensions}
-                    selectedItems={selectedItems}
                     groupDetails={table.groupDetails}
                     onItemClick={handleItemClickDimension}
                     searchResults={searchResults}
+                    tableName={table.name}
+                    treeSectionType={TreeSection.Dimensions}
+                    expandedGroups={expandedGroups}
+                    onToggleGroup={onToggleGroup}
                 >
                     <TreeRoot />
                 </TreeProvider>
@@ -362,10 +363,13 @@ const TableTreeSections: FC<Props> = ({
                     orderFieldsBy={table.orderFieldsBy}
                     searchQuery={searchQuery}
                     itemsMap={metrics}
-                    selectedItems={selectedItems}
                     groupDetails={table.groupDetails}
                     onItemClick={handleItemClickMetric}
                     searchResults={searchResults}
+                    tableName={table.name}
+                    treeSectionType={TreeSection.Metrics}
+                    expandedGroups={expandedGroups}
+                    onToggleGroup={onToggleGroup}
                 >
                     <TreeRoot />
                 </TreeProvider>
@@ -410,14 +414,17 @@ const TableTreeSections: FC<Props> = ({
                     orderFieldsBy={table.orderFieldsBy}
                     searchQuery={searchQuery}
                     itemsMap={customMetrics}
-                    selectedItems={selectedItems}
-                    missingCustomMetrics={missingFields?.customMetrics}
+                    missingCustomMetrics={missingCustomMetrics}
                     itemsAlerts={customMetricsIssues}
                     groupDetails={table.groupDetails}
                     onItemClick={handleItemClickMetric}
                     isGithubIntegrationEnabled={isGithubProject}
                     gitIntegration={gitIntegration}
                     searchResults={searchResults}
+                    tableName={table.name}
+                    treeSectionType={TreeSection.CustomMetrics}
+                    expandedGroups={expandedGroups}
+                    onToggleGroup={onToggleGroup}
                 >
                     <TreeRoot />
                 </TreeProvider>
@@ -466,11 +473,14 @@ const TableTreeSections: FC<Props> = ({
                     orderFieldsBy={table.orderFieldsBy}
                     searchQuery={searchQuery}
                     itemsMap={customDimensionsMap}
-                    missingCustomDimensions={missingFields?.customDimensions}
-                    selectedItems={selectedItems}
+                    missingCustomDimensions={missingCustomDimensions}
                     groupDetails={table.groupDetails}
                     onItemClick={handleItemClickDimension}
                     searchResults={searchResults}
+                    tableName={table.name}
+                    treeSectionType={TreeSection.CustomDimensions}
+                    expandedGroups={expandedGroups}
+                    onToggleGroup={onToggleGroup}
                 >
                     <TreeRoot />
                 </TreeProvider>

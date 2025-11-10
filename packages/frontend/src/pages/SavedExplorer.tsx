@@ -1,35 +1,43 @@
-import { memo, useEffect } from 'react';
+import { FeatureFlags } from '@lightdash/common';
+import { lazy, memo, Suspense, useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { useParams } from 'react-router';
 import ErrorState from '../components/common/ErrorState';
 import Page from '../components/common/Page/Page';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
 import Explorer from '../components/Explorer';
-import ExplorePanel from '../components/Explorer/ExplorePanel';
+import LoadingSkeleton from '../components/Explorer/ExploreTree/LoadingSkeleton';
 import SavedChartsHeader from '../components/Explorer/SavedChartsHeader';
 import { explorerStore } from '../features/explorer/store';
 import useDashboardStorage from '../hooks/dashboard/useDashboardStorage';
-import { useExplorerQueryManager } from '../hooks/useExplorerQueryManager';
+import { useExplorerQueryEffects } from '../hooks/useExplorerQueryEffects';
+import { useFeatureFlag } from '../hooks/useFeatureFlagEnabled';
 import { useSavedQuery } from '../hooks/useSavedQuery';
 import useApp from '../providers/App/useApp';
 import { defaultQueryExecution } from '../providers/Explorer/defaultState';
 import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
 import { ExplorerSection } from '../providers/Explorer/types';
 
-const SavedExplorerContent = memo<{
-    viewModeQueryArgs?: { chartUuid: string; context?: string };
-    isEditMode: boolean;
-}>(({ viewModeQueryArgs, isEditMode }) => {
-    // Run the query manager hook - orchestrates all query effects
-    useExplorerQueryManager({
-        viewModeQueryArgs,
-    });
+const LazyExplorePanel = lazy(
+    () => import('../components/Explorer/ExplorePanel'),
+);
+
+const SavedExplorerContent = memo<{ isEditMode: boolean }>(({ isEditMode }) => {
+    // Run the query effects hook - orchestrates all query effects
+    useExplorerQueryEffects();
+
+    // Pre-load the feature flag to avoid trying to render old side bar while it is fetching it in ExploreTree
+    useFeatureFlag(FeatureFlags.ExperimentalVirtualizedSideBar);
 
     return (
         <Page
             title={undefined} // Will be set by SavedChartsHeader
             header={<SavedChartsHeader />}
-            sidebar={<ExplorePanel />}
+            sidebar={
+                <Suspense fallback={<LoadingSkeleton />}>
+                    <LazyExplorePanel />
+                </Suspense>
+            }
             isSidebarOpen={isEditMode}
             withFullHeight
             withPaddedContent
@@ -44,7 +52,6 @@ const SavedExplorer = () => {
 
     const { savedQueryUuid, mode } = useParams<{
         savedQueryUuid: string;
-        projectUuid: string;
         mode?: string;
     }>();
 
@@ -112,6 +119,9 @@ const SavedExplorer = () => {
                                   writeBack: {
                                       isOpen: false,
                                   },
+                                  itemDetail: {
+                                      isOpen: false,
+                                  },
                               },
                               queryExecution: defaultQueryExecution,
                           }
@@ -120,14 +130,7 @@ const SavedExplorer = () => {
                 savedChart={data}
                 defaultLimit={health.data?.query.defaultLimit}
             >
-                <SavedExplorerContent
-                    viewModeQueryArgs={
-                        savedQueryUuid
-                            ? { chartUuid: savedQueryUuid }
-                            : undefined
-                    }
-                    isEditMode={isEditMode}
-                />
+                <SavedExplorerContent isEditMode={isEditMode} />
             </ExplorerProvider>
         </Provider>
     );

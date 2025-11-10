@@ -236,7 +236,6 @@ const AiAgentAdminThreadsTable = ({
                         <Group gap="two" wrap="nowrap">
                             <LightdashUserAvatar
                                 size={12}
-                                variant="filled"
                                 name={thread.agent.name}
                                 src={thread.agent.imageUrl}
                             />
@@ -375,9 +374,9 @@ const AiAgentAdminThreadsTable = ({
             header: 'Prompts',
             enableSorting: false,
             enableEditing: false,
-            size: 120,
+            size: 125,
             Header: ({ column }) => (
-                <Group gap="two">
+                <Group gap="two" wrap="nowrap">
                     <MantineIcon icon={IconMessages} color="gray.6" />
                     {column.columnDef.header}
                 </Group>

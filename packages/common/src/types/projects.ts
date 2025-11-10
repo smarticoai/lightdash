@@ -186,6 +186,7 @@ export enum SnowflakeAuthenticationType {
     PASSWORD = 'password',
     PRIVATE_KEY = 'private_key',
     SSO = 'sso',
+    EXTERNAL_BROWSER = 'external_browser',
 }
 
 export type CreateSnowflakeCredentials = {
@@ -210,6 +211,7 @@ export type CreateSnowflakeCredentials = {
     startOfWeek?: WeekDay | null;
     quotedIdentifiersIgnoreCase?: boolean;
     override?: boolean;
+    organizationWarehouseCredentialsUuid?: string;
 };
 export type SnowflakeCredentials = Omit<
     CreateSnowflakeCredentials,
@@ -252,6 +254,43 @@ export const maybeOverrideWarehouseConnection = <
     };
 };
 
+/**
+ * Merges new warehouse credentials with base credentials, preserving advanced settings
+ * like requireUserCredentials from the base credentials.
+ *
+ * This is useful when creating preview projects where we want to use new connection details
+ * (like from dbt profiles) but preserve advanced configuration from the parent project.
+ */
+export const mergeWarehouseCredentials = <T extends CreateWarehouseCredentials>(
+    baseCredentials: T,
+    newCredentials: T,
+): T => {
+    // If types don't match, return newCredentials as-is (can't merge different warehouse types)
+    if (baseCredentials.type !== newCredentials.type) {
+        return newCredentials;
+    }
+
+    // Edge case: if the warehouse is snowflake but with a different warehouse, return newCredentials as-is
+    // This is to avoid enforcing requireUserCredentials on a different snowflake warehouse that might not have SSO enabled or different roles
+    if (
+        baseCredentials.type === WarehouseTypes.SNOWFLAKE &&
+        newCredentials.type === WarehouseTypes.SNOWFLAKE &&
+        baseCredentials.warehouse !== newCredentials.warehouse
+    ) {
+        return newCredentials;
+    }
+
+    // We will use new credentials for connection, this might contain new authentication method
+    // do not include all baseCredentials here, to avoid conflicts on authentication (that will cause a mix of serviceaccounts/sso/passwords)
+    const merged = {
+        ...newCredentials,
+        // Keep requireUserCredentials from base credentials, since this is a security setting and should not be overridden
+        requireUserCredentials: baseCredentials.requireUserCredentials,
+    };
+
+    return merged as T;
+};
+
 export interface DbtProjectConfigBase {
     type: DbtProjectType;
 }
@@ -274,6 +313,21 @@ export enum SupportedDbtVersions {
 // Make it an enum to avoid TSOA errors
 export enum DbtVersionOptionLatest {
     LATEST = 'latest',
+}
+
+export function isDbtVersion110OrHigher(
+    version: SupportedDbtVersions | undefined,
+): boolean {
+    if (!version) {
+        return false;
+    }
+    // Get all enum values as an array in order
+    const versions = Object.values(SupportedDbtVersions);
+    const v110Index = versions.indexOf(SupportedDbtVersions.V1_10);
+    const currentIndex = versions.indexOf(version);
+
+    // If the current version is at or after v1.10 in the enum order
+    return currentIndex >= v110Index;
 }
 
 export type DbtVersionOption = SupportedDbtVersions | DbtVersionOptionLatest;
@@ -457,6 +511,7 @@ export type PreviewContentMapping = {
     dashboardVersions: IdContentMapping[];
     savedSql: IdContentMapping[];
     savedSqlVersions: IdContentMapping[];
+    aiAgents: IdContentMapping[];
 };
 
 export type UpdateSchedulerSettings = {

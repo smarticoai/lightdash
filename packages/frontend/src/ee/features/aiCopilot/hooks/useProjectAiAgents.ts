@@ -381,6 +381,7 @@ const createOptimisticMessages = (
         },
         {
             role: 'assistant' as const,
+            status: 'pending' as const,
             uuid: promptUuid,
             threadUuid,
             message: '',
@@ -395,6 +396,7 @@ const createOptimisticMessages = (
             humanScore: null,
             toolCalls: [],
             toolResults: [],
+            reasoning: [],
             savedQueryUuid: null,
             artifacts: null,
         },
@@ -525,6 +527,16 @@ export const useCreateAgentThreadMutation = (
                 threadUuid: thread.uuid,
                 messageUuid: thread.firstMessage.uuid,
                 onFinish: () =>
+                    queryClient.invalidateQueries({
+                        queryKey: [
+                            AI_AGENTS_KEY,
+                            projectUuid,
+                            agentUuid,
+                            'threads',
+                            thread.uuid,
+                        ],
+                    }),
+                refetchThread: () =>
                     queryClient.invalidateQueries({
                         queryKey: [
                             AI_AGENTS_KEY,
@@ -669,6 +681,16 @@ export const useCreateAgentThreadMessageMutation = (
                         'threads',
                         threadUuid,
                     ]),
+                refetchThread: () =>
+                    queryClient.invalidateQueries({
+                        queryKey: [
+                            AI_AGENTS_KEY,
+                            projectUuid,
+                            agentUuid,
+                            'threads',
+                            threadUuid,
+                        ],
+                    }),
             });
         },
         onError: ({ error }) => {

@@ -667,6 +667,7 @@ export const exploreComplexReferenceCompiled: Explore = {
                     tablesReferences: ['a'],
                     source: sourceMock,
                     hidden: false,
+                    showUnderlyingValues: undefined,
                 },
             },
             lineageGraph: {},
@@ -1255,6 +1256,7 @@ export const compiledJoinedExploreWithTwoJoinsToTheSameTable: Explore = {
                     tablesReferences: ['a', 'custom_alias'],
                     source: sourceMock,
                     hidden: false,
+                    showUnderlyingValues: undefined,
                 },
             },
         },
@@ -1547,12 +1549,14 @@ export const exploreWithMetricNumberCompiled: Explore = {
                     ...exploreWithMetricNumber.tables.a.metrics.m1,
                     compiledSql: 'SUM(("a".dim1))',
                     tablesReferences: ['a'],
+                    showUnderlyingValues: undefined,
                 },
                 m2: {
                     ...exploreWithMetricNumber.tables.a.metrics.m2,
                     compiledSql: '2 + (SUM(("a".dim1)))',
 
                     tablesReferences: ['a'],
+                    showUnderlyingValues: undefined,
                 },
             },
             lineageGraph: {},
@@ -1859,6 +1863,7 @@ export const exploreWithRequiredAttributesCompiled: Explore = {
                             is_admin: 'true',
                         },
                     },
+                    showUnderlyingValues: undefined,
                 },
             },
             lineageGraph: {},
@@ -1916,6 +1921,7 @@ export const exploreWithRequiredAttributesCompiled: Explore = {
                             is_admin: 'true',
                         },
                     },
+                    showUnderlyingValues: undefined,
                 },
             },
             lineageGraph: {},
@@ -2091,6 +2097,57 @@ export const exploreWithInvalidParameterReference: UncompiledExplore = {
                     default: 'active',
                 },
             },
+        },
+    },
+};
+
+// Test data for join description overrides
+export const simpleJoinedExploreWithBaseTableDescription: UncompiledExplore = {
+    ...simpleJoinedExplore,
+    tables: {
+        ...simpleJoinedExplore.tables,
+        b: {
+            ...simpleJoinedExplore.tables.b,
+            description: 'Base table B description',
+        },
+    },
+};
+
+export const compiledSimpleJoinedExploreWithBaseTableDescription: Explore = {
+    ...compiledSimpleJoinedExplore,
+    tables: {
+        ...compiledSimpleJoinedExplore.tables,
+        b: {
+            ...compiledSimpleJoinedExplore.tables.b,
+            description: 'Base table B description',
+        },
+    },
+};
+
+export const joinedExploreOverridingJoinDescription: UncompiledExplore = {
+    ...simpleJoinedExplore,
+    joinedTables: [
+        {
+            ...simpleJoinedExplore.joinedTables[0],
+            description: 'Custom join description',
+        },
+    ],
+    tables: {
+        ...simpleJoinedExplore.tables,
+        b: {
+            ...simpleJoinedExplore.tables.b,
+            description: 'Base table B description',
+        },
+    },
+};
+
+export const compiledJoinedExploreOverridingJoinDescription: Explore = {
+    ...compiledSimpleJoinedExplore,
+    tables: {
+        ...compiledSimpleJoinedExplore.tables,
+        b: {
+            ...compiledSimpleJoinedExplore.tables.b,
+            description: 'Custom join description',
         },
     },
 };

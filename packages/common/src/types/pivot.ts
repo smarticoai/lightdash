@@ -1,11 +1,6 @@
 import type { PivotIndexColum } from '../visualizations/types';
 import { type FieldType } from './field';
 import { type ResultRow, type ResultValue } from './results';
-import {
-    ChartType,
-    getHiddenTableFields,
-    type CreateSavedChartVersion,
-} from './savedCharts';
 import type { GroupByColumn, SortBy, ValuesColumn } from './sqlRunner';
 
 export type PivotConfig = {
@@ -80,21 +75,3 @@ export type PivotData = {
     };
     groupedSubtotals?: Record<string, Record<string, number>[]>;
 };
-
-export const getPivotConfig = (
-    savedChart: CreateSavedChartVersion,
-): PivotConfig | undefined =>
-    savedChart.chartConfig.type === ChartType.TABLE &&
-    savedChart.pivotConfig !== undefined
-        ? {
-              pivotDimensions: savedChart.pivotConfig.columns,
-              metricsAsRows:
-                  savedChart.chartConfig.config?.metricsAsRows ?? false,
-              hiddenMetricFieldIds: getHiddenTableFields(
-                  savedChart.chartConfig,
-              ),
-              columnOrder: savedChart.tableConfig.columnOrder,
-              rowTotals:
-                  savedChart.chartConfig.config?.showRowCalculation ?? false,
-          }
-        : undefined;

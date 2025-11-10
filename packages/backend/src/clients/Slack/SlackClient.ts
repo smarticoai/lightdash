@@ -14,7 +14,9 @@ import {
     Block,
     ExpressReceiver,
     LogLevel as SlackLogLevel,
+    type InstallationStore,
 } from '@slack/bolt';
+import { InstallProvider } from '@slack/oauth';
 import {
     ChatPostMessageArguments,
     ChatUpdateArguments,
@@ -302,24 +304,94 @@ export class SlackClient {
         return getCachedChannels();
     }
 
+    private static async isBotInChannel(
+        webClient: WebClient,
+        channelId: string,
+    ): Promise<boolean> {
+        try {
+            // Use conversations.info to check if bot is a member
+            // This works with channels:read and groups:read scopes
+            const response = await webClient.conversations.info({
+                channel: channelId,
+            });
+
+            return response.channel?.is_member ?? false;
+        } catch (e: AnyType) {
+            // If we can't check membership (e.g., private channel we're not in), assume we're not in it
+            Logger.debug(
+                `Unable to check bot membership for channel ${channelId}: ${
+                    e?.message || e
+                }`,
+            );
+            return false;
+        }
+    }
+
     async joinChannels(organizationUuid: string, channels: string[]) {
         if (channels.length === 0) return;
+
         try {
             const webClient = await this.getWebClient(organizationUuid);
-            const joinPromises = channels.map((channel) => {
-                // Don't need to join user channels (DM)
-                if (channel.startsWith('U')) return undefined;
 
-                return webClient.conversations.join({
+            // Filter out DM channels
+            const channelsToJoin = channels.filter(
+                (channel) => !channel.startsWith('U'),
+            );
+
+            if (channelsToJoin.length === 0) return;
+
+            // Check which channels we're already in
+            const membershipChecks = await Promise.allSettled(
+                channelsToJoin.map(async (channel) => ({
                     channel,
-                });
-            });
+                    isMember: await SlackClient.isBotInChannel(
+                        webClient,
+                        channel,
+                    ),
+                })),
+            );
+
+            const channelsNeedingJoin = membershipChecks
+                .filter(
+                    (result) =>
+                        result.status === 'fulfilled' && !result.value.isMember,
+                )
+                .map((result) =>
+                    result.status === 'fulfilled' ? result.value.channel : '',
+                )
+                .filter(Boolean);
+
+            if (channelsNeedingJoin.length === 0) {
+                Logger.debug(
+                    `Bot is already a member of all channels: ${channelsToJoin.join(
+                        ', ',
+                    )}`,
+                );
+                return;
+            }
+
+            const joinPromises = channelsNeedingJoin.map((channel) =>
+                webClient.conversations.join({ channel }),
+            );
             await Promise.all(joinPromises);
+            Logger.debug(
+                `Successfully joined channels: ${channelsNeedingJoin.join(
+                    ', ',
+                )}`,
+            );
         } catch (e: AnyType) {
-            // If the channels:join scope is missing, log a warning but don't throw
+            Logger.error(
+                `Unable to join channels ${channels.join(
+                    ', ',
+                )} on organization ${organizationUuid}`,
+                e,
+            );
+            // If the channels:join scope is missing, provide a helpful error
             if (e?.data?.error === 'missing_scope') {
                 Logger.warn(
-                    `Unable to join channels ${channels} on organization ${organizationUuid}: missing channels:join scope. The app can still be added to channels manually.`,
+                    `Unable to join channels ${channels.join(
+                        ', ',
+                    )} on organization ${organizationUuid}: missing channels:join scope. The app can still be added to channels manually.`,
                 );
                 throw new SlackError(
                     `Unable to join channel(s): missing channels:join scope. Add the app to the channel(s) manually.`,
@@ -327,7 +399,9 @@ export class SlackClient {
             }
             slackErrorHandler(
                 e,
-                `Unable to join channels ${channels} on organization ${organizationUuid}`,
+                `Unable to join channels ${channels.join(
+                    ', ',
+                )} on organization ${organizationUuid}`,
             );
         }
     }
@@ -676,45 +750,60 @@ export class SlackClient {
         }
 
         let app: App | undefined;
+        const slackOptions = this.getSlackOptions();
+        const logLevel = lightdashLogLevelToSlackLogLevel(
+            this.lightdashConfig.logging.level ?? 'info',
+        );
+        const installationStore: InstallationStore = {
+            storeInstallation: (i) =>
+                this.slackAuthenticationModel.createInstallation(i),
+            fetchInstallation: (i) =>
+                this.slackAuthenticationModel.getInstallation(i),
+            deleteInstallation: (i) =>
+                this.slackAuthenticationModel.deleteInstallation(i),
+        };
 
         try {
             if (this.lightdashConfig.slack?.socketMode) {
-                app = new App({
-                    ...this.getSlackOptions(),
-                    installationStore: {
-                        storeInstallation: (i) =>
-                            this.slackAuthenticationModel.createInstallation(i),
-                        fetchInstallation: (i) =>
-                            this.slackAuthenticationModel.getInstallation(i),
-                        deleteInstallation: (i) =>
-                            this.slackAuthenticationModel.deleteInstallation(i),
+                if (!this.lightdashConfig.slack.appToken) {
+                    throw new MissingConfigError(
+                        'Missing "SLACK_APP_TOKEN" to start Slack Client in socket mode',
+                    );
+                }
+
+                // Create InstallProvider for OAuth routes
+                const installProvider = new InstallProvider({
+                    ...slackOptions,
+                    installationStore,
+                    logLevel,
+                });
+
+                // Register OAuth routes manually, the SocketModeReceiver doesn't seem to handle the oauth flow
+                expressApp.get(
+                    slackOptions.installerOptions.redirectUriPath,
+                    async (req, res) => {
+                        await installProvider.handleCallback(req, res);
                     },
-                    logLevel: lightdashLogLevelToSlackLogLevel(
-                        this.lightdashConfig.logging.level ?? 'info',
-                    ),
-                    port: this.lightdashConfig.slack.port,
+                );
+
+                app = new App({
+                    ...slackOptions,
                     socketMode: this.lightdashConfig.slack.socketMode,
                     appToken: this.lightdashConfig.slack.appToken,
+                    port: this.lightdashConfig.slack.port,
+                    installationStore,
+                    logLevel,
                 });
             } else {
                 const slackReceiver = new ExpressReceiver({
-                    ...this.getSlackOptions(),
-                    installationStore: {
-                        storeInstallation: (i) =>
-                            this.slackAuthenticationModel.createInstallation(i),
-                        fetchInstallation: (i) =>
-                            this.slackAuthenticationModel.getInstallation(i),
-                        deleteInstallation: (i) =>
-                            this.slackAuthenticationModel.deleteInstallation(i),
-                    },
-                    logLevel: lightdashLogLevelToSlackLogLevel(
-                        this.lightdashConfig.logging.level ?? 'info',
-                    ),
+                    ...slackOptions,
+                    installationStore,
+                    logLevel,
                     app: expressApp,
                 });
 
                 app = new App({
-                    ...this.getSlackOptions(),
+                    ...slackOptions,
                     receiver: slackReceiver,
                 });
             }
@@ -724,7 +813,13 @@ export class SlackClient {
 
         if (app) {
             this.slackApp = app;
-            Logger.info('Slack app initialized successfully');
+
+            try {
+                await app.start();
+                Logger.info('Slack app initialized successfully');
+            } catch (e) {
+                Logger.error(`Unable to start Slack app ${e}`);
+            }
         }
     }
 }

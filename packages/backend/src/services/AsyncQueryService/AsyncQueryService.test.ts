@@ -25,12 +25,15 @@ import type { AnalyticsModel } from '../../models/AnalyticsModel';
 import type { CatalogModel } from '../../models/CatalogModel/CatalogModel';
 import type { ContentModel } from '../../models/ContentModel/ContentModel';
 import type { DashboardModel } from '../../models/DashboardModel/DashboardModel';
+import type { DownloadAuditModel } from '../../models/DownloadAuditModel';
 import type { DownloadFileModel } from '../../models/DownloadFileModel';
 import type { EmailModel } from '../../models/EmailModel';
 import { FeatureFlagModel } from '../../models/FeatureFlagModel/FeatureFlagModel';
 import type { GroupsModel } from '../../models/GroupsModel';
 import type { JobModel } from '../../models/JobModel/JobModel';
 import type { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
+import type { OrganizationWarehouseCredentialsModel } from '../../models/OrganizationWarehouseCredentialsModel';
+import type { ProjectCompileLogModel } from '../../models/ProjectCompileLogModel';
 import type { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { projectUuid } from '../../models/ProjectModel/ProjectModel.mock';
 import { ProjectParametersModel } from '../../models/ProjectParametersModel';
@@ -159,6 +162,9 @@ const getMockedAsyncQueryService = (
         catalogModel: {} as CatalogModel,
         contentModel: {} as ContentModel,
         encryptionUtil: {} as EncryptionUtil,
+        downloadAuditModel: {
+            logDownload: jest.fn(),
+        } as unknown as DownloadAuditModel,
         queryHistoryModel: {
             create: jest.fn(async () => ({ queryUuid: 'queryUuid' })),
             get: jest.fn(async () => undefined),
@@ -166,9 +172,9 @@ const getMockedAsyncQueryService = (
         } as unknown as QueryHistoryModel,
         userModel: {} as UserModel,
         savedSqlModel: {} as SavedSqlModel,
-        storageClient: {
+        resultsStorageClient: {
             isEnabled: true, // ! Hack for current tests that only check for results saved in S3
-            getDowloadStream: jest.fn(() => {
+            getDownloadStream: jest.fn(() => {
                 const readable = new Readable({
                     read() {
                         // Push some mock data and end the stream
@@ -185,12 +191,15 @@ const getMockedAsyncQueryService = (
         } as unknown as S3ResultsFileStorageClient,
         featureFlagModel: {} as FeatureFlagModel,
         projectParametersModel: {} as ProjectParametersModel,
+        organizationWarehouseCredentialsModel:
+            {} as OrganizationWarehouseCredentialsModel,
         pivotTableService: new PivotTableService({
             lightdashConfig,
             s3Client: {} as S3Client,
             downloadFileModel: {} as DownloadFileModel,
         }),
         permissionsService: {} as PermissionsService,
+        projectCompileLogModel: {} as ProjectCompileLogModel,
         ...overrides,
     });
 
@@ -395,7 +404,6 @@ describe('AsyncQueryService', () => {
                 expect.objectContaining({
                     userId: sessionAccount.user.id,
                     isRegisteredUser: sessionAccount.isRegisteredUser(),
-                    isSessionUser: sessionAccount.isSessionUser(),
                     projectUuid,
                     query: 'SELECT * FROM test',
                     queryHistoryUuid: 'test-query-uuid',
@@ -473,7 +481,6 @@ describe('AsyncQueryService', () => {
                 expect.objectContaining({
                     userId: sessionAccount.user.id,
                     isRegisteredUser: sessionAccount.isRegisteredUser(),
-                    isSessionUser: sessionAccount.isSessionUser(),
                     projectUuid,
                     query: 'SELECT * FROM test',
                     queryHistoryUuid: 'test-query-uuid',
@@ -570,7 +577,6 @@ describe('AsyncQueryService', () => {
                 expect.objectContaining({
                     userId: sessionAccount.user.id,
                     isRegisteredUser: sessionAccount.isRegisteredUser(),
-                    isSessionUser: sessionAccount.isSessionUser(),
                     projectUuid,
                     query: 'SELECT * FROM test',
                     queryHistoryUuid: 'test-query-uuid',
@@ -1110,7 +1116,6 @@ describe('AsyncQueryService', () => {
 
                 const runAsyncArgs: RunAsyncWarehouseQueryArgs = {
                     userId: sessionAccount.user.id,
-                    isSessionUser: true,
                     isRegisteredUser: true,
                     projectUuid,
                     query: 'SELECT * FROM test',
@@ -1185,9 +1190,10 @@ describe('AsyncQueryService', () => {
             });
 
             // Mock storage client methods
-            const mockStorageClient = service.storageClient as unknown as {
-                createUploadStream: jest.Mock;
-            };
+            const mockStorageClient =
+                service.resultsStorageClient as unknown as {
+                    createUploadStream: jest.Mock;
+                };
             mockStorageClient.createUploadStream = jest.fn(() => ({
                 write: jest.fn(),
                 close: jest.fn(),
@@ -1203,7 +1209,6 @@ describe('AsyncQueryService', () => {
 
             const runAsyncArgs: RunAsyncWarehouseQueryArgs = {
                 userId: sessionAccount.user.id,
-                isSessionUser: true,
                 isRegisteredUser: true,
                 projectUuid,
                 query: 'SELECT * FROM test_table',

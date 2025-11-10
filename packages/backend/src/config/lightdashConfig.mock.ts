@@ -207,6 +207,11 @@ export const lightdashConfigMock: LightdashConfig = {
                     modelName: 'mock_model_name',
                     temperature: 0.2,
                     responsesApi: false,
+                    reasoning: {
+                        enabled: false,
+                        reasoningSummary: 'auto',
+                        reasoningEffort: 'medium',
+                    },
                 },
             },
         },
@@ -252,6 +257,9 @@ export const lightdashConfigMock: LightdashConfig = {
     serviceAccount: {
         enabled: false,
     },
+    organizationWarehouseCredentials: {
+        enabled: false,
+    },
     googleCloudPlatform: {
         projectId: 'test-project-id',
     },
@@ -260,5 +268,10 @@ export const lightdashConfigMock: LightdashConfig = {
     },
     customRoles: {
         enabled: false,
+    },
+    experimentalExplorerImprovements: false,
+    experimentalVirtualizedSideBar: false,
+    dashboardComments: {
+        enabled: true,
     },
 };

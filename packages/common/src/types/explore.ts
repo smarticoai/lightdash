@@ -1,5 +1,6 @@
 import {
     type DbtModelJoinType,
+    type FieldSetDefinition,
     type LineageGraph,
     type SupportedDbtAdapter,
 } from './dbt';
@@ -30,6 +31,7 @@ export type ExploreJoin = {
     fields?: string[]; // Optional list of fields to include from the joined table
     always?: boolean; // Optional flag to always join the table
     relationship?: JoinRelationship;
+    description?: string; // Optional description override for the joined table
 };
 
 export type CompiledExploreJoin = Pick<
@@ -49,6 +51,7 @@ export type CompiledTable = TableBase & {
     uncompiledSqlWhere?: string;
     parameterReferences?: string[];
     parameters?: LightdashProjectConfig['parameters'];
+    sets?: Record<string, FieldSetDefinition>;
 };
 
 export enum ExploreType {
@@ -124,6 +127,7 @@ export type Table = TableBase & {
     lineageGraph: LineageGraph; // DAG structure representing the lineage of the table
     source?: Source;
     parameters?: LightdashProjectConfig['parameters'];
+    sets?: Record<string, FieldSetDefinition>;
 };
 
 export enum CustomViewType {

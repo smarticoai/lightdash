@@ -41,9 +41,10 @@ import {
     getDashboardFilterRulesForTileAndReferences,
     getDimensions,
     getErrorMessage,
-    getIntrinsicUserAttributes,
+    getFieldsFromMetricQuery,
     getItemId,
     getItemMap,
+    getMetrics,
     isCartesianChartConfig,
     isCustomBinDimension,
     isCustomDimension,
@@ -72,7 +73,6 @@ import {
     ResultRow,
     type RunQueryTags,
     S3Error,
-    SCHEDULER_TASKS,
     SchedulerFormat,
     sleep,
     type SpaceShare,
@@ -89,12 +89,16 @@ import { createInterface } from 'readline';
 import { Readable, Writable } from 'stream';
 import { v4 as uuidv4 } from 'uuid';
 import { DownloadCsv } from '../../analytics/LightdashAnalytics';
+import { S3Client } from '../../clients/Aws/S3Client';
+import { transformAndExportResults } from '../../clients/Aws/transformAndExportResults';
 import { S3ResultsFileStorageClient } from '../../clients/ResultsFileStorageClients/S3ResultsFileStorageClient';
 import { measureTime } from '../../logging/measureTime';
+import { DownloadAuditModel } from '../../models/DownloadAuditModel';
 import { FeatureFlagModel } from '../../models/FeatureFlagModel/FeatureFlagModel';
 import { QueryHistoryModel } from '../../models/QueryHistoryModel/QueryHistoryModel';
 import type { SavedSqlModel } from '../../models/SavedSqlModel';
 import PrometheusMetrics from '../../prometheus';
+import { compileMetricQuery } from '../../queryCompiler';
 import type { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { wrapSentryTransaction } from '../../utils';
 import { processFieldsForExport } from '../../utils/FileDownloadUtils/FileDownloadUtils';
@@ -146,10 +150,11 @@ const SQL_QUERY_MOCK_EXPLORER_NAME = 'sql_query_explorer';
 
 type AsyncQueryServiceArguments = ProjectServiceArguments & {
     queryHistoryModel: QueryHistoryModel;
+    downloadAuditModel: DownloadAuditModel;
     cacheService?: ICacheService;
     savedSqlModel: SavedSqlModel;
     featureFlagModel: FeatureFlagModel;
-    storageClient: S3ResultsFileStorageClient;
+    resultsStorageClient: S3ResultsFileStorageClient;
     pivotTableService: PivotTableService;
     prometheusMetrics?: PrometheusMetrics;
     schedulerClient: SchedulerClient;
@@ -159,13 +164,17 @@ type AsyncQueryServiceArguments = ProjectServiceArguments & {
 export class AsyncQueryService extends ProjectService {
     queryHistoryModel: QueryHistoryModel;
 
+    downloadAuditModel: DownloadAuditModel;
+
     cacheService?: ICacheService;
 
     savedSqlModel: SavedSqlModel;
 
     featureFlagModel: FeatureFlagModel;
 
-    storageClient: S3ResultsFileStorageClient;
+    resultsStorageClient: S3ResultsFileStorageClient;
+
+    exportsStorageClient: S3Client;
 
     pivotTableService: PivotTableService;
 
@@ -178,10 +187,12 @@ export class AsyncQueryService extends ProjectService {
     constructor(args: AsyncQueryServiceArguments) {
         super(args);
         this.queryHistoryModel = args.queryHistoryModel;
+        this.downloadAuditModel = args.downloadAuditModel;
         this.cacheService = args.cacheService;
         this.savedSqlModel = args.savedSqlModel;
         this.featureFlagModel = args.featureFlagModel;
-        this.storageClient = args.storageClient;
+        this.resultsStorageClient = args.resultsStorageClient;
+        this.exportsStorageClient = this.s3Client;
         this.pivotTableService = args.pivotTableService;
         this.prometheusMetrics = args.prometheusMetrics;
         this.schedulerClient = args.schedulerClient;
@@ -276,7 +287,7 @@ export class AsyncQueryService extends ProjectService {
         pageSize: number,
         formatter: (row: ResultRow) => ResultRow,
     ) {
-        if (!this.storageClient.isEnabled) {
+        if (!this.resultsStorageClient.isEnabled) {
             throw new S3Error('S3 is not enabled');
         }
 
@@ -286,7 +297,9 @@ export class AsyncQueryService extends ProjectService {
             );
         }
 
-        const cacheStream = await this.storageClient.getDowloadStream(fileName);
+        const cacheStream = await this.resultsStorageClient.getDownloadStream(
+            fileName,
+        );
 
         const rows: ResultRow[] = [];
         const rl = createInterface({
@@ -331,7 +344,7 @@ export class AsyncQueryService extends ProjectService {
             await this.getWarehouseCredentials({
                 projectUuid: queryHistory.projectUuid,
                 userId: account.user.id,
-                isSessionUser: account.isSessionUser(),
+                isRegisteredUser: account.isRegisteredUser(),
             }),
         );
 
@@ -526,7 +539,8 @@ export class AsyncQueryService extends ProjectService {
             durationMs,
         } = await measureTime(
             () =>
-                this.storageClient.isEnabled || this.cacheService?.isEnabled
+                this.resultsStorageClient.isEnabled ||
+                this.cacheService?.isEnabled
                     ? this.getResultsPageFromS3(
                           queryUuid,
                           resultsFileName,
@@ -674,7 +688,7 @@ export class AsyncQueryService extends ProjectService {
                 throw new Error('Results file name not found for query');
             }
 
-            return this.storageClient.getDowloadStream(resultsFileName);
+            return this.resultsStorageClient.getDownloadStream(resultsFileName);
         }
 
         throw new Error('Invalid query status');
@@ -730,7 +744,7 @@ export class AsyncQueryService extends ProjectService {
                     ? SchedulerFormat.XLSX
                     : SchedulerFormat.CSV,
             values: onlyRaw ? 'raw' : 'formatted',
-            storage: this.s3Client.isEnabled() ? 's3' : 'local',
+            storage: this.exportsStorageClient.isEnabled() ? 's3' : 'local',
         };
         this.analytics.trackAccount(account, {
             event: 'download_results.started',
@@ -780,10 +794,16 @@ export class AsyncQueryService extends ProjectService {
 
         const userUuid = account.user.id;
 
+        // If the account is a JWT user, we need to include the encoded JWT in the payload
+        const encodedJwt = account.isJwtUser()
+            ? account.authentication.source
+            : undefined;
+
         return this.schedulerClient.downloadAsyncQueryResults({
             ...payload,
             organizationUuid,
             userUuid,
+            encodedJwt,
         });
     }
 
@@ -805,6 +825,7 @@ export class AsyncQueryService extends ProjectService {
         | ApiDownloadAsyncQueryResultsAsXlsx
     > {
         assertIsAccountWithOrg(account);
+
         const { organizationUuid } = await this.projectModel.getSummary(
             projectUuid,
         );
@@ -850,6 +871,23 @@ export class AsyncQueryService extends ProjectService {
             throw new UnexpectedServerError('No columns found for query');
         }
 
+        try {
+            await this.downloadAuditModel.logDownload({
+                queryUuid,
+                userUuid: isJwtUser(account) ? null : account.user.userUuid,
+                organizationUuid,
+                projectUuid: projectUuid || null,
+                fileType: type || DownloadFileType.JSONL,
+                originalQueryContext: queryHistory.context || null,
+            });
+        } catch (error) {
+            this.logger.error('Failed to log download audit', {
+                queryUuid,
+                organizationUuid,
+                error: getErrorMessage(error),
+            });
+        }
+
         // TODO: We should use the columns data instead of fields. We need to: add format expression to columns type and refactor csv service, etc to use columns instead of fields
         // Note: Generate fields for SQL queries. As a workaround, we check the explore name to identify SQL queries and generate fields from columns.
         const resultFields =
@@ -883,7 +921,7 @@ export class AsyncQueryService extends ProjectService {
                         fields,
                         metricQuery: queryHistory.metricQuery,
                         projectUuid,
-                        storageClient: this.storageClient,
+                        storageClient: this.resultsStorageClient,
                         pivotDetails:
                             AsyncQueryService.getPivotDetailsFromQueryHistory(
                                 queryHistory,
@@ -923,7 +961,8 @@ export class AsyncQueryService extends ProjectService {
                         resultsFileName,
                         fields,
                         metricQuery: queryHistory.metricQuery,
-                        storageClient: this.storageClient,
+                        resultsStorageClient: this.resultsStorageClient,
+                        exportsStorageClient: this.exportsStorageClient,
                         lightdashConfig: this.lightdashConfig,
                         pivotDetails:
                             AsyncQueryService.getPivotDetailsFromQueryHistory(
@@ -944,7 +983,10 @@ export class AsyncQueryService extends ProjectService {
                 return ExcelService.downloadAsyncExcelDirectly(
                     resultsFileName,
                     resultFields,
-                    this.storageClient,
+                    {
+                        resultsStorageClient: this.resultsStorageClient,
+                        exportsStorageClient: this.exportsStorageClient,
+                    },
                     {
                         onlyRaw,
                         showTableNames,
@@ -1014,8 +1056,15 @@ export class AsyncQueryService extends ProjectService {
             hiddenFields,
         });
 
-        // Transform and upload the results
-        return this.storageClient.transformResultsIntoNewFile(
+        // Determine file type based on file extension
+        const fileExtension = formattedFileName.toLowerCase().split('.').pop();
+        const fileType =
+            fileExtension === 'xlsx'
+                ? DownloadFileType.XLSX
+                : DownloadFileType.CSV;
+
+        // Transform and export the results from results bucket to exports bucket
+        return transformAndExportResults(
             resultsFileName,
             formattedFileName,
             async (readStream, writeStream) => {
@@ -1035,7 +1084,16 @@ export class AsyncQueryService extends ProjectService {
                     truncated,
                 };
             },
-            attachmentDownloadName,
+            {
+                resultsStorageClient: this.resultsStorageClient,
+                exportsStorageClient: this.s3Client,
+            },
+            {
+                fileType,
+                attachmentDownloadName: attachmentDownloadName
+                    ? `${attachmentDownloadName}.${fileExtension}`
+                    : undefined,
+            },
         );
     }
 
@@ -1043,7 +1101,9 @@ export class AsyncQueryService extends ProjectService {
         resultsFileName: string,
     ): Promise<ApiDownloadAsyncQueryResults> {
         return {
-            fileUrl: await this.storageClient.getFileUrl(resultsFileName),
+            fileUrl: await this.resultsStorageClient.getFileUrl(
+                resultsFileName,
+            ),
         };
     }
 
@@ -1261,7 +1321,6 @@ export class AsyncQueryService extends ProjectService {
     public async runAsyncWarehouseQuery({
         userId,
         isRegisteredUser,
-        isSessionUser,
         projectUuid,
         query,
         fieldsMap,
@@ -1299,7 +1358,7 @@ export class AsyncQueryService extends ProjectService {
             const warehouseCredentials = await this.getWarehouseCredentials({
                 projectUuid,
                 userId,
-                isSessionUser,
+                isRegisteredUser,
             });
 
             warehouseCredentialsType = warehouseCredentials.type;
@@ -1319,8 +1378,8 @@ export class AsyncQueryService extends ProjectService {
 
             // Create upload stream for storing results
             // If S3 is not configured, we don't write to S3
-            stream = this.storageClient.isEnabled
-                ? this.storageClient.createUploadStream(
+            stream = this.resultsStorageClient.isEnabled
+                ? this.resultsStorageClient.createUploadStream(
                       S3ResultsFileStorageClient.sanitizeFileExtension(
                           fileName,
                       ),
@@ -1465,6 +1524,47 @@ export class AsyncQueryService extends ProjectService {
         }
     }
 
+    private async getMetricQueryFields({
+        metricQuery,
+        dateZoom,
+        explore,
+        warehouseSqlBuilder,
+        projectUuid,
+    }: Pick<
+        ExecuteAsyncMetricQueryArgs,
+        'metricQuery' | 'dateZoom' | 'projectUuid'
+    > & {
+        warehouseSqlBuilder: WarehouseSqlBuilder;
+        explore: Explore;
+        pivotConfiguration?: PivotConfiguration;
+    }) {
+        const availableParameterDefinitions = await this.getAvailableParameters(
+            projectUuid,
+            explore,
+        );
+        const availableParameters = Object.keys(availableParameterDefinitions);
+
+        const exploreWithOverride = ProjectService.updateExploreWithDateZoom(
+            explore,
+            metricQuery,
+            warehouseSqlBuilder,
+            availableParameters,
+            dateZoom,
+        );
+
+        const compiledMetricQuery = compileMetricQuery({
+            explore: exploreWithOverride,
+            metricQuery,
+            warehouseSqlBuilder,
+            availableParameters,
+        });
+
+        return getFieldsFromMetricQuery(
+            compiledMetricQuery,
+            exploreWithOverride,
+        );
+    }
+
     private async prepareMetricQueryAsyncQueryArgs({
         account,
         metricQuery,
@@ -1473,12 +1573,14 @@ export class AsyncQueryService extends ProjectService {
         warehouseSqlBuilder,
         parameters,
         projectUuid,
+        pivotConfiguration,
     }: Pick<
         ExecuteAsyncMetricQueryArgs,
         'account' | 'metricQuery' | 'dateZoom' | 'parameters' | 'projectUuid'
     > & {
         warehouseSqlBuilder: WarehouseSqlBuilder;
         explore: Explore;
+        pivotConfiguration?: PivotConfiguration;
     }) {
         assertIsAccountWithOrg(account);
 
@@ -1501,6 +1603,7 @@ export class AsyncQueryService extends ProjectService {
             // ! TODO: Should validate the parameters to make sure they are valid from the options
             parameters,
             availableParameterDefinitions,
+            pivotConfiguration,
         });
 
         const fieldsWithOverrides: ItemsMap = Object.fromEntries(
@@ -1593,7 +1696,7 @@ export class AsyncQueryService extends ProjectService {
                         await this.getWarehouseCredentials({
                             projectUuid,
                             userId: account.user.id,
-                            isSessionUser: account.isSessionUser(),
+                            isRegisteredUser: account.isRegisteredUser(),
                         });
 
                     const warehouseCredentialsType = warehouseCredentials.type;
@@ -1767,7 +1870,6 @@ export class AsyncQueryService extends ProjectService {
                     void this.runAsyncWarehouseQuery({
                         userId: account.user.id,
                         isRegisteredUser: account.isRegisteredUser(),
-                        isSessionUser: account.isSessionUser(),
                         projectUuid,
                         query,
                         fieldsMap,
@@ -1857,7 +1959,7 @@ export class AsyncQueryService extends ProjectService {
         const warehouseCredentials = await this.getWarehouseCredentials({
             projectUuid,
             userId: account.user.id,
-            isSessionUser: account.isSessionUser(),
+            isRegisteredUser: account.isRegisteredUser(),
         });
 
         const warehouseSqlBuilder = warehouseSqlBuilderFromType(
@@ -1887,6 +1989,7 @@ export class AsyncQueryService extends ProjectService {
             warehouseSqlBuilder,
             parameters: combinedParameters,
             projectUuid,
+            pivotConfiguration,
         });
 
         const { queryUuid, cacheMetadata } = await this.executeAsyncQuery(
@@ -2023,7 +2126,7 @@ export class AsyncQueryService extends ProjectService {
         const warehouseCredentials = await this.getWarehouseCredentials({
             projectUuid,
             userId: account.user.id,
-            isSessionUser: account.isSessionUser(),
+            isRegisteredUser: account.isRegisteredUser(),
         });
 
         const warehouseSqlBuilder = warehouseSqlBuilderFromType(
@@ -2039,19 +2142,10 @@ export class AsyncQueryService extends ProjectService {
             savedChartParameters,
         );
 
-        const {
-            sql,
-            fields,
-            warnings,
-            parameterReferences,
-            missingParameterReferences,
-            usedParameters,
-        } = await this.prepareMetricQueryAsyncQueryArgs({
-            account,
+        const fields = await this.getMetricQueryFields({
             metricQuery: metricQueryWithLimit,
             explore,
             warehouseSqlBuilder,
-            parameters: combinedParameters,
             projectUuid,
         });
 
@@ -2063,6 +2157,23 @@ export class AsyncQueryService extends ProjectService {
               )
             : undefined;
 
+        const {
+            sql,
+            fields: fieldsWithOverrides,
+            warnings,
+            parameterReferences,
+            missingParameterReferences,
+            usedParameters,
+        } = await this.prepareMetricQueryAsyncQueryArgs({
+            account,
+            metricQuery: metricQueryWithLimit,
+            explore,
+            warehouseSqlBuilder,
+            parameters: combinedParameters,
+            projectUuid,
+            pivotConfiguration,
+        });
+
         const { queryUuid, cacheMetadata } = await this.executeAsyncQuery(
             {
                 account,
@@ -2072,7 +2183,7 @@ export class AsyncQueryService extends ProjectService {
                 queryTags,
                 invalidateCache,
                 metricQuery: metricQueryWithLimit,
-                fields,
+                fields: fieldsWithOverrides,
                 sql,
                 originalColumns: undefined,
                 missingParameterReferences,
@@ -2085,7 +2196,7 @@ export class AsyncQueryService extends ProjectService {
             queryUuid,
             cacheMetadata,
             metricQuery: metricQueryWithLimit,
-            fields,
+            fields: fieldsWithOverrides,
             warnings,
             parameterReferences,
             usedParametersValues: usedParameters,
@@ -2275,7 +2386,7 @@ export class AsyncQueryService extends ProjectService {
         const warehouseCredentials = await this.getWarehouseCredentials({
             projectUuid,
             userId: account.user.id,
-            isSessionUser: account.isSessionUser(),
+            isRegisteredUser: account.isRegisteredUser(),
         });
 
         const warehouseSqlBuilder = warehouseSqlBuilderFromType(
@@ -2283,7 +2394,9 @@ export class AsyncQueryService extends ProjectService {
             warehouseCredentials.startOfWeek,
         );
 
-        const dashboard = await this.dashboardModel.getById(dashboardUuid);
+        const dashboard = await this.dashboardModel.getByIdOrSlug(
+            dashboardUuid,
+        );
         const dashboardParameters = getDashboardParametersValuesMap(dashboard);
 
         // Combine default parameter values, dashboard parameters, and request parameters first
@@ -2294,9 +2407,25 @@ export class AsyncQueryService extends ProjectService {
             dashboardParameters,
         );
 
+        const fields = await this.getMetricQueryFields({
+            metricQuery: metricQueryWithLimit,
+            explore,
+            warehouseSqlBuilder,
+            projectUuid,
+            dateZoom,
+        });
+
+        const pivotConfiguration = pivotResults
+            ? derivePivotConfigurationFromChart(
+                  savedChart,
+                  metricQueryWithLimit,
+                  fields,
+              )
+            : undefined;
+
         const {
             sql,
-            fields,
+            fields: fieldsWithOverrides,
             parameterReferences,
             missingParameterReferences,
             usedParameters,
@@ -2308,15 +2437,8 @@ export class AsyncQueryService extends ProjectService {
             warehouseSqlBuilder,
             parameters: combinedParameters,
             projectUuid,
+            pivotConfiguration,
         });
-
-        const pivotConfiguration = pivotResults
-            ? derivePivotConfigurationFromChart(
-                  savedChart,
-                  metricQueryWithLimit,
-                  fields,
-              )
-            : undefined;
 
         const { queryUuid, cacheMetadata } = await this.executeAsyncQuery(
             {
@@ -2328,7 +2450,7 @@ export class AsyncQueryService extends ProjectService {
                 queryTags,
                 invalidateCache,
                 dateZoom,
-                fields,
+                fields: fieldsWithOverrides,
                 sql,
                 originalColumns: undefined,
                 missingParameterReferences,
@@ -2342,7 +2464,7 @@ export class AsyncQueryService extends ProjectService {
             cacheMetadata,
             appliedDashboardFilters,
             metricQuery: metricQueryWithLimit,
-            fields,
+            fields: fieldsWithOverrides,
             parameterReferences,
             usedParametersValues: usedParameters,
         };
@@ -2424,10 +2546,7 @@ export class AsyncQueryService extends ProjectService {
 
         const isValidNonCustomDimension = (
             dimension: CustomDimension | CompiledDimension,
-        ) =>
-            !isCustomDimension(dimension) &&
-            !dimension.timeInterval &&
-            !dimension.hidden;
+        ) => !isCustomDimension(dimension) && !dimension.hidden;
 
         const availableDimensions = allDimensions.filter(
             (dimension) =>
@@ -2441,6 +2560,16 @@ export class AsyncQueryService extends ProjectService {
                           `${dimension.table}.${dimension.name}`,
                       )
                     : true),
+        );
+        const availableMetrics = getMetrics(explore).filter(
+            (metric) =>
+                availableTables.has(metric.table) &&
+                !metric.hidden &&
+                ((itemShowUnderlyingValues?.includes(metric.name) &&
+                    itemShowUnderlyingTable === metric.table) ||
+                    itemShowUnderlyingValues?.includes(
+                        `${metric.table}.${metric.name}`,
+                    )),
         );
 
         const requestParameters: ExecuteAsyncUnderlyingDataRequestParams = {
@@ -2466,7 +2595,7 @@ export class AsyncQueryService extends ProjectService {
                 (dimension) => !isCustomBinDimension(dimension),
             ),
             filters,
-            metrics: [],
+            metrics: availableMetrics.map(getItemId),
             sorts: [],
             limit: limit ?? 500,
             tableCalculations: [],
@@ -2476,7 +2605,7 @@ export class AsyncQueryService extends ProjectService {
         const warehouseCredentials = await this.getWarehouseCredentials({
             projectUuid,
             userId: account.user.id,
-            isSessionUser: account.isSessionUser(),
+            isRegisteredUser: account.isRegisteredUser(),
         });
 
         const warehouseSqlBuilder = warehouseSqlBuilderFromType(
@@ -2651,7 +2780,7 @@ export class AsyncQueryService extends ProjectService {
             await this.getWarehouseCredentials({
                 projectUuid,
                 userId: account.user.id,
-                isSessionUser: account.authentication.type === 'session',
+                isRegisteredUser: account.isRegisteredUser(),
             }),
         );
 
@@ -2675,6 +2804,7 @@ export class AsyncQueryService extends ProjectService {
             intrinsicUserAttributes,
             userAttributes,
             warehouseConnection.warehouseClient,
+            { noWrap: true },
         );
 
         // Then replace parameters in SQL before running column discovery query
@@ -2972,7 +3102,9 @@ export class AsyncQueryService extends ProjectService {
             throw new ForbiddenError("You don't have access to this chart");
         }
 
-        const dashboard = await this.dashboardModel.getById(dashboardUuid);
+        const dashboard = await this.dashboardModel.getByIdOrSlug(
+            dashboardUuid,
+        );
         const dashboardParameters = getDashboardParametersValuesMap(dashboard);
 
         // Combine default parameter values, dashboard parameters, and request parameters first

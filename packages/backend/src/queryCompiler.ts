@@ -7,17 +7,68 @@ import {
     CompileError,
     convertAdditionalMetric,
     convertFieldRefToFieldId,
+    DependencyNode,
+    detectCircularDependencies,
     Explore,
     ExploreCompiler,
+    isPostCalculationMetricType,
     isSqlTableCalculation,
     isTemplateTableCalculation,
     lightdashVariablePattern,
     MetricQuery,
+    MetricType,
+    PivotConfiguration,
     TableCalculation,
     TableCalculationTemplate,
     TableCalculationTemplateType,
     type WarehouseSqlBuilder,
 } from '@lightdash/common';
+import { compileTableCalculationFromTemplate } from './tableCalculationTemplateQueryCompiler';
+
+const getTableCalculationReferences = (sql: string): string[] => {
+    const matches = sql.match(lightdashVariablePattern) || [];
+    return matches.map((match) => match.slice(2, -1)); // Remove ${ and }
+};
+
+const buildTableCalculationDependencyGraph = (
+    tableCalculations: TableCalculation[],
+): DependencyNode[] =>
+    tableCalculations.map((calc) => {
+        if (isSqlTableCalculation(calc)) {
+            return {
+                name: calc.name,
+                dependencies: getTableCalculationReferences(calc.sql),
+            };
+        }
+
+        if (isTemplateTableCalculation(calc)) {
+            const fieldIdDependency =
+                'fieldId' in calc.template && calc.template.fieldId !== null
+                    ? [calc.template.fieldId]
+                    : [];
+
+            const orderByFields =
+                'orderBy' in calc.template
+                    ? calc.template.orderBy.map((ob) => ob.fieldId)
+                    : [];
+
+            const partitionByFields =
+                'partitionBy' in calc.template && calc.template.partitionBy
+                    ? calc.template.partitionBy
+                    : [];
+
+            return {
+                name: calc.name,
+                dependencies: [
+                    ...fieldIdDependency,
+                    ...orderByFields,
+                    ...partitionByFields,
+                ],
+            };
+        }
+
+        throw new CompileError(`Table calculation has no SQL or template`, {});
+    });
 
 interface TableCalculationDependency {
     name: string;
@@ -170,8 +221,9 @@ const compileTableCalculation = (
     tableCalculation: TableCalculation,
     validFieldIds: string[],
     quoteChar: string,
-    dependencyGraph: TableCalculationDependency[],
+    dependencyGraph: DependencyNode[],
     warehouseSqlBuilder: WarehouseSqlBuilder,
+    sortFields: MetricQuery['sorts'],
 ): CompiledTableCalculation => {
     if (validFieldIds.includes(tableCalculation.name)) {
         throw new CompileError(
@@ -230,6 +282,7 @@ const compileTableCalculation = (
         const compiledSql = compileTableCalculationFromTemplate(
             tableCalculation.template,
             warehouseSqlBuilder,
+            sortFields,
         );
 
         return {
@@ -247,6 +300,7 @@ const compileTableCalculations = (
     validFieldIds: string[],
     quoteChar: string,
     warehouseSqlBuilder: WarehouseSqlBuilder,
+    sortFields: MetricQuery['sorts'],
 ): CompiledTableCalculation[] => {
     if (tableCalculations.length === 0) {
         return [];
@@ -255,7 +309,11 @@ const compileTableCalculations = (
     // Build dependency graph to check for circular dependencies
     const dependencyGraph =
         buildTableCalculationDependencyGraph(tableCalculations);
-    detectCircularDependencies(dependencyGraph);
+    try {
+        detectCircularDependencies(dependencyGraph, 'table calculations');
+    } catch (e) {
+        throw new CompileError(e instanceof Error ? e.message : String(e), {});
+    }
 
     const compiledTableCalculations: CompiledTableCalculation[] = [];
 
@@ -266,6 +324,7 @@ const compileTableCalculations = (
             quoteChar,
             dependencyGraph,
             warehouseSqlBuilder,
+            sortFields,
         );
         compiledTableCalculations.push(compiled);
     }
@@ -307,6 +366,66 @@ const compileAdditionalMetric = ({
     };
 };
 
+export function compilePostCalculationMetric({
+    warehouseSqlBuilder,
+    type,
+    sql,
+    pivotConfiguration,
+    orderByClause,
+}: {
+    warehouseSqlBuilder: WarehouseSqlBuilder;
+    type: MetricType;
+    sql: string;
+    pivotConfiguration?: PivotConfiguration;
+    orderByClause?: string;
+}): string {
+    const floatType = warehouseSqlBuilder.getFloatingType();
+    if (!isPostCalculationMetricType(type)) {
+        throw new CompileError(
+            `Unexpected metric type '${type}' when compiling PostCalculation metric`,
+        );
+    }
+
+    const groupByColumns = pivotConfiguration?.groupByColumns ?? [];
+    const q = warehouseSqlBuilder.getFieldQuoteChar();
+    const partitionByClause: string | undefined =
+        groupByColumns.length > 0
+            ? `PARTITION BY ${groupByColumns
+                  .map((col) => `${q}${col.reference}${q}`)
+                  .join(', ')}`
+            : undefined;
+
+    const finalOrderByClause = orderByClause ?? `ORDER BY (SELECT NULL)`;
+
+    if (type === MetricType.RUNNING_TOTAL) {
+        return `SUM(${sql}) OVER (${
+            partitionByClause ?? ' '
+        }${finalOrderByClause} ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`;
+    }
+
+    if (type === MetricType.PERCENT_OF_PREVIOUS) {
+        return (
+            `(CAST(${sql} AS ${floatType}) / ` +
+            `CAST(NULLIF(LAG(${sql}) OVER(${
+                partitionByClause ?? ' '
+            }${finalOrderByClause}), 0) AS ${floatType})) - 1`
+        );
+    }
+
+    if (type === MetricType.PERCENT_OF_TOTAL) {
+        return (
+            `(CAST(${sql} AS ${floatType}) / ` +
+            `CAST(NULLIF(SUM(${sql}) OVER(${
+                partitionByClause ?? ''
+            }), 0) AS ${floatType}))`
+        );
+    }
+
+    throw new CompileError(
+        `No PostCalculation metric implementation for type ${type}`,
+    );
+}
+
 type CompileMetricQueryArgs = {
     explore: Pick<Explore, 'targetDatabase' | 'tables' | 'parameters'>;
     metricQuery: MetricQuery;
@@ -347,6 +466,7 @@ export const compileMetricQuery = ({
         validFieldIds,
         fieldQuoteChar,
         warehouseSqlBuilder,
+        metricQuery.sorts,
     );
 
     return {

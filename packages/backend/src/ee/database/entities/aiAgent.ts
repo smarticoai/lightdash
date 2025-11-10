@@ -12,6 +12,8 @@ export type DbAiAgent = {
     tags: string[] | null;
     enable_data_access: boolean;
     enable_self_improvement: boolean;
+    enable_reasoning: boolean;
+    version: number;
     created_at: Date;
     updated_at: Date;
 };

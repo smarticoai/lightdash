@@ -6,7 +6,7 @@ import {
     ProjectCatalog,
     TablesConfiguration,
 } from '@lightdash/common';
-import express from 'express';
+import express, { type Router } from 'express';
 
 import path from 'path';
 import {
@@ -17,7 +17,7 @@ import {
 
 const fs = require('fs');
 
-export const projectRouter = express.Router({ mergeParams: true });
+export const projectRouter: Router = express.Router({ mergeParams: true });
 
 projectRouter.patch(
     '/',
@@ -56,6 +56,7 @@ projectRouter.get(
                     req.user!,
                     getObjectValue(req.params, 'projectUuid'),
                     getObjectValue(req.params, 'query'),
+                    req.query.source as 'omnibar' | 'ai_search_box' | undefined,
                     {
                         type: type?.toString(),
                         fromDate: fromDate?.toString(),

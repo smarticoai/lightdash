@@ -112,15 +112,10 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
         if (!lightdashConfig.auth.pat.enabled) {
             throw new AuthorizationError('Personal access tokens are disabled');
         }
-        // Use a custom callback so passport does not send a response on failure
-        passport.authenticate(
-            'headerapikey',
-            { session: false },
-            (err: unknown, user?: SessionUser | false | null) => {
-                if (err) {
-                    return next();
-                }
-
+        passport.authenticate('headerapikey', { session: false })(
+            req,
+            res,
+            () => {
                 if (req?.account?.isAuthenticated()) {
                     Logger.warn(
                         buildAccountExistsWarning('ApiKey'),
@@ -128,23 +123,21 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
                     );
                 }
 
-                if (user) {
-                    req.user = user;
+                if (req.user) {
                     req.account = fromApiKey(
-                        user,
+                        req.user!,
                         req.headers.authorization || '',
                     );
                 }
-                return next();
+                next();
             },
-        )(req, res, next);
+        );
     };
     try {
         authenticateServiceAccount(req, res, authenticateWithPat);
     } catch (e) {
         authenticateWithPat();
     }
-    // Do not invoke passport again here; authenticateWithPat already handled PATs via callback
 };
 
 export const storeOIDCRedirect: RequestHandler = (req, res, next) => {
@@ -235,10 +228,11 @@ export const getDeprecatedRouteMiddleware =
         next();
     };
 
-export const deprecatedResultsRoute = getDeprecatedRouteMiddleware(
-    new Date('2025-04-30'),
-    `Please use 'POST /api/v2/projects/{projectUuid}/query' in conjuntion with 'GET /api/v2/projects/{projectUuid}/query/{queryUuid}' instead.`,
-);
+export const deprecatedResultsRoute: RequestHandler =
+    getDeprecatedRouteMiddleware(
+        new Date('2025-04-30'),
+        `Please use 'POST /api/v2/projects/{projectUuid}/query' in conjuntion with 'GET /api/v2/projects/{projectUuid}/query/{queryUuid}' instead.`,
+    );
 
 export const invalidUserErrorHandler: ErrorRequestHandler = (
     err,

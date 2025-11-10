@@ -5,32 +5,14 @@
  * If the feature flag is no longer in use, remove it from this enum.
  */
 export enum FeatureFlags {
-    /**
-     * Enable passthrough login
-     */
-    PassthroughLogin = 'passthrough-login',
-
-
     /**/
     ShowDbtCloudProjectOption = 'show-dbt-cloud-project-option',
-
-    
-    /** Enable dashboard tabs */
-    DashboardTabs = 'dashboard_tabs',
-
 
     /* Show user groups */
     UserGroupsEnabled = 'user-groups-enabled',
 
     /* Send local timezone to the warehouse session */
     EnableUserTimezones = 'enable-user-timezones',
-
-
-    /**
-     * Enable the semantic layer
-     */
-    SemanticLayerEnabled = 'semantic-layer-enabled',
-
 
     /**
      * Enable dashboard comments
@@ -53,11 +35,6 @@ export enum FeatureFlags {
      * Enable the ability to write back custom bin dimensions to dbt.
      */
     WriteBackCustomBinDimensions = 'write-back-custom-bin-dimensions',
-
-    /**
-     * Enable a new API endpoint that requests results page by page.
-     */
-    QueryPagination = 'query-pagination',
 
     /**
      * Enable the ability to show the warehouse execution time and total time in the chart tile.
@@ -87,14 +64,14 @@ export enum FeatureFlags {
     UnusedContentDashboard = 'unused-content-dashboard',
 
     /**
-     * Enable Redux state management for Explorer (gradual migration from Context API)
+     * Enable experimental explorer improvements
      */
-    UseRedux = 'use-redux',
+    ExperimentalExplorerImprovements = 'experimental-explorer-improvements',
 
     /**
-     * Enable the ability to use the user attributes to replace the project id in the explore tables
+     * Enable experimental virtualized side bar
      */
-    UseUserAttributesToReplaceProjectId = 'use-user-attributes-to-replace-project-id',
+    ExperimentalVirtualizedSideBar = 'experimental-virtualized-side-bar',
 }
 
 export type FeatureFlag = {

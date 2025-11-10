@@ -1,4 +1,4 @@
-import { FeatureFlags } from '@lightdash/common';
+import { CommercialFeatureFlags, FeatureFlags } from '@lightdash/common';
 import {
     ActionIcon,
     Anchor,
@@ -76,6 +76,8 @@ const formSchema = z.object({
     userAccess: z.array(z.string()),
     enableDataAccess: z.boolean(),
     enableSelfImprovement: z.boolean(),
+    enableReasoning: z.boolean(),
+    version: z.number(),
 });
 
 export const AiAgentFormSetup = ({
@@ -143,6 +145,14 @@ export const AiAgentFormSetup = ({
     const isGroupsEnabled =
         userGroupsFeatureFlagQuery.isSuccess &&
         userGroupsFeatureFlagQuery.data.enabled;
+
+    const agentReasoningFeatureFlagQuery = useFeatureFlag(
+        CommercialFeatureFlags.AgentReasoning,
+    );
+
+    const isAgentReasoningEnabled =
+        agentReasoningFeatureFlagQuery.isSuccess &&
+        agentReasoningFeatureFlagQuery.data.enabled;
 
     const { data: groups, isLoading: isLoadingGroups } = useOrganizationGroups(
         {
@@ -360,8 +370,6 @@ export const AiAgentFormSetup = ({
                                 })}
                             />
                             <Switch
-                                // TODO: enable this once we have a way to enable self-improvement
-                                disabled
                                 variant="subtle"
                                 label={
                                     <Group gap="xs">
@@ -390,7 +398,7 @@ export const AiAgentFormSetup = ({
                                                 />
                                             }
                                         >
-                                            Coming soon
+                                            Beta
                                         </Badge>
                                     </Group>
                                 }
@@ -418,6 +426,55 @@ export const AiAgentFormSetup = ({
                                     },
                                 )}
                             />
+                            {isAgentReasoningEnabled && (
+                                <Switch
+                                    variant="subtle"
+                                    label={
+                                        <Group gap="xs">
+                                            <Text fz="sm" fw={500}>
+                                                Enable Reasoning
+                                            </Text>
+                                            <Tooltip
+                                                label="When enabled, the AI agent will show its reasoning process while generating responses, helping you understand how it arrives at conclusions."
+                                                withArrow
+                                                withinPortal
+                                                multiline
+                                                position="right"
+                                                maw="300px"
+                                            >
+                                                <MantineIcon
+                                                    icon={IconInfoCircle}
+                                                />
+                                            </Tooltip>
+                                            <Badge
+                                                color="yellow"
+                                                radius="sm"
+                                                variant="light"
+                                                leftSection={
+                                                    <MantineIcon
+                                                        icon={IconAlertTriangle}
+                                                        size={12}
+                                                    />
+                                                }
+                                            >
+                                                Experimental
+                                            </Badge>
+                                        </Group>
+                                    }
+                                    description={
+                                        <>
+                                            Displays the agent's reasoning
+                                            process while generating responses,
+                                            helping you understand how it thinks
+                                            through problems and reaches
+                                            conclusions.
+                                        </>
+                                    }
+                                    {...form.getInputProps('enableReasoning', {
+                                        type: 'checkbox',
+                                    })}
+                                />
+                            )}
                         </Stack>
                     </Paper>
 

@@ -15,6 +15,8 @@ import { FeatureFlagModel } from '../../models/FeatureFlagModel/FeatureFlagModel
 import { GroupsModel } from '../../models/GroupsModel';
 import { JobModel } from '../../models/JobModel/JobModel';
 import { OnboardingModel } from '../../models/OnboardingModel/OnboardingModel';
+import { OrganizationWarehouseCredentialsModel } from '../../models/OrganizationWarehouseCredentialsModel';
+import { ProjectCompileLogModel } from '../../models/ProjectCompileLogModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { ProjectParametersModel } from '../../models/ProjectParametersModel';
 import { SavedChartModel } from '../../models/SavedChartModel';
@@ -70,6 +72,9 @@ describe('Csv service', () => {
             userModel: {} as UserModel,
             featureFlagModel: {} as FeatureFlagModel,
             projectParametersModel: {} as ProjectParametersModel,
+            organizationWarehouseCredentialsModel:
+                {} as OrganizationWarehouseCredentialsModel,
+            projectCompileLogModel: {} as ProjectCompileLogModel,
         }),
         s3Client: {} as S3Client,
         savedChartModel: {} as SavedChartModel,

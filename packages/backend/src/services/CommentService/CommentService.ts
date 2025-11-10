@@ -13,10 +13,10 @@ import * as Sentry from '@sentry/node';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
 import { CommentModel } from '../../models/CommentModel/CommentModel';
 import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
+import { FeatureFlagModel } from '../../models/FeatureFlagModel/FeatureFlagModel';
 import { NotificationsModel } from '../../models/NotificationsModel/NotificationsModel';
 import { SpaceModel } from '../../models/SpaceModel';
 import { UserModel } from '../../models/UserModel';
-import { isFeatureFlagEnabled } from '../../postHog';
 import { BaseService } from '../BaseService';
 import { hasViewAccessToSpace } from '../SpaceService/SpaceService';
 
@@ -27,6 +27,7 @@ type CommentServiceArguments = {
     commentModel: CommentModel;
     notificationsModel: NotificationsModel;
     userModel: UserModel;
+    featureFlagModel: FeatureFlagModel;
 };
 
 export class CommentService extends BaseService {
@@ -42,6 +43,8 @@ export class CommentService extends BaseService {
 
     userModel: UserModel;
 
+    featureFlagModel: FeatureFlagModel;
+
     constructor({
         analytics,
         dashboardModel,
@@ -49,6 +52,7 @@ export class CommentService extends BaseService {
         commentModel,
         notificationsModel,
         userModel,
+        featureFlagModel,
     }: CommentServiceArguments) {
         super();
         this.analytics = analytics;
@@ -57,6 +61,7 @@ export class CommentService extends BaseService {
         this.commentModel = commentModel;
         this.notificationsModel = notificationsModel;
         this.userModel = userModel;
+        this.featureFlagModel = featureFlagModel;
     }
 
     async hasDashboardSpaceAccess(
@@ -81,16 +86,18 @@ export class CommentService extends BaseService {
         return hasViewAccessToSpace(user, space, spaceAccess);
     }
 
-    private static async isFeatureEnabled(
-        user: Pick<LightdashUser, 'userUuid' | 'organizationUuid'>,
+    private async isFeatureEnabled(
+        user: Pick<
+            LightdashUser,
+            'userUuid' | 'organizationUuid' | 'organizationName'
+        >,
     ) {
-        const isEnabled = await isFeatureFlagEnabled(
-            FeatureFlags.DashboardComments,
+        const featureFlag = await this.featureFlagModel.get({
             user,
-            { throwOnTimeout: false },
-            true, // default value
-        );
-        if (!isEnabled) throw new ForbiddenError('Feature not enabled');
+            featureFlagId: FeatureFlags.DashboardComments,
+        });
+        if (!featureFlag.enabled)
+            throw new ForbiddenError('Feature not enabled');
     }
 
     private async createCommentNotification({
@@ -155,9 +162,11 @@ export class CommentService extends BaseService {
         replyTo: string | null,
         mentions: string[],
     ): Promise<string> {
-        await CommentService.isFeatureEnabled(user);
+        await this.isFeatureEnabled(user);
 
-        const dashboard = await this.dashboardModel.getById(dashboardUuid);
+        const dashboard = await this.dashboardModel.getByIdOrSlug(
+            dashboardUuid,
+        );
 
         if (
             user.ability.cannot(
@@ -214,11 +223,13 @@ export class CommentService extends BaseService {
 
     async findCommentsForDashboard(
         user: SessionUser,
-        dashboardUuid: string,
+        dashboardUuidOrSlug: string,
     ): Promise<Record<string, Comment[]>> {
-        await CommentService.isFeatureEnabled(user);
+        await this.isFeatureEnabled(user);
 
-        const dashboard = await this.dashboardModel.getById(dashboardUuid);
+        const dashboard = await this.dashboardModel.getByIdOrSlug(
+            dashboardUuidOrSlug,
+        );
 
         if (
             user.ability.cannot(
@@ -247,7 +258,7 @@ export class CommentService extends BaseService {
         );
 
         return this.commentModel.findCommentsForDashboard(
-            dashboardUuid,
+            dashboard.uuid,
             user.userUuid,
             canUserRemoveAnyComment,
         );
@@ -258,9 +269,11 @@ export class CommentService extends BaseService {
         dashboardUuid: string,
         commentId: string,
     ): Promise<void> {
-        await CommentService.isFeatureEnabled(user);
+        await this.isFeatureEnabled(user);
 
-        const dashboard = await this.dashboardModel.getById(dashboardUuid);
+        const dashboard = await this.dashboardModel.getByIdOrSlug(
+            dashboardUuid,
+        );
         if (
             user.ability.cannot(
                 'manage',
@@ -301,9 +314,11 @@ export class CommentService extends BaseService {
         dashboardUuid: string,
         commentId: string,
     ): Promise<void> {
-        await CommentService.isFeatureEnabled(user);
+        await this.isFeatureEnabled(user);
 
-        const dashboard = await this.dashboardModel.getById(dashboardUuid);
+        const dashboard = await this.dashboardModel.getByIdOrSlug(
+            dashboardUuid,
+        );
 
         if (!(await this.hasDashboardSpaceAccess(user, dashboard.spaceUuid))) {
             throw new ForbiddenError(

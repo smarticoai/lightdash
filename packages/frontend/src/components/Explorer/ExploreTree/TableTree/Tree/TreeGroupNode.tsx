@@ -11,9 +11,15 @@ import { IconChevronRight } from '@tabler/icons-react';
 import intersectionBy from 'lodash/intersectionBy';
 import { memo, useCallback, useMemo, type FC } from 'react';
 import { useToggle } from 'react-use';
+import {
+    explorerActions,
+    selectActiveFields,
+    useExplorerDispatch,
+    useExplorerSelector,
+} from '../../../../../features/explorer/store';
 import MantineIcon from '../../../../common/MantineIcon';
-import { ItemDetailMarkdown, ItemDetailPreview } from '../ItemDetailPreview';
-import { useItemDetail } from '../useItemDetails';
+import { ItemDetailPreview } from '../ItemDetailPreview';
+import { buildGroupKey } from '../Virtualization/types';
 import TreeNodes from './TreeNodes';
 import { type GroupNode, type Node } from './types';
 import useTableTree from './useTableTree';
@@ -30,13 +36,22 @@ type Props = {
 };
 
 const TreeGroupNodeComponent: FC<Props> = ({ node }) => {
-    const selectedItems = useTableTree((ctx) => ctx.selectedItems);
+    const dispatch = useExplorerDispatch();
+    const selectedItems = useExplorerSelector(selectActiveFields);
     const isSearching = useTableTree((ctx) => ctx.isSearching);
     const searchQuery = useTableTree((ctx) => ctx.searchQuery);
     const searchResults = useTableTree((ctx) => ctx.searchResults);
-    const [isOpen, toggleOpen] = useToggle(false);
+    const tableName = useTableTree((ctx) => ctx.tableName);
+    const treeSectionType = useTableTree((ctx) => ctx.treeSectionType);
+    const expandedGroups = useTableTree((ctx) => ctx.expandedGroups);
+    const onToggleGroup = useTableTree((ctx) => ctx.onToggleGroup);
+    const isVirtualized = useTableTree((ctx) => ctx.isVirtualized);
+    const depth = useTableTree((ctx) => ctx.depth);
     const [isHover, toggleHover] = useToggle(false);
-    const { showItemDetail } = useItemDetail();
+
+    // Build unique group key
+    const groupKey = buildGroupKey(tableName, treeSectionType, node.key);
+    const isOpen = expandedGroups.has(groupKey);
 
     const allChildrenKeys = useMemo(() => getAllChildrenKeys([node]), [node]);
 
@@ -69,21 +84,19 @@ const TreeGroupNodeComponent: FC<Props> = ({ node }) => {
     const onOpenDescriptionView = useCallback(() => {
         toggleHover(false);
 
-        showItemDetail({
-            header: (
-                <Group>
-                    <Text size="md">{label}</Text>
-                </Group>
-            ),
-            detail: description ? (
-                <ItemDetailMarkdown source={description} />
-            ) : (
-                <Text color="gray">No description available.</Text>
-            ),
-        });
-    }, [toggleHover, showItemDetail, label, description]);
+        dispatch(
+            explorerActions.openItemDetail({
+                itemType: 'group',
+                label,
+                description,
+            }),
+        );
+    }, [toggleHover, dispatch, label, description]);
 
-    const handleToggleOpen = useCallback(() => toggleOpen(), [toggleOpen]);
+    const handleToggleOpen = useCallback(
+        () => onToggleGroup(groupKey),
+        [onToggleGroup, groupKey],
+    );
     const handleMouseEnter = useCallback(
         () => toggleHover(true),
         [toggleHover],
@@ -110,12 +123,22 @@ const TreeGroupNodeComponent: FC<Props> = ({ node }) => {
                 style={{
                     margin: 1,
                     transition: 'transform 200ms ease',
-                    transform: isNavLinkOpen ? 'rotate(90deg)' : undefined,
+                    transform: isNavLinkOpen ? 'rotate(90deg)' : 'rotate(0deg)',
                 }}
             />
         ),
         [isNavLinkOpen],
     );
+
+    // Apply indentation for virtualized mode only
+    // Non-virtualized mode uses NavLink's built-in nesting with childrenOffset
+    const pl = useMemo(() => {
+        if (isVirtualized) {
+            // Base padding is 12px, each nesting level adds 20px
+            return `${12 + (depth ?? 0) * 20}px`;
+        }
+        return undefined;
+    }, [depth, isVirtualized]);
 
     if (!hasVisibleChildren) return null;
 
@@ -131,6 +154,7 @@ const TreeGroupNodeComponent: FC<Props> = ({ node }) => {
             // --end moves chevron to the left
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
+            pl={pl}
             label={
                 <Group>
                     {!isOpen && hasSelectedChildren && (
@@ -177,7 +201,10 @@ const TreeGroupNodeComponent: FC<Props> = ({ node }) => {
                 </Group>
             }
         >
-            {isNavLinkOpen && <TreeNodes nodeMap={node.children} />}
+            {/* In virtualized mode, children are rendered as separate items in the flat list */}
+            {isNavLinkOpen && !isVirtualized && (
+                <TreeNodes nodeMap={node.children} isNested />
+            )}
         </NavLink>
     );
 };

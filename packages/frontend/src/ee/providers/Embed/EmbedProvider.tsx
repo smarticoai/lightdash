@@ -1,7 +1,7 @@
 import { type LanguageMap, type SavedChart } from '@lightdash/common';
 import get from 'lodash/get';
 import { useEffect, useMemo, useState, type FC } from 'react';
-import { useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { useAccount } from '../../../hooks/user/useAccount';
 import { useAbilityContext } from '../../../providers/Ability/useAbilityContext';
 import {
@@ -9,8 +9,10 @@ import {
     setToInMemoryStorage,
 } from '../../../utils/inMemoryStorage';
 import { type SdkFilter } from '../../features/embed/EmbedDashboard/types';
+import { LightdashEventType } from '../../features/embed/events/types';
+import { useEmbedEventEmitter } from '../../features/embed/hooks/useEmbedEventEmitter';
 import EmbedProviderContext from './context';
-import { EMBED_KEY, type InMemoryEmbed } from './types';
+import { EMBED_KEY, type EmbedMode, type InMemoryEmbed } from './types';
 
 type Props = {
     embedToken?: string;
@@ -25,7 +27,7 @@ type Props = {
 
 const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
     children,
-    embedToken = window.location.hash.replace('#', ''),
+    embedToken: encodedToken,
     filters,
     projectUuid: projectUuidFromProps,
     contentOverrides,
@@ -33,12 +35,38 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
     onBackToDashboard,
     savedChart,
 }) => {
+    const embedToken = encodedToken || window.location.hash.replace('#', '');
     const [isInitialized, setIsInitialized] = useState(false);
     const embed = getFromInMemoryStorage<InMemoryEmbed>(EMBED_KEY);
     const { data: account, isLoading } = useAccount();
     const ability = useAbilityContext();
     const params = useParams();
+    const navigate = useNavigate();
     const projectUuid = projectUuidFromProps || params.projectUuid;
+    const location = useLocation();
+    const { dispatchEmbedEvent } = useEmbedEventEmitter();
+    const mode: EmbedMode = encodedToken ? 'sdk' : 'direct';
+
+    // Remove the token from the URL.
+    useEffect(() => {
+        if (mode === 'direct' && location.hash) {
+            void navigate(location.pathname + location.search, {
+                replace: true,
+            });
+        }
+    }, [mode, location, navigate]);
+
+    // We sync embed UI changes with the URL just as with the main app.
+    // For iframe embeds only, we emit messages to the parent window.
+    useEffect(() => {
+        if (mode === 'sdk') return;
+
+        dispatchEmbedEvent(LightdashEventType.LocationChanged, {
+            pathname: location.pathname,
+            search: location.search,
+            href: window.location.href,
+        });
+    }, [location, dispatchEmbedEvent, mode]);
 
     // Set ability rules for the embedded user. We should only get abilities from abilityContext
     // rather than directly on the user or account.
@@ -71,6 +99,7 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
             onExplore,
             savedChart,
             onBackToDashboard,
+            mode,
         };
     }, [
         embed?.projectUuid,
@@ -82,6 +111,7 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
         onExplore,
         savedChart,
         onBackToDashboard,
+        mode,
     ]);
 
     return (

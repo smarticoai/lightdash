@@ -11,6 +11,7 @@ import {
     type ParametersValuesMap,
     type PivotValue,
     type Series,
+    type StackType,
     type TableCalculationMetadata,
 } from '@lightdash/common';
 import type EChartsReact from 'echarts-for-react';
@@ -51,6 +52,7 @@ import { type useVisualizationContext } from './useVisualizationContext';
 
 export type VisualizationProviderProps = {
     minimal?: boolean;
+    isDashboard?: boolean;
     chartConfig: ChartConfig;
     initialPivotDimensions: string[] | undefined;
     unsavedMetricQuery?: MetricQuery;
@@ -83,6 +85,7 @@ const VisualizationProvider: FC<
     React.PropsWithChildren<VisualizationProviderProps>
 > = ({
     minimal = false,
+    isDashboard = false,
     initialPivotDimensions,
     resultsData,
     isLoading,
@@ -138,7 +141,7 @@ const VisualizationProvider: FC<
         useChartColorConfig({ colorPalette });
 
     // cartesian config related
-    const [stacking, setStacking] = useState<boolean>();
+    const [stacking, setStacking] = useState<boolean | StackType>();
     const [cartesianType, setCartesianType] = useState<CartesianTypeOptions>();
     // --
 
@@ -301,12 +304,13 @@ const VisualizationProvider: FC<
         'visualizationConfig'
     > = {
         minimal,
+        isDashboard,
         pivotDimensions: validPivotDimensions,
         chartRef,
         resultsData: lastValidResultsData,
         isLoading,
         apiErrorDetail,
-        columnOrder,
+        columnOrder: defaultColumnOrder,
         itemsMap,
         setStacking,
         setCartesianType,
@@ -317,6 +321,7 @@ const VisualizationProvider: FC<
         getGroupColor,
         getSeriesColor,
         chartConfig,
+        parameters,
     };
 
     switch (chartConfig.type) {
@@ -334,6 +339,7 @@ const VisualizationProvider: FC<
                     onChartConfigChange={handleChartConfigChange}
                     colorPalette={colorPalette}
                     tableCalculationsMetadata={tableCalculationsMetadata}
+                    parameters={parameters}
                 >
                     {({ visualizationConfig }) => (
                         <Context.Provider
@@ -353,6 +359,7 @@ const VisualizationProvider: FC<
                     onChartConfigChange={handleChartConfigChange}
                     colorPalette={colorPalette}
                     tableCalculationsMetadata={tableCalculationsMetadata}
+                    parameters={parameters}
                 >
                     {({ visualizationConfig }) => (
                         <Context.Provider
@@ -372,6 +379,7 @@ const VisualizationProvider: FC<
                     onChartConfigChange={handleChartConfigChange}
                     colorPalette={colorPalette}
                     tableCalculationsMetadata={tableCalculationsMetadata}
+                    parameters={parameters}
                 >
                     {({ visualizationConfig }) => (
                         <Context.Provider
@@ -390,6 +398,7 @@ const VisualizationProvider: FC<
                     initialChartConfig={chartConfig.config}
                     onChartConfigChange={handleChartConfigChange}
                     tableCalculationsMetadata={tableCalculationsMetadata}
+                    parameters={parameters}
                 >
                     {({ visualizationConfig }) => (
                         <Context.Provider

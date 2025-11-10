@@ -160,6 +160,34 @@ export const dashboardForValidation: {
     chartUuids: ['chartUuid'],
 };
 
+// Dashboard with filters but no charts (dangling filters scenario)
+export const dashboardWithDanglingFilters: {
+    dashboardUuid: string;
+    name: string;
+    filters: DashboardFilters;
+    chartUuids: string[];
+} = {
+    dashboardUuid: 'dashboardWithDanglingFilters',
+    name: 'Dashboard with dangling filters',
+    filters: {
+        dimensions: [
+            {
+                id: 'filter1',
+                target: {
+                    fieldId: 'table_dimension',
+                    tableName: 'table',
+                },
+                operator: FilterOperator.EQUALS,
+                values: ['value1'],
+                label: 'Dimension Filter',
+            },
+        ],
+        metrics: [],
+        tableCalculations: [],
+    },
+    chartUuids: [], // No charts - filters are dangling
+};
+
 export const explore: Explore = {
     targetDatabase: SupportedDbtAdapter.POSTGRES,
     name: 'valid_explore',
@@ -272,6 +300,25 @@ export const exploreWithJoin: Explore = {
             lineageGraph: {},
         },
     },
+};
+
+// Additional explore with different name but same baseTable and fields as base explore
+export const additionalExplore: Explore = {
+    targetDatabase: SupportedDbtAdapter.POSTGRES,
+    name: 'additional_explore',
+    label: 'Additional Explore',
+    tags: [],
+    baseTable: 'table', // Same baseTable as explore
+    joinedTables: [],
+    tables: explore.tables, // Same fields as base explore
+};
+
+export const chartForValidationWithAdditionalExplore: Awaited<
+    ReturnType<SavedChartModel['findChartsForValidation']>
+>[number] = {
+    ...chartForValidation,
+    name: 'Chart using additional explore',
+    tableName: 'additional_explore', // References the additional explore by name
 };
 
 export const exploreError: ExploreError = {

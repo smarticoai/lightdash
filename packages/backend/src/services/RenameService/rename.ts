@@ -27,6 +27,7 @@ import {
     RenameType,
     SavedChartDAO,
     SchedulerAndTargets,
+    TableCalculationTemplateType,
 } from '@lightdash/common';
 
 /* There are different methods to replace model names
@@ -555,13 +556,22 @@ export const renameMetricQuery = (
             ...(isTemplateTableCalculation(tc) && {
                 template: {
                     ...tc.template,
-                    fieldId: replaceId(tc.template.fieldId),
+                    ...('fieldId' in tc.template &&
+                        tc.template.fieldId && {
+                            fieldId: replaceId(tc.template.fieldId),
+                        }),
                     ...('orderBy' in tc.template && {
                         orderBy: tc.template.orderBy.map((o) => ({
                             ...o,
                             fieldId: replaceId(o.fieldId),
                         })),
                     }),
+                    ...('partitionBy' in tc.template && tc.template.partitionBy
+                        ? {
+                              partitionBy:
+                                  tc.template.partitionBy.map(replaceId),
+                          }
+                        : {}),
                 },
             }),
         })),

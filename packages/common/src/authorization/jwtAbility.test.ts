@@ -44,6 +44,8 @@ const embed: OssEmbed = {
     encodedSecret: 'encoded-secret',
     dashboardUuids: ['dashboard-uuid-1'],
     allowAllDashboards: false,
+    chartUuids: [],
+    allowAllCharts: false,
     createdAt: '2021-01-01',
     user: {
         firstName: 'John',
@@ -57,7 +59,8 @@ const defineAbilityForEmbedUser = (
     dashboardUuid: string,
 ): MemberAbility => {
     const builder = new AbilityBuilder<MemberAbility>(Ability);
-    applyEmbeddedAbility(embedUser, dashboardUuid, embed, builder);
+    const externalId = 'external-id-1';
+    applyEmbeddedAbility(embedUser, dashboardUuid, embed, externalId, builder);
     return builder.build();
 };
 

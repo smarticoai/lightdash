@@ -1,12 +1,18 @@
+import { SupportedDbtAdapter } from '../types/dbt';
 import { CompileError } from '../types/errors';
-import { friendlyName } from '../types/field';
-import { ExploreCompiler, parseAllReferences } from './exploreCompiler';
+import { DimensionType, FieldType, friendlyName } from '../types/field';
+import {
+    ExploreCompiler,
+    parseAllReferences,
+    type UncompiledExplore,
+} from './exploreCompiler';
 import {
     compiledExploreWithHiddenJoin,
     compiledExploreWithJoinWithFieldsAndGroups,
     compiledExploreWithParameters,
     compiledJoinedExploreOverridingAliasAndLabel,
     compiledJoinedExploreOverridingJoinAlias,
+    compiledJoinedExploreOverridingJoinDescription,
     compiledJoinedExploreOverridingJoinLabel,
     compiledJoinedExploreWithJoinAliasAndSubsetOfFieldsThatDontIncludeSqlFields,
     compiledJoinedExploreWithSubsetOfFields,
@@ -14,6 +20,7 @@ import {
     compiledJoinedExploreWithTwoJoinsToTheSameTable,
     compiledSimpleJoinedExplore,
     compiledSimpleJoinedExploreWithAlwaysTrue,
+    compiledSimpleJoinedExploreWithBaseTableDescription,
     customSqlDimensionWithNoReferences,
     customSqlDimensionWithReferences,
     expectedCompiledCustomSqlDimensionWithNoReferences,
@@ -46,6 +53,7 @@ import {
     exploreWithRequiredAttributesCompiled,
     joinedExploreOverridingAliasAndLabel,
     joinedExploreOverridingJoinAlias,
+    joinedExploreOverridingJoinDescription,
     joinedExploreOverridingJoinLabel,
     joinedExploreWithJoinAliasAndSubsetOfFieldsThatDontIncludeSqlFields,
     joinedExploreWithSubsetOfFields,
@@ -53,6 +61,7 @@ import {
     joinedExploreWithTwoJoinsToTheSameTable,
     simpleJoinedExplore,
     simpleJoinedExploreWithAlwaysTrue,
+    simpleJoinedExploreWithBaseTableDescription,
     tablesWithMetricsWithFilters,
     warehouseClientMock,
 } from './exploreCompiler.mock';
@@ -191,6 +200,18 @@ describe('Explores with a base table and joined table', () => {
         expect(compiler.compileExplore(exploreWithHiddenJoin)).toStrictEqual(
             compiledExploreWithHiddenJoin,
         );
+    });
+    test('should use base table description when join has no description override', () => {
+        expect(
+            compiler.compileExplore(
+                simpleJoinedExploreWithBaseTableDescription,
+            ),
+        ).toStrictEqual(compiledSimpleJoinedExploreWithBaseTableDescription);
+    });
+    test('should override base table description with join description', () => {
+        expect(
+            compiler.compileExplore(joinedExploreOverridingJoinDescription),
+        ).toStrictEqual(compiledJoinedExploreOverridingJoinDescription);
     });
 });
 describe('Default field labels render correctly for various input formats', () => {
@@ -774,6 +795,179 @@ describe('Explore compilation with model-level parameters', () => {
                 'a.date_range',
                 'b.date_range',
             ]);
+        });
+    });
+
+    describe('Field Sets', () => {
+        it('should expand field sets in join.fields', () => {
+            const explore: UncompiledExplore = {
+                name: 'test_explore',
+                label: 'Test Explore',
+                tags: [],
+                baseTable: 'a',
+                groupLabel: undefined,
+                joinedTables: [
+                    {
+                        table: 'b',
+                        sqlOn: '${a.dim1} = ${b.dim1}',
+                        fields: ['all_fields*', '-dim3'],
+                    },
+                ],
+                tables: {
+                    a: {
+                        name: 'a',
+                        label: 'a',
+                        database: 'database',
+                        schema: 'schema',
+                        sqlTable: 'test.a',
+                        dimensions: {
+                            dim1: {
+                                fieldType: FieldType.DIMENSION,
+                                type: DimensionType.STRING,
+                                name: 'dim1',
+                                label: 'Dim 1',
+                                table: 'a',
+                                tableLabel: 'a',
+                                sql: '${TABLE}.dim1',
+                                hidden: false,
+                                index: 0,
+                            },
+                        },
+                        metrics: {},
+                        lineageGraph: {},
+                    },
+                    b: {
+                        name: 'b',
+                        label: 'b',
+                        database: 'database',
+                        schema: 'schema',
+                        sqlTable: 'test.b',
+                        dimensions: {
+                            dim1: {
+                                fieldType: FieldType.DIMENSION,
+                                type: DimensionType.STRING,
+                                name: 'dim1',
+                                label: 'Dim 1',
+                                table: 'b',
+                                tableLabel: 'b',
+                                sql: '${TABLE}.dim1',
+                                hidden: false,
+                                index: 0,
+                            },
+                            dim2: {
+                                fieldType: FieldType.DIMENSION,
+                                type: DimensionType.STRING,
+                                name: 'dim2',
+                                label: 'Dim 2',
+                                table: 'b',
+                                tableLabel: 'b',
+                                sql: '${TABLE}.dim2',
+                                hidden: false,
+                                index: 1,
+                            },
+                            dim3: {
+                                fieldType: FieldType.DIMENSION,
+                                type: DimensionType.STRING,
+                                name: 'dim3',
+                                label: 'Dim 3',
+                                table: 'b',
+                                tableLabel: 'b',
+                                sql: '${TABLE}.dim3',
+                                hidden: false,
+                                index: 2,
+                            },
+                        },
+                        metrics: {},
+                        lineageGraph: {},
+                        sets: {
+                            id_fields: {
+                                fields: ['dim1', 'dim2'],
+                            },
+                            all_fields: {
+                                fields: ['id_fields*', 'dim3'],
+                            },
+                        },
+                    },
+                },
+                targetDatabase: SupportedDbtAdapter.POSTGRES,
+                meta: {},
+            };
+
+            const result = compiler.compileExplore(explore);
+
+            // Should include dim1 and dim2 from id_fields, but exclude dim3
+            expect(result.tables.b.dimensions).toHaveProperty('dim1');
+            expect(result.tables.b.dimensions).toHaveProperty('dim2');
+            expect(result.tables.b.dimensions).not.toHaveProperty('dim3');
+        });
+
+        it('should throw error for non-existent set in join', () => {
+            const explore: UncompiledExplore = {
+                name: 'test_explore',
+                label: 'Test Explore',
+                tags: [],
+                baseTable: 'a',
+                groupLabel: undefined,
+                joinedTables: [
+                    {
+                        table: 'b',
+                        sqlOn: '${a.dim1} = ${b.dim1}',
+                        fields: ['nonexistent_set*'],
+                    },
+                ],
+                tables: {
+                    a: {
+                        name: 'a',
+                        label: 'a',
+                        database: 'database',
+                        schema: 'schema',
+                        sqlTable: 'test.a',
+                        dimensions: {
+                            dim1: {
+                                fieldType: FieldType.DIMENSION,
+                                type: DimensionType.STRING,
+                                name: 'dim1',
+                                label: 'Dim 1',
+                                table: 'a',
+                                tableLabel: 'a',
+                                sql: '${TABLE}.dim1',
+                                hidden: false,
+                                index: 0,
+                            },
+                        },
+                        metrics: {},
+                        lineageGraph: {},
+                    },
+                    b: {
+                        name: 'b',
+                        label: 'b',
+                        database: 'database',
+                        schema: 'schema',
+                        sqlTable: 'test.b',
+                        dimensions: {
+                            dim1: {
+                                fieldType: FieldType.DIMENSION,
+                                type: DimensionType.STRING,
+                                name: 'dim1',
+                                label: 'Dim 1',
+                                table: 'b',
+                                tableLabel: 'b',
+                                sql: '${TABLE}.dim1',
+                                hidden: false,
+                                index: 0,
+                            },
+                        },
+                        metrics: {},
+                        lineageGraph: {},
+                    },
+                },
+                targetDatabase: SupportedDbtAdapter.POSTGRES,
+                meta: {},
+            };
+
+            expect(() => compiler.compileExplore(explore)).toThrow(
+                /Set "nonexistent_set" not found/,
+            );
         });
     });
 });

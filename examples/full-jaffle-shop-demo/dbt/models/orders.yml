@@ -17,6 +17,8 @@ models:
           - join: customers
             sql_on: ${customers.customer_id} = ${orders.customer_id}
             relationship: many-to-one
+            label: Order Customer
+            description: The customer who placed this order (many orders can belong to one customer)
         metrics:
           completion_percentage:
             type: number
@@ -28,6 +30,17 @@ models:
         default_time_dimension:
           field: order_date
           interval: MONTH
+        explores:
+          completed_orders:
+            label: Completed Orders
+            description: Analysis of completed orders with customer information
+            group_label: Sales Analysis
+            joins:
+              - join: customers
+                sql_on: ${customers.customer_id} = ${orders.customer_id}
+                relationship: many-to-one
+            required_filters:
+              - is_completed: "true"
     columns:
       - name: order_id
         tests:
@@ -113,10 +126,6 @@ models:
                 # Hex colors are supported in both chart config and echarts
                 "placed": "#e6fa0f"
                 "completed": "#00FF00"
-                # Rgb/rgba/name colors are not supported in chart config, but supported in echarts
-                "shipped": "rgba(47, 119, 150, 0.7)"
-                "return_pending": "orange"
-                "returned": "rgb(247, 32, 32)"
         tests:
           - accepted_values:
               values:
@@ -146,6 +155,19 @@ models:
                 default_time_dimension:
                   field: order_date
                   interval: DAY
+              amount_percent_of_previous:
+                type: percent_of_previous
+                sql: ${total_order_amount}
+                format: "#,##0.00%"
+              amount_percent_of_total:
+                type: percent_of_total
+                sql: ${total_order_amount}
+                format: "#,##0.00%"
+              amount_running_total:
+                type: running_total
+                sql: ${total_order_amount}
+                format: usd
+                round: 2
               total_completed_order_amount:
                 type: sum
                 format: usd

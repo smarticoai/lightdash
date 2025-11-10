@@ -16,6 +16,7 @@ import {
     IconLock,
     IconPalette,
     IconPlug,
+    IconRefresh,
     IconReportAnalytics,
     IconTableOptions,
     IconUserCircle,
@@ -57,6 +58,7 @@ import Page from '../components/common/Page/Page';
 import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
 import RouterNavLink from '../components/common/RouterNavLink';
 import { SettingsGridCard } from '../components/common/Settings/SettingsCard';
+import { useAiOrganizationSettings } from '../ee/features/aiCopilot/hooks/useAiOrganizationSettings';
 import ScimAccessTokensPanel from '../ee/features/scim/components/ScimAccessTokensPanel';
 import { ServiceAccountsPage } from '../ee/features/serviceAccounts';
 import { CustomRoleCreate } from '../ee/pages/customRoles/CustomRoleCreate';
@@ -85,9 +87,11 @@ const Settings: FC = () => {
         CommercialFeatureFlags.Scim,
     );
 
-    const { data: isAiCopilotEnabled } = useFeatureFlag(
-        CommercialFeatureFlags.AiCopilot,
-    );
+    const aiOrganizationSettingsQuery = useAiOrganizationSettings();
+    const isAiCopilotEnabledOrTrial =
+        (aiOrganizationSettingsQuery.isSuccess &&
+            aiOrganizationSettingsQuery.data?.isCopilotEnabled) ||
+        aiOrganizationSettingsQuery.data?.isTrial;
 
     const isServiceAccountFeatureFlagEnabled = useFeatureFlagEnabled(
         CommercialFeatureFlags.ServiceAccounts,
@@ -145,9 +149,14 @@ const Settings: FC = () => {
     const isServiceAccountsEnabled =
         health?.isServiceAccountEnabled || isServiceAccountFeatureFlagEnabled;
 
-    const isWarehouseCredentialsEnabled = useFeatureFlagEnabled(
+    const isWarehouseCredentialsFeatureFlagEnabled = useFeatureFlagEnabled(
         CommercialFeatureFlags.OrganizationWarehouseCredentials,
     );
+
+    // This allows us to enable organization warehouse credentials in the UI for on-premise installations
+    const isWarehouseCredentialsEnabled =
+        (health?.isOrganizationWarehouseCredentialsEnabled ?? false) ||
+        isWarehouseCredentialsFeatureFlagEnabled;
 
     const routes = useMemo<RouteObject[]>(() => {
         const allowedRoutes: RouteObject[] = [
@@ -400,12 +409,26 @@ const Settings: FC = () => {
     const routeElements = useRoutes(routes);
 
     const location = useLocation();
-    const isChangesetsPage = useMemo(() => {
-        return matchPath(
-            {
-                path: '/generalSettings/projectManagement/:projectUuid/changesets',
-            },
-            location.pathname,
+    const isFixedContent = useMemo(() => {
+        return (
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement/:projectUuid/changesets',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement/:projectUuid/scheduledDeliveries',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement/:projectUuid/compilationHistory',
+                },
+                location.pathname,
+            )
         );
     }, [location.pathname]);
 
@@ -438,7 +461,7 @@ const Settings: FC = () => {
         <Page
             withFullHeight
             withSidebarFooter
-            withFixedContent={!isChangesetsPage}
+            withFixedContent={isFixedContent}
             withPaddedContent
             title="Settings"
             sidebar={
@@ -652,7 +675,7 @@ const Settings: FC = () => {
                                             }
                                         />
                                     )}
-                                {isAiCopilotEnabled?.enabled &&
+                                {isAiCopilotEnabledOrTrial &&
                                     user.ability.can(
                                         'manage',
                                         subject('AiAgent', {
@@ -715,6 +738,15 @@ const Settings: FC = () => {
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/changesets`}
                                         icon={
                                             <MantineIcon icon={IconHistory} />
+                                        }
+                                    />
+
+                                    <RouterNavLink
+                                        label="Compilation history"
+                                        exact
+                                        to={`/generalSettings/projectManagement/${project.projectUuid}/compilationHistory`}
+                                        icon={
+                                            <MantineIcon icon={IconRefresh} />
                                         }
                                     />
 

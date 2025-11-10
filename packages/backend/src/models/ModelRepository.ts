@@ -8,6 +8,7 @@ import { CommentModel } from './CommentModel/CommentModel';
 import { ContentModel } from './ContentModel/ContentModel';
 import { DashboardModel } from './DashboardModel/DashboardModel';
 import { PersonalAccessTokenModel } from './DashboardModel/PersonalAccessTokenModel';
+import { DownloadAuditModel } from './DownloadAuditModel';
 import { DownloadFileModel } from './DownloadFileModel';
 import { EmailModel } from './EmailModel';
 import { FeatureFlagModel } from './FeatureFlagModel/FeatureFlagModel';
@@ -28,6 +29,7 @@ import { OrganizationModel } from './OrganizationModel';
 import { OrganizationWarehouseCredentialsModel } from './OrganizationWarehouseCredentialsModel';
 import { PasswordResetLinkModel } from './PasswordResetLinkModel';
 import { PinnedListModel } from './PinnedListModel';
+import { ProjectCompileLogModel } from './ProjectCompileLogModel';
 import { ProjectModel } from './ProjectModel/ProjectModel';
 import { ProjectParametersModel } from './ProjectParametersModel';
 import { QueryHistoryModel } from './QueryHistoryModel/QueryHistoryModel';
@@ -59,6 +61,7 @@ export type ModelManifest = {
     commentModel: CommentModel;
     dashboardModel: DashboardModel;
     downloadFileModel: DownloadFileModel;
+    downloadAuditModel: DownloadAuditModel;
     emailModel: EmailModel;
     githubAppInstallationsModel: GithubAppInstallationsModel;
     gitlabAppInstallationsModel: GitlabAppInstallationsModel;
@@ -79,6 +82,7 @@ export type ModelManifest = {
     personalAccessTokenModel: PersonalAccessTokenModel;
     pinnedListModel: PinnedListModel;
     projectModel: ProjectModel;
+    projectCompileLogModel: ProjectCompileLogModel;
     resourceViewItemModel: ResourceViewItemModel;
     rolesModel: RolesModel;
     savedChartModel: SavedChartModel;
@@ -105,6 +109,7 @@ export type ModelManifest = {
     changesetModel: ChangesetModel;
     /** An implementation signature for these models are not available at this stage */
     aiAgentModel: unknown;
+    aiOrganizationSettingsModel: unknown;
     embedModel: unknown;
     dashboardSummaryModel: unknown;
     serviceAccountModel: unknown;
@@ -229,6 +234,13 @@ export class ModelRepository
         return this.getModel(
             'downloadFileModel',
             () => new DownloadFileModel({ database: this.database }),
+        );
+    }
+
+    public getDownloadAuditModel(): DownloadAuditModel {
+        return this.getModel(
+            'downloadAuditModel',
+            () => new DownloadAuditModel({ database: this.database }),
         );
     }
 
@@ -404,6 +416,13 @@ export class ModelRepository
         );
     }
 
+    public getProjectCompileLogModel(): ProjectCompileLogModel {
+        return this.getModel(
+            'projectCompileLogModel',
+            () => new ProjectCompileLogModel({ database: this.database }),
+        );
+    }
+
     public getResourceViewItemModel(): ResourceViewItemModel {
         return this.getModel(
             'resourceViewItemModel',
@@ -567,6 +586,10 @@ export class ModelRepository
 
     public getAiAgentModel<ModelImplT>(): ModelImplT {
         return this.getModel('aiAgentModel');
+    }
+
+    public getAiOrganizationSettingsModel<ModelImplT>(): ModelImplT {
+        return this.getModel('aiOrganizationSettingsModel');
     }
 
     public getEmbedModel<ModelImplT>(): ModelImplT {

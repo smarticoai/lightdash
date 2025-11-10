@@ -6,6 +6,7 @@ import {
     setTag,
     setTags,
     setUser,
+    spotlightBrowserIntegration,
 } from '@sentry/react';
 import { useEffect, useState } from 'react';
 import { smrMode } from '../../utils/smarticoUtils';
@@ -17,12 +18,14 @@ import {
     useParams,
 } from 'react-router';
 
+const sentrySpotlightEnabled =
+    import.meta.env.DEV && import.meta.env.VITE_SENTRY_SPOTLIGHT;
+
 const useSentry = (
     sentryConfig: HealthState['sentry'] | undefined,
     user: LightdashUser | undefined,
 ) => {
     const [isSentryLoaded, setIsSentryLoaded] = useState(false);
-
     useEffect(() => {
 
         if (smrMode()) {
@@ -35,6 +38,14 @@ const useSentry = (
                 release: sentryConfig.release,
                 environment: sentryConfig.environment,
                 integrations: [
+                    ...(sentrySpotlightEnabled
+                        ? [
+                              spotlightBrowserIntegration({
+                                  sidecarUrl: import.meta.env
+                                      .VITE_SENTRY_SPOTLIGHT,
+                              }),
+                          ]
+                        : []),
                     reactRouterV7BrowserTracingIntegration({
                         useEffect,
                         useLocation,
@@ -45,6 +56,10 @@ const useSentry = (
                     replayIntegration(),
                 ],
                 tracesSampler(samplingContext) {
+                    if (sentrySpotlightEnabled) {
+                        return 1.0;
+                    }
+
                     if (samplingContext.parentSampled !== undefined) {
                         return samplingContext.parentSampled;
                     }

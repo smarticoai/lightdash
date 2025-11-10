@@ -1,9 +1,9 @@
 version: 2
 models:
   - name: fanouts_tracks
-    meta: 
-      required_attributes: 
-        is_admin_saas_demo: 'true'
+    meta:
+      required_attributes:
+        is_admin_saas_demo: "true"
       primary_key: event_id
     columns:
       - name: user_id
@@ -21,11 +21,8 @@ models:
               type: count_distinct
               label: "✅ FANOUT SAFE Unique Event Count"
               description: "✅ CORRECT: Uses count_distinct so won't inflate"
-            inflated_event_count:
+            event_count:
               type: count
-              label: "🚨 INFLATED Event Count"
-              description: "❌ WRONG: If grain of data is not at event/track level then this
-                will be inflated"
       - name: event_name
         description: ""
         meta:

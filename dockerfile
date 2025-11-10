@@ -278,7 +278,7 @@ COPY --from=prod-builder /usr/app /usr/app
 #     && ln -s /usr/local/dbt1.6/bin/dbt /usr/local/bin/dbt1.6 \
 #     && ln -s /usr/local/dbt1.7/bin/dbt /usr/local/bin/dbt1.7 \
 #     && ln -s /usr/local/dbt1.8/bin/dbt /usr/local/bin/dbt1.8 \
-RUN ln -s /usr/local/dbt1.9/bin/dbt /usr/local/bin/dbt1.9
+RUN ln -s /usr/local/dbt1.10/bin/dbt /usr/local/bin/dbt1.10
 
 
 # Run backend

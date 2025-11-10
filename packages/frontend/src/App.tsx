@@ -75,7 +75,6 @@ const App = () => (
                     </ModalsProvider>
                 </Mantine8Provider>
             </MantineProvider>
-            {/* <ReactQueryDevtools initialIsOpen={false} /> */}
         </ReactQueryProvider>
     </>
 );

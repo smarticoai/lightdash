@@ -5,15 +5,18 @@ import {
     CreateChangeFn,
     CreateOrUpdateArtifactFn,
     FindChartsFn,
+    FindContentFn,
     FindDashboardsFn,
     FindExploresFn,
     FindFieldFn,
     GetExploreCompilerFn,
     GetExploreFn,
     GetPromptFn,
+    ListExploresFn,
     RunMiniMetricQueryFn,
     SearchFieldValuesFn,
     SendFileFn,
+    StoreReasoningFn,
     StoreToolCallFn,
     StoreToolResultsFn,
     TrackEventFn,
@@ -35,25 +38,29 @@ export type AiAgentArgs = AnyAiModel & {
     enableDataAccess: boolean;
     enableSelfImprovement: boolean;
 
-    availableExploresPageSize: number;
-    findExploresPageSize: number;
-    findExploresFieldOverviewSearchSize: number;
     findExploresFieldSearchSize: number;
-    findExploresMaxDescriptionLength: number;
     findFieldsPageSize: number;
     findDashboardsPageSize: number;
     findChartsPageSize: number;
     maxQueryLimit: number;
-    siteUrl?: string;
+    siteUrl: string;
     canManageAgent: boolean;
 };
 
 export type PerformanceMetrics = {
     measureGenerateResponseTime: (durationMs: number) => void;
     measureStreamResponseTime: (durationMs: number) => void;
+    measureStreamFirstChunk: (durationMs: number) => void;
+    measureTTFT: (
+        durationMs: number,
+        model: string,
+        mode: 'stream' | 'generate',
+    ) => void;
 };
 
 export type AiAgentDependencies = {
+    listExplores: ListExploresFn;
+    findContent: FindContentFn;
     findCharts: FindChartsFn;
     findDashboards: FindDashboardsFn;
     findExplores: FindExploresFn;
@@ -67,6 +74,7 @@ export type AiAgentDependencies = {
     updateProgress: UpdateProgressFn;
     storeToolCall: StoreToolCallFn;
     storeToolResults: StoreToolResultsFn;
+    storeReasoning: StoreReasoningFn;
     searchFieldValues: SearchFieldValuesFn;
     trackEvent: TrackEventFn;
     createOrUpdateArtifact: CreateOrUpdateArtifactFn;

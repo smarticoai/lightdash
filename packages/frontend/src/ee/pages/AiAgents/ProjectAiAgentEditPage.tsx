@@ -55,6 +55,8 @@ const formSchema = z.object({
     userAccess: z.array(z.string()),
     enableDataAccess: z.boolean(),
     enableSelfImprovement: z.boolean(),
+    enableReasoning: z.boolean(),
+    version: z.number(),
 });
 
 type Props = {
@@ -99,6 +101,8 @@ const ProjectAiAgentEditPage: FC<Props> = ({ isCreateMode = false }) => {
             userAccess: [],
             enableDataAccess: false,
             enableSelfImprovement: false,
+            enableReasoning: false,
+            version: 2, // INFO: Default to v2 for now
         },
         validate: zodResolver(formSchema),
     });
@@ -119,6 +123,8 @@ const ProjectAiAgentEditPage: FC<Props> = ({ isCreateMode = false }) => {
                 userAccess: agent.userAccess ?? [],
                 enableDataAccess: agent.enableDataAccess ?? false,
                 enableSelfImprovement: agent.enableSelfImprovement ?? false,
+                enableReasoning: agent.enableReasoning ?? false,
+                version: agent.version ?? 2, // INFO: Default to v2 for now
             };
             form.setValues(values);
             form.resetDirty(values);
@@ -247,7 +253,6 @@ const ProjectAiAgentEditPage: FC<Props> = ({ isCreateMode = false }) => {
                         </Group>
                         <LightdashUserAvatar
                             name={isCreateMode ? '+' : form.values.name}
-                            variant="filled"
                             src={
                                 !isCreateMode ? form.values.imageUrl : undefined
                             }

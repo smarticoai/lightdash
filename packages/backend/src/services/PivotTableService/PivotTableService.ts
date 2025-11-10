@@ -5,17 +5,14 @@ import {
     getErrorMessage,
     ItemsMap,
     MetricQuery,
-    MissingConfigError,
     PivotConfig,
     pivotResultsAsCsv,
     type ReadyQueryResultsPage,
 } from '@lightdash/common';
 import { stringify } from 'csv-stringify';
-import * as fs from 'fs';
 import * as fsPromise from 'fs/promises';
 import moment from 'moment';
 import { nanoid } from 'nanoid';
-import { Readable } from 'stream';
 import { S3Client } from '../../clients/Aws/S3Client';
 import { AttachmentUrl } from '../../clients/EmailClient/EmailClient';
 import { S3ResultsFileStorageClient } from '../../clients/ResultsFileStorageClients/S3ResultsFileStorageClient';
@@ -112,11 +109,12 @@ export class PivotTableService extends BaseService {
             attachmentDownloadName?: string;
         };
     }): Promise<{ fileUrl: string; truncated: boolean }> {
-        const { onlyRaw, customLabels, pivotConfig } = options;
+        const { onlyRaw, customLabels, pivotConfig, attachmentDownloadName } =
+            options;
 
         // Load rows from the results file using shared streaming utility
         // Use the same logic as regular CSV exports - respect csvCellsLimit with field count
-        const readStream = await storageClient.getDowloadStream(
+        const readStream = await storageClient.getDownloadStream(
             resultsFileName,
         );
 
@@ -147,8 +145,7 @@ export class PivotTableService extends BaseService {
             );
         }
 
-        const fileName =
-            options.attachmentDownloadName || `pivot-${resultsFileName}`;
+        const fileName = attachmentDownloadName || `pivot-${resultsFileName}`;
 
         const attachmentUrl = await this.downloadPivotTableCsv({
             name: fileName,
@@ -200,10 +197,18 @@ export class PivotTableService extends BaseService {
         customLabels: Record<string, string> | undefined;
         metricsAsRows?: boolean;
     }): Promise<AttachmentUrl> {
+        // PivotDetails.valuesColumns is just an array objects, we need to convert it to a map so we can format the pivoted results
+        // See AsyncQueryService.ts line 1126 for more details on why we're using pivotColumnName as the key
+        const pivotValuesColumnsMap = Object.fromEntries(
+            pivotDetails?.valuesColumns?.map((column) => [
+                column.pivotColumnName,
+                column,
+            ]) ?? [],
+        );
+
         // PivotQueryResults expects a formatted ResultRow[] type, so we need to convert it first
         // TODO: refactor pivotQueryResults to accept a Record<string, any>[] simple row type for performance
-        const formattedRows = formatRows(rows, itemMap);
-
+        const formattedRows = formatRows(rows, itemMap, pivotValuesColumnsMap);
         const csvResults = pivotResultsAsCsv({
             pivotConfig,
             rows: formattedRows,
@@ -220,6 +225,7 @@ export class PivotTableService extends BaseService {
                 csvResults,
                 {
                     delimiter: ',',
+                    quoted: true,
                 },
                 (err, output) => {
                     if (err) {

@@ -10,6 +10,7 @@ import type {
     ToolDashboardArgs,
     ToolName,
     ToolProposeChangeOutput,
+    ToolRunQueryArgs,
     ToolTableVizArgs,
     ToolTimeSeriesArgs,
     ToolVerticalBarArgs,
@@ -18,6 +19,8 @@ import { type AgentToolOutput } from './schemas';
 import { type AiMetricQuery, type AiResultType } from './types';
 
 export * from './adminTypes';
+export * from './chartConfig/slack';
+export * from './chartConfig/web';
 export * from './constants';
 export * from './filterExploreByTags';
 export * from './followUpTools';
@@ -25,6 +28,7 @@ export * from './requestTypes';
 export * from './schemas';
 export * from './types';
 export * from './utils';
+export * from './validators';
 
 export const baseAgentSchema = z.object({
     uuid: z.string(),
@@ -63,6 +67,8 @@ export const baseAgentSchema = z.object({
     userAccess: z.array(z.string()),
     enableDataAccess: z.boolean(),
     enableSelfImprovement: z.boolean(),
+    enableReasoning: z.boolean(),
+    version: z.number(),
 });
 
 export type BaseAiAgent = z.infer<typeof baseAgentSchema>;
@@ -83,6 +89,8 @@ export type AiAgent = Pick<
     | 'userAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
+    | 'enableReasoning'
+    | 'version'
 >;
 
 export type AiAgentSummary = Pick<
@@ -101,6 +109,8 @@ export type AiAgentSummary = Pick<
     | 'userAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
+    | 'enableReasoning'
+    | 'version'
 >;
 
 export type AiAgentUser = {
@@ -130,6 +140,7 @@ export type AiAgentMessageAssistantArtifact = Pick<
 
 export type AiAgentMessageAssistant = {
     role: 'assistant';
+    status: 'idle' | 'pending' | 'error';
     uuid: string;
     threadUuid: string;
 
@@ -143,6 +154,7 @@ export type AiAgentMessageAssistant = {
 
     toolCalls: AiAgentToolCall[];
     toolResults: AiAgentToolResult[];
+    reasoning: AiAgentReasoning[];
     savedQueryUuid: string | null;
 
     artifacts: AiAgentMessageAssistantArtifact[] | null;
@@ -193,6 +205,8 @@ export type ApiCreateAiAgent = Pick<
     | 'userAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
+    | 'enableReasoning'
+    | 'version'
 >;
 
 export type ApiUpdateAiAgent = Partial<
@@ -208,6 +222,8 @@ export type ApiUpdateAiAgent = Partial<
         | 'userAccess'
         | 'enableDataAccess'
         | 'enableSelfImprovement'
+        | 'enableReasoning'
+        | 'version'
     >
 > & {
     uuid: string;
@@ -335,6 +351,14 @@ export type AiAgentToolResult = {
       }
 );
 
+export type AiAgentReasoning = {
+    uuid: string;
+    promptUuid: string;
+    reasoningId: string;
+    text: string;
+    createdAt: Date;
+};
+
 export type AiAgentExploreAccessSummary = {
     exploreName: string;
     joinedTables: string[];
@@ -363,6 +387,7 @@ export type AiArtifact = {
         | ToolTableVizArgs
         | ToolTimeSeriesArgs
         | ToolVerticalBarArgs
+        | ToolRunQueryArgs
         | null;
     dashboardConfig: ToolDashboardArgs | null;
     versionCreatedAt: Date;

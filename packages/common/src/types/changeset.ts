@@ -14,13 +14,8 @@ export const ChangesetSchema = z.object({
     name: z.string().min(1),
 });
 
-export const ChangeSchema = z
+export const ChangeBaseSchema = z
     .object({
-        changeUuid: z.string().uuid(),
-        changesetUuid: z.string().uuid(),
-        createdAt: z.date(),
-        createdByUserUuid: z.string().uuid(),
-        sourcePromptUuid: z.string().uuid().nullable(),
         entityType: z.enum(['table', 'dimension', 'metric']),
         entityTableName: z.string().min(1),
         entityName: z.string().min(1),
@@ -43,11 +38,14 @@ export const ChangeSchema = z
                             description: z.string().optional(),
                             hidden: z.boolean(),
                             compiledSql: z.string(),
-                            tablesReferences: z.array(z.string()),
+                            tablesReferences: z.array(z.string()).optional(),
                             tablesRequiredAttributes: z
                                 .record(
                                     z.string(),
-                                    z.record(z.string(), z.string()),
+                                    z.record(
+                                        z.string(),
+                                        z.string().or(z.array(z.string())),
+                                    ),
                                 )
                                 .optional(),
                         }),
@@ -75,6 +73,18 @@ export const ChangeSchema = z
         ]),
     );
 
+export type ChangeBase = z.infer<typeof ChangeBaseSchema>;
+
+export const ChangeSchema = ChangeBaseSchema.and(
+    z.object({
+        changeUuid: z.string().uuid(),
+        changesetUuid: z.string().uuid(),
+        createdAt: z.date(),
+        createdByUserUuid: z.string().uuid(),
+        sourcePromptUuid: z.string().uuid().nullable(),
+    }),
+);
+
 export const ChangesetWithChangesSchema = ChangesetSchema.extend({
     changes: z.array(ChangeSchema),
 });
@@ -86,6 +96,11 @@ export type Change = z.infer<typeof ChangeSchema>;
 export type ApiChangesetsResponse = {
     status: 'ok';
     results: ChangesetWithChanges;
+};
+
+export type ApiGetChangeResponse = {
+    status: 'ok';
+    results: Change;
 };
 
 export type CreateChangeParams = Pick<
@@ -101,8 +116,14 @@ export type CreateChangeParams = Pick<
 
 // tsoa does not support z.infer schemas - https://github.com/lukeautry/tsoa/issues/1256
 type ChangesetTSOACompat = Record<string, unknown>;
+type ChangeTSOACompat = Record<string, unknown>;
 
 export type ApiChangesetsResponseTSOACompat = {
     status: 'ok';
     results: ChangesetTSOACompat[];
+};
+
+export type ApiGetChangeResponseTSOACompat = {
+    status: 'ok';
+    results: ChangeTSOACompat;
 };

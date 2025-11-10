@@ -5,8 +5,7 @@ import {
 } from '@lightdash/common';
 import { MantineProvider, NavLink, Text } from '@mantine/core';
 import { IconTable } from '@tabler/icons-react';
-import type { FC } from 'react';
-import { useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo, type FC } from 'react';
 import { useToggle } from 'react-use';
 
 import { getMantineThemeOverride } from '../../../../mantineTheme';
@@ -87,24 +86,21 @@ const TableTreeWrapper: FC<React.PropsWithChildren<TableTreeWrapperProps>> = ({
 };
 
 type Props = {
-    isOpenByDefault: boolean;
+    isExpanded: boolean;
+    onToggle: () => void;
     searchQuery?: string;
     showTableLabel: boolean;
     table: CompiledTable;
     additionalMetrics: AdditionalMetric[];
-    selectedItems: Set<string>;
     onSelectedNodeChange: (itemId: string, isDimension: boolean) => void;
     missingCustomMetrics: AdditionalMetric[];
     customDimensions?: CustomDimension[];
-    missingCustomDimensions?: CustomDimension[];
-    missingFields?: {
-        all: string[];
-        customDimensions: CustomDimension[] | undefined;
-        customMetrics: AdditionalMetric[] | undefined;
-    };
-    selectedDimensions?: string[];
+    missingCustomDimensions: CustomDimension[];
+    missingFieldIds: string[];
     searchResults: string[];
     isSearching: boolean;
+    expandedGroups: Set<string>;
+    onToggleGroup: (groupKey: string) => void;
 };
 
 const EmptyWrapper: FC<React.PropsWithChildren<{}>> = ({ children }) => (
@@ -128,29 +124,30 @@ const themeOverride = getMantineThemeOverride({
     },
 });
 
-const TableTree: FC<Props> = ({
-    isOpenByDefault,
+const TableTreeComponent: FC<Props> = ({
+    isExpanded,
+    onToggle,
     showTableLabel,
     table,
     additionalMetrics,
     customDimensions,
     missingCustomMetrics,
     missingCustomDimensions,
+    missingFieldIds,
     searchQuery,
-    missingFields,
-    selectedDimensions,
     isSearching,
+    expandedGroups,
+    onToggleGroup,
     ...rest
 }) => {
     const Wrapper = showTableLabel ? TableTreeWrapper : EmptyWrapper;
-    const [isOpen, toggle] = useToggle(isOpenByDefault);
 
     return (
         <TrackSection name={SectionName.SIDEBAR}>
             <MantineProvider inherit theme={themeOverride}>
                 <Wrapper
-                    isOpen={isSearching || isOpen}
-                    toggle={toggle}
+                    isOpen={isSearching || isExpanded}
+                    toggle={onToggle}
                     table={table}
                 >
                     <TableTreeSections
@@ -158,9 +155,12 @@ const TableTree: FC<Props> = ({
                         searchQuery={searchQuery}
                         additionalMetrics={additionalMetrics}
                         customDimensions={customDimensions}
-                        missingFields={missingFields}
-                        selectedDimensions={selectedDimensions}
+                        missingCustomMetrics={missingCustomMetrics}
+                        missingCustomDimensions={missingCustomDimensions}
+                        missingFieldIds={missingFieldIds}
                         isSearching={isSearching}
+                        expandedGroups={expandedGroups}
+                        onToggleGroup={onToggleGroup}
                         {...rest}
                     />
                 </Wrapper>
@@ -168,5 +168,9 @@ const TableTree: FC<Props> = ({
         </TrackSection>
     );
 };
+
+const TableTree = memo(TableTreeComponent);
+
+TableTree.displayName = 'TableTree';
 
 export default TableTree;

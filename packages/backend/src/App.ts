@@ -74,7 +74,6 @@ import {
 import { UtilProviderMap, UtilRepository } from './utils/UtilRepository';
 import { VERSION } from './version';
 import PrometheusMetrics from './prometheus';
-import { jwtStrategy } from './controllers/authentication/strategies/jwtStrategy';
 import { snowflakePassportStrategy } from './controllers/authentication/strategies/snowflakeStrategy';
 import { jwtAuthMiddleware } from './middlewares/jwtAuthMiddleware';
 import { InstanceConfigurationService } from './services/InstanceConfigurationService/InstanceConfigurationService';
@@ -135,6 +134,7 @@ const schedulerWorkerFactory = (context: {
         encryptionUtil: context.utils.getEncryptionUtil(),
         renameService: context.serviceRepository.getRenameService(),
         asyncQueryService: context.serviceRepository.getAsyncQueryService(),
+        featureFlagService: context.serviceRepository.getFeatureFlagService(),
     });
 
 export type AppArguments = {

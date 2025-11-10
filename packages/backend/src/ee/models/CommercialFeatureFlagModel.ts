@@ -22,7 +22,8 @@ export class CommercialFeatureFlagModel extends FeatureFlagModel {
             [CommercialFeatureFlags.Scim]: this.getScimFlag.bind(this),
             [CommercialFeatureFlags.AiCopilot]:
                 this.getAiCopilotFlag.bind(this),
-            [CommercialFeatureFlags.AiAgent]: this.getAiAgentFlag.bind(this),
+            [CommercialFeatureFlags.AgentReasoning]:
+                CommercialFeatureFlagModel.getAgentReasoningFlag.bind(this),
         };
     }
 
@@ -106,38 +107,26 @@ export class CommercialFeatureFlagModel extends FeatureFlagModel {
         };
     }
 
-    private async getAiAgentFlag({
-        featureFlagId,
+    private static async getAgentReasoningFlag({
         user,
+        featureFlagId,
     }: FeatureFlagLogicArgs) {
-        if (!user) {
-            throw new Error('User is required to check if AI agent is enabled');
-        }
-
-        if (!this.lightdashConfig.ai.copilot.enabled) {
-            return {
-                id: featureFlagId,
-                enabled: false,
-            };
-        }
-
-        if (this.lightdashConfig.ai.copilot.askAiButtonEnabled) {
-            return {
-                id: featureFlagId,
-                enabled: true,
-            };
-        }
-
+        const enabled = user
+            ? await isFeatureFlagEnabled(
+                  CommercialFeatureFlags.AgentReasoning as AnyType as FeatureFlags,
+                  {
+                      userUuid: user.userUuid,
+                      organizationUuid: user.organizationUuid,
+                      organizationName: user.organizationName,
+                  },
+                  {
+                      throwOnTimeout: false,
+                  },
+              )
+            : false;
         return {
             id: featureFlagId,
-            enabled: await isFeatureFlagEnabled(
-                CommercialFeatureFlags.AiAgent as AnyType as FeatureFlags,
-                {
-                    userUuid: user.userUuid,
-                    organizationUuid: user.organizationUuid,
-                    organizationName: user.organizationName,
-                },
-            ),
+            enabled,
         };
     }
 }

@@ -5,13 +5,20 @@ import {
     getItemId,
     hasFormatting,
     type CustomFormat,
+    type Metric,
 } from '@lightdash/common';
 import { Button, Group, Modal, Stack, Title } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import isEqual from 'lodash/isEqual';
-import { useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect } from 'react';
 import { type ValueOf } from 'type-fest';
-import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import {
+    explorerActions,
+    selectFormatModal,
+    selectMetricQuery,
+    useExplorerDispatch,
+    useExplorerSelector,
+} from '../../../features/explorer/store';
 import { FormatForm } from '../FormatForm';
 
 const DEFAULT_FORMAT: CustomFormat = {
@@ -24,20 +31,21 @@ const DEFAULT_FORMAT: CustomFormat = {
     suffix: undefined,
 };
 
-export const FormatModal = () => {
-    const { isOpen, metric } = useExplorerContext(
-        (context) => context.state.modals.format,
-    );
-    const metricOverrides = useExplorerContext(
-        (context) =>
-            context.state.unsavedChartVersion.metricQuery.metricOverrides,
-    );
-    const toggleModal = useExplorerContext(
-        (context) => context.actions.toggleFormatModal,
-    );
+export const FormatModal = memo(() => {
+    const dispatch = useExplorerDispatch();
+    const { isOpen, metric } = useExplorerSelector(selectFormatModal);
+    const metricQuery = useExplorerSelector(selectMetricQuery);
+    const metricOverrides = metricQuery.metricOverrides;
 
-    const updateMetricFormat = useExplorerContext(
-        (context) => context.actions.updateMetricFormat,
+    const toggleModal = useCallback(() => {
+        dispatch(explorerActions.toggleFormatModal());
+    }, [dispatch]);
+
+    const updateMetricFormat = useCallback(
+        (payload: { metric: Metric; formatOptions: CustomFormat }) => {
+            dispatch(explorerActions.updateMetricFormat(payload));
+        },
+        [dispatch],
     );
 
     const form = useForm<{ format: CustomFormat }>({
@@ -128,4 +136,4 @@ export const FormatModal = () => {
             </form>
         </Modal>
     ) : null;
-};
+});

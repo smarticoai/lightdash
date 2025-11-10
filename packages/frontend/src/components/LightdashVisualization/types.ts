@@ -7,6 +7,7 @@ import {
     type Metric,
     type MetricQuery,
     type ParametersValuesMap,
+    type StackType,
     type TableCalculation,
     type TableCalculationMetadata,
 } from '@lightdash/common';
@@ -34,6 +35,7 @@ export type VisualizationConfigCommon<T extends VisualizationConfig> = {
         config: T['chartConfig']['validConfig'];
     }) => void;
     children: (props: { visualizationConfig: T }) => JSX.Element;
+    parameters?: ParametersValuesMap;
 };
 
 // Big Number
@@ -71,7 +73,7 @@ export const isCartesianVisualizationConfig = (
 export type VisualizationCartesianConfigProps =
     VisualizationConfigCommon<VisualizationConfigCartesian> & {
         itemsMap: ItemsMap | undefined;
-        stacking: boolean | undefined;
+        stacking: boolean | StackType | undefined;
         cartesianType: CartesianTypeOptions | undefined;
         columnOrder: string[];
         validPivotDimensions: string[] | undefined;

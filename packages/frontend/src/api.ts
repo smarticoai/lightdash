@@ -9,7 +9,6 @@ import {
 } from '@lightdash/common';
 import { spanToTraceHeader, startSpan } from '@sentry/react';
 import fetch from 'isomorphic-fetch';
-import { smrIsEmbeddedMode, smrReplaceRecursivelyCurrency } from './utils/smarticoUtils';
 import { EMBED_KEY, type InMemoryEmbed } from './ee/providers/Embed/types';
 import { getFromInMemoryStorage } from './utils/inMemoryStorage';
 
@@ -22,15 +21,12 @@ export const BASE_API_URL =
         ? `http://test.lightdash/`
         : import.meta.env.BASE_URL;
 
-const defaultHeaders: any = {
+const defaultHeaders = {
     'Content-Type': 'application/json',
     [LightdashRequestMethodHeader]: RequestMethod.WEB_APP,
     [LightdashVersionHeader]: __APP_VERSION__,
 };
 
-if (smrIsEmbeddedMode()) {
-    defaultHeaders.JWT = 'token ' + (window as any)._smr_token;
-}
 const isSafeToAddEmbedHeader = (
     headers: Record<string, string> | undefined,
 ) => {
@@ -89,7 +85,7 @@ const handleError = (err: any): ApiError => {
             name: 'NetworkError',
             statusCode: 500,
             message:
-                'We are currently unable to reach the server. Please try again in a few moments.',
+                'We are currently unable to reach the Lightdash server. Please try again in a few moments.',
             data: err,
         },
     };
@@ -180,9 +176,6 @@ export const lightdashApi = async <T extends ApiResponse['results']>({
                 case 'ok':
                     // make sure we return null instead of undefined
                     // otherwise react-query will crash
-                    if (d.results) {
-                        d.results = smrReplaceRecursivelyCurrency(d.results);
-                    }
                     return (d.results ?? null) as T;
                 case 'error':
                     throw d;

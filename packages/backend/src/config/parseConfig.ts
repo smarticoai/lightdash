@@ -44,7 +44,7 @@ enum TokenEnvironmentVariable {
 
 const tokenConfigs = {
     [TokenEnvironmentVariable.SERVICE_ACCOUNT]: {
-        prefix: AuthTokenPrefix?.SERVICE_ACCOUNT,
+        prefix: AuthTokenPrefix.SERVICE_ACCOUNT,
     },
 };
 
@@ -477,6 +477,11 @@ export const getUpdateSetupConfig = (): LightdashConfig['updateSetup'] => {
         dbt: {
             personal_access_token: process.env.LD_SETUP_GITHUB_PAT,
         },
+        embed: {
+            allowAllDashboards:
+                process.env.LD_SETUP_EMBED_ALLOW_ALL_DASHBOARDS === 'true',
+            secret: process.env.LD_SETUP_EMBED_SECRET,
+        },
     };
 };
 
@@ -618,6 +623,77 @@ const parseAndSanitizeSchedulerTasks = (): Array<SchedulerTaskName> => {
 
     return ALL_TASK_NAMES;
 };
+
+export const getAiConfig = () => ({
+    enabled: process.env.AI_COPILOT_ENABLED === 'true',
+    debugLoggingEnabled:
+        process.env.AI_COPILOT_DEBUG_LOGGING_ENABLED === 'true',
+    telemetryEnabled: process.env.AI_COPILOT_TELEMETRY_ENABLED === 'true',
+    requiresFeatureFlag:
+        process.env.AI_COPILOT_REQUIRES_FEATURE_FLAG === 'true',
+    askAiButtonEnabled: process.env.ASK_AI_BUTTON_ENABLED === 'true',
+    defaultProvider:
+        process.env.AI_DEFAULT_PROVIDER || DEFAULT_DEFAULT_AI_PROVIDER,
+    providers: {
+        azure: process.env.AZURE_AI_API_KEY
+            ? {
+                  endpoint: process.env.AZURE_AI_ENDPOINT,
+                  apiKey: process.env.AZURE_AI_API_KEY,
+                  apiVersion: process.env.AZURE_AI_API_VERSION,
+                  deploymentName: process.env.AZURE_AI_DEPLOYMENT_NAME,
+                  temperature: getFloatFromEnvironmentVariable(
+                      'AZURE_AI_TEMPERATURE',
+                  ),
+              }
+            : undefined,
+        openai: process.env.OPENAI_API_KEY
+            ? {
+                  apiKey: process.env.OPENAI_API_KEY,
+                  modelName:
+                      process.env.OPENAI_MODEL_NAME ||
+                      DEFAULT_OPENAI_MODEL_NAME,
+                  baseUrl: process.env.OPENAI_BASE_URL,
+                  temperature:
+                      getFloatFromEnvironmentVariable('OPENAI_TEMPERATURE'),
+                  responsesApi: process.env.OPENAI_RESPONSES_API === 'true',
+                  reasoning: {
+                      enabled: process.env.OPENAI_REASONING_ENABLED === 'true',
+                      reasoningSummary: process.env.OPENAI_REASONING_SUMMARY,
+                      reasoningEffort: process.env.OPENAI_REASONING_EFFORT,
+                  },
+              }
+            : undefined,
+        anthropic: process.env.ANTHROPIC_API_KEY
+            ? {
+                  apiKey: process.env.ANTHROPIC_API_KEY,
+                  modelName:
+                      process.env.ANTHROPIC_MODEL_NAME ||
+                      DEFAULT_ANTHROPIC_MODEL_NAME,
+                  temperature: getFloatFromEnvironmentVariable(
+                      'ANTHROPIC_TEMPERATURE',
+                  ),
+              }
+            : undefined,
+        openrouter: process.env.OPENROUTER_API_KEY
+            ? {
+                  apiKey: process.env.OPENROUTER_API_KEY,
+                  modelName:
+                      process.env.OPENROUTER_MODEL_NAME ||
+                      DEFAULT_OPENROUTER_MODEL_NAME,
+                  sortOrder: process.env.OPENROUTER_SORT_ORDER,
+                  allowedProviders: getArrayFromCommaSeparatedList(
+                      'OPENROUTER_ALLOWED_PROVIDERS',
+                  ),
+                  temperature: getFloatFromEnvironmentVariable(
+                      'OPENROUTER_TEMPERATURE',
+                  ),
+              }
+            : undefined,
+    },
+    maxQueryLimit:
+        getIntegerFromEnvironmentVariable('AI_COPILOT_MAX_QUERY_LIMIT') ||
+        AI_DEFAULT_MAX_QUERY_LIMIT,
+});
 
 export type LoggingConfig = {
     level: LoggingLevel;
@@ -762,6 +838,9 @@ export type LightdashConfig = {
     serviceAccount: {
         enabled: boolean;
     };
+    organizationWarehouseCredentials: {
+        enabled: boolean;
+    };
     github: {
         appName: string;
         redirectDomain: string;
@@ -829,6 +908,10 @@ export type LightdashConfig = {
             token: string;
             expirationTime: Date | null;
         };
+        embed?: {
+            allowAllDashboards?: boolean;
+            secret?: string;
+        };
     };
     mcp: {
         enabled: boolean;
@@ -837,6 +920,11 @@ export type LightdashConfig = {
         enabled: boolean;
     };
     analyticsEmbedSecret?: string;
+    experimentalExplorerImprovements: boolean;
+    experimentalVirtualizedSideBar: boolean;
+    dashboardComments: {
+        enabled: boolean;
+    };
 };
 
 export type SlackConfig = {
@@ -1064,72 +1152,7 @@ export const parseConfig = (): LightdashConfig => {
         );
     }
 
-    const rawCopilotConfig = {
-        enabled: process.env.AI_COPILOT_ENABLED === 'true',
-        debugLoggingEnabled:
-            process.env.AI_COPILOT_DEBUG_LOGGING_ENABLED === 'true',
-        telemetryEnabled: process.env.AI_COPILOT_TELEMETRY_ENABLED === 'true',
-        requiresFeatureFlag:
-            process.env.AI_COPILOT_REQUIRES_FEATURE_FLAG === 'true',
-        askAiButtonEnabled: process.env.ASK_AI_BUTTON_ENABLED === 'true',
-        defaultProvider:
-            process.env.AI_DEFAULT_PROVIDER || DEFAULT_DEFAULT_AI_PROVIDER,
-        providers: {
-            azure: process.env.AZURE_AI_API_KEY
-                ? {
-                      endpoint: process.env.AZURE_AI_ENDPOINT,
-                      apiKey: process.env.AZURE_AI_API_KEY,
-                      apiVersion: process.env.AZURE_AI_API_VERSION,
-                      deploymentName: process.env.AZURE_AI_DEPLOYMENT_NAME,
-                      temperature: getFloatFromEnvironmentVariable(
-                          'AZURE_AI_TEMPERATURE',
-                      ),
-                  }
-                : undefined,
-            openai: process.env.OPENAI_API_KEY
-                ? {
-                      apiKey: process.env.OPENAI_API_KEY,
-                      modelName:
-                          process.env.OPENAI_MODEL_NAME ||
-                          DEFAULT_OPENAI_MODEL_NAME,
-                      baseUrl: process.env.OPENAI_BASE_URL,
-                      temperature:
-                          getFloatFromEnvironmentVariable('OPENAI_TEMPERATURE'),
-                      responsesApi: process.env.OPENAI_RESPONSES_API === 'true',
-                  }
-                : undefined,
-            anthropic: process.env.ANTHROPIC_API_KEY
-                ? {
-                      apiKey: process.env.ANTHROPIC_API_KEY,
-                      modelName:
-                          process.env.ANTHROPIC_MODEL_NAME ||
-                          DEFAULT_ANTHROPIC_MODEL_NAME,
-                      temperature: getFloatFromEnvironmentVariable(
-                          'ANTHROPIC_TEMPERATURE',
-                      ),
-                  }
-                : undefined,
-            openrouter: process.env.OPENROUTER_API_KEY
-                ? {
-                      apiKey: process.env.OPENROUTER_API_KEY,
-                      modelName:
-                          process.env.OPENROUTER_MODEL_NAME ||
-                          DEFAULT_OPENROUTER_MODEL_NAME,
-                      sortOrder: process.env.OPENROUTER_SORT_ORDER,
-                      allowedProviders: getArrayFromCommaSeparatedList(
-                          'OPENROUTER_ALLOWED_PROVIDERS',
-                      ),
-                      temperature: getFloatFromEnvironmentVariable(
-                          'OPENROUTER_TEMPERATURE',
-                      ),
-                  }
-                : undefined,
-        },
-        maxQueryLimit:
-            getIntegerFromEnvironmentVariable('AI_COPILOT_MAX_QUERY_LIMIT') ||
-            AI_DEFAULT_MAX_QUERY_LIMIT,
-    };
-
+    const rawCopilotConfig = getAiConfig();
     const copilotConfigParse =
         aiCopilotConfigSchema.safeParse(rawCopilotConfig);
 
@@ -1574,6 +1597,11 @@ export const parseConfig = (): LightdashConfig => {
         serviceAccount: {
             enabled: process.env.SERVICE_ACCOUNT_ENABLED === 'true',
         },
+        organizationWarehouseCredentials: {
+            enabled:
+                process.env.ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED ===
+                'true',
+        },
         github: {
             appName: process.env.GITHUB_APP_NAME || 'lightdash-app-dev',
             redirectDomain:
@@ -1614,5 +1642,12 @@ export const parseConfig = (): LightdashConfig => {
             enabled: process.env.CUSTOM_ROLES_ENABLED === 'true',
         },
         analyticsEmbedSecret: process.env.ANALYTICS_EMBED_SECRET,
+        experimentalExplorerImprovements:
+            process.env.EXPERIMENTAL_EXPLORER_IMPROVEMENTS === 'true',
+        experimentalVirtualizedSideBar:
+            process.env.EXPERIMENTAL_VIRTUALIZED_SIDE_BAR === 'true',
+        dashboardComments: {
+            enabled: process.env.DISABLE_DASHBOARD_COMMENTS !== 'true',
+        },
     };
 };

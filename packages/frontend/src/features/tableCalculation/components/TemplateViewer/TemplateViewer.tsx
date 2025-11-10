@@ -1,10 +1,11 @@
 import {
     friendlyName,
     getFieldLabel,
+    WindowFunctionType,
     type TableCalculationTemplate,
 } from '@lightdash/common';
 import { Badge, Group, Stack, Text } from '@mantine/core';
-import { type FC } from 'react';
+import { useCallback, useMemo, type FC } from 'react';
 import { useColumns } from '../../../../hooks/useColumns';
 import {
     formatTemplateType,
@@ -19,6 +20,67 @@ interface TemplateViewerProps {
 export const TemplateViewer: FC<TemplateViewerProps> = ({ template }) => {
     const columns = useColumns();
 
+    const columnsMap = useMemo(() => {
+        return new Map(columns.map((c) => [c.id, c.meta?.item]));
+    }, [columns]);
+
+    const getLabel = useCallback(
+        (fieldId: string) => {
+            const field = columnsMap.get(fieldId);
+            return field && 'label' in field
+                ? getFieldLabel(field)
+                : friendlyName(fieldId);
+        },
+        [columnsMap],
+    );
+
+    const formatWindowFunction = useCallback(
+        (windowFunction: WindowFunctionType) => {
+            switch (windowFunction) {
+                case WindowFunctionType.ROW_NUMBER:
+                    return 'ROW_NUMBER()';
+                case WindowFunctionType.PERCENT_RANK:
+                    return 'PERCENT_RANK()';
+                default:
+                    return windowFunction;
+            }
+        },
+        [],
+    );
+
+    const fieldLabel = useMemo(
+        () =>
+            template && 'fieldId' in template && template.fieldId !== null
+                ? getLabel(template.fieldId)
+                : undefined,
+        [template, getLabel],
+    );
+
+    const orderByText = useMemo(() => {
+        if (!template || !('orderBy' in template) || !template.orderBy) {
+            return null;
+        }
+        return template.orderBy
+            .map(
+                ({ fieldId, order }) =>
+                    `${getLabel(fieldId)} ${order?.toUpperCase() || 'ASC'}`,
+            )
+            .join(', ');
+    }, [template, getLabel]);
+
+    const partitionByText = useMemo(() => {
+        if (
+            !template ||
+            !('partitionBy' in template) ||
+            !template.partitionBy
+        ) {
+            return null;
+        }
+        return template.partitionBy
+            .map((fieldId) => getLabel(fieldId))
+            .join(', ');
+    }, [template, getLabel]);
+
     if (!template) {
         return (
             <Text c="dimmed" size="sm">
@@ -26,16 +88,6 @@ export const TemplateViewer: FC<TemplateViewerProps> = ({ template }) => {
             </Text>
         );
     }
-
-    const getLabel = (fieldId: string) => {
-        const field = columns.find((c) => c.id === fieldId)?.meta?.item;
-
-        return field && 'label' in field
-            ? getFieldLabel(field)
-            : friendlyName(template.fieldId);
-    };
-
-    const fieldLabel = getLabel(template.fieldId);
 
     return (
         <Stack spacing="md">
@@ -54,32 +106,43 @@ export const TemplateViewer: FC<TemplateViewerProps> = ({ template }) => {
                 </Text>
             </Stack>
 
-            <Group>
-                <Text fw={600} size="sm">
-                    Field:
-                </Text>
-                {fieldLabel}
-            </Group>
+            {'windowFunction' in template && (
+                <Group>
+                    <Text fw={600} size="sm">
+                        Window Function:
+                    </Text>
+                    <Text size="sm">
+                        {formatWindowFunction(template.windowFunction)}
+                    </Text>
+                </Group>
+            )}
 
-            {'orderBy' in template &&
-                template.orderBy &&
-                template.orderBy.length > 0 && (
-                    <Group>
-                        <Text fw={600} size="sm">
-                            Order By:
-                        </Text>
-                        <Text size="sm">
-                            {template.orderBy
-                                .map(
-                                    ({ fieldId, order }) =>
-                                        `${getLabel(fieldId)} ${
-                                            order?.toUpperCase() || 'ASC'
-                                        }`,
-                                )
-                                .join(', ')}
-                        </Text>
-                    </Group>
-                )}
+            {fieldLabel && (
+                <Group>
+                    <Text fw={600} size="sm">
+                        Field:
+                    </Text>
+                    {fieldLabel}
+                </Group>
+            )}
+
+            {orderByText && (
+                <Group>
+                    <Text fw={600} size="sm">
+                        Order By:
+                    </Text>
+                    <Text size="sm">{orderByText}</Text>
+                </Group>
+            )}
+
+            {partitionByText && (
+                <Group>
+                    <Text fw={600} size="sm">
+                        Partition By:
+                    </Text>
+                    <Text size="sm">{partitionByText}</Text>
+                </Group>
+            )}
         </Stack>
     );
 };

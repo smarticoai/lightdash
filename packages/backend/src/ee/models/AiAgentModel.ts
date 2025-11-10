@@ -14,8 +14,10 @@ import {
     AiAgentMessageAssistantArtifact,
     AiAgentMessageUser,
     AiAgentNotFoundError,
+    AiAgentReasoning,
     AiAgentSummary,
     AiAgentThreadSummary,
+    AiAgentToolCall,
     AiAgentToolResult,
     AiAgentUser,
     AiAgentUserPreferences,
@@ -49,6 +51,8 @@ import {
     type AiAgent,
 } from '@lightdash/common';
 import { Knex } from 'knex';
+import moment from 'moment';
+import { AiAgentReasoningTableName } from '../../database/entities/aiAgentReasoning';
 import { DbEmail, EmailTableName } from '../../database/entities/emails';
 import { DbProject, ProjectTableName } from '../../database/entities/projects';
 import { DbUser, UserTableName } from '../../database/entities/users';
@@ -198,6 +202,8 @@ export class AiAgentModel {
                 imageUrl: `${AiAgentTableName}.image_url`,
                 enableDataAccess: `${AiAgentTableName}.enable_data_access`,
                 enableSelfImprovement: `${AiAgentTableName}.enable_self_improvement`,
+                enableReasoning: `${AiAgentTableName}.enable_reasoning`,
+                version: `${AiAgentTableName}.version`,
                 groupAccess: this.database.raw(`
                     COALESCE(
                         (SELECT json_agg(group_uuid)
@@ -306,6 +312,8 @@ export class AiAgentModel {
                 imageUrl: `${AiAgentTableName}.image_url`,
                 enableDataAccess: `${AiAgentTableName}.enable_data_access`,
                 enableSelfImprovement: `${AiAgentTableName}.enable_self_improvement`,
+                enableReasoning: `${AiAgentTableName}.enable_reasoning`,
+                version: `${AiAgentTableName}.version`,
                 groupAccess: this.database.raw(`
                     COALESCE(
                         (SELECT json_agg(group_uuid)
@@ -387,6 +395,8 @@ export class AiAgentModel {
             | 'userAccess'
             | 'enableDataAccess'
             | 'enableSelfImprovement'
+            | 'enableReasoning'
+            | 'version'
         > & {
             organizationUuid: string;
         },
@@ -402,6 +412,8 @@ export class AiAgentModel {
                     image_url: null,
                     enable_data_access: args.enableDataAccess,
                     enable_self_improvement: args.enableSelfImprovement,
+                    enable_reasoning: args.enableReasoning,
+                    version: args.version,
                 })
                 .returning('*');
 
@@ -473,6 +485,8 @@ export class AiAgentModel {
                 userAccess,
                 enableDataAccess: agent.enable_data_access,
                 enableSelfImprovement: agent.enable_self_improvement,
+                enableReasoning: agent.enable_reasoning,
+                version: agent.version,
             };
         });
     }
@@ -507,6 +521,12 @@ export class AiAgentModel {
                               enable_self_improvement:
                                   args.enableSelfImprovement,
                           }
+                        : {}),
+                    ...(args.enableReasoning !== undefined
+                        ? { enable_reasoning: args.enableReasoning }
+                        : {}),
+                    ...(args.version !== undefined
+                        ? { version: args.version }
                         : {}),
                 })
                 .returning('*');
@@ -594,6 +614,8 @@ export class AiAgentModel {
                 userAccess,
                 enableDataAccess: agent.enable_data_access,
                 enableSelfImprovement: agent.enable_self_improvement,
+                enableReasoning: agent.enable_reasoning,
+                version: agent.version,
             };
         });
     }
@@ -1265,37 +1287,47 @@ export class AiAgentModel {
                 row.ai_prompt_uuid,
             );
 
-            if (row.responded_at != null) {
-                const artifacts = artifactsMap.get(row.ai_prompt_uuid) || [];
+            const reasoning = await this.getReasoningForPrompt(
+                row.ai_prompt_uuid,
+            );
 
-                messages.push({
-                    role: 'assistant',
-                    uuid: row.ai_prompt_uuid,
-                    threadUuid: row.ai_thread_uuid,
-                    message: row.response,
-                    createdAt: row.responded_at.toISOString(),
-                    humanScore: row.human_score,
-                    artifacts: artifacts.length > 0 ? artifacts : null,
-                    toolCalls: toolCalls
-                        .filter(
-                            (
-                                tc,
-                            ): tc is DbAiAgentToolCall & {
-                                tool_name: ToolName;
-                            } => isToolName(tc.tool_name),
-                        )
-                        .map((tc) => ({
-                            uuid: tc.ai_agent_tool_call_uuid,
-                            promptUuid: tc.ai_prompt_uuid,
-                            toolCallId: tc.tool_call_id,
-                            createdAt: tc.created_at,
-                            toolName: tc.tool_name,
-                            toolArgs: tc.tool_args,
-                        })),
-                    toolResults,
-                    savedQueryUuid: row.saved_query_uuid,
-                });
-            }
+            const artifacts = artifactsMap.get(row.ai_prompt_uuid);
+
+            messages.push({
+                role: 'assistant',
+                status: AiAgentModel.getThreadMessageStatus({
+                    responded_at: row.responded_at,
+                    response: row.response,
+                    created_at: row.created_at,
+                }),
+                uuid: row.ai_prompt_uuid,
+                threadUuid: row.ai_thread_uuid,
+                message: row.response,
+                createdAt:
+                    row.responded_at?.toISOString() ??
+                    row.created_at.toISOString(),
+                humanScore: row.human_score,
+                artifacts: artifacts ?? null,
+                toolCalls: toolCalls
+                    .filter(
+                        (
+                            tc,
+                        ): tc is DbAiAgentToolCall & {
+                            tool_name: ToolName;
+                        } => isToolName(tc.tool_name),
+                    )
+                    .map((tc) => ({
+                        uuid: tc.ai_agent_tool_call_uuid,
+                        promptUuid: tc.ai_prompt_uuid,
+                        toolCallId: tc.tool_call_id,
+                        createdAt: tc.created_at,
+                        toolName: tc.tool_name,
+                        toolArgs: tc.tool_args,
+                    })),
+                toolResults,
+                reasoning,
+                savedQueryUuid: row.saved_query_uuid,
+            });
 
             return messages;
         });
@@ -1356,6 +1388,19 @@ export class AiAgentModel {
         }
 
         return artifactsMap;
+    }
+
+    static getThreadMessageStatus(
+        row: Pick<DbAiPrompt, 'responded_at' | 'response' | 'created_at'>,
+    ): 'idle' | 'pending' | 'error' {
+        if (row.responded_at == null || row.response == null) {
+            // if the message was created more than 5 minutes ago, return error
+            if (moment(row.created_at).add(5, 'minutes').isBefore(moment())) {
+                return 'error';
+            }
+            return 'pending';
+        }
+        return 'idle';
     }
 
     async findThreadMessage(
@@ -1519,15 +1564,20 @@ export class AiAgentModel {
                 const toolResults = await this.getToolResultsForPrompt(
                     row.ai_prompt_uuid,
                 );
+                const reasoning = await this.getReasoningForPrompt(
+                    row.ai_prompt_uuid,
+                );
                 return {
                     role: 'assistant',
+                    status: AiAgentModel.getThreadMessageStatus({
+                        responded_at: row.responded_at,
+                        response: row.response,
+                        created_at: row.created_at,
+                    }),
                     uuid: row.ai_prompt_uuid,
                     threadUuid: row.ai_thread_uuid,
-
-                    // TODO: handle null response
                     message: row.response ?? '',
                     createdAt: row.responded_at?.toString() ?? '',
-
                     humanScore: row.human_score,
                     artifacts: artifacts.length > 0 ? artifacts : null,
                     toolCalls: toolCalls
@@ -1547,6 +1597,7 @@ export class AiAgentModel {
                             toolArgs: tc.tool_args,
                         })),
                     toolResults,
+                    reasoning,
                     savedQueryUuid: row.saved_query_uuid,
                 } satisfies AiAgentMessageAssistant;
             default:
@@ -2078,6 +2129,99 @@ export class AiAgentModel {
         return toolCall.ai_agent_tool_call_uuid;
     }
 
+    // eslint-disable-next-line class-methods-use-this
+    private parseToolResult(row: DbAiAgentToolResult): AiAgentToolResult {
+        const toolName = ToolNameSchema.parse(row.tool_name);
+
+        switch (toolName) {
+            case 'proposeChange':
+                return {
+                    uuid: row.ai_agent_tool_result_uuid,
+                    promptUuid: row.ai_prompt_uuid,
+                    toolCallId: row.tool_call_id,
+                    toolName,
+                    result: row.result,
+                    metadata:
+                        toolProposeChangeOutputSchema.shape.metadata.parse(
+                            row.metadata,
+                        ),
+                    createdAt: row.created_at,
+                };
+            default:
+                return {
+                    uuid: row.ai_agent_tool_result_uuid,
+                    promptUuid: row.ai_prompt_uuid,
+                    toolCallId: row.tool_call_id,
+                    toolName,
+                    result: row.result,
+                    metadata: row.metadata as AgentToolOutput['metadata'],
+                    createdAt: row.created_at,
+                };
+        }
+    }
+
+    /**
+     * Gets all tool calls and results for a prompt using a single query
+     * @param promptUuid
+     * @returns Array<{toolCall: AiAgentToolCall, toolResult: AiAgentToolResult}>
+     */
+    async getToolCallsAndResultsForPrompt(promptUuid: string): Promise<
+        Array<{
+            toolCall: AiAgentToolCall;
+            toolResult: AiAgentToolResult;
+        }>
+    > {
+        const rows = await this.database(AiAgentToolCallTableName)
+            .select<
+                Array<
+                    DbAiAgentToolCall &
+                        Pick<
+                            DbAiAgentToolResult,
+                            'ai_agent_tool_result_uuid' | 'result' | 'metadata'
+                        > & { result_created_at: Date }
+                >
+            >(
+                `${AiAgentToolCallTableName}.*`,
+                `${AiAgentToolResultTableName}.ai_agent_tool_result_uuid`,
+                `${AiAgentToolResultTableName}.result`,
+                `${AiAgentToolResultTableName}.metadata`,
+                `${AiAgentToolResultTableName}.created_at as result_created_at`,
+            )
+            .innerJoin(
+                AiAgentToolResultTableName,
+                `${AiAgentToolCallTableName}.tool_call_id`,
+                `${AiAgentToolResultTableName}.tool_call_id`,
+            )
+            .where(`${AiAgentToolCallTableName}.ai_prompt_uuid`, promptUuid)
+            .orderBy(`${AiAgentToolCallTableName}.created_at`, 'asc');
+
+        return rows.map((row) => {
+            const toolCall = {
+                uuid: row.ai_agent_tool_call_uuid,
+                promptUuid: row.ai_prompt_uuid,
+                toolCallId: row.tool_call_id,
+                toolName: row.tool_name,
+                toolArgs: row.tool_args,
+                createdAt: row.created_at,
+            } satisfies AiAgentToolCall;
+
+            const toolResult = this.parseToolResult({
+                ai_agent_tool_result_uuid: row.ai_agent_tool_result_uuid,
+                ai_prompt_uuid: row.ai_prompt_uuid,
+                tool_call_id: row.tool_call_id,
+                tool_name: row.tool_name,
+                result: row.result,
+                metadata: row.metadata,
+                created_at: row.result_created_at,
+            });
+
+            return {
+                toolCall,
+                toolResult,
+            };
+        });
+    }
+
     async getToolCallsForPrompt(
         promptUuid: string,
     ): Promise<DbAiAgentToolCall[]> {
@@ -2090,18 +2234,7 @@ export class AiAgentModel {
         promptUuid: string,
     ): Promise<AiAgentToolResult[]> {
         const rows = await this.database(AiAgentToolResultTableName)
-            .select<
-                Pick<
-                    DbAiAgentToolResult,
-                    | 'ai_agent_tool_result_uuid'
-                    | 'ai_prompt_uuid'
-                    | 'tool_call_id'
-                    | 'tool_name'
-                    | 'result'
-                    | 'metadata'
-                    | 'created_at'
-                >[]
-            >(
+            .select<DbAiAgentToolResult[]>(
                 'ai_agent_tool_result_uuid',
                 'ai_prompt_uuid',
                 'tool_call_id',
@@ -2113,34 +2246,7 @@ export class AiAgentModel {
             .where('ai_prompt_uuid', promptUuid)
             .orderBy('created_at', 'asc');
 
-        return rows.map((row) => {
-            const toolName = ToolNameSchema.parse(row.tool_name);
-            switch (toolName) {
-                case 'proposeChange':
-                    return {
-                        uuid: row.ai_agent_tool_result_uuid,
-                        promptUuid: row.ai_prompt_uuid,
-                        toolCallId: row.tool_call_id,
-                        toolName,
-                        result: row.result,
-                        metadata:
-                            toolProposeChangeOutputSchema.shape.metadata.parse(
-                                row.metadata,
-                            ),
-                        createdAt: row.created_at,
-                    };
-                default:
-                    return {
-                        uuid: row.ai_agent_tool_result_uuid,
-                        promptUuid: row.ai_prompt_uuid,
-                        toolCallId: row.tool_call_id,
-                        toolName,
-                        result: row.result,
-                        metadata: row.metadata as AgentToolOutput['metadata'],
-                        createdAt: row.created_at,
-                    };
-            }
-        });
+        return rows.map(this.parseToolResult);
     }
 
     async createToolResults(
@@ -2169,6 +2275,53 @@ export class AiAgentModel {
 
             return toolResults.map((tr) => tr.ai_agent_tool_result_uuid);
         });
+    }
+
+    async createReasoning(
+        promptUuid: string,
+        reasonings: Array<{ reasoningId: string; text: string }>,
+    ): Promise<string[]> {
+        if (reasonings.length === 0) return [];
+
+        // Group by reasoningId and concatenate texts
+        const grouped = reasonings.reduce<Record<string, string[]>>(
+            (acc, r) => {
+                if (!acc[r.reasoningId]) {
+                    acc[r.reasoningId] = [];
+                }
+                acc[r.reasoningId].push(r.text);
+                return acc;
+            },
+            {},
+        );
+
+        const inserted = await this.database(AiAgentReasoningTableName)
+            .insert(
+                Object.entries(grouped).map(([reasoningId, texts]) => ({
+                    ai_prompt_uuid: promptUuid,
+                    reasoning_id: reasoningId,
+                    text: texts.join('\n\n'),
+                })),
+            )
+            .returning('ai_agent_reasoning_uuid');
+
+        return inserted.map((row) => row.ai_agent_reasoning_uuid);
+    }
+
+    async getReasoningForPrompt(
+        promptUuid: string,
+    ): Promise<AiAgentReasoning[]> {
+        const rows = await this.database(AiAgentReasoningTableName)
+            .where('ai_prompt_uuid', promptUuid)
+            .orderBy('created_at', 'asc');
+
+        return rows.map((row) => ({
+            uuid: row.ai_agent_reasoning_uuid,
+            promptUuid: row.ai_prompt_uuid,
+            reasoningId: row.reasoning_id,
+            text: row.text,
+            createdAt: row.created_at,
+        }));
     }
 
     async updateToolResultMetadata(

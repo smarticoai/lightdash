@@ -151,12 +151,24 @@ describe('Formatting', () => {
         });
 
         describe('when applying round', () => {
-            test('if round is undefined it should keep up to 3 decimal places', () => {
+            test('if round is undefined and custom format is not number format it should keep up to 3 decimal places', () => {
                 expect(applyCustomFormat(5.9)).toEqual('5.9');
                 expect(applyCustomFormat(5.99)).toEqual('5.99');
                 expect(applyCustomFormat(5.999)).toEqual('5.999');
                 expect(applyCustomFormat(5.9999)).toEqual('6');
                 expect(applyCustomFormat(5.99999)).toEqual('6');
+                expect(
+                    applyCustomFormat(5.9, {
+                        type: CustomFormatType.CURRENCY,
+                        currency: Format.USD,
+                    }),
+                ).toEqual('$5.90');
+            });
+
+            test('if round is undefined and format is number it should keep 0 decimal places', () => {
+                expect(
+                    applyCustomFormat(5.9, { type: CustomFormatType.NUMBER }),
+                ).toEqual('6');
             });
 
             test('when round zero it should return the right round', () => {
@@ -444,14 +456,12 @@ describe('Formatting', () => {
             };
 
             test('it should return the right style', () => {
-                expect(applyCustomFormat(5, thousandsConfig)).toEqual('0.005K');
+                expect(applyCustomFormat(5, thousandsConfig)).toEqual('0K');
                 expect(applyCustomFormat(5, millionsConfig)).toEqual('0M');
-                expect(applyCustomFormat(500000, billionsConfig)).toEqual(
-                    '0.001B',
-                );
+                expect(applyCustomFormat(500000, billionsConfig)).toEqual('0B');
                 expect(applyCustomFormat(5, billionsConfig)).toEqual('0B');
                 expect(applyCustomFormat(5000000000, trillionsConfig)).toEqual(
-                    '0.005T',
+                    '0T',
                 );
             });
 
@@ -1234,7 +1244,7 @@ describe('Formatting', () => {
                 applyCustomFormat(12345.56789, {
                     type: CustomFormatType.NUMBER,
                 }),
-            ).toEqual('12,345.568');
+            ).toEqual('12,346');
             expect(
                 applyCustomFormat(12345.1235, {
                     type: CustomFormatType.NUMBER,
@@ -1252,7 +1262,7 @@ describe('Formatting', () => {
                     prefix: 'foo ',
                     suffix: ' bar',
                 }),
-            ).toEqual('foo 12,345.124 bar');
+            ).toEqual('foo 12,345 bar');
         });
 
         test('convert table calculation formats with invalid numbers', () => {
@@ -1564,6 +1574,162 @@ describe('Formatting', () => {
             expect(applyDefaultFormat(1234567)).toBe('1,234,567');
             expect(applyDefaultFormat(1234)).toBe('1,234');
             expect(applyDefaultFormat(-1234)).toBe('-1,234');
+        });
+    });
+
+    describe('formatItemValue with parameters', () => {
+        describe('conditional format expressions with ternary operators', () => {
+            it('should format currency based on parameter value - USD', () => {
+                const metricWithConditionalFormat = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.currency=="USD"?"$":"€"}0,0.00',
+                };
+                const parameters = { currency: 'USD' };
+
+                expect(
+                    formatItemValue(
+                        metricWithConditionalFormat,
+                        1234.56,
+                        false,
+                        parameters,
+                    ),
+                ).toBe('$1,234.56');
+            });
+
+            it('should format currency based on parameter value - EUR', () => {
+                const metricWithConditionalFormat = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.currency=="USD"?"$":"€"}0,0.00',
+                };
+                const parameters = { currency: 'EUR' };
+
+                expect(
+                    formatItemValue(
+                        metricWithConditionalFormat,
+                        1234.56,
+                        false,
+                        parameters,
+                    ),
+                ).toBe('€1,234.56');
+            });
+
+            it('should handle simple currency parameter substitution', () => {
+                const metricWithSimpleFormat = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.symbol}0,0.00',
+                };
+
+                expect(
+                    formatItemValue(metricWithSimpleFormat, 1234.56, false, {
+                        symbol: '£',
+                    }),
+                ).toBe('£1,234.56');
+
+                expect(
+                    formatItemValue(metricWithSimpleFormat, 1234.56, false, {
+                        symbol: '¥',
+                    }),
+                ).toBe('¥1,234.56');
+            });
+
+            it('should fall back to default formatting when parameters are not provided', () => {
+                const metricWithConditionalFormat = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.currency=="USD"?"$":"€"}0,0.00',
+                };
+
+                // Without parameters, should fall back to default number formatting
+                expect(
+                    formatItemValue(
+                        metricWithConditionalFormat,
+                        1234.56,
+                        false,
+                        undefined,
+                    ),
+                ).toBe('1,234.56');
+            });
+
+            it('should handle conditional rounding precision', () => {
+                const metricWithConditionalFormat = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.precision=="high"?"$":"$"}0,0${ld.parameters.precision=="high"?".00":""}',
+                };
+
+                expect(
+                    formatItemValue(
+                        metricWithConditionalFormat,
+                        1234.567,
+                        false,
+                        { precision: 'high' },
+                    ),
+                ).toBe('$1,234.57');
+
+                expect(
+                    formatItemValue(
+                        metricWithConditionalFormat,
+                        1234.567,
+                        false,
+                        { precision: 'low' },
+                    ),
+                ).toBe('$1,235');
+            });
+
+            it('should work with both ld.parameters and lightdash.parameters prefixes', () => {
+                const metricWithLdPrefix = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.symbol}0,0.00',
+                };
+
+                const metricWithLightdashPrefix = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${lightdash.parameters.symbol}0,0.00',
+                };
+
+                expect(
+                    formatItemValue(metricWithLdPrefix, 1234.56, false, {
+                        symbol: '$',
+                    }),
+                ).toBe('$1,234.56');
+
+                expect(
+                    formatItemValue(metricWithLightdashPrefix, 1234.56, false, {
+                        symbol: '€',
+                    }),
+                ).toBe('€1,234.56');
+            });
+
+            it('should handle different currency symbols', () => {
+                const metricWithFormat = {
+                    ...metric,
+                    type: MetricType.NUMBER,
+                    format: '${ld.parameters.symbol}0,0.00',
+                };
+
+                expect(
+                    formatItemValue(metricWithFormat, 1000.5, false, {
+                        symbol: '$',
+                    }),
+                ).toBe('$1,000.50');
+
+                expect(
+                    formatItemValue(metricWithFormat, 1000.5, false, {
+                        symbol: '€',
+                    }),
+                ).toBe('€1,000.50');
+
+                expect(
+                    formatItemValue(metricWithFormat, 1000.5, false, {
+                        symbol: '£',
+                    }),
+                ).toBe('£1,000.50');
+            });
         });
     });
 });

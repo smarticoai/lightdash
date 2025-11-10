@@ -1,4 +1,4 @@
-import { Navigate, type RouteObject } from 'react-router';
+import { Navigate, Outlet, type RouteObject } from 'react-router';
 import NavBar from '../components/NavBar';
 import PrivateRoute from '../components/PrivateRoute';
 import { TrackPage } from '../providers/Tracking/TrackingProvider';
@@ -31,6 +31,14 @@ const COMMERCIAL_EMBED_ROUTES: RouteObject[] = [
                 ),
             },
             {
+                path: '/embed/:projectUuid/tabs/:tabUuid',
+                element: (
+                    <TrackPage name={PageName.EMBED_DASHBOARD}>
+                        <EmbedDashboard />
+                    </TrackPage>
+                ),
+            },
+            {
                 path: '/embed/:projectUuid/explore/:exploreId',
                 element: (
                     <TrackPage name={PageName.EMBED_EXPLORE}>
@@ -48,9 +56,23 @@ const COMMERCIAL_AI_AGENTS_ROUTES: RouteObject[] = [
         element: (
             <PrivateRoute>
                 <NavBar />
-                <AiAgentsAdminPage />
+                <Outlet />
             </PrivateRoute>
         ),
+        children: [
+            {
+                index: true,
+                element: <Navigate to="threads" replace />,
+            },
+            {
+                path: 'threads',
+                element: <AiAgentsAdminPage />,
+            },
+            {
+                path: 'agents',
+                element: <AiAgentsAdminPage />,
+            },
+        ],
     },
     {
         path: '/ai-agents/',

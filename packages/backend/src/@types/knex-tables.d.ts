@@ -123,6 +123,10 @@ import {
 } from '../database/entities/warehouseCredentials';
 
 import {
+    AiAgentReasoningTable,
+    AiAgentReasoningTableName,
+} from '../database/entities/aiAgentReasoning';
+import {
     AnalyticsChartViews,
     AnalyticsChartViewsTableName,
     AnalyticsDashboardViews,
@@ -140,6 +144,10 @@ import {
     DashboardTileCommentsTable,
     DashboardTileCommentsTableName,
 } from '../database/entities/comments';
+import {
+    DownloadAuditTable,
+    DownloadAuditTableName,
+} from '../database/entities/downloadAudit';
 import {
     DownloadFileTable,
     DownloadFileTableName,
@@ -374,6 +382,7 @@ declare module 'knex/types/tables' {
         [SavedChartCustomDimensionsTableName]: SavedChartCustomDimensionsTable;
         [SavedChartCustomSqlDimensionsTableName]: SavedChartCustomSqlDimensionsTable;
         [DownloadFileTableName]: DownloadFileTable;
+        [DownloadAuditTableName]: DownloadAuditTable;
         [GithubAppInstallationTableName]: GithubAppInstallationTable;
         [GitlabAppInstallationTableName]: GitlabAppInstallationTable;
         [DashboardTileCommentsTableName]: DashboardTileCommentsTable;
@@ -390,6 +399,7 @@ declare module 'knex/types/tables' {
         [AiAgentSlackIntegrationTableName]: AiAgentSlackIntegrationTable;
         [AiAgentInstructionVersionsTableName]: AiAgentInstructionVersionsTable;
         [AiAgentUserPreferencesTableName]: AiAgentUserPreferencesTable;
+        [AiAgentReasoningTableName]: AiAgentReasoningTable;
         [AiAgentToolCallTableName]: AiAgentToolCallTable;
         [AiAgentToolResultTableName]: AiAgentToolResultTable;
         [DashboardTabsTableName]: DashboardTabsTable;

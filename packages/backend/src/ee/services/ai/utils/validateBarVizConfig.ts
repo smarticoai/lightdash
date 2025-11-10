@@ -5,6 +5,7 @@ import {
 } from '@lightdash/common';
 import {
     validateCustomMetricsDefinition,
+    validateFieldEntityType,
     validateFilterRules,
     validateMetricDimensionFilterPlacement,
     validateSelectedFieldsExistence,
@@ -17,33 +18,43 @@ export const validateBarVizConfig = (
     explore: Explore,
 ) => {
     const filterRules = getTotalFilterRules(vizTool.filters);
-    const fieldsToValidate = [
-        vizTool.vizConfig.xDimension,
-        vizTool.vizConfig.breakdownByDimension,
-        ...vizTool.vizConfig.yMetrics,
-        ...vizTool.vizConfig.sorts.map((sortField) => sortField.fieldId),
-    ].filter((x) => typeof x === 'string');
-    validateSelectedFieldsExistence(
-        explore,
-        fieldsToValidate,
-        vizTool.customMetrics,
-    );
-    validateCustomMetricsDefinition(explore, vizTool.customMetrics);
-    validateFilterRules(explore, filterRules, vizTool.customMetrics);
-    validateMetricDimensionFilterPlacement(
-        explore,
-        vizTool.filters,
-        vizTool.customMetrics,
-    );
     const selectedDimensions = [
         vizTool.vizConfig.xDimension,
         vizTool.vizConfig.breakdownByDimension,
     ].filter((x) => typeof x === 'string');
+    validateFieldEntityType(explore, selectedDimensions, 'dimension');
+    validateFieldEntityType(
+        explore,
+        vizTool.vizConfig.yMetrics,
+        'metric',
+        vizTool.customMetrics,
+    );
+    validateCustomMetricsDefinition(explore, vizTool.customMetrics);
+    validateFilterRules(
+        explore,
+        filterRules,
+        vizTool.customMetrics,
+        vizTool.tableCalculations,
+    );
+    validateMetricDimensionFilterPlacement(
+        explore,
+        vizTool.customMetrics,
+        vizTool.tableCalculations,
+        vizTool.filters,
+    );
+    // validate sort fields exist
+    validateSelectedFieldsExistence(
+        explore,
+        vizTool.vizConfig.sorts.map((sort) => sort.fieldId),
+        vizTool.customMetrics,
+        vizTool.tableCalculations,
+    );
     validateSortFieldsAreSelected(
         vizTool.vizConfig.sorts,
         selectedDimensions,
         vizTool.vizConfig.yMetrics,
         vizTool.customMetrics,
+        vizTool.tableCalculations,
     );
     validateTableCalculations(
         explore,

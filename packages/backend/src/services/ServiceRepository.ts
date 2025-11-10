@@ -32,6 +32,7 @@ import { PermissionsService } from './PermissionsService/PermissionsService';
 import { PersonalAccessTokenService } from './PersonalAccessTokenService';
 import { PinningService } from './PinningService/PinningService';
 import { PivotTableService } from './PivotTableService/PivotTableService';
+import { ProjectCompileLogService } from './ProjectCompileLogService/ProjectCompileLogService';
 import { ProjectParametersService } from './ProjectParametersService';
 import { ProjectService } from './ProjectService/ProjectService';
 import { PromoteService } from './PromoteService/PromoteService';
@@ -99,12 +100,14 @@ interface ServiceManifest {
     asyncQueryService: AsyncQueryService;
     renameService: RenameService;
     projectParametersService: ProjectParametersService;
+    projectCompileLogService: ProjectCompileLogService;
     permissionsService: PermissionsService;
     /** An implementation signature for these services are not available at this stage */
     embedService: unknown;
     aiService: unknown;
     aiAgentService: unknown;
     aiAgentAdminService: unknown;
+    aiOrganizationSettingsService: unknown;
     scimService: unknown;
     supportService: unknown;
     cacheService: unknown;
@@ -280,6 +283,7 @@ export class ServiceRepository
                     commentModel: this.models.getCommentModel(),
                     notificationsModel: this.models.getNotificationsModel(),
                     userModel: this.models.getUserModel(),
+                    featureFlagModel: this.models.getFeatureFlagModel(),
                 }),
         );
     }
@@ -550,6 +554,10 @@ export class ServiceRepository
                     featureFlagModel: this.models.getFeatureFlagModel(),
                     projectParametersModel:
                         this.models.getProjectParametersModel(),
+                    organizationWarehouseCredentialsModel:
+                        this.models.getOrganizationWarehouseCredentialsModel(),
+                    projectCompileLogModel:
+                        this.models.getProjectCompileLogModel(),
                 }),
         );
     }
@@ -587,14 +595,20 @@ export class ServiceRepository
                     encryptionUtil: this.utils.getEncryptionUtil(),
                     userModel: this.models.getUserModel(),
                     queryHistoryModel: this.models.getQueryHistoryModel(),
+                    downloadAuditModel: this.models.getDownloadAuditModel(),
                     savedSqlModel: this.models.getSavedSqlModel(),
-                    storageClient: this.clients.getResultsFileStorageClient(),
+                    resultsStorageClient:
+                        this.clients.getResultsFileStorageClient(),
                     featureFlagModel: this.models.getFeatureFlagModel(),
                     projectParametersModel:
                         this.models.getProjectParametersModel(),
+                    organizationWarehouseCredentialsModel:
+                        this.models.getOrganizationWarehouseCredentialsModel(),
                     pivotTableService: this.getPivotTableService(),
                     prometheusMetrics: this.prometheusMetrics,
                     permissionsService: this.getPermissionsService(),
+                    projectCompileLogModel:
+                        this.models.getProjectCompileLogModel(),
                 }),
         );
     }
@@ -821,6 +835,8 @@ export class ServiceRepository
             () =>
                 new ChangesetService({
                     changesetModel: this.models.getChangesetModel(),
+                    catalogModel: this.models.getCatalogModel(),
+                    projectModel: this.models.getProjectModel(),
                 }),
         );
     }
@@ -931,6 +947,12 @@ export class ServiceRepository
         return this.getService('aiAgentAdminService');
     }
 
+    public getAiOrganizationSettingsService<
+        AiOrganizationSettingsServiceImplT,
+    >(): AiOrganizationSettingsServiceImplT {
+        return this.getService('aiOrganizationSettingsService');
+    }
+
     public getRolesService(): RolesService {
         return this.getService(
             'rolesService',
@@ -1017,6 +1039,17 @@ export class ServiceRepository
                     projectParametersModel:
                         this.models.getProjectParametersModel(),
                     projectModel: this.models.getProjectModel(),
+                }),
+        );
+    }
+
+    public getProjectCompileLogService(): ProjectCompileLogService {
+        return this.getService(
+            'projectCompileLogService',
+            () =>
+                new ProjectCompileLogService({
+                    projectCompileLogModel:
+                        this.models.getProjectCompileLogModel(),
                 }),
         );
     }

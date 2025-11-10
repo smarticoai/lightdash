@@ -36,10 +36,10 @@ import {
 import { parse } from 'scim2-parse-filter';
 import { LightdashAnalytics } from '../../../analytics/LightdashAnalytics';
 import { LightdashConfig } from '../../../config/parseConfig';
-import Logger from '../../../logging/logger';
 import { EmailModel } from '../../../models/EmailModel';
 import { GroupsModel } from '../../../models/GroupsModel';
 import { OrganizationMemberProfileModel } from '../../../models/OrganizationMemberProfileModel';
+import { RolesModel } from '../../../models/RolesModel';
 import { UserModel } from '../../../models/UserModel';
 import { BaseService } from '../../../services/BaseService';
 import {
@@ -58,6 +58,7 @@ type ScimServiceArguments = {
     groupsModel: GroupsModel;
     serviceAccountModel: ServiceAccountModel;
     commercialFeatureFlagModel: CommercialFeatureFlagModel;
+    rolesModel: RolesModel;
 };
 
 export class ScimService extends BaseService {
@@ -77,6 +78,8 @@ export class ScimService extends BaseService {
 
     private readonly commercialFeatureFlagModel: CommercialFeatureFlagModel;
 
+    private readonly rolesModel: RolesModel;
+
     constructor({
         lightdashConfig,
         organizationMemberProfileModel,
@@ -86,6 +89,7 @@ export class ScimService extends BaseService {
         groupsModel,
         serviceAccountModel,
         commercialFeatureFlagModel,
+        rolesModel,
     }: ScimServiceArguments) {
         super();
         this.lightdashConfig = lightdashConfig;
@@ -96,6 +100,7 @@ export class ScimService extends BaseService {
         this.groupsModel = groupsModel;
         this.serviceAccountModel = serviceAccountModel;
         this.commercialFeatureFlagModel = commercialFeatureFlagModel;
+        this.rolesModel = rolesModel;
     }
 
     private static throwForbiddenErrorOnNoPermission(user: SessionUser) {
@@ -232,12 +237,20 @@ export class ScimService extends BaseService {
         userUuid: string;
         organizationUuid: string;
     }): Promise<ScimUser> {
+        this.logger.debug('SCIM: Getting user', { userUuid, organizationUuid });
         try {
             const user =
                 await this.organizationMemberProfileModel.getOrganizationMemberByUuid(
                     organizationUuid,
                     userUuid,
                 );
+            this.logger.debug('SCIM: Successfully retrieved user', {
+                userUuid,
+                organizationUuid,
+                userEmail: user.email,
+                isActive: user.isActive,
+                role: user.role,
+            });
             // Construct SCIM-compliant response
             return this.convertLightdashUserToScimUser(user);
         } catch (error) {
@@ -248,7 +261,7 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to retrieve SCIM user: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -272,8 +285,15 @@ export class ScimService extends BaseService {
         itemsPerPage?: number;
         filter?: string;
     }): Promise<ScimListResponse<ScimUser>> {
+        this.logger.debug('SCIM: Listing users', {
+            organizationUuid,
+            startIndex,
+            itemsPerPage,
+            filter,
+        });
         try {
             const parsedFilter = filter ? parse(filter) : null;
+            this.logger.debug('SCIM: Parsed filter', { parsedFilter });
 
             // these columns map from the potential scim filter to the actual user columns
             const userColumnMapping = {
@@ -315,6 +335,14 @@ export class ScimService extends BaseService {
                 this.convertLightdashUserToScimUser(member),
             );
 
+            this.logger.debug('SCIM: Successfully listed users', {
+                organizationUuid,
+                totalResults: pagination?.totalResults ?? 0,
+                returnedCount: scimUsers.length,
+                startIndex,
+                itemsPerPage: pagination?.pageSize ?? 0,
+            });
+
             return {
                 schemas: [ScimSchemaType.LIST_RESPONSE],
                 totalResults: pagination?.totalResults ?? 0,
@@ -323,7 +351,7 @@ export class ScimService extends BaseService {
                 Resources: scimUsers,
             };
         } catch (error) {
-            Logger.error(
+            this.logger.error(
                 `Failed to list SCIM users: ${getErrorMessage(error)}`,
             );
             throw new ScimError({
@@ -341,6 +369,15 @@ export class ScimService extends BaseService {
         user: ScimUpsertUser;
         organizationUuid: string;
     }): Promise<ScimUser> {
+        this.logger.debug('SCIM: Creating user', {
+            organizationUuid,
+            userName: user.userName,
+            firstName: user.name?.givenName,
+            lastName: user.name?.familyName,
+            active: user.active,
+            hasExtensionData: !!user[ScimSchemaType.LIGHTDASH_USER_EXTENSION],
+            extensionRole: user[ScimSchemaType.LIGHTDASH_USER_EXTENSION]?.role,
+        });
         try {
             const email = ScimService.getScimUserEmail(user);
             const dbUser = await this.userModel.createUser(
@@ -384,6 +421,13 @@ export class ScimService extends BaseService {
                 dbUser.userUuid,
                 email,
             );
+            this.logger.debug('SCIM: Successfully created user', {
+                organizationUuid,
+                userUuid: dbUser.userUuid,
+                email,
+                role,
+                isActive: user.active,
+            });
             this.analytics.track({
                 event: 'user.created',
                 anonymousId: LightdashAnalytics.anonymousId,
@@ -411,7 +455,7 @@ export class ScimService extends BaseService {
                     scimType: 'uniqueness',
                 });
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to create SCIM user: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -433,6 +477,16 @@ export class ScimService extends BaseService {
         userUuid: string;
         organizationUuid: string;
     }): Promise<ScimUser> {
+        this.logger.debug('SCIM: Updating user', {
+            userUuid,
+            organizationUuid,
+            userName: user.userName,
+            firstName: user.name?.givenName,
+            lastName: user.name?.familyName,
+            active: user.active,
+            hasExtensionData: !!user[ScimSchemaType.LIGHTDASH_USER_EXTENSION],
+            extensionRole: user[ScimSchemaType.LIGHTDASH_USER_EXTENSION]?.role,
+        });
         try {
             const emailToUpdate = ScimService.getScimUserEmail(user);
             // get existing user (and make sure user is in the organization)
@@ -447,8 +501,8 @@ export class ScimService extends BaseService {
                 dbUser.email,
                 {
                     // conditionally update fields
-                    firstName: user.name.givenName || dbUser.firstName,
-                    lastName: user.name.familyName || dbUser.lastName,
+                    firstName: user.name?.givenName || dbUser.firstName,
+                    lastName: user.name?.familyName || dbUser.lastName,
                     email: emailToUpdate,
                     isActive: user.active ?? dbUser.isActive,
                 },
@@ -477,10 +531,89 @@ export class ScimService extends BaseService {
                 );
             }
 
+            // If setting user to inactive, drop org role to MEMBER and remove project roles
+            if (user.active === false) {
+                try {
+                    if (dbUser.role !== OrganizationMemberRole.MEMBER) {
+                        await this.organizationMemberProfileModel.updateOrganizationMember(
+                            organizationUuid,
+                            userUuid,
+                            {
+                                role: OrganizationMemberRole.MEMBER,
+                            },
+                        );
+                        this.logger.debug(
+                            'SCIM: Updated user organisation role to MEMBER',
+                            {
+                                userUuid,
+                                organizationUuid,
+                                role: OrganizationMemberRole.MEMBER,
+                            },
+                        );
+                    }
+                } catch (e) {
+                    this.logger.error(
+                        `Failed to drop organization role for inactive user ${userUuid} to MEMBER: ${getErrorMessage(
+                            e,
+                        )}`,
+                    );
+                }
+                try {
+                    const projectsCount =
+                        await this.rolesModel.removeUserAccessFromAllProjects(
+                            dbUser.userUuid,
+                        );
+                    this.logger.debug(
+                        'SCIM: Removed user roles from all projects',
+                        {
+                            userUuid,
+                            organizationUuid,
+                            projectsCount,
+                        },
+                    );
+                } catch (e) {
+                    this.logger.error(
+                        `Failed to remove project roles for inactive user ${userUuid}: ${getErrorMessage(
+                            e,
+                        )}`,
+                    );
+                }
+
+                // Remove user from all groups in the organization when deactivated
+                try {
+                    const groupsCount =
+                        await this.groupsModel.removeUserFromAllGroups({
+                            organizationUuid,
+                            userUuid,
+                        });
+                    this.logger.debug('SCIM: Removed user from all groups', {
+                        userUuid,
+                        organizationUuid,
+                        groupsCount,
+                    });
+                } catch (e) {
+                    this.logger.error(
+                        `Failed to remove group memberships for inactive user ${userUuid}: ${getErrorMessage(
+                            e,
+                        )}`,
+                    );
+                }
+            }
+
             // Get the updated user with potentially new role
             const finalUser = await this.userModel.getUserDetailsByUuid(
                 updatedUser.userUuid,
             );
+
+            this.logger.debug('SCIM: Successfully updated user', {
+                userUuid,
+                organizationUuid,
+                emailToUpdate,
+                roleChanged: extensionData?.role !== dbUser.role,
+                newRole: extensionData?.role,
+                previousRole: dbUser.role,
+                isActive: finalUser.isActive,
+            });
 
             this.analytics.track({
                 event: 'user.updated',
@@ -509,7 +642,7 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to update SCIM user: ${getErrorMessage(error)}`,
             );
             Sentry.captureException(error);
@@ -529,6 +662,16 @@ export class ScimService extends BaseService {
         organizationUuid: string;
         patchOp: ScimPatch;
     }): Promise<ScimUser> {
+        this.logger.debug('SCIM: Patching user', {
+            userUuid,
+            organizationUuid,
+            operationsCount: patchOp.Operations.length,
+            operations: patchOp.Operations.map((op) => ({
+                op: op.op,
+                path: op.path,
+                hasValue: !!op.value,
+            })),
+        });
         try {
             // get existing user (and make sure user is in the organization)
             const dbUser =
@@ -543,6 +686,11 @@ export class ScimService extends BaseService {
                 scimDbUser as PatchLibScimResource,
                 patchOp.Operations,
             );
+            this.logger.debug('SCIM: Applied patch operations to user', {
+                userUuid,
+                organizationUuid,
+                patchedFields: Object.keys(patchedDbUserObj),
+            });
             // apply updates to user
             const patchedUser = await this.updateUser({
                 user: patchedDbUserObj as ScimUpsertUser,
@@ -569,7 +717,7 @@ export class ScimService extends BaseService {
                     case ScimError:
                         throw error; // pass through scim errors (from this.updateUser)
                     default:
-                        Logger.error(
+                        this.logger.error(
                             `Failed to patch SCIM user: ${getErrorMessage(
                                 error,
                             )}`,
@@ -597,6 +745,10 @@ export class ScimService extends BaseService {
         userUuid: string;
         organizationUuid: string;
     }): Promise<void> {
+        this.logger.debug('SCIM: Deleting user', {
+            userUuid,
+            organizationUuid,
+        });
         try {
             // get existing user (and make sure user is in the organization)
             const dbUser =
@@ -611,12 +763,27 @@ export class ScimService extends BaseService {
                     organizationUuid,
                 );
             if (remainingAdmins.length === 0 && admin.userUuid === userUuid) {
+                this.logger.debug(
+                    'SCIM: Cannot delete user - last admin in organization',
+                    {
+                        userUuid,
+                        organizationUuid,
+                        email: dbUser.email,
+                    },
+                );
                 throw new ParameterError(
                     'Organization must have at least one admin',
                 );
             }
 
             await this.userModel.delete(dbUser.userUuid);
+
+            this.logger.debug('SCIM: Successfully deleted user', {
+                userUuid,
+                organizationUuid,
+                email: dbUser.email,
+                role: dbUser.role,
+            });
 
             this.analytics.track({
                 event: 'user.deleted',
@@ -646,7 +813,7 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to delete SCIM user: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -662,15 +829,30 @@ export class ScimService extends BaseService {
         organizationUuid: string,
         groupUuid: string,
     ): Promise<ScimGroup> {
+        this.logger.debug('SCIM: Getting group', {
+            groupUuid,
+            organizationUuid,
+        });
         try {
             const group = await this.groupsModel.getGroupWithMembers(groupUuid);
             if (group.organizationUuid !== organizationUuid) {
+                this.logger.debug('SCIM: Group not found in organization', {
+                    groupUuid,
+                    organizationUuid,
+                    groupOrgUuid: group.organizationUuid,
+                });
                 throw new ScimError({
                     detail: `Group with UUID ${groupUuid} not found`,
                     status: 404,
                     scimType: 'noTarget',
                 });
             }
+            this.logger.debug('SCIM: Successfully retrieved group', {
+                groupUuid,
+                organizationUuid,
+                groupName: group.name,
+                memberCount: group.members.length,
+            });
             return this.convertLightdashGroupToScimGroup(group);
         } catch (error) {
             if (error instanceof ScimError) {
@@ -683,8 +865,8 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
-            Logger.error(
-                `Failed to retrieve SCIM user: ${getErrorMessage(error)}`,
+            this.logger.error(
+                `Failed to retrieve SCIM group: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
                 detail: getErrorMessage(error),
@@ -706,8 +888,15 @@ export class ScimService extends BaseService {
         itemsPerPage?: number;
         filter?: string;
     }): Promise<ScimListResponse<ScimGroup>> {
+        this.logger.debug('SCIM: Listing groups', {
+            organizationUuid,
+            startIndex,
+            itemsPerPage,
+            filter,
+        });
         try {
             const parsedFilter = filter ? parse(filter) : null;
+            this.logger.debug('SCIM: Parsed group filter', { parsedFilter });
 
             const exactMatchFilterName =
                 parsedFilter?.op === 'eq' &&
@@ -748,6 +937,14 @@ export class ScimService extends BaseService {
                 }),
             );
 
+            this.logger.debug('SCIM: Successfully listed groups', {
+                organizationUuid,
+                totalResults: pagination?.totalResults ?? 0,
+                returnedCount: scimGroups.length,
+                startIndex,
+                itemsPerPage: pagination?.pageSize ?? 0,
+            });
+
             return {
                 schemas: [ScimSchemaType.LIST_RESPONSE],
                 totalResults: pagination?.totalResults ?? 0,
@@ -756,7 +953,7 @@ export class ScimService extends BaseService {
                 Resources: scimGroups,
             };
         } catch (error) {
-            Logger.error(
+            this.logger.error(
                 `Failed to retrieve SCIM groups: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -772,6 +969,12 @@ export class ScimService extends BaseService {
         organizationUuid: string,
         groupToCreate: ScimUpsertGroup,
     ): Promise<ScimGroup> {
+        this.logger.debug('SCIM: Creating group', {
+            organizationUuid,
+            displayName: groupToCreate.displayName,
+            memberCount: groupToCreate.members?.length || 0,
+            memberUuids: groupToCreate.members?.map((m) => m.value) || [],
+        });
         try {
             if (!groupToCreate.displayName) {
                 throw new ScimError({
@@ -786,6 +989,14 @@ export class ScimService extends BaseService {
             });
 
             if (matchesByName.length > 0) {
+                this.logger.debug('SCIM: Group name already exists', {
+                    organizationUuid,
+                    displayName: groupToCreate.displayName,
+                    existingGroups: matchesByName.map((g) => ({
+                        uuid: g.uuid,
+                        name: g.name,
+                    })),
+                });
                 throw new ScimError({
                     detail: 'Group with this name already exists',
                     status: 409,
@@ -798,10 +1009,21 @@ export class ScimService extends BaseService {
                 createGroup: {
                     organizationUuid,
                     name: groupToCreate.displayName,
-                    members: groupToCreate.members.map((member) => ({
-                        userUuid: member.value,
-                    })),
+                    ...(groupToCreate.members !== undefined
+                        ? {
+                              members: groupToCreate.members.map((member) => ({
+                                  userUuid: member.value,
+                              })),
+                          }
+                        : {}),
                 },
+            });
+
+            this.logger.debug('SCIM: Successfully created group', {
+                organizationUuid,
+                groupUuid: group.uuid,
+                groupName: group.name,
+                memberCount: group.memberUuids.length,
             });
 
             this.analytics.track({
@@ -821,7 +1043,7 @@ export class ScimService extends BaseService {
             if (error instanceof ScimError) {
                 throw error;
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to replace SCIM group: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -838,6 +1060,13 @@ export class ScimService extends BaseService {
         groupUuid: string,
         groupToUpdate: ScimUpsertGroup,
     ): Promise<ScimGroup> {
+        this.logger.debug('SCIM: Replacing group', {
+            organizationUuid,
+            groupUuid,
+            displayName: groupToUpdate.displayName,
+            memberCount: groupToUpdate.members?.length || 0,
+            memberUuids: groupToUpdate.members?.map((m) => m.value) || [],
+        });
         try {
             if (!groupToUpdate.displayName) {
                 throw new ScimError({
@@ -849,6 +1078,14 @@ export class ScimService extends BaseService {
 
             const group = await this.groupsModel.getGroupWithMembers(groupUuid);
             if (group.organizationUuid !== organizationUuid) {
+                this.logger.debug(
+                    'SCIM: Group not found in organization for replace',
+                    {
+                        groupUuid,
+                        organizationUuid,
+                        groupOrgUuid: group.organizationUuid,
+                    },
+                );
                 throw new ScimError({
                     detail: `Group with UUID ${groupUuid} not found`,
                     status: 404,
@@ -866,6 +1103,15 @@ export class ScimService extends BaseService {
                 (match) => match.uuid !== groupUuid,
             );
             if (conflictingGroups.length > 0) {
+                this.logger.debug('SCIM: Group name conflict on replace', {
+                    organizationUuid,
+                    groupUuid,
+                    displayName: groupToUpdate.displayName,
+                    conflictingGroups: conflictingGroups.map((g) => ({
+                        uuid: g.uuid,
+                        name: g.name,
+                    })),
+                });
                 throw new ScimError({
                     detail: 'Group with this name already exists',
                     status: 409,
@@ -878,11 +1124,25 @@ export class ScimService extends BaseService {
                 groupUuid,
                 update: {
                     name: groupToUpdate.displayName,
-                    members: groupToUpdate.members.map((member) => ({
-                        userUuid: member.value,
-                    })),
+                    ...(groupToUpdate.members !== undefined
+                        ? {
+                              members: groupToUpdate.members.map((member) => ({
+                                  userUuid: member.value,
+                              })),
+                          }
+                        : {}),
                 },
             });
+
+            this.logger.debug('SCIM: Successfully replaced group', {
+                organizationUuid,
+                groupUuid,
+                oldName: group.name,
+                newName: updatedGroup.name,
+                oldMemberCount: group.members.length,
+                newMemberCount: updatedGroup.memberUuids.length,
+            });
+
             this.analytics.track({
                 event: 'group.updated',
                 anonymousId: LightdashAnalytics.anonymousId,
@@ -907,7 +1167,7 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to replace SCIM group: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -924,11 +1184,29 @@ export class ScimService extends BaseService {
         groupUuid: string,
         patchOp: ScimPatch,
     ): Promise<ScimGroup> {
+        this.logger.debug('SCIM: Updating group with patch', {
+            organizationUuid,
+            groupUuid,
+            operationsCount: patchOp.Operations.length,
+            operations: patchOp.Operations.map((op) => ({
+                op: op.op,
+                path: op.path,
+                hasValue: !!op.value,
+            })),
+        });
         try {
             const existingGroup = await this.groupsModel.getGroupWithMembers(
                 groupUuid,
             );
             if (existingGroup.organizationUuid !== organizationUuid) {
+                this.logger.debug(
+                    'SCIM: Group not found in organization for patch',
+                    {
+                        groupUuid,
+                        organizationUuid,
+                        groupOrgUuid: existingGroup.organizationUuid,
+                    },
+                );
                 throw new ScimError({
                     detail: `Group with UUID ${groupUuid} not found`,
                     status: 404,
@@ -942,6 +1220,14 @@ export class ScimService extends BaseService {
                 existingScimGroup,
                 patchOp.Operations,
             ) as ScimGroup;
+            this.logger.debug('SCIM: Applied patch operations to group', {
+                organizationUuid,
+                groupUuid,
+                oldName: existingGroup.name,
+                newName: patchedScimGroup.displayName,
+                oldMemberCount: existingGroup.members.length,
+                newMemberCount: (patchedScimGroup.members ?? []).length,
+            });
             if (!patchedScimGroup.displayName) {
                 throw new ScimError({
                     detail: 'displayName is required',
@@ -954,11 +1240,25 @@ export class ScimService extends BaseService {
                 groupUuid,
                 update: {
                     name: patchedScimGroup.displayName,
-                    members: patchedScimGroup.members.map((member) => ({
-                        userUuid: member.value,
-                    })),
+                    ...(patchedScimGroup.members !== undefined
+                        ? {
+                              members: patchedScimGroup.members.map(
+                                  (member) => ({
+                                      userUuid: member.value,
+                                  }),
+                              ),
+                          }
+                        : {}),
                 },
             });
+
+            this.logger.debug('SCIM: Successfully updated group', {
+                organizationUuid,
+                groupUuid,
+                finalName: updatedGroup.name,
+                finalMemberCount: updatedGroup.memberUuids.length,
+            });
+
             this.analytics.track({
                 event: 'group.updated',
                 anonymousId: LightdashAnalytics.anonymousId,
@@ -991,7 +1291,7 @@ export class ScimService extends BaseService {
                     case ScimError:
                         throw error; // pass through scim errors
                     default:
-                        Logger.error(
+                        this.logger.error(
                             `Failed to patch SCIM group: ${getErrorMessage(
                                 error,
                             )}`,
@@ -1015,9 +1315,21 @@ export class ScimService extends BaseService {
         organizationUuid: string,
         groupUuid: string,
     ): Promise<void> {
+        this.logger.debug('SCIM: Deleting group', {
+            organizationUuid,
+            groupUuid,
+        });
         try {
             const group = await this.groupsModel.getGroup(groupUuid);
             if (group.organizationUuid !== organizationUuid) {
+                this.logger.debug(
+                    'SCIM: Group not found in organization for delete',
+                    {
+                        groupUuid,
+                        organizationUuid,
+                        groupOrgUuid: group.organizationUuid,
+                    },
+                );
                 throw new ScimError({
                     detail: `Group with UUID ${groupUuid} not found`,
                     status: 404,
@@ -1026,6 +1338,11 @@ export class ScimService extends BaseService {
             }
 
             await this.groupsModel.deleteGroup(groupUuid);
+            this.logger.debug('SCIM: Successfully deleted group', {
+                organizationUuid,
+                groupUuid,
+                groupName: group.name,
+            });
             this.analytics.track({
                 event: 'group.deleted',
                 anonymousId: LightdashAnalytics.anonymousId,
@@ -1046,7 +1363,7 @@ export class ScimService extends BaseService {
                     scimType: 'noTarget',
                 });
             }
-            Logger.error(
+            this.logger.error(
                 `Failed to delete SCIM group: ${getErrorMessage(error)}`,
             );
             const scimError = new ScimError({
@@ -1110,6 +1427,7 @@ export class ScimService extends BaseService {
             >]: ScimSchemaAttribute;
         };
 
+        // These attributes should match the ScimUser interface
         const fieldAttributeMap: ScimUserFieldMap = {
             userName: {
                 name: 'userName',
@@ -1188,7 +1506,7 @@ export class ScimService extends BaseService {
                         type: 'string',
                         multiValued: false,
                         description: 'Email address for the User',
-                        required: false,
+                        required: true,
                         caseExact: false,
                         mutability: 'readWrite',
                         returned: 'default',
@@ -1214,7 +1532,7 @@ export class ScimService extends BaseService {
         return Object.values(fieldAttributeMap);
     }
 
-    static getSchemas(): ScimSchema[] {
+    static getSchemas(): ScimListResponse<ScimSchema> {
         const userSchema: ScimSchema = {
             schemas: [ScimSchemaType.SCHEMA],
             id: ScimSchemaType.USER,
@@ -1223,6 +1541,7 @@ export class ScimService extends BaseService {
             attributes: this.buildUserSchemaAttributes(),
         };
 
+        // These attributes should match the ScimGroup interface
         const groupSchema: ScimSchema = {
             schemas: [ScimSchemaType.SCHEMA],
             id: ScimSchemaType.GROUP,
@@ -1257,7 +1576,7 @@ export class ScimService extends BaseService {
                             multiValued: false,
                             description:
                                 'Identifier of the member of this Group',
-                            required: false,
+                            required: true,
                             caseExact: false,
                             mutability: 'readWrite',
                             returned: 'default',
@@ -1708,20 +2027,28 @@ export class ScimService extends BaseService {
             ],
         };
 
-        return [
+        const schemas = [
             userSchema,
             groupSchema,
             lightdashUserExtensionSchema,
             serviceProviderConfigSchema,
             resourceTypeSchema,
         ];
+
+        return {
+            schemas: [ScimSchemaType.LIST_RESPONSE],
+            totalResults: schemas.length,
+            itemsPerPage: schemas.length,
+            startIndex: 1,
+            Resources: schemas,
+        };
     }
 
-    static getResourceTypes(): ScimResourceType[] {
+    static getResourceTypes(): ScimListResponse<ScimResourceType> {
         // Get base URL from environment or use default
         const baseUrl = process.env.SITE_URL || 'http://localhost:8080';
 
-        return [
+        const resources: ScimResourceType[] = [
             {
                 schemas: [ScimSchemaType.RESOURCE_TYPE],
                 id: 'User',
@@ -1753,5 +2080,13 @@ export class ScimService extends BaseService {
                 },
             },
         ];
+
+        return {
+            schemas: [ScimSchemaType.LIST_RESPONSE],
+            totalResults: resources.length,
+            itemsPerPage: resources.length,
+            startIndex: 1,
+            Resources: resources,
+        };
     }
 }

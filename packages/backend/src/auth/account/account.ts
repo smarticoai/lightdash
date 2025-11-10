@@ -86,7 +86,15 @@ export const fromJwt = ({
     userAttributes: UserAccessControls;
 }): AnonymousAccount => {
     const builder = new AbilityBuilder<MemberAbility>(Ability);
-    applyEmbeddedAbility(decodedToken, dashboardUuid, embed, builder);
+    const externalId = getExternalId(decodedToken, source, embed.organization);
+
+    applyEmbeddedAbility(
+        decodedToken,
+        dashboardUuid,
+        embed,
+        externalId,
+        builder,
+    );
     const abilities = builder.build();
 
     return createAccount({
@@ -100,11 +108,12 @@ export const fromJwt = ({
         access: {
             dashboardId: dashboardUuid,
             filtering: decodedToken.content.dashboardFiltersInteractivity,
+            parameters: decodedToken.content.parameterInteractivity,
             controls: userAttributes,
         },
         // Create the fields we're able to set from the JWT
         user: {
-            id: getExternalId(decodedToken, source, embed.organization),
+            id: externalId,
             type: 'anonymous',
             ability: abilities,
             abilityRules: abilities.rules,

@@ -15,7 +15,9 @@ import {
     getFilterRules,
     getItemId,
     InlineErrorType,
+    isChartValidationError,
     isDashboardFieldTarget,
+    isDashboardValidationError,
     isExploreError,
     isSqlTableCalculation,
     isTemplateTableCalculation,
@@ -110,11 +112,22 @@ export class ValidationService extends BaseService {
             }
 
             if (isTemplateTableCalculation(tc)) {
-                const fieldsInTemplate = [
-                    tc.template.fieldId,
-                    ...('orderBy' in tc.template
+                const fieldIdPart =
+                    'fieldId' in tc.template && tc.template.fieldId !== null
+                        ? [tc.template.fieldId]
+                        : [];
+                const orderByPart =
+                    'orderBy' in tc.template
                         ? tc.template.orderBy.map((o) => o.fieldId)
-                        : []),
+                        : [];
+                const partitionByPart =
+                    'partitionBy' in tc.template && tc.template.partitionBy
+                        ? tc.template.partitionBy
+                        : [];
+                const fieldsInTemplate = [
+                    ...fieldIdPart,
+                    ...orderByPart,
+                    ...partitionByPart,
                 ];
                 return [...acc, ...fieldsInTemplate];
             }
@@ -239,7 +252,11 @@ export class ValidationService extends BaseService {
                 if (selectedExplores === undefined) return true;
                 return selectedExplores.some((explore) => {
                     if (isExploreError(explore)) return false;
-                    return explore.baseTable === c.tableName;
+                    // Match by baseTable or explore name (for additional explores)
+                    return (
+                        explore.baseTable === c.tableName ||
+                        explore.name === c.tableName
+                    );
                 });
             })
             .flatMap(
@@ -441,16 +458,40 @@ export class ValidationService extends BaseService {
 
     private async validateDashboards(
         projectUuid: string,
-        existingFields: CompiledField[],
+        exploreFields: Record<
+            string,
+            { dimensionIds: string[]; metricIds: string[] }
+        >,
         brokenCharts: Pick<CreateChartValidation, 'chartUuid' | 'name'>[],
+        allCharts: Array<{ uuid: string; tableName: string }>,
     ): Promise<CreateDashboardValidation[]> {
-        const existingFieldIds = existingFields.map(getItemId);
-
         const dashboardsToValidate =
             await this.dashboardModel.findDashboardsForValidation(projectUuid);
         const results: CreateDashboardValidation[] =
             dashboardsToValidate.flatMap(
                 ({ name, dashboardUuid, filters, chartUuids }) => {
+                    // Get unique explore names used by charts on this dashboard
+                    const dashboardExplores = new Set(
+                        chartUuids
+                            .map((chartUuid) => {
+                                const chart = allCharts.find(
+                                    (c) => c.uuid === chartUuid,
+                                );
+                                return chart?.tableName;
+                            })
+                            .filter((tableName): tableName is string =>
+                                Boolean(tableName),
+                            ),
+                    );
+
+                    // Build field list from only the explores used by this dashboard's charts
+                    const dashboardFieldIds = Array.from(
+                        dashboardExplores,
+                    ).flatMap((exploreName) => {
+                        const fields = exploreFields[exploreName];
+                        if (!fields) return [];
+                        return [...fields.dimensionIds, ...fields.metricIds];
+                    });
                     const commonValidation = {
                         name,
                         dashboardUuid,
@@ -502,9 +543,33 @@ export class ValidationService extends BaseService {
                                 // Skip SQL column targets
                                 return acc;
                             }
+
+                            // Check if the filter's table is used by any chart on this dashboard
+                            const filterTableName = isDashboardFieldTarget(
+                                filter.target,
+                            )
+                                ? filter.target.tableName
+                                : undefined;
+
+                            if (
+                                filterTableName &&
+                                !dashboardExplores.has(filterTableName)
+                            ) {
+                                // Filter references an explore not used by any chart on this dashboard
+                                return [
+                                    ...acc,
+                                    {
+                                        ...commonValidation,
+                                        errorType: ValidationErrorType.Filter,
+                                        error: `Filter error: the field '${filter.target.fieldId}' references table '${filterTableName}' which is not used by any chart on this dashboard`,
+                                        fieldName: filter.target.fieldId,
+                                    },
+                                ];
+                            }
+
                             return containsFieldId({
                                 acc,
-                                fieldIds: existingFieldIds,
+                                fieldIds: dashboardFieldIds,
                                 fieldId: filter.target.fieldId,
                                 error: `Filter error: the field '${filter.target.fieldId}' no longer exists`,
                                 errorType: ValidationErrorType.Filter,
@@ -538,9 +603,30 @@ export class ValidationService extends BaseService {
                                 isDashboardFieldTarget(tileTarget) &&
                                 !tileTarget.isSqlColumn // Skip SQL column targets
                             ) {
+                                // Check if the tile target's table is used by any chart on this dashboard
+                                const tileTargetTableName =
+                                    tileTarget.tableName;
+
+                                if (
+                                    tileTargetTableName &&
+                                    !dashboardExplores.has(tileTargetTableName)
+                                ) {
+                                    // Tile target references an explore not used by any chart on this dashboard
+                                    return [
+                                        ...acc,
+                                        {
+                                            ...commonValidation,
+                                            errorType:
+                                                ValidationErrorType.Filter,
+                                            error: `Filter error: the field '${tileTarget.fieldId}' references table '${tileTargetTableName}' which is not used by any chart on this dashboard`,
+                                            fieldName: tileTarget.fieldId,
+                                        },
+                                    ];
+                                }
+
                                 return containsFieldId({
                                     acc,
-                                    fieldIds: existingFieldIds,
+                                    fieldIds: dashboardFieldIds,
                                     fieldId: tileTarget.fieldId,
                                     error: `Filter error: the field '${tileTarget.fieldId}' no longer exists`,
                                     errorType: ValidationErrorType.Filter,
@@ -650,12 +736,19 @@ export class ValidationService extends BaseService {
                 const metrics = Object.values(explore.tables).flatMap((table) =>
                     Object.values(table.metrics),
                 );
+                const fieldData = {
+                    dimensionIds: dimensions.map(getItemId),
+                    metricIds: metrics.map(getItemId),
+                };
                 return {
                     ...acc,
-                    [explore.baseTable]: {
-                        dimensionIds: dimensions.map(getItemId),
-                        metricIds: metrics.map(getItemId),
-                    },
+                    // Index by baseTable for base explores and charts using baseTable
+                    [explore.baseTable]: fieldData,
+                    // Also index by explore name for additional explores
+                    // https://docs.lightdash.com/guides/explores
+                    ...(explore.name !== explore.baseTable
+                        ? { [explore.name]: fieldData }
+                        : {}),
                 };
             }, {}) || {};
 
@@ -699,13 +792,26 @@ export class ValidationService extends BaseService {
                   )
                 : [];
 
+        // Get all charts for dashboard validation (need chart->explore mapping)
+        const allCharts =
+            !hasValidationTargets ||
+            validationTargets.has(ValidationTarget.DASHBOARDS)
+                ? await this.savedChartModel.findChartsForValidation(
+                      projectUuid,
+                  )
+                : [];
+
         const dashboardErrors =
             !hasValidationTargets ||
             validationTargets.has(ValidationTarget.DASHBOARDS)
                 ? await this.validateDashboards(
                       projectUuid,
-                      existingFields,
+                      exploreFields,
                       chartErrors,
+                      allCharts.map((c) => ({
+                          uuid: c.uuid,
+                          tableName: c.tableName,
+                      })),
                   )
                 : [];
 
@@ -788,6 +894,21 @@ export class ValidationService extends BaseService {
         // Filter private content to developers
         return Promise.all(
             validations.map(async (validation) => {
+                const isDeleted =
+                    (isDashboardValidationError(validation) &&
+                        !validation.dashboardUuid) ||
+                    (isChartValidationError(validation) &&
+                        !validation.chartUuid);
+
+                if (isDeleted) {
+                    return {
+                        ...validation,
+                        chartUuid: undefined,
+                        dashboardUuid: undefined,
+                        name: 'Deleted content',
+                    };
+                }
+
                 const space = spaces.find(
                     (s) => s.uuid === validation.spaceUuid,
                 );
@@ -824,7 +945,30 @@ export class ValidationService extends BaseService {
         ) {
             throw new ForbiddenError();
         }
-        const validations = await this.validationModel.get(projectUuid, jobId);
+        const allValidations = await this.validationModel.get(
+            projectUuid,
+            jobId,
+        );
+
+        // Filter out orphaned validations (content was deleted)
+        const validations = allValidations.filter((validation) => {
+            // Keep table validations (they don't reference charts/dashboards)
+            if (
+                !isDashboardValidationError(validation) &&
+                !isChartValidationError(validation)
+            ) {
+                return true;
+            }
+
+            // Filter out chart/dashboard validations where content no longer exists
+            const hasChartUuid =
+                isChartValidationError(validation) && validation.chartUuid;
+            const hasDashboardUuid =
+                isDashboardValidationError(validation) &&
+                validation.dashboardUuid;
+
+            return hasChartUuid || hasDashboardUuid;
+        });
 
         if (fromSettings) {
             const contentIds = validations.map(

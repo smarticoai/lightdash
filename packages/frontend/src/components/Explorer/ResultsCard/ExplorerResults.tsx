@@ -4,6 +4,7 @@ import { memo, useCallback, useMemo, useState, type FC } from 'react';
 
 import {
     selectAdditionalMetrics,
+    selectColumnOrder,
     selectIsEditMode,
     selectTableCalculations,
     selectTableName,
@@ -60,6 +61,15 @@ export const ExplorerResults = memo(() => {
     const additionalMetrics = useExplorerSelector(selectAdditionalMetrics);
     const tableCalculations = useExplorerSelector(selectTableCalculations);
 
+    // Get chart config for column properties
+    const chartConfig = useExplorerContext(
+        (context) => context.state.unsavedChartVersion.chartConfig,
+    );
+    const columnProperties =
+        chartConfig.type === 'table' && chartConfig.config?.columns
+            ? chartConfig.config.columns
+            : undefined;
+
     // Get query state from new hook
     const {
         query,
@@ -73,14 +83,10 @@ export const ExplorerResults = memo(() => {
         FeatureFlags.UseSqlPivotResults,
     );
 
-    // Get metric query from new hook instead of context
     const dimensions = query.data?.metricQuery?.dimensions ?? [];
     const metrics = query.data?.metricQuery?.metrics ?? [];
-    const explorerColumnOrder = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.tableConfig.columnOrder,
-    );
+    const explorerColumnOrder = useExplorerSelector(selectColumnOrder);
 
-    // Get pivot config state outside useMemo
     const hasPivotConfig = useExplorerContext(
         (context) => !!context.state.unsavedChartVersion.pivotConfig,
     );
@@ -88,54 +94,10 @@ export const ExplorerResults = memo(() => {
     const resultsData = useMemo(() => {
         const isSqlPivotEnabled = !!useSqlPivotResults?.enabled;
         const hasUnpivotedQuery = !!unpivotedQuery?.data?.queryUuid;
-        const hasMainQuery = !!query.data?.queryUuid;
 
         // Only use unpivoted data when SQL pivot is enabled
         const shouldUseUnpivotedData =
             isSqlPivotEnabled && hasPivotConfig && hasUnpivotedQuery;
-
-        // Check if the main query is currently loading
-        const isMainQueryLoading =
-            query.isFetching ||
-            queryResults.isFetchingFirstPage ||
-            query.status === 'loading';
-
-        // Only check unpivoted query states if SQL pivot is enabled
-        if (isSqlPivotEnabled) {
-            // Check if we need to show loading for unpivoted data
-            const isUnpivotedQueryLoading =
-                unpivotedQuery.isFetching ||
-                unpivotedQueryResults.isFetchingFirstPage ||
-                unpivotedQuery.status === 'loading';
-
-            // Only consider needing unpivoted query if we actually expect it to run
-            const needsUnpivotedQuery =
-                hasPivotConfig &&
-                hasMainQuery &&
-                !hasUnpivotedQuery &&
-                !unpivotedQuery.isFetching &&
-                !unpivotedQuery.data &&
-                !isMainQueryLoading; // Don't show loading if main query is still running
-
-            const shouldShowLoadingForUnpivoted =
-                hasPivotConfig &&
-                hasMainQuery &&
-                !hasUnpivotedQuery &&
-                !isMainQueryLoading && // Don't show loading if main query is still running
-                (isUnpivotedQueryLoading || needsUnpivotedQuery);
-
-            if (shouldShowLoadingForUnpivoted) {
-                // Show loading state for pivoted charts waiting for unpivoted data
-                return {
-                    rows: undefined,
-                    totalResults: undefined,
-                    isFetchingRows: false,
-                    fetchMoreRows: () => {},
-                    status: 'loading' as const,
-                    apiError: null,
-                };
-            }
-        }
 
         if (shouldUseUnpivotedData) {
             return {
@@ -302,6 +264,7 @@ export const ExplorerResults = memo(() => {
                     pagination={pagination}
                     footer={footer}
                     showSubtotals={false}
+                    columnProperties={columnProperties}
                 />
                 <JsonViewerModal
                     heading={`Field: ${expandData.name}`}

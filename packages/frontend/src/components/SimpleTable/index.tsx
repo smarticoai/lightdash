@@ -196,12 +196,16 @@ const SimpleTable: FC<SimpleTableProps> = ({
                         <PivotTable
                             className={className}
                             data={pivotTableData.data}
+                            isMinimal={minimal}
                             conditionalFormattings={conditionalFormattings}
                             minMaxMap={minMaxMap}
                             getFieldLabel={getFieldLabel}
                             getField={getField}
                             hideRowNumbers={hideRowNumbers}
                             showSubtotals={showSubtotals}
+                            columnProperties={
+                                visualizationConfig.chartConfig.columnProperties
+                            }
                             {...rest}
                         />
                         {showResultsTotal && (
@@ -238,6 +242,9 @@ const SimpleTable: FC<SimpleTableProps> = ({
                 showSubtotals={showSubtotals}
                 conditionalFormattings={conditionalFormattings}
                 minMaxMap={minMaxMap}
+                columnProperties={
+                    visualizationConfig.chartConfig.columnProperties
+                }
                 footer={pagination}
                 headerContextMenu={headerContextMenu}
                 cellContextMenu={cellContextMenu}

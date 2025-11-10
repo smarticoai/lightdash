@@ -2,25 +2,29 @@
 import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 // eslint-disable-next-line import/extensions
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import express from 'express';
+import express, { type Router } from 'express';
 import { IncomingMessage } from 'http';
 
 import {
+    ApiKeyAccount,
     ForbiddenError,
     getErrorMessage,
     LightdashError,
+    LightdashSessionUser,
     MissingConfigError,
     NotImplementedError,
     OauthAccount,
+    OauthAuth,
 } from '@lightdash/common';
 import {
+    allowApiKeyAuthentication,
     allowOauthAuthentication,
     isAuthenticated,
 } from '../controllers/authentication';
 import { ExtraContext, McpService } from '../ee/services/McpService/McpService';
 import Logger from '../logging/logger';
 
-const mcpRouter = express.Router({ mergeParams: true });
+const mcpRouter: Router = express.Router({ mergeParams: true });
 
 function getMcpService(req: express.Request): McpService {
     try {
@@ -61,6 +65,7 @@ const returnHeaderIfUnauthenticated = (
 mcpRouter.all(
     '/',
     allowOauthAuthentication,
+    allowApiKeyAuthentication,
     returnHeaderIfUnauthenticated,
     async (req, res) => {
         try {
@@ -123,6 +128,20 @@ mcpRouter.all(
                         token: oauthAuth.authentication.token,
                         clientId: oauthAuth.authentication.clientId,
                         scopes: oauthAuth.authentication.scopes,
+                        extra,
+                    };
+                }
+
+                if (req.user && req.account?.isPatUser()) {
+                    const apiKeyAuth = req.account as ApiKeyAccount;
+                    const extra: ExtraContext = {
+                        user: req.user,
+                        account: apiKeyAuth,
+                    };
+                    authReq.auth = {
+                        token: apiKeyAuth.authentication.source,
+                        clientId: 'API key', // hardcoded client and scopes for PAT authentication
+                        scopes: ['mcp:read', 'mcp:write'],
                         extra,
                     };
                 }
