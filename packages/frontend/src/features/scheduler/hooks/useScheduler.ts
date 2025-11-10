@@ -110,33 +110,6 @@ const getPaginatedSchedulers = async (
     });
 };
 
-const getPaginatedSchedulers = async (
-    projectUuid: string,
-    paginateArgs?: KnexPaginateArgs,
-    searchQuery?: string,
-    sortBy?: string,
-    sortDirection?: 'asc' | 'desc',
-) => {
-    const urlParams = new URLSearchParams({
-        ...(paginateArgs
-            ? {
-                  page: String(paginateArgs.page),
-                  pageSize: String(paginateArgs.pageSize),
-              }
-            : {}),
-        ...(searchQuery ? { searchQuery } : {}),
-        ...(sortBy ? { sortBy } : {}),
-        ...(sortDirection ? { sortDirection } : {}),
-    }).toString();
-
-    return lightdashApi<ApiSchedulersResponse['results']>({
-        url: `/schedulers/${projectUuid}/list${
-            urlParams ? `?${urlParams}` : ''
-        }`,
-        method: 'GET',
-        body: undefined,
-    });
-};
 
 export const getSchedulerJobStatus = async <
     T = ApiJobStatusResponse['results'],
@@ -280,39 +253,6 @@ export const usePaginatedSchedulers = ({
         keepPreviousData: true,
         refetchOnWindowFocus: false,
         enabled: !!projectUuid,
-    });
-};
-
-export const usePaginatedSchedulers = ({
-    projectUuid,
-    paginateArgs,
-    searchQuery,
-    sortBy,
-    sortDirection,
-}: {
-    projectUuid: string;
-    paginateArgs?: KnexPaginateArgs;
-    searchQuery?: string;
-    sortBy?: string;
-    sortDirection?: 'asc' | 'desc';
-}) => {
-    return useQuery<ApiSchedulersResponse['results'], ApiError>({
-        queryKey: [
-            'paginatedSchedulers',
-            projectUuid,
-            paginateArgs,
-            searchQuery,
-            sortBy,
-            sortDirection,
-        ],
-        queryFn: () =>
-            getPaginatedSchedulers(
-                projectUuid,
-                paginateArgs,
-                searchQuery,
-                sortBy,
-                sortDirection,
-            ),
     });
 };
 
