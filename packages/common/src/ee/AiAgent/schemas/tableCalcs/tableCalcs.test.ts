@@ -12,6 +12,7 @@ describe('convertAiTableCalcsSchemaToTableCalcs', () => {
                 name: 'percent_total_sales',
                 displayName: 'Percent of total sales',
                 fieldId: 'orders_revenue',
+                partitionBy: null,
             },
         ];
 

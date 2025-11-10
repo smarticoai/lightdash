@@ -80,6 +80,7 @@ import { InstanceConfigurationService } from './services/InstanceConfigurationSe
 import { slackPassportStrategy } from './controllers/authentication/strategies/slackStrategy';
 import { SlackClient } from './clients/Slack/SlackClient';
 import { sessionAccountMiddleware } from './middlewares/accountMiddleware';
+import { jwtStrategy } from './controllers/authentication/strategies/jwtStrategy';
 
 // We need to override this interface to have our user typing
 declare global {

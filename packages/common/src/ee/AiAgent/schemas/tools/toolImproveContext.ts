@@ -40,8 +40,10 @@ export const TOOL_IMPROVE_CONTEXT_DESCRIPTION = `
  `;
 
 export const toolImproveContextArgsSchema = createToolSchema(
-    AiResultType.IMPROVE_CONTEXT,
-    TOOL_IMPROVE_CONTEXT_DESCRIPTION,
+    {
+        type: AiResultType.IMPROVE_CONTEXT,
+        description: TOOL_IMPROVE_CONTEXT_DESCRIPTION,
+    },
 )
     .extend({
         originalQuery: z
