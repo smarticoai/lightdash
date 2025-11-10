@@ -874,11 +874,12 @@ export class UserModel {
 
     async findSessionUserByPersonalAccessToken(
         token: string,
+        noHash: boolean = false,
     ): Promise<
         | { user: SessionUser; personalAccessToken: PersonalAccessToken }
         | undefined
     > {
-        const tokenHash = await hash(token);
+        const tokenHash = noHash ? token : await hash(token);
         const [row] = await userDetailsQueryBuilder(this.database)
             .innerJoin(
                 'personal_access_tokens',

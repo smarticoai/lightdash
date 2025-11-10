@@ -11,12 +11,13 @@ import {
 } from '@lightdash/common';
 import { tool } from 'ai';
 import { z } from 'zod';
-import type { FindFieldFn } from '../types/aiAgentDependencies';
+import type { FindFieldFn, UpdateProgressFn } from '../types/aiAgentDependencies';
 import { toModelOutput } from '../utils/toModelOutput';
 import { toolErrorHandler } from '../utils/toolErrorHandler';
 
 type Dependencies = {
     findFields: FindFieldFn;
+    updateProgress: UpdateProgressFn;
     pageSize: number;
 };
 

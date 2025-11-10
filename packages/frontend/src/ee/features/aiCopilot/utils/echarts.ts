@@ -290,6 +290,6 @@ export const getChartConfigFromAiAgentVizConfig = ({
                 echartsConfig: getTableMetricEchartsConfig(),
             };
         default:
-            return assertUnreachable(parsedConfig, 'Invalid chart type');
+            return assertUnreachable(parsedConfig.type as never, 'Invalid chart type');
     }
 };

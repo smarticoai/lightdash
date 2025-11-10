@@ -4,7 +4,7 @@ import {
     SchedulerJobStatus,
     type SchedulerWithLogs,
 } from '@lightdash/common';
-import { Tooltip, type MantineTheme } from '@mantine-8/core';
+import { Tooltip } from '@mantine-8/core';
 import {
     IconAlertTriangleFilled,
     IconCircleCheckFilled,
@@ -51,7 +51,7 @@ export const getSchedulerIcon = (item: SchedulerItem) => {
     }
 };
 
-export const getLogStatusIcon = (log: Log, theme: MantineTheme) => {
+export const getLogStatusIcon = (log: Log) => {
     switch (log.status) {
         case SchedulerJobStatus.SCHEDULED:
             return (
@@ -59,7 +59,6 @@ export const getLogStatusIcon = (log: Log, theme: MantineTheme) => {
                     <MantineIcon
                         icon={IconClockFilled}
                         color="blue.3"
-                        style={{ color: theme.colors.blue[3] }}
                     />
                 </Tooltip>
             );
@@ -69,7 +68,6 @@ export const getLogStatusIcon = (log: Log, theme: MantineTheme) => {
                     <MantineIcon
                         icon={IconProgress}
                         color="yellow.6"
-                        style={{ color: theme.colors.yellow[6] }}
                     />
                 </Tooltip>
             );
@@ -79,7 +77,6 @@ export const getLogStatusIcon = (log: Log, theme: MantineTheme) => {
                     <MantineIcon
                         icon={IconCircleCheckFilled}
                         color="green.6"
-                        style={{ color: theme.colors.green[6] }}
                     />
                 </Tooltip>
             );
@@ -89,7 +86,6 @@ export const getLogStatusIcon = (log: Log, theme: MantineTheme) => {
                     <MantineIcon
                         icon={IconAlertTriangleFilled}
                         color="red.6"
-                        style={{ color: theme.colors.red[6] }}
                     />
                 </Tooltip>
             );

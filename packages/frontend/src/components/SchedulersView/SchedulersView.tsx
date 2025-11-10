@@ -51,7 +51,7 @@ type Column = {
 };
 
 const Schedulers: FC<SchedulersProps> = ({ projectUuid }) => {
-    const { classes, theme } = useTableStyles();
+    const { classes } = useTableStyles();
     const [page, setPage] = useState(1);
     const [search, setSearch] = useState('');
     const [sortBy] = useState<string | undefined>('name');
@@ -83,11 +83,13 @@ const Schedulers: FC<SchedulersProps> = ({ projectUuid }) => {
     }, [search, sortBy, sortDirection]);
 
     const schedulers = useMemo(() => {
-        return paginatedSchedulers?.data || [];
+        const pages = paginatedSchedulers?.pages ?? [];
+        return pages.flatMap((p) => p.data);
     }, [paginatedSchedulers]);
 
     const pagination = useMemo(() => {
-        return paginatedSchedulers?.pagination;
+        const pages = paginatedSchedulers?.pages ?? [];
+        return pages.length > 0 ? pages[pages.length - 1]?.pagination : undefined;
     }, [paginatedSchedulers]);
 
     const { data: slackInstallation } = useGetSlack();
@@ -135,7 +137,7 @@ const Schedulers: FC<SchedulersProps> = ({ projectUuid }) => {
                               };
                               return (
                                   <Group noWrap>
-                                      {getSchedulerIcon(item, theme)}
+                                      {getSchedulerIcon(item)}
                                       <Stack spacing="two">
                                           <Anchor
                                               component={Link}
@@ -352,7 +354,7 @@ const Schedulers: FC<SchedulersProps> = ({ projectUuid }) => {
                       },
                   ]
                 : [],
-        [project, theme, projectUuid, getSlackChannelName],
+        [project, projectUuid, getSlackChannelName],
     );
 
     return (

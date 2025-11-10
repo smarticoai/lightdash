@@ -483,14 +483,14 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                         <Group>
                             {isLogGroup(rowData) ? (
                                 rowData.logs[0] ? (
-                                    getLogStatusIcon(rowData.logs[0], theme)
+                                    getLogStatusIcon(rowData.logs[0])
                                 ) : (
                                     <Text fz="xs" c="gray.6">
                                         -
                                     </Text>
                                 )
                             ) : (
-                                getLogStatusIcon(rowData.log, theme)
+                                getLogStatusIcon(rowData.log)
                             )}
 
                             {isLogGroup(rowData) &&

@@ -60,7 +60,7 @@ const Logs: FC<LogsProps> = ({
     charts,
     dashboards,
 }) => {
-    const { classes, theme } = useTableStyles();
+    const { classes } = useTableStyles();
     const [openedUuids, setOpenedUuids] = useState<Set<string>>(new Set());
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [selectedScheduler, setSelectedScheduler] = useState<{
@@ -110,7 +110,7 @@ const Logs: FC<LogsProps> = ({
 
                     return (
                         <Group noWrap>
-                            {getSchedulerIcon(item, theme)}
+                            {getSchedulerIcon(item)}
 
                             <Stack spacing="two">
                                 <Anchor
@@ -270,11 +270,11 @@ const Logs: FC<LogsProps> = ({
                                 <Text color="gray.6">-</Text>
                             ) : (
                                 <Stack>
-                                    {getLogStatusIcon(currentLogs[0], theme)}
+                                    {getLogStatusIcon(currentLogs[0])}
                                     <Collapse in={openedUuids.has(jobGroup)}>
                                         <Stack>
                                             {currentLogs.map((log) =>
-                                                getLogStatusIcon(log, theme),
+                                                getLogStatusIcon(log),
                                             )}
                                         </Stack>
                                     </Collapse>
@@ -347,15 +347,7 @@ const Logs: FC<LogsProps> = ({
                 },
             },
         ];
-    }, [
-        users,
-        charts,
-        dashboards,
-        projectUuid,
-        theme,
-        handleTogle,
-        openedUuids,
-    ]);
+    }, [users, charts, dashboards, projectUuid, handleTogle, openedUuids]);
 
     return (
         <>
