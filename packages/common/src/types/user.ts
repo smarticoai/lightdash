@@ -16,17 +16,6 @@ export type AccountUser = {
     type: 'registered' | 'anonymous';
 };
 
-export type AccountUser = {
-    id: string;
-    email: string | undefined;
-    /* Whether the user can login */
-    isActive: boolean;
-    abilityRules: AbilityBuilder<MemberAbility>['rules'];
-    ability: MemberAbility;
-    /* Is this a registered/known user in our DB or an anonymous/external user? */
-    type: 'registered' | 'anonymous';
-};
-
 export interface LightdashUser {
     userUuid: string;
     firstName: string;
