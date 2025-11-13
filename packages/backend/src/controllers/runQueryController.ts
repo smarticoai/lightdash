@@ -177,6 +177,7 @@ export class RunViewChartQueryController extends BaseController {
                 body.csvLimit,
                 body.dateZoom,
                 context,
+                req.user!,
             );
         this.setStatus(200);
         return {
