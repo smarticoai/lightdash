@@ -115,7 +115,12 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
                 : undefined;
         const hasApiKeyHeader =
             authorizationHeader?.startsWith('ApiKey ') === true;
-        if (!hasApiKeyHeader) {
+        // SMR-START
+        const hasSmrJwtHeader =
+            typeof (req.headers).jwt === 'string' &&
+            ((req.headers).jwt as string).length > 0;
+        // SMR-END
+        if (!hasApiKeyHeader && !hasSmrJwtHeader) {
             // Permissive: no PAT header present, continue without attempting PAT
             next();
             return;
