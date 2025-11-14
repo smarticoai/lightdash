@@ -11,6 +11,7 @@ import { spanToTraceHeader, startSpan } from '@sentry/react';
 import fetch from 'isomorphic-fetch';
 import { EMBED_KEY, type InMemoryEmbed } from './ee/providers/Embed/types';
 import { getFromInMemoryStorage } from './utils/inMemoryStorage';
+import { smrIsEmbeddedMode, smrReplaceRecursivelyCurrency } from './utils/smarticoUtils';
 
 // TODO: import from common or fix the instantiation of the request module
 const LIGHTDASH_SDK_INSTANCE_URL_LOCAL_STORAGE_KEY =
@@ -26,6 +27,12 @@ const defaultHeaders = {
     [LightdashRequestMethodHeader]: RequestMethod.WEB_APP,
     [LightdashVersionHeader]: __APP_VERSION__,
 };
+
+// SMR-START
+if (smrIsEmbeddedMode()) {
+    (defaultHeaders as any).JWT = 'token ' + (window as any)._smr_token;
+}
+// SMR-END
 
 const isSafeToAddEmbedHeader = (
     headers: Record<string, string> | undefined,
@@ -176,6 +183,11 @@ export const lightdashApi = async <T extends ApiResponse['results']>({
                 case 'ok':
                     // make sure we return null instead of undefined
                     // otherwise react-query will crash
+                    // SMR-START
+                    if (d.results) {
+                        d.results = smrReplaceRecursivelyCurrency(d.results);
+                    }
+                    // SMR-END
                     return (d.results ?? null) as T;
                 case 'error':
                     throw d;
