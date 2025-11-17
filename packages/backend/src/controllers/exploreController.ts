@@ -124,7 +124,6 @@ export class ExploreController extends BaseController {
                 body,
                 projectUuid,
                 exploreName: exploreId,
-                user: req.user!,
             });
 
         return {

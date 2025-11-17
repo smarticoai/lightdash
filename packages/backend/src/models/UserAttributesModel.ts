@@ -32,7 +32,6 @@ export class UserAttributesModel {
     async getAttributeValuesForOrgMember(filters: {
         organizationUuid: string;
         userUuid: string;
-        user?: SessionUser;
     }): Promise<UserAttributeValueMap> {
         const attributeValues = await this.database(UserAttributesTable)
             .leftJoin(

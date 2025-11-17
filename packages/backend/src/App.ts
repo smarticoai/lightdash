@@ -734,7 +734,9 @@ export default class App {
         const userService = this.serviceRepository.getUserService();
 
         passport.use(apiKeyPassportStrategy({ userService }));
+        // SMR-START
         passport.use(jwtStrategy({ userService }));
+        // SMR-END
         passport.use(
             localPassportStrategy({
                 userService,

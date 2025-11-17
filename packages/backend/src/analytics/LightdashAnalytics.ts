@@ -1579,9 +1579,11 @@ export class LightdashAnalytics extends Analytics {
     }
 
     track<T extends BaseTrack>(payload: TypedEvent | UntypedEvent<T>) {
+        // SMR-START
         if (!this.lightdashConfig.rudder.writeKey
             || this.lightdashConfig.rudder.writeKey === 'notrack'
         ) return; // Tracking disabled
+        // SMR-END
         if (isUserUpdatedEvent(payload)) {
             const basicEventProperties = {
                 is_tracking_anonymized: payload.properties.isTrackingAnonymized,

@@ -2060,7 +2060,6 @@ export class ProjectService extends BaseService {
     async compileQuery(
         args: {
             account: Account;
-            user: SessionUser;
             // ! TODO: we need to fix this type
             body: MetricQuery & { parameters?: ParametersValuesMap };
             projectUuid: string;
