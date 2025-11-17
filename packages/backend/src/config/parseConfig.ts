@@ -1099,8 +1099,6 @@ export type SmtpConfig = {
 
 const DEFAULT_JOB_TIMEOUT = 1000 * 60 * 10; // 10 minutes
 
-console.log('process.env.LIGHTDASH_SECRET', process.env.LIGHTDASH_SECRET);
-
 export const parseConfig = (): LightdashConfig => {
     const lightdashSecret = process.env.LIGHTDASH_SECRET;
     if (!lightdashSecret) {
