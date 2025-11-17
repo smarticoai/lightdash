@@ -152,13 +152,10 @@ export class UserAttributesModel {
 
         // combine group, user and default values
         return attributeValues.reduce<UserAttributeValueMap>((acc, row) => {
-            const sessionValue = filters.user?.userAttributes ? filters.user.userAttributes[row.name] as any : null;
             const userValue: string | undefined = userValuesMap[row.name];
             const groupValues: string[] = groupValuesMap[row.name] ?? [];
             let finalValues: string[];
-            if (sessionValue) {
-                finalValues = [sessionValue, ...groupValues];
-            } else if (userValue) {
+            if (userValue) {
                 finalValues = [userValue, ...groupValues];
             } else if (groupValues.length > 0) {
                 finalValues = groupValues;
