@@ -3,7 +3,6 @@ import { type MemberAbility } from '../authorization/types';
 import { type AnyType } from './any';
 import { type OpenIdIdentityIssuerType } from './openIdIdentity';
 import { type OrganizationMemberRole } from './organizationMemberProfile';
-import { type UserAttributeValueMap } from './userAttributes';
 
 export type AccountUser = {
     id: string;
@@ -76,7 +75,6 @@ export interface LightdashUserWithAbilityRules extends LightdashUser {
 
 export interface SessionUser extends LightdashUserWithAbilityRules {
     ability: MemberAbility;
-    userAttributes?: UserAttributeValueMap;
 }
 
 export interface UpdatedByUser {

@@ -26,7 +26,6 @@ export const jwtStrategy = ({
                     jwtDecoded.auth_token,
                     true
                 );
-                user.userAttributes = jwtDecoded;
                 return done(null, user);
             } catch (error) {
                 console.error('Error in jwtStrategy', error);

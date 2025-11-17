@@ -973,20 +973,6 @@ export class ProjectService extends BaseService {
             credentials = await this.refreshCredentials(credentials, userId);
         }
 
-        // SMR-start
-        const { organizationUuid } = await this.projectModel.getSummary(projectUuid);        
-        const userAttributes = await this.userAttributesModel.getAttributeValuesForOrgMember(
-            {
-                organizationUuid,
-                userUuid: userId
-            },
-        );     
-        
-        if (userAttributes?.bq_project_id) {
-            (credentials as CreateBigqueryCredentials).project = userAttributes.bq_project_id as unknown as string;
-        }
-        // SMR-end
-
         return {
             ...credentials,
             userWarehouseCredentialsUuid,
@@ -2074,11 +2060,13 @@ export class ProjectService extends BaseService {
     async compileQuery(
         args: {
             account: Account;
+            user: SessionUser;
             // ! TODO: we need to fix this type
             body: MetricQuery & { parameters?: ParametersValuesMap };
             projectUuid: string;
         } & ({ exploreName: string } | { explore: Explore }),
     ) {
+
         const {
             account,
             body: { parameters, ...metricQuery },
@@ -2110,7 +2098,7 @@ export class ProjectService extends BaseService {
         const explore =
             'explore' in args
                 ? args.explore
-                : await this.getExplore(account, projectUuid, args.exploreName);
+                : await this.getExplore(account, projectUuid, args.exploreName, undefined, undefined);
 
         const { warehouseClient, sshTunnel } = await this._getWarehouseClient(
             projectUuid,
@@ -2141,7 +2129,7 @@ export class ProjectService extends BaseService {
             userAttributes,
             timezone: this.lightdashConfig.query.timezone || 'UTC',
             parameters,
-            availableParameterDefinitions,
+            availableParameterDefinitions, 
         });
 
         await sshTunnel.disconnect();
@@ -2500,7 +2488,6 @@ export class ProjectService extends BaseService {
         csvLimit: number | null | undefined,
         dateZoom?: DateZoom,
         context: QueryExecutionContext = QueryExecutionContext.EXPLORE,
-        user?: SessionUser,
     ): Promise<ApiQueryResults> {
         assertIsAccountWithOrg(account);
 
@@ -2554,7 +2541,6 @@ export class ProjectService extends BaseService {
             dateZoom,
             chartUuid: undefined,
             invalidateCache: true, // Do not cache results for explore queries
-            user,
         });
     }
 
@@ -2570,7 +2556,6 @@ export class ProjectService extends BaseService {
         explore: validExplore,
         dateZoom,
         chartUuid,
-        user,
     }: {
         account: Account;
         metricQuery: MetricQuery;
@@ -2583,7 +2568,6 @@ export class ProjectService extends BaseService {
         explore?: Explore;
         dateZoom?: DateZoom;
         chartUuid: string | undefined;
-        user?: SessionUser;
     }): Promise<ApiQueryResults> {
         return wrapSentryTransaction(
             'ProjectService.runQueryAndFormatRows',
@@ -2596,7 +2580,6 @@ export class ProjectService extends BaseService {
                 const { rows, cacheMetadata, fields } =
                     await this.runMetricQuery({
                         account,
-                        user,
                         metricQuery,
                         projectUuid,
                         exploreName,
@@ -2911,7 +2894,6 @@ export class ProjectService extends BaseService {
 
     async runMetricQuery({
         account,
-        user,
         metricQuery,
         projectUuid,
         exploreName,
@@ -2925,7 +2907,6 @@ export class ProjectService extends BaseService {
         parameters,
     }: {
         account: Account;
-        user?: SessionUser;
         metricQuery: MetricQuery;
         projectUuid: string;
         exploreName: string;
@@ -2997,8 +2978,8 @@ export class ProjectService extends BaseService {
                         });
 
                     // SMR-START
-                    if (explore.tables && (user?.userAttributes?.bq_project_id || userAttributes?.bq_project_id)) {
-                        const bqProjectId: string = (user?.userAttributes?.bq_project_id || userAttributes?.bq_project_id) as unknown as string;
+                    if (explore.tables && userAttributes?.bq_project_id) {
+                        const bqProjectId: string = (userAttributes?.bq_project_id as unknown as string[])[0];
                         for (const [, compiledTable] of Object.entries(explore.tables)) {
                             compiledTable.database = bqProjectId;
                             compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
@@ -3620,9 +3601,8 @@ export class ProjectService extends BaseService {
             await this.getUserAttributes({ user });
 
         // SMR-START
-        if (explore && explore.tables && user?.userAttributes?.bq_project_id) {
-            const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
-            // console.log('bqProjectId1', bqProjectId);
+        if (explore && explore.tables && userAttributes?.bq_project_id) {
+            const bqProjectId: string = (userAttributes.bq_project_id as unknown as string[])[0];
             for (const [, compiledTable] of Object.entries(explore.tables)) {
                 compiledTable.database = bqProjectId;
                 compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
@@ -4193,9 +4173,10 @@ export class ProjectService extends BaseService {
         projectUuid: string,
         exploreName: string,
         organizationUuid?: string,
-        includeUnfilteredTables: boolean = true,
-        user?: SessionUser,
+        includeUnfilteredTables: boolean = true
     ): Promise<Explore> {
+
+
         return Sentry.startSpan(
             {
                 op: 'ProjectService.getExplore',
@@ -4211,8 +4192,9 @@ export class ProjectService extends BaseService {
                 const explore = exploresMap[exploreName];
 
                 // SMR-START
-                if (explore.tables && user?.userAttributes?.bq_project_id) {
-                    const bqProjectId: string = user.userAttributes.bq_project_id as unknown as string;
+                const { userAttributes } = await this.getUserAttributes({ account });
+                if (explore.tables && userAttributes.bq_project_id) {
+                    const bqProjectId: string = (userAttributes.bq_project_id as unknown as string[])[0];
                     for (const [, compiledTable] of Object.entries(explore.tables)) {
                         compiledTable.database = bqProjectId;
                         compiledTable.sqlTable = compiledTable.sqlTable.replace(process.env.SMR_BQ_PROJECT || 'project-not-defined', bqProjectId);
