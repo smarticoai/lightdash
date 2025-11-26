@@ -6716,6 +6716,77 @@ export class ProjectService extends BaseService {
         };
     }
 
+    public async getBackOfficeSegmentSql(
+        account: Account,
+        projectUuid: string,
+        segmentId: number,
+        projectId: string,
+        dataset: string,
+    ): Promise<{ sql: string }> {
+        // Permissions: ensure the requester can view the project
+        await this.getProject(projectUuid, account);
+
+        const baseUrl = process.env.SMR_BACKOFFICE_URL;
+        const token = process.env.SMR_BACKOFFICE_TOKEN;
+        if (!baseUrl) {
+            throw new UnexpectedServerError(
+                'Back Office URL is not configured (SMR_BACKOFFICE_URL)',
+            );
+        }
+        if (!projectId || !dataset) {
+            throw new ParameterError(
+                'projectId and dataset are required query parameters',
+            );
+        }
+
+        const requestUrl = new URL(`/segments/${segmentId}/sql`, baseUrl);
+        requestUrl.searchParams.set('project_id', projectId);
+        requestUrl.searchParams.set('dataset', dataset);
+
+        const response = await fetch(requestUrl.href, {
+            method: 'GET',
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+        });
+        if (!response.ok) {
+            const errText = await response.text();
+            this.logger.error(
+                `Back Office segment SQL fetch failed: ${response.status} ${response.statusText} - ${errText}`,
+            );
+            throw new UnexpectedServerError(
+                `Failed to fetch segment SQL for id ${segmentId}`,
+            );
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        let baseSql: string;
+        if (contentType.includes('application/json')) {
+            const json = (await response.json()) as {
+                sql?: string;
+                query?: string;
+            };
+            baseSql = (json.sql || json.query || '').toString();
+        } else {
+            baseSql = (await response.text()).toString();
+        }
+
+        // Normalize: remove wrapping quotes and trailing semicolon
+        let normalizedSql = baseSql.trim();
+        if (
+            (normalizedSql.startsWith('"') && normalizedSql.endsWith('"')) ||
+            (normalizedSql.startsWith("'") && normalizedSql.endsWith("'"))
+        ) {
+            normalizedSql = normalizedSql.slice(1, -1);
+        }
+        if (normalizedSql.endsWith(';')) {
+            normalizedSql = normalizedSql.slice(0, -1);
+        }
+
+        // Return normalized SQL from Back Office as-is (no extra wrapping)
+        return { sql: normalizedSql };
+    }
+
     /**
      * Combines parameter values from multiple sources in order of priority:
      * 1. Request parameters (highest priority)

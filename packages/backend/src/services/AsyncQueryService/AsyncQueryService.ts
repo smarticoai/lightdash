@@ -2807,10 +2807,14 @@ export class AsyncQueryService extends ProjectService {
             { noWrap: true },
         );
 
+        // Resolve segment placeholders, if any
+        const sqlWithSegments =
+            await this.resolveSegmentsInSql(sqlWithUserAttributes, account, projectUuid);
+
         // Then replace parameters in SQL before running column discovery query
         const { replacedSql: columnDiscoverySql } =
             safeReplaceParametersWithSqlBuilder(
-                sqlWithUserAttributes,
+                sqlWithSegments,
                 parameters ?? {},
                 warehouseConnection.warehouseClient,
             );
@@ -2851,7 +2855,7 @@ export class AsyncQueryService extends ProjectService {
 
         const virtualView = createVirtualViewObject(
             SQL_QUERY_MOCK_EXPLORER_NAME,
-            sqlWithUserAttributes,
+            sqlWithSegments,
             vizColumns,
             warehouseConnection.warehouseClient,
         );
@@ -2933,7 +2937,7 @@ export class AsyncQueryService extends ProjectService {
             {
                 referenceMap,
                 select: selectColumns,
-                from: { name: 'sql_query', sql: sqlWithUserAttributes },
+                from: { name: 'sql_query', sql: sqlWithSegments },
                 filters: appliedDashboardFilters
                     ? {
                           id: uuidv4(),
@@ -2980,6 +2984,68 @@ export class AsyncQueryService extends ProjectService {
             originalColumns,
             usedParameters,
         };
+    }
+
+    private async resolveSegmentsInSql(
+        sql: string,
+        account: Account,
+        projectUuid: string,
+    ): Promise<string> {
+        let updatedSql = sql;
+        if (!/segment_id\s+\d+/i.test(updatedSql)) return updatedSql;
+
+        // Extract BigQuery project and dataset from first fully-qualified table reference
+        // Pattern: `project`.`dataset`.`table`
+        const fqtnMatch =
+            /`([a-zA-Z0-9_-]+)`\.`([a-zA-Z0-9_]+)`\.`([a-zA-Z0-9_]+)`/.exec(
+                updatedSql,
+            );
+        const projectId = fqtnMatch?.[1];
+        const dataset = fqtnMatch?.[2];
+        if (!projectId || !dataset) {
+            return updatedSql;
+        }
+
+        // Simplified: find any IN ( ... ) that contains 'segment_id N'
+        const segmentInClausePattern =
+            /\bIN\s*\(\s*[^)]*segment_id\s+(\d+)[^)]*\)/gi;
+        const matches = Array.from(updatedSql.matchAll(segmentInClausePattern));
+        if (matches.length === 0) return updatedSql;
+
+        const replacements = await Promise.all(
+            matches.map(async (m) => {
+                const fullMatch = m[0];
+                const segmentId = Number(m[1]);
+                const start = m.index ?? 0;
+                const end = start + fullMatch.length;
+                if (!Number.isFinite(segmentId)) return null;
+                try {
+                    const { sql: segmentSql } =
+                        await this.getBackOfficeSegmentSql(
+                            account,
+                            projectUuid,
+                            segmentId,
+                            projectId,
+                            dataset,
+                        );
+                    const replacement = `IN ( ${segmentSql} )`;
+                    return { start, end, replacement };
+                } catch {
+                    return null;
+                }
+            }),
+        );
+
+        const validReplacements = replacements
+            .filter((r): r is { start: number; end: number; replacement: string } => !!r)
+            .sort((a, b) => b.start - a.start);
+        for (const r of validReplacements) {
+            updatedSql =
+                updatedSql.slice(0, r.start) +
+                r.replacement +
+                updatedSql.slice(r.end);
+        }
+        return updatedSql;
     }
 
     async executeAsyncSqlChartQuery(
