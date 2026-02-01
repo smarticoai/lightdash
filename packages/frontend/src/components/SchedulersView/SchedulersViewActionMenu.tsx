@@ -5,6 +5,7 @@ import {
     IconSend,
     IconSquarePlus,
     IconTrash,
+    IconUserEdit,
 } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { type FC } from 'react';
@@ -24,12 +25,19 @@ interface SchedulersViewActionMenuProps {
     onOpen?: () => void;
     onClose?: () => void;
     item: SchedulerItem;
-    projectUuid: string;
+    projectUuid?: string | null;
+    onReassignOwner?: (
+        schedulerUuid: string,
+        ownerUuid: string | undefined,
+    ) => void;
+    hideReassign?: boolean;
 }
 
 const SchedulersViewActionMenu: FC<SchedulersViewActionMenuProps> = ({
     item,
     projectUuid,
+    onReassignOwner,
+    hideReassign = false,
 }) => {
     const [isDeleting, setIsDeleting] = React.useState(false);
     const [isConfirmOpen, setIsConfirmOpen] = React.useState(false);
@@ -85,6 +93,21 @@ const SchedulersViewActionMenu: FC<SchedulersViewActionMenuProps> = ({
                     >
                         Send now
                     </Menu.Item>
+                    {!hideReassign && (
+                        <Menu.Item
+                            component="button"
+                            role="menuitem"
+                            leftSection={<MantineIcon icon={IconUserEdit} />}
+                            onClick={() =>
+                                onReassignOwner?.(
+                                    item.schedulerUuid,
+                                    item.createdBy,
+                                )
+                            }
+                        >
+                            Reassign owner
+                        </Menu.Item>
+                    )}
                     <Menu.Divider />
                     <Menu.Item
                         component="button"
@@ -97,12 +120,14 @@ const SchedulersViewActionMenu: FC<SchedulersViewActionMenuProps> = ({
                     </Menu.Item>
                 </Menu.Dropdown>
             </Menu>
-            <SchedulerDeleteModal
-                opened={isDeleting}
-                schedulerUuid={item.schedulerUuid}
-                onConfirm={handleDelete}
-                onClose={handleDelete}
-            />
+            {isDeleting && (
+                <SchedulerDeleteModal
+                    opened={isDeleting}
+                    schedulerUuid={item.schedulerUuid}
+                    onConfirm={handleDelete}
+                    onClose={handleDelete}
+                />
+            )}
             <ConfirmSendNowModal
                 opened={isConfirmOpen}
                 onClose={() => setIsConfirmOpen(false)}

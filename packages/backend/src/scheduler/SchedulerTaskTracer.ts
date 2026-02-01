@@ -1,5 +1,7 @@
 import {
+    GoogleSheetsTransientError,
     QueueTraceProperties,
+    ResultsExpiredError,
     SCHEDULER_TASKS,
     SchedulerTaskName,
     TaskPayloadMap,
@@ -33,6 +35,23 @@ const getTagsForTask: {
         'project.uuid': payload.projectUuid,
     }),
     [SCHEDULER_TASKS.SEND_EMAIL_NOTIFICATION]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+
+    // Batch notification tasks
+    [SCHEDULER_TASKS.SEND_SLACK_BATCH_NOTIFICATION]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+    [SCHEDULER_TASKS.SEND_EMAIL_BATCH_NOTIFICATION]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+    [SCHEDULER_TASKS.SEND_MSTEAMS_BATCH_NOTIFICATION]: (payload) => ({
         'organization.uuid': payload.organizationUuid,
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
@@ -124,6 +143,18 @@ const getTagsForTask: {
         'project.uuid': payload.projectUuid,
     }),
 
+    [SCHEDULER_TASKS.EMBED_ARTIFACT_VERSION]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+
+    [SCHEDULER_TASKS.GENERATE_ARTIFACT_QUESTION]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+
     [SCHEDULER_TASKS.RENAME_RESOURCES]: (payload) => ({
         'organization.uuid': payload.organizationUuid,
         'user.uuid': payload.userUuid,
@@ -136,6 +167,11 @@ const getTagsForTask: {
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
     }),
+    [SCHEDULER_TASKS.SYNC_SLACK_CHANNELS]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+    }),
+    [SCHEDULER_TASKS.GENERATE_SLACK_CHANNEL_SYNC_JOBS]: () => ({}),
+    [SCHEDULER_TASKS.CHECK_FOR_STUCK_JOBS]: () => ({}),
 } as const;
 
 // Generic accessor function
@@ -256,16 +292,29 @@ export const traceTask = <T extends SchedulerTaskName>(
                                 },
                             });
 
-                            // Capture the error with additional fingerprinting
-                            Sentry.withScope((scope) => {
-                                scope.setFingerprint([
-                                    'scheduler_worker',
-                                    taskName,
-                                    (e as Error).name || 'Error',
-                                    (e as Error).message || 'Unknown error',
-                                ]);
-                                Sentry.captureException(e);
-                            });
+                            // Only capture to Sentry if this is the final attempt or it's not a retryable error
+                            // ResultsExpiredError is expected (expired S3 cache) and should not go to Sentry
+                            const isRetryableError =
+                                e instanceof GoogleSheetsTransientError;
+                            const isExpectedError =
+                                e instanceof ResultsExpiredError;
+                            const hasRetriesRemaining =
+                                job.attempts < job.max_attempts;
+
+                            if (
+                                !isExpectedError &&
+                                (!isRetryableError || !hasRetriesRemaining)
+                            ) {
+                                Sentry.withScope((scope) => {
+                                    scope.setFingerprint([
+                                        'scheduler_worker',
+                                        taskName,
+                                        (e as Error).name || 'Error',
+                                        (e as Error).message || 'Unknown error',
+                                    ]);
+                                    Sentry.captureException(e);
+                                });
+                            }
 
                             throw e;
                         }

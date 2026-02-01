@@ -1,7 +1,11 @@
 {
     "name": "@lightdash/warehouses",
-    "version": "0.2128.1",
+    "version": "0.2405.0",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/lightdash/lightdash.git"
+    },
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "files": [
@@ -15,14 +19,16 @@
         "lodash": "^4.17.21",
         "pg": "^8.13.1",
         "pg-cursor": "^2.10.0",
-        "snowflake-sdk": "~2.3.1",
+        "node-fetch": "^2.7.0",
+        "snowflake-sdk": "~2.3.3",
         "ssh2": "^1.14.0",
-        "trino-client": "0.2.6"
+        "trino-client": "0.2.9"
     },
     "devDependencies": {
         "@types/pg": "^8.11.10",
         "@types/pg-cursor": "^2.7.0",
         "@types/ssh2": "^1.11.15",
+        "@types/node-fetch": "^2.6.13",
         "copyfiles": "^2.4.1"
     },
     "description": "Warehouse connectors for Lightdash",
@@ -38,6 +44,6 @@
         "copy-files": "copyfiles -u 1 src/warehouseClients/ca-bundle-aws-redshift.crt src/warehouseClients/ca-bundle-aws-rds-global.pem dist/",
         "build": "pnpm run copy-files && tsc --build tsconfig.json",
         "dev": "pnpm run copy-files && tsc --build --watch --preserveWatchOutput tsconfig.json",
-        "release": "pnpm publish --no-git-checks"
+        "release": "pnpm publish --no-git-checks --access public"
     }
 }

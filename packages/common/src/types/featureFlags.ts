@@ -5,9 +5,6 @@
  * If the feature flag is no longer in use, remove it from this enum.
  */
 export enum FeatureFlags {
-    /**/
-    ShowDbtCloudProjectOption = 'show-dbt-cloud-project-option',
-
     /* Show user groups */
     UserGroupsEnabled = 'user-groups-enabled',
 
@@ -46,8 +43,6 @@ export enum FeatureFlags {
      */
     AiCustomViz = 'ai-custom-viz',
 
-    BigquerySSO = 'bigquery-sso',
-
     /**
      * Use workers for async query execution
      */
@@ -59,19 +54,37 @@ export enum FeatureFlags {
     UseSqlPivotResults = 'use-sql-pivot-results',
 
     /**
+     * Enable map chart type visualization
+     */
+    Maps = 'maps',
+
+    /**
      * Enable the unused content dashboard showing least viewed charts and dashboards
      */
     UnusedContentDashboard = 'unused-content-dashboard',
 
     /**
-     * Enable experimental explorer improvements
+     * Enable period-over-period comparisons option
      */
-    ExperimentalExplorerImprovements = 'experimental-explorer-improvements',
+    PeriodOverPeriod = 'pop',
 
     /**
-     * Enable experimental virtualized side bar
+     * Enable viewing and editing YAML source files in the Explore UI
      */
-    ExperimentalVirtualizedSideBar = 'experimental-virtualized-side-bar',
+    EditYamlInUi = 'edit-yaml-in-ui',
+
+    /**
+     * Enable echarts visualization in Metrics Catalog explore modal (V2)
+     * When enabled, uses VisualizationProvider + echarts instead of recharts
+     */
+    MetricsCatalogEchartsVisualization = 'metrics-catalog-echarts-visualization',
+
+    /**
+     * Enable nested spaces to define their own permissions as well as extending
+     * their parent permissions. When disabled (default), all nested spaces
+     * inherit permissions from their root space.
+     */
+    NestedSpacesPermissions = 'nested-spaces-permissions',
 }
 
 export type FeatureFlag = {

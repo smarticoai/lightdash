@@ -1,11 +1,13 @@
 import { type FilterableDimension } from './field';
 import { type DashboardFilters } from './filter';
+import { type KnexPaginatedData } from './knex-paginate';
 import { type DashboardParameters } from './parameters';
 import {
     type ChartKind,
     type CreateSavedChart,
     type SavedChartType,
 } from './savedCharts';
+import type { SchedulerAndTargets } from './scheduler';
 import { type SpaceShare } from './space';
 import { type UpdatedByUser } from './user';
 import { type ValidationSummary } from './validation';
@@ -15,6 +17,7 @@ export enum DashboardTileTypes {
     SQL_CHART = 'sql_chart',
     MARKDOWN = 'markdown',
     LOOM = 'loom',
+    HEADING = 'heading',
 }
 
 type CreateDashboardTileBase = {
@@ -34,6 +37,7 @@ export type DashboardMarkdownTileProperties = {
     properties: {
         title: string;
         content: string;
+        hideFrame?: boolean;
     };
 };
 
@@ -70,6 +74,15 @@ export type DashboardSqlChartTileProperties = {
     };
 };
 
+export type DashboardHeadingTileProperties = {
+    type: DashboardTileTypes.HEADING;
+    properties: {
+        title: undefined;
+        text: string;
+        showDivider?: boolean;
+    };
+};
+
 export type CreateDashboardMarkdownTile = CreateDashboardTileBase &
     DashboardMarkdownTileProperties;
 export type DashboardMarkdownTile = DashboardTileBase &
@@ -89,6 +102,11 @@ export type CreateDashboardSqlChartTile = CreateDashboardTileBase &
 export type DashboardSqlChartTile = DashboardTileBase &
     DashboardSqlChartTileProperties;
 
+export type CreateDashboardHeadingTile = CreateDashboardTileBase &
+    DashboardHeadingTileProperties;
+export type DashboardHeadingTile = DashboardTileBase &
+    DashboardHeadingTileProperties;
+
 export type CreateDashboard = {
     name: string;
     description?: string;
@@ -97,6 +115,7 @@ export type CreateDashboard = {
         | CreateDashboardMarkdownTile
         | CreateDashboardLoomTile
         | CreateDashboardSqlChartTile
+        | CreateDashboardHeadingTile
     >;
     filters?: DashboardFilters;
     parameters?: DashboardParameters;
@@ -111,7 +130,8 @@ export type DashboardTile =
     | DashboardChartTile
     | DashboardMarkdownTile
     | DashboardLoomTile
-    | DashboardSqlChartTile;
+    | DashboardSqlChartTile
+    | DashboardHeadingTile;
 
 export const isDashboardChartTileType = (
     tile: DashboardTile,
@@ -128,6 +148,10 @@ export const isDashboardLoomTileType = (
 export const isDashboardSqlChartTile = (
     tile: DashboardTileBase,
 ): tile is DashboardSqlChartTile => tile.type === DashboardTileTypes.SQL_CHART;
+
+export const isDashboardHeadingTileType = (
+    tile: DashboardTile,
+): tile is DashboardHeadingTile => tile.type === DashboardTileTypes.HEADING;
 
 export type DashboardTab = {
     uuid: string;
@@ -321,4 +345,19 @@ export type CreateDashboardWithCharts = {
 export type ApiCreateDashboardWithChartsResponse = {
     status: 'ok';
     results: Dashboard;
+};
+
+export type ApiDashboardSchedulersResponse = {
+    status: 'ok';
+    results: SchedulerAndTargets[];
+};
+
+export type ApiDashboardPaginatedSchedulersResponse = {
+    status: 'ok';
+    results: KnexPaginatedData<SchedulerAndTargets[]>;
+};
+
+export type ApiCreateDashboardSchedulerResponse = {
+    status: 'ok';
+    results: SchedulerAndTargets;
 };

@@ -8,7 +8,7 @@ import type {
 import { type AnyType } from './any';
 import { CompileError } from './errors';
 import { type MetricFilterRule } from './filter';
-import { type TimeFrames } from './timeFrames';
+import type { TimeFrames } from './timeFrames';
 
 export enum Compact {
     THOUSANDS = 'thousands',
@@ -67,14 +67,14 @@ export enum NumberSeparator {
 }
 type CompactConfig = {
     compact: Compact;
-    alias: Array<typeof CompactAlias[number]>;
+    alias: Array<(typeof CompactAlias)[number]>;
     orderOfMagnitude: number;
     convertFn: (value: number) => number;
     label: string;
     suffix: string;
 };
 
-export type CompactOrAlias = Compact | typeof CompactAlias[number];
+export type CompactOrAlias = Compact | (typeof CompactAlias)[number];
 
 export const CompactConfigMap: Record<Compact, CompactConfig> = {
     [Compact.THOUSANDS]: {
@@ -284,7 +284,7 @@ export interface CustomFormat {
     type: CustomFormatType;
     round?: number | undefined;
     separator?: NumberSeparator;
-    currency?: typeof currencies[number] | undefined;
+    currency?: (typeof currencies)[number] | undefined;
     compact?: CompactOrAlias | undefined;
     prefix?: string | undefined;
     suffix?: string | undefined;
@@ -325,7 +325,7 @@ export enum WindowFunctionType {
     MAX = 'max',
 }
 
-export const nillaryWindowFunctions: WindowFunctionType[] = [
+export const nullaryWindowFunctions: WindowFunctionType[] = [
     WindowFunctionType.ROW_NUMBER,
     WindowFunctionType.PERCENT_RANK,
     WindowFunctionType.CUME_DIST,
@@ -566,7 +566,26 @@ export interface Dimension extends Field {
     colors?: Record<string, string>;
     isIntervalBase?: boolean;
     aiHint?: string | string[];
+    formatOptions?: CustomFormat;
+    image?: {
+        url: string;
+        width?: number;
+        height?: number;
+        fit?: string;
+    };
+    spotlight?: {
+        filterBy?: boolean;
+        segmentBy?: boolean;
+    };
 }
+
+/**
+ * Error information stored on a field when compilation fails but
+ * partial compilation mode is enabled.
+ */
+export type FieldCompilationError = {
+    message: string;
+};
 
 type CompiledProperties = {
     compiledSql: string; // sql string with resolved template variables
@@ -575,9 +594,21 @@ type CompiledProperties = {
         string,
         Record<string, string | string[]>
     >;
+    /**
+     * When partial compilation mode is enabled, fields that fail to compile
+     * will have this property set instead of causing the entire explore to fail.
+     */
+    compilationError?: FieldCompilationError;
 };
 export type CompiledDimension = Dimension & CompiledProperties;
 export type CompiledMetric = Metric & CompiledProperties;
+
+/**
+ * Type guard to check if a compiled field has a compilation error.
+ */
+export const hasFieldCompilationError = (
+    field: CompiledDimension | CompiledMetric,
+): boolean => field.compilationError !== undefined;
 
 export type CompiledField = CompiledDimension | CompiledMetric;
 
@@ -585,6 +616,12 @@ export const isDimension = (
     field: ItemsMap[string] | AdditionalMetric | undefined, // NOTE: `ItemsMap converts AdditionalMetric to Metric
 ): field is Dimension =>
     isField(field) && field.fieldType === FieldType.DIMENSION;
+
+export const isTimeBasedDimension = (
+    item: ItemsMap[string] | AdditionalMetric | undefined,
+): item is Dimension =>
+    isDimension(item) &&
+    (item.type === DimensionType.DATE || item.type === DimensionType.TIMESTAMP);
 
 export interface FilterableDimension extends Dimension {
     type:
@@ -724,13 +761,17 @@ export interface Metric extends Field {
     spotlight?: {
         visibility: LightdashProjectConfig['spotlight']['default_visibility'];
         categories?: string[]; // yaml_reference
+        filterBy?: string[]; // dimension IDs allowlist
+        segmentBy?: string[]; // dimension IDs allowlist
+        owner?: string; // metric owner email
     };
     aiHint?: string | string[];
 }
 
 export const isFilterableDimension = (
-    dimension: Dimension,
+    dimension: Dimension | undefined,
 ): dimension is FilterableDimension =>
+    !!dimension &&
     [
         DimensionType.STRING,
         DimensionType.NUMBER,

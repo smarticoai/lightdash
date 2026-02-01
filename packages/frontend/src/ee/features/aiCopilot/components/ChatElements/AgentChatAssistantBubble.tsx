@@ -1,29 +1,28 @@
 import {
-    ChartKind,
     type AiAgentMessageAssistant,
     type ToolProposeChangeArgs,
 } from '@lightdash/common';
 import {
     ActionIcon,
     Alert,
-    Anchor,
     Button,
     CopyButton,
     Group,
     Loader,
     Paper,
+    Popover,
     Stack,
     Text,
+    Textarea,
     Tooltip,
 } from '@mantine-8/core';
 import { useDisclosure } from '@mantine-8/hooks';
 import {
-    IconArrowRight,
     IconBug,
     IconCheck,
     IconCopy,
     IconExclamationCircle,
-    IconLayoutDashboard,
+    IconMessageX,
     IconRefresh,
     IconTestPipe,
     IconThumbDown,
@@ -32,21 +31,22 @@ import {
     IconThumbUpFilled,
 } from '@tabler/icons-react';
 import MDEditor from '@uiw/react-md-editor';
-import { memo, useCallback, type FC } from 'react';
+import { memo, useCallback, useState, type FC } from 'react';
 import MantineIcon from '../../../../../components/common/MantineIcon';
-import { getChartIcon } from '../../../../../components/common/ResourceIcon/utils';
 import {
     mdEditorComponents,
     rehypeRemoveHeaderLinks,
     useMdEditorStyle,
 } from '../../../../../utils/markdownUtils';
-import { useUpdatePromptFeedbackMutation } from '../../hooks/useProjectAiAgents';
+import {
+    useRetryAiAgentThreadMessageMutation,
+    useUpdatePromptFeedbackMutation,
+} from '../../hooks/useProjectAiAgents';
 import { setArtifact } from '../../store/aiArtifactSlice';
 import {
     useAiAgentStoreDispatch,
     useAiAgentStoreSelector,
 } from '../../store/hooks';
-import { useAiAgentThreadStreamMutation } from '../../streaming/useAiAgentThreadStreamMutation';
 import {
     useAiAgentThreadMessageStreaming,
     useAiAgentThreadStreamQuery,
@@ -55,6 +55,8 @@ import styles from './AgentChatAssistantBubble.module.css';
 import AgentChatDebugDrawer from './AgentChatDebugDrawer';
 import { AiArtifactInline } from './AiArtifactInline';
 import { AiArtifactButton } from './ArtifactButton/AiArtifactButton';
+import { ContentLink } from './ContentLink';
+import { MessageModelIndicator } from './MessageModelIndicator';
 import { rehypeAiAgentContentLinks } from './rehypeContentLinks';
 import { AiChartToolCalls } from './ToolCalls/AiChartToolCalls';
 import { AiProposeChangeToolCall } from './ToolCalls/AiProposeChangeToolCall';
@@ -70,34 +72,33 @@ const AssistantBubbleContent: FC<{
         message.threadUuid,
         message.uuid,
     );
-    const { streamMessage } = useAiAgentThreadStreamMutation();
+    const { mutate: handleRetry } = useRetryAiAgentThreadMessageMutation();
     const mdStyle = useMdEditorStyle();
 
     const isPending = message.status === 'pending';
-    const hasStreamingError =
-        streamingState?.error && streamingState?.messageUuid === message.uuid;
+    const hasError = message.status === 'error';
     const hasNoResponse = !isStreaming && !message.message && !isPending;
-    const shouldShowRetry = hasStreamingError || hasNoResponse;
+    const shouldShowRetry = hasError || hasNoResponse;
 
-    const messageContent =
+    const baseMessageContent =
         isStreaming && streamingState
             ? streamingState.content
-            : message.message ?? '';
+            : (message.message ?? '');
 
-    const handleRetry = useCallback(() => {
-        void streamMessage({
-            projectUuid,
-            agentUuid,
-            threadUuid: message.threadUuid,
-            messageUuid: message.uuid,
-        });
-    }, [
-        streamMessage,
-        agentUuid,
-        message.threadUuid,
-        message.uuid,
-        projectUuid,
-    ]);
+    const referencedArtifactsMarkdown =
+        !isStreaming &&
+        !isPending &&
+        message.referencedArtifacts &&
+        message.referencedArtifacts.length > 0
+            ? `\n\nReferenced answers: ${message.referencedArtifacts
+                  .map(
+                      (artifact) =>
+                          `[${artifact.title}](#artifact-link#artifact-uuid-${artifact.artifactUuid}#version-uuid-${artifact.versionUuid}#artifact-type-${artifact.artifactType})`,
+                  )
+                  .join(', ')}`
+            : '';
+
+    const messageContent = baseMessageContent + referencedArtifactsMarkdown;
 
     const proposeChangeToolCall = isStreaming
         ? (streamingState?.toolCalls.find((t) => t.toolName === 'proposeChange')
@@ -110,7 +111,7 @@ const AssistantBubbleContent: FC<{
     );
 
     const toolCalls = isStreaming
-        ? streamingState?.toolCalls ?? []
+        ? (streamingState?.toolCalls ?? [])
         : message.toolCalls;
 
     return (
@@ -121,7 +122,7 @@ const AssistantBubbleContent: FC<{
                     radius="md"
                     pr="md"
                     shadow="none"
-                    bg="gray.0"
+                    bg="ldGray.0"
                     style={{
                         borderStyle: 'dashed',
                     }}
@@ -135,7 +136,7 @@ const AssistantBubbleContent: FC<{
                                     size="md"
                                 />
                             }
-                            color="gray.0"
+                            color="ldGray.0"
                             variant="outline"
                         >
                             <Stack gap={4}>
@@ -143,23 +144,30 @@ const AssistantBubbleContent: FC<{
                                     Something went wrong
                                 </Text>
                                 <Text size="xs" c="dimmed">
-                                    Failed to generate response. Please try
-                                    again.
+                                    {message.errorMessage ||
+                                        'Failed to generate response. Please try again.'}
                                 </Text>
                             </Stack>
                         </Alert>
                         <Button
                             size="xs"
                             variant="default"
-                            color="dark.5"
+                            color="ldDark.5"
                             leftSection={
                                 <MantineIcon
                                     icon={IconRefresh}
                                     size="sm"
-                                    color="gray.7"
+                                    color="ldGray.7"
                                 />
                             }
-                            onClick={handleRetry}
+                            onClick={() =>
+                                handleRetry({
+                                    projectUuid,
+                                    agentUuid,
+                                    threadUuid: message.threadUuid,
+                                    messageUuid: message.uuid,
+                                })
+                            }
                         >
                             Try again
                         </Button>
@@ -200,98 +208,18 @@ const AssistantBubbleContent: FC<{
                                 typeof props['data-content-type'] === 'string'
                                     ? props['data-content-type']
                                     : undefined;
-                            const chartType =
-                                'data-chart-type' in props &&
-                                typeof props['data-chart-type'] === 'string'
-                                    ? props['data-chart-type']
-                                    : undefined;
 
-                            if (contentType === 'dashboard-link') {
-                                return (
-                                    <Anchor
-                                        {...props}
-                                        target="_blank"
-                                        fz="sm"
-                                        fw={500}
-                                        bg="gray.0"
-                                        c="gray.7"
-                                        td="none"
-                                        classNames={{
-                                            root: styles.contentLink,
-                                        }}
-                                    >
-                                        <MantineIcon
-                                            icon={IconLayoutDashboard}
-                                            size="md"
-                                            color="green.7"
-                                            fill="green.6"
-                                            fillOpacity={0.2}
-                                            strokeWidth={1.9}
-                                        />
-
-                                        {/* margin is added by md package */}
-                                        <Text fz="sm" fw={500} m={0}>
-                                            {children}
-                                        </Text>
-
-                                        <MantineIcon
-                                            icon={IconArrowRight}
-                                            color="gray.7"
-                                            size="sm"
-                                            strokeWidth={2.0}
-                                        />
-                                    </Anchor>
-                                );
-                            } else if (contentType === 'chart-link') {
-                                const chartTypeKind =
-                                    chartType &&
-                                    Object.values(ChartKind).includes(
-                                        chartType as ChartKind,
-                                    )
-                                        ? (chartType as ChartKind)
-                                        : undefined;
-                                return (
-                                    <Anchor
-                                        {...props}
-                                        target="_blank"
-                                        fz="sm"
-                                        fw={500}
-                                        bg="gray.0"
-                                        c="gray.7"
-                                        td="none"
-                                        classNames={{
-                                            root: styles.contentLink,
-                                        }}
-                                    >
-                                        {chartTypeKind && (
-                                            <MantineIcon
-                                                icon={getChartIcon(
-                                                    chartTypeKind,
-                                                )}
-                                                size="md"
-                                                color="blue.7"
-                                                fill="blue.4"
-                                                fillOpacity={0.2}
-                                                strokeWidth={1.9}
-                                            />
-                                        )}
-
-                                        {/* margin is added by md package */}
-                                        <Text fz="sm" fw={500} m={0}>
-                                            {children}
-                                        </Text>
-
-                                        <MantineIcon
-                                            icon={IconArrowRight}
-                                            color="gray.7"
-                                            size="sm"
-                                            strokeWidth={2.0}
-                                        />
-                                    </Anchor>
-                                );
-                            }
-
-                            return <a {...props}>{children}</a>;
+                            return (
+                                <ContentLink
+                                    contentType={contentType}
+                                    props={props}
+                                    message={message}
+                                    projectUuid={projectUuid}
+                                    agentUuid={agentUuid}
+                                >
+                                    {children}
+                                </ContentLink>
+                            );
                         },
                     }}
                 />
@@ -357,21 +285,48 @@ export const AssistantBubble: FC<Props> = memo(
         const downVoted = message.humanScore === -1;
         const hasRating = upVoted || downVoted;
 
+        const [popoverOpened, { open: openPopover, close: closePopover }] =
+            useDisclosure(false);
+        const [feedbackText, setFeedbackText] = useState('');
+
         const handleUpvote = useCallback(() => {
-            if (hasRating) return;
             updateFeedbackMutation.mutate({
                 messageUuid: message.uuid,
-                humanScore: 1,
+                humanScore: upVoted ? 0 : 1,
             });
-        }, [hasRating, updateFeedbackMutation, message.uuid]);
+        }, [updateFeedbackMutation, message.uuid, upVoted]);
 
         const handleDownvote = useCallback(() => {
-            if (hasRating) return;
-            updateFeedbackMutation.mutate({
-                messageUuid: message.uuid,
-                humanScore: -1,
-            });
-        }, [hasRating, updateFeedbackMutation, message.uuid]);
+            if (downVoted) {
+                updateFeedbackMutation.mutate({
+                    messageUuid: message.uuid,
+                    humanScore: 0,
+                });
+            } else {
+                updateFeedbackMutation.mutate({
+                    messageUuid: message.uuid,
+                    humanScore: -1,
+                });
+                openPopover();
+            }
+        }, [updateFeedbackMutation, message.uuid, downVoted, openPopover]);
+
+        const handleSubmitFeedback = useCallback(() => {
+            if (feedbackText.trim().length !== 0) {
+                updateFeedbackMutation.mutate({
+                    messageUuid: message.uuid,
+                    humanScore: -1,
+                    humanFeedback: feedbackText.trim(),
+                });
+            }
+            closePopover();
+            setFeedbackText('');
+        }, [updateFeedbackMutation, message.uuid, feedbackText, closePopover]);
+
+        const handleCancelFeedback = useCallback(() => {
+            closePopover();
+            setFeedbackText('');
+        }, [closePopover]);
 
         const isPending = message.status === 'pending';
         const isLoading =
@@ -388,7 +343,7 @@ export const AssistantBubble: FC<Props> = memo(
                 pos="relative"
                 w="100%"
                 gap="xs"
-                bg={isActive ? 'gray.0' : 'transparent'}
+                bg={isActive ? 'ldGray.0' : 'transparent'}
                 style={{
                     overflow: 'unset',
                     borderStartStartRadius: '0px',
@@ -451,13 +406,32 @@ export const AssistantBubble: FC<Props> = memo(
                               ))}
                     </Stack>
                 )}
+                {!popoverOpened && downVoted && message.humanFeedback && (
+                    <Paper p="xs" mt="xs" radius="md" withBorder>
+                        <Stack gap="xs">
+                            <Group gap="xs">
+                                <MantineIcon
+                                    icon={IconMessageX}
+                                    size={16}
+                                    color="ldGray.7"
+                                />
+                                <Text size="xs" c="dimmed" fw={600}>
+                                    User feedback
+                                </Text>
+                            </Group>
+                            <Text size="sm" c="dimmed" fw={500}>
+                                {message.humanFeedback}
+                            </Text>
+                        </Stack>
+                    </Paper>
+                )}
                 {isLoading ? null : (
                     <Group gap={0}>
                         <CopyButton value={message.message ?? ''}>
                             {({ copied, copy }) => (
                                 <ActionIcon
                                     variant="subtle"
-                                    color="gray"
+                                    color="ldGray.9"
                                     aria-label="copy"
                                     onClick={copy}
                                 >
@@ -471,7 +445,7 @@ export const AssistantBubble: FC<Props> = memo(
                         {(!hasRating || upVoted) && (
                             <ActionIcon
                                 variant="subtle"
-                                color="gray"
+                                color="ldGray.9"
                                 aria-label="upvote"
                                 onClick={handleUpvote}
                             >
@@ -495,34 +469,92 @@ export const AssistantBubble: FC<Props> = memo(
                         )}
 
                         {(!hasRating || downVoted) && (
-                            <ActionIcon
-                                variant="subtle"
-                                color="gray"
-                                aria-label="downvote"
-                                onClick={handleDownvote}
+                            <Popover
+                                width={500}
+                                position="top-start"
+                                trapFocus
+                                opened={popoverOpened}
+                                onChange={() => {
+                                    closePopover();
+                                    setFeedbackText('');
+                                }}
+                                withArrow
                             >
-                                <MantineIcon
-                                    icon={
-                                        downVoted
-                                            ? IconThumbDownFilled
-                                            : IconThumbDown
-                                    }
-                                />
-                            </ActionIcon>
+                                <Popover.Target>
+                                    <ActionIcon
+                                        variant="subtle"
+                                        color="ldGray.9"
+                                        aria-label="downvote"
+                                        onClick={handleDownvote}
+                                    >
+                                        <MantineIcon
+                                            icon={
+                                                downVoted
+                                                    ? IconThumbDownFilled
+                                                    : IconThumbDown
+                                            }
+                                        />
+                                    </ActionIcon>
+                                </Popover.Target>
+                                <Popover.Dropdown>
+                                    <form
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+                                            handleSubmitFeedback();
+                                        }}
+                                    >
+                                        <Stack gap="xs">
+                                            <Textarea
+                                                autoFocus
+                                                classNames={{
+                                                    input: styles.feedbackInput,
+                                                }}
+                                                placeholder="Tell us what went wrong, feedback will be added to agent context (optional)"
+                                                value={feedbackText}
+                                                onChange={(e) =>
+                                                    setFeedbackText(
+                                                        e.currentTarget.value,
+                                                    )
+                                                }
+                                                minRows={3}
+                                                maxRows={5}
+                                                radius="md"
+                                                resize="vertical"
+                                            />
+                                            <Group gap="xs">
+                                                <Button
+                                                    type="submit"
+                                                    size="xs"
+                                                    color="ldDark.5"
+                                                >
+                                                    Submit
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    size="xs"
+                                                    variant="subtle"
+                                                    onClick={
+                                                        handleCancelFeedback
+                                                    }
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </Group>
+                                        </Stack>
+                                    </form>
+                                </Popover.Dropdown>
+                            </Popover>
                         )}
 
                         {showAddToEvalsButton && onAddToEvals && (
                             <Tooltip label="Add this response to evals">
                                 <ActionIcon
                                     variant="subtle"
-                                    color="gray"
+                                    color="ldGray.9"
                                     aria-label="Add to evaluation set"
                                     onClick={() => onAddToEvals(message.uuid)}
                                 >
-                                    <MantineIcon
-                                        icon={IconTestPipe}
-                                        color="gray"
-                                    />
+                                    <MantineIcon icon={IconTestPipe} />
                                 </ActionIcon>
                             </Tooltip>
                         )}
@@ -530,13 +562,19 @@ export const AssistantBubble: FC<Props> = memo(
                         {isArtifactAvailable && (
                             <ActionIcon
                                 variant="subtle"
-                                color="gray"
+                                color="ldGray.9"
                                 aria-label="Debug information"
                                 onClick={openDrawer}
                             >
-                                <MantineIcon icon={IconBug} color="gray" />
+                                <MantineIcon icon={IconBug} />
                             </ActionIcon>
                         )}
+
+                        <MessageModelIndicator
+                            projectUuid={projectUuid}
+                            agentUuid={agentUuid}
+                            modelConfig={message.modelConfig}
+                        />
                     </Group>
                 )}
 
@@ -545,6 +583,7 @@ export const AssistantBubble: FC<Props> = memo(
                     projectUuid={projectUuid}
                     artifacts={message.artifacts}
                     toolCalls={message.toolCalls}
+                    toolResults={message.toolResults}
                     isVisualizationAvailable={isArtifactAvailable}
                     isDrawerOpen={isDrawerOpen}
                     onClose={closeDrawer}

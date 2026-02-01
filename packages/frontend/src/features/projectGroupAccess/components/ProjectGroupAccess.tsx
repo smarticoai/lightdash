@@ -13,13 +13,13 @@ import { useMemo, type FC } from 'react';
 import SuboptimalState from '../../../components/common/SuboptimalState/SuboptimalState';
 import { useTableStyles } from '../../../hooks/styles/useTableStyles';
 import useToaster from '../../../hooks/toaster/useToaster';
-import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import { useOrganizationGroups } from '../../../hooks/useOrganizationGroups';
 import { useOrganizationRoles } from '../../../hooks/useOrganizationRoles';
 import {
     useProjectGroupRoleAssignments,
     useUpsertProjectGroupRoleAssignmentMutation,
 } from '../../../hooks/useProjectGroupRoles';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import { useAbilityContext } from '../../../providers/Ability/useAbilityContext';
 import useApp from '../../../providers/App/useApp';
 import { TrackPage } from '../../../providers/Tracking/TrackingProvider';
@@ -43,7 +43,7 @@ const ProjectGroupAccessComponent: FC<ProjectGroupAccessProps> = ({
     const { cx, classes } = useTableStyles();
     const { showToastSuccess } = useToaster();
 
-    const userGroupsFeatureFlagQuery = useFeatureFlag(
+    const userGroupsFeatureFlagQuery = useServerFeatureFlag(
         FeatureFlags.UserGroupsEnabled,
     );
 
@@ -83,14 +83,34 @@ const ProjectGroupAccessComponent: FC<ProjectGroupAccessProps> = ({
 
     const rolesData = useMemo(() => {
         if (!organizationRoles) return [];
-        return organizationRoles.map(
-            (role: Pick<Role, 'roleUuid' | 'name' | 'ownerType'>) => ({
-                value: role.roleUuid,
-                label: role.name,
-                group:
-                    role.ownerType === 'system' ? 'System role' : 'Custom role',
-            }),
+
+        const systemRoles: { value: string; label: string }[] = [];
+        const customRoles: { value: string; label: string }[] = [];
+
+        organizationRoles.forEach(
+            (role: Pick<Role, 'roleUuid' | 'name' | 'ownerType'>) => {
+                const item = { value: role.roleUuid, label: role.name };
+                if (role.ownerType === 'system') {
+                    systemRoles.push(item);
+                } else {
+                    customRoles.push(item);
+                }
+            },
         );
+
+        const roleGroups: {
+            group: string;
+            items: { value: string; label: string }[];
+        }[] = [];
+
+        if (systemRoles.length > 0) {
+            roleGroups.push({ group: 'System role', items: systemRoles });
+        }
+        if (customRoles.length > 0) {
+            roleGroups.push({ group: 'Custom role', items: customRoles });
+        }
+
+        return roleGroups;
     }, [organizationRoles]);
 
     const canManageProjectAccess = ability.can(

@@ -94,10 +94,10 @@ const ColumnConfiguration: FC<ColumnConfigurationProps> = ({ fieldId }) => {
                     isPivotingDimension
                         ? 'Cannot hide dimensions when pivoting'
                         : disableHidingDimensions
-                        ? 'Cannot hide dimensions when pivoting'
-                        : isColumnVisible(fieldId)
-                        ? 'Hide column'
-                        : 'Show column'
+                          ? 'Cannot hide dimensions when pivoting'
+                          : isColumnVisible(fieldId)
+                            ? 'Hide column'
+                            : 'Show column'
                 }
             >
                 <Box
@@ -128,7 +128,7 @@ const ColumnConfiguration: FC<ColumnConfigurationProps> = ({ fieldId }) => {
                     >
                         <MantineIcon
                             icon={
-                                isColumnVisible(fieldId) ? IconEyeOff : IconEye
+                                isColumnVisible(fieldId) ? IconEye : IconEyeOff
                             }
                         />
                     </ActionIcon>

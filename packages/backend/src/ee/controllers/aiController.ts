@@ -1,9 +1,15 @@
 import {
     ApiAiDashboardSummaryResponse,
+    ApiAiGenerateChartMetadataResponse,
     ApiAiGenerateCustomVizResponse,
+    ApiAiGenerateTableCalculationResponse,
+    ApiAiGenerateTooltipResponse,
     ApiAiGetDashboardSummaryResponse,
     ApiErrorPayload,
     DashboardSummary,
+    GenerateChartMetadataRequest,
+    GenerateTableCalculationRequest,
+    GenerateTooltipRequest,
     ItemsMap,
 } from '@lightdash/common';
 import {
@@ -98,6 +104,66 @@ export class AiController extends BaseController {
                 projectUuid,
                 ...body,
             }),
+        };
+    }
+
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/chart/generate-metadata')
+    @OperationId('generateChartMetadata')
+    async generateChartMetadata(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Body() body: GenerateChartMetadataRequest,
+    ): Promise<ApiAiGenerateChartMetadataResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.getAiService().generateChartMetadata(
+                req.user!,
+                projectUuid,
+                body,
+            ),
+        };
+    }
+
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/table-calculation/generate')
+    @OperationId('generateTableCalculation')
+    async generateTableCalculation(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Body() body: GenerateTableCalculationRequest,
+    ): Promise<ApiAiGenerateTableCalculationResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.getAiService().generateTableCalculation(
+                req.user!,
+                projectUuid,
+                body,
+            ),
+        };
+    }
+
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/tooltip/generate')
+    @OperationId('generateTooltip')
+    async generateTooltip(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Body() body: GenerateTooltipRequest,
+    ): Promise<ApiAiGenerateTooltipResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.getAiService().generateTooltip(
+                req.user!,
+                projectUuid,
+                body,
+            ),
         };
     }
 

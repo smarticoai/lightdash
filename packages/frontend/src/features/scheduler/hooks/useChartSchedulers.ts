@@ -1,30 +1,92 @@
 import {
+    type ApiCreateSavedChartSchedulerResponse,
     type ApiError,
+    type ApiSavedChartPaginatedSchedulersResponse,
     type CreateSchedulerAndTargetsWithoutIds,
-    type SchedulerAndTargets,
+    type KnexPaginateArgs,
+    type SchedulerFormat,
 } from '@lightdash/common';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+    useInfiniteQuery,
+    useMutation,
+    useQueryClient,
+} from '@tanstack/react-query';
 import { lightdashApi } from '../../../api';
 import useToaster from '../../../hooks/toaster/useToaster';
 
-const getChartSchedulers = async (uuid: string) =>
-    lightdashApi<SchedulerAndTargets[]>({
-        url: `/saved/${uuid}/schedulers`,
-        method: 'GET',
-        body: undefined,
+type ChartSchedulersResponse =
+    ApiSavedChartPaginatedSchedulersResponse['results'];
+
+const getChartSchedulers = async (
+    uuid: string,
+    paginateArgs: KnexPaginateArgs,
+    searchQuery?: string,
+    formats?: SchedulerFormat[],
+) => {
+    const params = new URLSearchParams({
+        page: paginateArgs.page.toString(),
+        pageSize: paginateArgs.pageSize.toString(),
     });
 
-export const useChartSchedulers = (chartUuid: string) =>
-    useQuery<SchedulerAndTargets[], ApiError>({
-        queryKey: ['chart_schedulers', chartUuid],
-        queryFn: () => getChartSchedulers(chartUuid),
+    if (searchQuery) {
+        params.set('searchQuery', searchQuery);
+    }
+
+    if (formats && formats.length > 0) {
+        params.set('formats', formats.join(','));
+    }
+
+    return lightdashApi<ChartSchedulersResponse>({
+        url: `/saved/${uuid}/schedulers?${params.toString()}`,
+        method: 'GET',
+        body: undefined,
+        version: 'v2',
+    });
+};
+
+export type UseChartSchedulersParams = {
+    chartUuid: string;
+    searchQuery?: string;
+    pageSize?: number;
+    formats?: SchedulerFormat[];
+};
+
+export const useChartSchedulers = ({
+    chartUuid,
+    searchQuery,
+    pageSize = 25,
+    formats,
+}: UseChartSchedulersParams) =>
+    useInfiniteQuery<ChartSchedulersResponse, ApiError>({
+        queryKey: [
+            'chart_schedulers',
+            chartUuid,
+            searchQuery,
+            pageSize,
+            formats,
+        ],
+        queryFn: ({ pageParam = 1 }) =>
+            getChartSchedulers(
+                chartUuid,
+                { page: pageParam as number, pageSize },
+                searchQuery,
+                formats,
+            ),
+        getNextPageParam: (lastPage) => {
+            const currentPage = lastPage.pagination?.page ?? 1;
+            const totalPages = lastPage.pagination?.totalPageCount ?? 0;
+            return currentPage < totalPages ? currentPage + 1 : undefined;
+        },
+        keepPreviousData: true,
+        refetchOnWindowFocus: false,
+        enabled: !!chartUuid,
     });
 
 const createChartScheduler = async (
     uuid: string,
     data: CreateSchedulerAndTargetsWithoutIds,
 ) =>
-    lightdashApi<SchedulerAndTargets>({
+    lightdashApi<ApiCreateSavedChartSchedulerResponse['results']>({
         url: `/saved/${uuid}/schedulers`,
         method: 'POST',
         body: JSON.stringify(data),
@@ -34,7 +96,7 @@ export const useChartSchedulerCreateMutation = () => {
     const queryClient = useQueryClient();
     const { showToastSuccess, showToastApiError } = useToaster();
     return useMutation<
-        SchedulerAndTargets,
+        ApiCreateSavedChartSchedulerResponse['results'],
         ApiError,
         { resourceUuid: string; data: CreateSchedulerAndTargetsWithoutIds }
     >(({ resourceUuid, data }) => createChartScheduler(resourceUuid, data), {

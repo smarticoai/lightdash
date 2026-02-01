@@ -57,9 +57,10 @@ export * from './authorization/types';
 export * from './compiler/compilationReport';
 export * from './compiler/exploreCompiler';
 export * from './compiler/filtersCompiler';
+export * from './compiler/lightdashModelConverter';
 export * from './compiler/parameters';
 export * from './compiler/translator';
-export * from './constants/pivot';
+export * from './constants/screenshot';
 export * from './constants/sessionStorageKeys';
 export * from './constants/sqlRunner';
 export { default as DbtSchemaEditor } from './dbt/DbtSchemaEditor/DbtSchemaEditor';
@@ -69,8 +70,11 @@ export * from './pivot/derivePivotConfigFromChart';
 export * from './pivot/pivotConfig';
 export * from './pivot/pivotQueryResults';
 export * from './pivot/utils';
+export { default as chartAsCodeSchema } from './schemas/json/chart-as-code-1.0.json';
+export { default as dashboardAsCodeSchema } from './schemas/json/dashboard-as-code-1.0.json';
 export { default as lightdashDbtYamlSchema } from './schemas/json/lightdash-dbt-2.0.json';
 export { default as lightdashProjectConfigSchema } from './schemas/json/lightdash-project-config-1.0.json';
+export { default as modelAsCodeSchema } from './schemas/json/model-as-code-1.0.json';
 export * from './templating/template';
 export * from './types/account';
 export * from './types/analytics';
@@ -105,11 +109,13 @@ export * from './types/featureFlags';
 export * from './types/field';
 export * from './types/fieldMatch';
 export * from './types/filter';
+export * from './types/funnel';
 export * from './types/gdrive';
 export * from './types/gitIntegration';
 export * from './types/groups';
 export * from './types/job';
 export * from './types/knex-paginate';
+export * from './types/lightdashModel';
 export * from './types/lightdashProjectConfig';
 export * from './types/metricQuery';
 export * from './types/metricsExplorer';
@@ -121,6 +127,7 @@ export * from './types/organizationMemberProfile';
 export * from './types/organizationWarehouseCredentials';
 export * from './types/paginateResults';
 export * from './types/parameters';
+export * from './types/periodOverPeriodComparison';
 export * from './types/personalAccessToken';
 export * from './types/pinning';
 export * from './types/pivot';
@@ -165,6 +172,7 @@ export { default as assertUnreachable } from './utils/assertUnreachable';
 export * from './utils/catalogMetricsTree';
 export * from './utils/changeset';
 export * from './utils/charts';
+export * from './utils/chartValidation';
 export * from './utils/colors';
 export * from './utils/conditionalFormatExpressions';
 export * from './utils/conditionalFormatting';
@@ -193,6 +201,7 @@ export * from './utils/promises';
 export * from './utils/sanitizeHtml';
 export * from './utils/scheduler';
 export * from './utils/searchParams';
+export * from './utils/slack';
 export * from './utils/sleep';
 export * from './utils/slugs';
 export * from './utils/subtotals';
@@ -201,8 +210,18 @@ export * from './utils/timeFrames';
 export * from './utils/virtualView';
 export * from './utils/warehouse';
 export * from './visualizations/CartesianChartDataModel';
-export * from './visualizations/chartTransformations';
 export * from './visualizations/helpers/getCartesianAxisFormatterConfig';
+export * from './visualizations/helpers/styles/axisStyles';
+export * from './visualizations/helpers/styles/barChartStyles';
+export * from './visualizations/helpers/styles/gridStyles';
+export * from './visualizations/helpers/styles/legendStyles';
+export * from './visualizations/helpers/styles/pieChartStyles';
+export * from './visualizations/helpers/styles/referenceLineStyles';
+export * as vizThemeColors from './visualizations/helpers/styles/themeColors';
+export * from './visualizations/helpers/styles/tooltipStyles';
+export * from './visualizations/helpers/styles/valueLabelStyles';
+export * from './visualizations/helpers/tooltipFormatter';
+export * from './visualizations/helpers/valueFormatter';
 export * from './visualizations/PieChartDataModel';
 export * from './visualizations/TableDataModel';
 export * from './visualizations/types';
@@ -570,7 +589,7 @@ export function getItemMap(
                 additionalMetric,
                 table,
             });
-            return [...acc, metric];
+            acc.push(metric);
         }
         return acc;
     }, []);
@@ -579,14 +598,33 @@ export function getItemMap(
         ...convertedAdditionalMetrics,
         ...tableCalculations,
         ...customDimensions,
-    ].reduce(
-        (acc, item) => ({
-            ...acc,
-            [getItemId(item)]: item,
-        }),
-        {},
-    );
+    ].reduce((acc, item) => {
+        acc[getItemId(item)] = item;
+        return acc;
+    }, {} as ItemsMap);
 }
+
+export const getFieldsFromMetricQuery = (
+    metricQuery: MetricQuery,
+    explore: Explore,
+): ItemsMap => {
+    const itemsMap = getItemMap(
+        explore,
+        metricQuery.additionalMetrics,
+        metricQuery.tableCalculations,
+        metricQuery.customDimensions,
+    );
+    const itemIdsInMetricQuery = [
+        ...metricQuery.dimensions,
+        ...metricQuery.metrics,
+        ...(metricQuery.tableCalculations || []).map(getItemId),
+    ];
+    return itemIdsInMetricQuery.reduce<ItemsMap>((acc, id) => {
+        const item = itemsMap[id];
+        if (item) acc[id] = item;
+        return acc;
+    }, {});
+};
 
 export const getDimensionsFromItemsMap = (itemsMap: ItemsMap) =>
     Object.entries(itemsMap).reduce<

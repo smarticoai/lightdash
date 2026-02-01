@@ -1,6 +1,8 @@
 import {
+    getItemId,
     MAX_SEGMENT_DIMENSION_UNIQUE_VALUES,
     MetricExplorerComparison,
+    type CompiledDimension,
     type MetricExplorerQuery,
 } from '@lightdash/common';
 import {
@@ -16,7 +18,7 @@ import {
 } from '@mantine/core';
 import { IconInfoCircle, IconX } from '@tabler/icons-react';
 import { type UseQueryResult } from '@tanstack/react-query';
-import { type FC } from 'react';
+import { useMemo, type FC } from 'react';
 import MantineIcon from '../../../../components/common/MantineIcon';
 import { Blocks } from '../../../../svgs/metricsCatalog';
 import { useSelectStyles } from '../../styles/useSelectStyles';
@@ -25,11 +27,7 @@ import SelectItem from '../SelectItem';
 type Props = {
     query: MetricExplorerQuery;
     onSegmentDimensionChange: (value: string | null) => void;
-    segmentByData: Array<{
-        value: string;
-        label: string;
-        group: string;
-    }>;
+    dimensions: CompiledDimension[] | undefined;
     segmentDimensionsQuery: UseQueryResult;
     hasFilteredSeries: boolean;
 };
@@ -37,16 +35,26 @@ type Props = {
 export const MetricExploreSegmentationPicker: FC<Props> = ({
     query,
     onSegmentDimensionChange,
-    segmentByData,
+    dimensions,
     segmentDimensionsQuery,
     hasFilteredSeries,
 }) => {
     const { classes } = useSelectStyles();
 
+    const segmentByData = useMemo(
+        () =>
+            dimensions?.map((dimension) => ({
+                value: getItemId(dimension),
+                label: dimension.label,
+                group: dimension.tableLabel,
+            })) ?? [],
+        [dimensions],
+    );
+
     return (
         <Stack spacing="xs">
             <Group position="apart">
-                <Text fw={500} c="gray.7">
+                <Text fw={500} c="ldGray.7">
                     Segment
                 </Text>
 
@@ -57,7 +65,7 @@ export const MetricExploreSegmentationPicker: FC<Props> = ({
                     size="xs"
                     radius="md"
                     rightIcon={
-                        <MantineIcon icon={IconX} color="gray.5" size={12} />
+                        <MantineIcon icon={IconX} color="ldGray.5" size={12} />
                     }
                     sx={(theme) => ({
                         visibility:
@@ -66,7 +74,7 @@ export const MetricExploreSegmentationPicker: FC<Props> = ({
                                 ? 'hidden'
                                 : 'visible',
                         '&:hover': {
-                            backgroundColor: theme.colors.gray[1],
+                            backgroundColor: theme.colors.ldGray[1],
                         },
                     })}
                     styles={{
@@ -104,7 +112,7 @@ export const MetricExploreSegmentationPicker: FC<Props> = ({
                         data-disabled={!segmentDimensionsQuery.isSuccess}
                         rightSection={
                             segmentDimensionsQuery.isLoading ? (
-                                <Loader size="xs" color="gray.5" />
+                                <Loader size="xs" color="ldGray.5" />
                             ) : undefined
                         }
                         classNames={classes}

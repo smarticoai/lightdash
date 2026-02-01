@@ -1,17 +1,20 @@
 import {
+    convertFormattedValue,
     DimensionType,
     formatItemValue,
+    getErrorMessage,
     getItemId,
     getItemMap,
-    isAdditionalMetric,
     isCustomDimension,
     isDimension,
     isField,
     isNumericItem,
     isResultValue,
     itemsInMetricQuery,
+    renderTemplatedUrl,
     type AdditionalMetric,
     type CustomDimension,
+    type Dimension,
     type Field,
     type ItemsMap,
     type ParametersValuesMap,
@@ -27,6 +30,10 @@ import omit from 'lodash/omit';
 import { useMemo } from 'react';
 import { formatRowValueFromWarehouse } from '../components/DataViz/formatters/formatRowValueFromWarehouse';
 import MantineIcon from '../components/common/MantineIcon';
+import {
+    BrokenImageCell,
+    ImageCell,
+} from '../components/common/Table/ImageCell';
 import {
     TableHeaderBoldLabel,
     TableHeaderLabelContainer,
@@ -47,21 +54,11 @@ import {
     selectTableName,
     useExplorerSelector,
 } from '../features/explorer/store';
-import { renderBarChartDisplay } from './barChartDisplay';
+import { getFieldColors } from '../utils/fieldColors';
+import { TableCellBar } from './TableCellBar';
 import { useCalculateTotal } from './useCalculateTotal';
 import { useExplore } from './useExplore';
 import { useExplorerQuery } from './useExplorerQuery';
-
-export const getItemBgColor = (
-    item: Field | AdditionalMetric | TableCalculation | CustomDimension,
-): string => {
-    if (isCustomDimension(item)) return '#d2dbe9';
-    if (isField(item) || isAdditionalMetric(item)) {
-        return isDimension(item) ? '#d2dbe9' : '#e4dad0';
-    } else {
-        return '#d2dfd7';
-    }
-};
 
 export const formatCellContent = (
     data?: { value: ResultValue },
@@ -112,8 +109,9 @@ const formatBarDisplayCell = (
 ) => {
     const cellValue = info.getValue();
     const columnId = info.column.id;
-
+    const columnProperties = info.table?.options.meta?.columnProperties;
     const minMaxMap = info.table?.options.meta?.minMaxMap;
+    const color = columnProperties?.[columnId]?.color;
 
     // For pivot tables, get the base field ID from the item in meta
     // This is needed because pivoted columns have different IDs than the base field
@@ -141,15 +139,120 @@ const formatBarDisplayCell = (
     // For pivot tables, try baseFieldId first so all pivoted versions share the same scale
     // Fall back to columnId for individual column scales
     const minMax = minMaxMap[baseFieldId] ?? minMaxMap[columnId];
-    const min = minMax?.min ?? 0;
-    const max = minMax?.max ?? 100;
 
-    return renderBarChartDisplay({
-        value,
-        formatted,
-        min,
-        max,
-    });
+    // Don't render bars if minMaxMap is missing for this field
+    // Fallback values (0, 100) cause incorrect scaling for percentage values stored as decimals
+    if (!minMax) {
+        // Handle both ResultRow and RawResultRow formats
+        if (isResultValue(cellValue)) {
+            return formatCellContent(cellValue, item, parameters);
+        } else {
+            // For raw string values, return formatted value
+            return <span>{formatted}</span>;
+        }
+    }
+
+    // Convert value for percentage fields (multiply decimal by 100 to match min/max scale)
+    // This ensures percentage values stored as decimals (0.05) are properly scaled
+    // to match the min/max values calculated by convertFormattedValue (5, 15)
+    const convertedValue = convertFormattedValue(value, item);
+    const numericConvertedValue =
+        typeof convertedValue === 'number' ? convertedValue : value;
+
+    return (
+        <TableCellBar
+            value={numericConvertedValue}
+            formatted={formatted}
+            min={minMax.min}
+            max={minMax.max}
+            color={color}
+        />
+    );
+};
+
+const formatImageCell = (
+    item: Dimension,
+    info:
+        | CellContext<ResultRow, { value: ResultValue }>
+        | CellContext<RawResultRow, string>,
+) => {
+    // Extract value from cell
+    const cellValue = info.getValue();
+    const value: ResultValue = isResultValue(cellValue)
+        ? cellValue.value
+        : { raw: cellValue, formatted: String(cellValue) };
+
+    const urlTemplate = item.image?.url || '';
+
+    // Only extract row data if template references other fields
+    // Skip expensive getAllCells() for simple templates like "${value.raw}"
+    const needsRowContext =
+        urlTemplate.includes('${') &&
+        !urlTemplate.match(/^\$\{value\.(raw|formatted)\}$/);
+
+    // TODO optimization opportunity:
+    // extract row at a row level (not per cell) , not at a cell level, if the row contains at least 1 image.
+    // this will optimize rows with more than 2 images
+    // we'll have to refactor the existing code to pass this parsed row info
+
+    // Build row data similar to UrlMenuItem (only when needed)
+    const row = needsRowContext
+        ? info.row
+              .getAllCells()
+              .reduce<
+                  Record<string, Record<string, ResultValue>>
+              >((acc, rowCell) => {
+                  const cellItem = rowCell.column.columnDef.meta?.item;
+                  const rowCellValue = rowCell.getValue();
+
+                  // Handle both ResultRow and RawResultRow formats
+                  const cellResultValue = isResultValue(rowCellValue)
+                      ? (rowCellValue as { value: ResultValue }).value
+                      : {
+                            raw: rowCellValue,
+                            formatted: String(rowCellValue),
+                        };
+
+                  if (cellItem && isField(cellItem) && cellResultValue) {
+                      acc[cellItem.table] = acc[cellItem.table] || {};
+                      acc[cellItem.table][cellItem.name] = cellResultValue;
+                  }
+                  return acc;
+              }, {})
+        : {};
+
+    try {
+        // Render the templated URL with row context
+        // eslint-disable-next-line testing-library/render-result-naming-convention
+        const processedUrl = renderTemplatedUrl(
+            item.image?.url || '',
+            value,
+            row,
+        );
+        // Validate image url
+        const imageUrl = new URL(processedUrl);
+        if (!['http:', 'https:'].includes(imageUrl.protocol)) {
+            console.error(`Invalid image protocol "${processedUrl}"`);
+            return (
+                <BrokenImageCell
+                    imageUrl={processedUrl}
+                    error={`Invalid image protocol`}
+                />
+            );
+        }
+
+        return <ImageCell item={item} imageUrl={imageUrl.href} />;
+    } catch (error) {
+        console.error(
+            `Invalid image URL template "${item.image?.url}": ${error}`,
+        );
+        return (
+            <BrokenImageCell
+                imageUrl={item.image?.url || (value.raw as string)}
+                error={getErrorMessage(error) as string}
+            />
+        );
+    }
 };
 
 export const getFormattedValueCell = (
@@ -165,6 +268,11 @@ export const getFormattedValueCell = (
         console.error(`Unable to format value for bar display cell ${error}`);
     }
 
+    // Check if this is an image dimension
+    if (item && isDimension(item) && item.image?.url && cellValue) {
+        return formatImageCell(item, info);
+    }
+
     return formatCellContent(cellValue, item, parameters);
 };
 
@@ -178,6 +286,12 @@ export const getValueCell = (
         if (isBarDisplay(info)) return formatBarDisplayCell(info, parameters);
     } catch (error) {
         console.error(`Unable to get value for bar display cell ${error}`);
+    }
+
+    // Check if this is an image dimension
+    const item = info.column.columnDef.meta?.item;
+    if (item && isDimension(item) && item.image?.url) {
+        return formatImageCell(item, info);
     }
 
     // Default text rendering
@@ -282,14 +396,13 @@ export const useColumns = (): TableColumn[] => {
             invalidActiveItems: [],
         };
 
-        // Filter itemsMap to only include active fields
-        // This is more efficient than spreading objects in a reduce
-        for (const key of activeFields) {
-            const item = itemsMap[key];
+        // Filter itemsMap to only include fields to be rendered (preserves order via Set insertion)
+        for (const fieldId of activeFields) {
+            const item = itemsMap[fieldId];
             if (item) {
-                result.activeItemsMap[key] = item;
+                result.activeItemsMap[fieldId] = item;
             } else {
-                result.invalidActiveItems.push(key);
+                result.invalidActiveItems.push(fieldId);
             }
         }
 
@@ -312,19 +425,22 @@ export const useColumns = (): TableColumn[] => {
             return [];
         }
 
+        const hasJoins = (exploreData?.joinedTables || []).length > 0;
+
         const validColumns = Object.entries(activeItemsMap).reduce<
             TableColumn[]
         >((acc, [fieldId, item]) => {
-            const hasJoins = (exploreData?.joinedTables || []).length > 0;
-
             const sortIndex = sorts.findIndex((sf) => fieldId === sf.fieldId);
             const isFieldSorted = sortIndex !== -1;
+            const fieldColors = getFieldColors(item);
             const column: TableColumn = columnHelper.accessor(
                 (row) => row[fieldId],
                 {
                     id: fieldId,
                     header: () => (
-                        <TableHeaderLabelContainer>
+                        <TableHeaderLabelContainer
+                            color={fieldColors.columnHeaderColor}
+                        >
                             {isField(item) ? (
                                 <>
                                     {hasJoins && (
@@ -390,7 +506,7 @@ export const useColumns = (): TableColumn[] => {
                         item,
                         draggable: true,
                         frozen: false,
-                        bgColor: getItemBgColor(item),
+                        bgColor: fieldColors.bg,
                         sort: isFieldSorted
                             ? {
                                   sortIndex,
@@ -402,6 +518,7 @@ export const useColumns = (): TableColumn[] => {
                     },
                 },
             );
+
             return [...acc, column];
         }, []);
 
@@ -442,6 +559,7 @@ export const useColumns = (): TableColumn[] => {
             },
             [],
         );
+
         return [...validColumns, ...invalidColumns];
     }, [
         hasNoActiveFields,

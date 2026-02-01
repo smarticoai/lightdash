@@ -16,6 +16,8 @@ node_modules/
 /packages/e2e/cypress/videos/**/*
 /packages/e2e/cypress/downloads/**/*
 /packages/e2e/cypress/artifacts/**/*
+# Content as code e2e tests
+packages/e2e/lightdash 
 
 # eval reports
 /packages/backend/eval-reports/**/*
@@ -91,7 +93,10 @@ flake.lock
 
 
 # Charts as code
-lightdash
+/examples/full-jaffle-shop-demo/dbt/lightdash
+/examples/lightdash
+/lightdash
+
 *storybook.log
 
 # Prometheus
@@ -104,3 +109,7 @@ data/
 .local/*
 
 CLAUDE.local.md
+http-client.private.env.json
+
+# turbo
+.turbo

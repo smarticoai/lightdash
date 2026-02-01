@@ -8,6 +8,7 @@ import { type KnexPaginatedData } from './knex-paginate';
 import { type MetricQuery } from './metricQuery';
 import { type ParametersValuesMap } from './parameters';
 import { type PivotConfig } from './pivot';
+import type { PartialFailure, SchedulerRun } from './schedulerLog';
 import { type DateGranularity } from './timeFrames';
 import { type ValidationTarget } from './validation';
 
@@ -106,6 +107,7 @@ export type SchedulerBase = {
     format: SchedulerFormat;
     cron: string;
     timezone?: string;
+    projectSchedulerTimezone?: string;
     savedChartUuid: string | null;
     savedChartName: string | null;
     dashboardUuid: string | null;
@@ -115,6 +117,8 @@ export type SchedulerBase = {
     enabled: boolean;
     notificationFrequency?: NotificationFrequency;
     includeLinks: boolean;
+    projectUuid?: string | null;
+    projectName?: string | null;
 };
 
 export type ChartScheduler = SchedulerBase & {
@@ -143,6 +147,7 @@ export type SchedulerAndTargets = Scheduler & {
         | SchedulerEmailTarget
         | SchedulerMsTeamsTarget
     )[];
+    latestRun?: SchedulerRun | null;
 };
 
 export type SchedulerSlackTarget = {
@@ -362,6 +367,36 @@ export type ApiTestSchedulerResponse = {
     };
 };
 
+export type ReassignSchedulerOwnerRequest = {
+    schedulerUuids: string[];
+    newOwnerUserUuid: string;
+};
+
+export type ApiReassignSchedulerOwnerResponse = ApiSuccess<
+    SchedulerAndTargets[]
+>;
+
+export type UserSchedulersSummary = {
+    totalCount: number;
+    hasGsheetsSchedulers: boolean;
+    byProject: Array<{
+        projectUuid: string;
+        projectName: string;
+        count: number;
+    }>;
+};
+
+export type ReassignUserSchedulersRequest = {
+    newOwnerUserUuid: string;
+};
+
+export type ApiUserSchedulersSummaryResponse =
+    ApiSuccess<UserSchedulersSummary>;
+
+export type ApiReassignUserSchedulersResponse = ApiSuccess<{
+    reassignedCount: number;
+}>;
+
 export type TraceTaskBase = {
     organizationUuid: string;
     projectUuid: string;
@@ -426,6 +461,7 @@ export type NotificationPayloadBase = {
             source: string;
             fileName: string;
         };
+        failures?: PartialFailure[];
     };
     scheduler: CreateSchedulerAndTargets;
 };
@@ -451,6 +487,41 @@ export type GsheetsNotificationPayload = TraceTaskBase & {
     schedulerUuid: string;
     scheduledTime: Date;
     jobGroup: string;
+};
+
+// Batch notification payloads - one job per delivery type instead of per recipient
+export type SlackBatchNotificationPayload = TraceTaskBase &
+    Omit<NotificationPayloadBase, 'scheduler'> & {
+        targets: SchedulerSlackTarget[];
+        scheduler: SchedulerAndTargets;
+    };
+
+export type EmailBatchNotificationPayload = TraceTaskBase &
+    Omit<NotificationPayloadBase, 'scheduler'> & {
+        targets: SchedulerEmailTarget[];
+        scheduler: SchedulerAndTargets;
+    };
+
+export type MsTeamsBatchNotificationPayload = TraceTaskBase &
+    Omit<NotificationPayloadBase, 'scheduler'> & {
+        targets: SchedulerMsTeamsTarget[];
+        scheduler: SchedulerAndTargets;
+    };
+
+// Result tracking for batch deliveries
+export type DeliveryResult = {
+    target: string; // channel ID, email, or webhook URL
+    targetUuid?: string;
+    success: boolean;
+    error?: string;
+};
+
+export type BatchDeliveryResult = {
+    type: 'slack' | 'email' | 'msteams';
+    total: number;
+    succeeded: number;
+    failed: number;
+    results: DeliveryResult[];
 };
 
 export type DownloadCsvPayload = TraceTaskBase & {
@@ -538,4 +609,12 @@ export type DownloadAsyncQueryResultsPayload = TraceTaskBase & {
     pivotConfig?: PivotConfig;
     attachmentDownloadName?: string;
     encodedJwt?: string;
+};
+
+export type SyncSlackChannelsPayload = Pick<
+    TraceTaskBase,
+    'organizationUuid' | 'schedulerUuid'
+> & {
+    projectUuid: undefined;
+    userUuid: undefined;
 };

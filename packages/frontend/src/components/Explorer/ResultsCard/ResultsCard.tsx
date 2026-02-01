@@ -1,5 +1,5 @@
 import { subject } from '@casl/ability';
-import { ActionIcon, Popover } from '@mantine/core';
+import { ActionIcon, Group, Popover } from '@mantine/core';
 import { IconShare2 } from '@tabler/icons-react';
 import { memo, useCallback, useMemo, type FC } from 'react';
 import {
@@ -8,6 +8,7 @@ import {
     selectIsEditMode,
     selectIsResultsExpanded,
     selectMetricQuery,
+    selectSavedChart,
     selectSorts,
     selectTableName,
     useExplorerDispatch,
@@ -19,7 +20,6 @@ import { useProjectUuid } from '../../../hooks/useProjectUuid';
 import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import { ExplorerSection } from '../../../providers/Explorer/types';
-import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import AddColumnButton from '../../AddColumnButton';
 import ExportSelector from '../../ExportSelector';
 import SortButton from '../../SortButton';
@@ -42,12 +42,11 @@ const ResultsCard: FC = memo(() => {
     const metricQuery = useExplorerSelector(selectMetricQuery);
     const columnOrder = useExplorerSelector(selectColumnOrder);
 
-    // Get query state from new hook
     const { queryResults, getDownloadQueryUuid } = useExplorerQuery();
+
     const totalResults = queryResults.totalResults;
-    const savedChart = useExplorerContext(
-        (context) => context.state.savedChart,
-    );
+
+    const savedChart = useExplorerSelector(selectSavedChart);
 
     const toggleExpandedSection = useCallback(
         (section: ExplorerSection) => {
@@ -94,11 +93,11 @@ const ResultsCard: FC = memo(() => {
             onToggle={toggleCard}
             disabled={!tableName}
             headerElement={
-                <>
+                <Group noWrap spacing="xs">
                     {tableName && sorts.length > 0 && (
                         <SortButton isEditMode={isEditMode} sorts={sorts} />
                     )}
-                </>
+                </Group>
             }
             rightHeaderElement={
                 projectUuid &&

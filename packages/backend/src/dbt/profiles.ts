@@ -3,6 +3,7 @@ import {
     assertUnreachable,
     BigqueryAuthenticationType,
     CreateWarehouseCredentials,
+    ParameterError,
     SnowflakeAuthenticationType,
     WarehouseTypes,
 } from '@lightdash/common';
@@ -48,6 +49,15 @@ const credentialsTarget = (
                 case BigqueryAuthenticationType.SSO:
                 case undefined:
                     bqResult.target.method = 'service-account-json';
+                    // Ensure keyfileContents exists and is not null/undefined
+                    if (
+                        !credentials.keyfileContents ||
+                        typeof credentials.keyfileContents !== 'object'
+                    ) {
+                        throw new ParameterError(
+                            'BigQuery private key/SSO authentication requires keyfileContents to be provided',
+                        );
+                    }
                     bqResult.target.keyfile_json = Object.fromEntries(
                         Object.keys(credentials.keyfileContents).map((key) => [
                             key,
@@ -85,9 +95,8 @@ const credentialsTarget = (
                     threads: DEFAULT_THREADS,
                     keepalives_idle: credentials.keepalivesIdle,
                     sslmode: credentials.sslmode,
-                    sslrootcert: require.resolve(
-                        '@lightdash/warehouses/dist/warehouseClients/ca-bundle-aws-redshift.crt',
-                    ),
+                    sslrootcert:
+                        require.resolve('@lightdash/warehouses/dist/warehouseClients/ca-bundle-aws-redshift.crt'),
                     ra3_node: credentials.ra3Node || true,
                 },
                 environment: {
@@ -112,9 +121,8 @@ const credentialsTarget = (
                     sslmode: credentials.sslmode,
                     ...(credentials.host.endsWith('.rds.amazonaws.com')
                         ? {
-                              sslrootcert: require.resolve(
-                                  '@lightdash/warehouses/dist/warehouseClients/ca-bundle-aws-rds-global.pem',
-                              ),
+                              sslrootcert:
+                                  require.resolve('@lightdash/warehouses/dist/warehouseClients/ca-bundle-aws-rds-global.pem'),
                           }
                         : {}),
                 },
@@ -192,7 +200,14 @@ const credentialsTarget = (
             }
             return result;
         }
-        case WarehouseTypes.DATABRICKS:
+        case WarehouseTypes.DATABRICKS: {
+            const tokenValue =
+                credentials.token ?? credentials.personalAccessToken;
+            if (!tokenValue) {
+                throw new Error(
+                    'Databricks credentials must have either token or personalAccessToken',
+                );
+            }
             return {
                 target: {
                     type: WarehouseTypes.DATABRICKS,
@@ -204,9 +219,13 @@ const credentialsTarget = (
                     http_path: credentials.httpPath,
                 },
                 environment: {
-                    [envVar('token')]: credentials.personalAccessToken,
+                    [envVar('token')]:
+                        credentials.personalAccessToken ||
+                        credentials.token ||
+                        '',
                 },
             };
+        }
         case WarehouseTypes.CLICKHOUSE:
             return {
                 target: {

@@ -17,7 +17,17 @@ export interface ScimResource {
 }
 
 export interface LightdashScimExtension {
+    /**
+     * @deprecated - use ScimUser['roles'] instead. Learn more at https://docs.lightdash.com/references/scim-integration#lightdash-extension-schema-deprecated
+     */
     role?: string;
+}
+
+export interface ScimUserRole {
+    value: string;
+    display?: string;
+    type?: string;
+    primary?: boolean;
 }
 
 export interface ScimUser extends ScimResource {
@@ -32,6 +42,7 @@ export interface ScimUser extends ScimResource {
         value: string;
         primary?: boolean;
     }[];
+    roles?: ScimUserRole[];
     [ScimSchemaType.LIGHTDASH_USER_EXTENSION]?: LightdashScimExtension;
 }
 
@@ -51,6 +62,20 @@ export interface ScimGroup extends ScimResource {
 export interface ScimGroupMember {
     value: string;
     display?: string;
+}
+
+export interface ScimRole extends ScimResource {
+    schemas: ScimSchemaType.ROLE[];
+    value: string;
+    display?: string;
+    type?: string; // A label indicating the role's function level (e.g.: Organization, Project - A, Project - B). Should help clients group roles and validate 1 role per type (aka org/project).
+    supported: boolean;
+    meta: ScimResource['meta'] & {
+        resourceType: 'Role';
+        created?: Date;
+        lastModified?: Date;
+        location: string;
+    };
 }
 
 export type ScimErrorPayload = {

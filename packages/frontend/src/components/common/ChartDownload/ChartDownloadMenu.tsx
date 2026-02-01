@@ -21,6 +21,7 @@ import {
 } from '../CollapsableCard/constants';
 import MantineIcon from '../MantineIcon';
 import ChartDownloadOptions from './ChartDownloadOptions';
+import { CHART_TYPES_WITHOUT_IMAGE_EXPORT } from './chartDownloadUtils';
 
 export type ChartDownloadMenuProps = {
     getDownloadQueryUuid: (
@@ -83,6 +84,13 @@ const ChartDownloadMenu: React.FC<ChartDownloadMenuProps> = memo(
             [getDownloadQueryUuid],
         );
 
+        if (
+            CHART_TYPES_WITHOUT_IMAGE_EXPORT.includes(
+                visualizationConfig.chartType,
+            )
+        ) {
+            return null;
+        }
         return isTableVisualizationConfig(visualizationConfig) &&
             getChartDownloadQueryUuid ? (
             <Can
@@ -103,7 +111,7 @@ const ChartDownloadMenu: React.FC<ChartDownloadMenuProps> = memo(
                             {...COLLAPSABLE_CARD_ACTION_ICON_PROPS}
                             disabled={disabled}
                         >
-                            <MantineIcon icon={IconShare2} color="gray" />
+                            <MantineIcon icon={IconShare2} />
                         </ActionIcon>
                     </Popover.Target>
 

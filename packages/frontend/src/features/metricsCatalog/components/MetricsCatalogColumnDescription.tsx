@@ -34,8 +34,7 @@ export const MetricsCatalogColumnDescription: FC<Props> = ({ row, table }) => {
     const markdownPreviewProps: MarkdownPreviewProps = {
         style: {
             fontSize: theme.fontSizes.sm,
-            color: theme.colors.dark[4],
-            fontFamily: 'Inter',
+            color: theme.colors.ldGray[6],
             backgroundColor: 'inherit',
         },
         components: {
@@ -59,7 +58,7 @@ export const MetricsCatalogColumnDescription: FC<Props> = ({ row, table }) => {
         <Box ref={cellRef}>
             <Text
                 ref={highlightRef}
-                c={row.original.description ? 'dark.4' : 'dark.1'}
+                c={row.original.description ? 'ldGray.6' : 'ldGray.4'}
                 fz="sm"
                 fw={400}
                 lh="150%"
@@ -77,7 +76,7 @@ export const MetricsCatalogColumnDescription: FC<Props> = ({ row, table }) => {
                 lineClamp={2}
                 sx={{
                     cursor: canOpen ? 'pointer' : 'default',
-                    color: row.original.description ? 'dark.4' : 'dark.1',
+                    color: row.original.description ? 'ldGray.6' : 'ldGray.4',
                 }}
             >
                 <MarkdownPreview

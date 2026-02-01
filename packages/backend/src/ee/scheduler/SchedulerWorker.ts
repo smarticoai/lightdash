@@ -12,7 +12,7 @@ import { tryJobOrTimeout } from '../../scheduler/SchedulerJobTimeout';
 import { SchedulerTaskArguments } from '../../scheduler/SchedulerTask';
 import { SchedulerWorker } from '../../scheduler/SchedulerWorker';
 import { TypedEETaskList } from '../../scheduler/types';
-import { AiAgentService } from '../services/AiAgentService';
+import { AiAgentService } from '../services/AiAgentService/AiAgentService';
 import type { EmbedService } from '../services/EmbedService/EmbedService';
 
 const AI_AGENT_EVAL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
@@ -50,6 +50,18 @@ export class CommercialSchedulerWorker extends SchedulerWorker {
                 await this.aiAgentService.replyToSlackPrompt(
                     payload.slackPromptUuid,
                 );
+            },
+            [EE_SCHEDULER_TASKS.EMBED_ARTIFACT_VERSION]: async (
+                payload,
+                _helpers,
+            ) => {
+                await this.aiAgentService.embedArtifactVersion(payload);
+            },
+            [EE_SCHEDULER_TASKS.GENERATE_ARTIFACT_QUESTION]: async (
+                payload,
+                _helpers,
+            ) => {
+                await this.aiAgentService.generateArtifactQuestion(payload);
             },
             [EE_SCHEDULER_TASKS.AI_AGENT_EVAL_RESULT]: async (
                 payload,

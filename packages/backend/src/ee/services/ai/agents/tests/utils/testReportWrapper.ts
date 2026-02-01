@@ -1,16 +1,19 @@
 import { TestContext } from 'vitest';
 import { DbAiAgentToolCall } from '../../../../../database/entities/ai';
-import { LlmJudgeResult } from './llmAsAJudge';
-import { ToolJudgeResult } from './llmAsJudgeForTools';
+import { LlmJudgeResult } from '../../../utils/llmAsAJudge';
+import { ToolJudgeResult } from '../../../utils/llmAsJudgeForTools';
 import { setTaskMeta } from './taskMeta';
+import { ToolCallWithResult } from './testHelpers';
 
 interface TestReportData {
     prompts?: string[];
     responses?: string[];
-    toolCalls?: string[];
+    toolCalls?: ToolCallWithResult[];
     llmJudgeResults?: LlmJudgeResult[];
     llmToolJudgeResults?: ToolJudgeResult[];
     agentInfo?: { provider: string; model: string };
+    agentType?: 'specialized' | 'generic';
+    agentTags?: string[];
 }
 
 /**
@@ -68,6 +71,12 @@ export async function withTestReport<T>(
             );
             setTaskMeta(task.meta, 'agentModel', reportData.agentInfo.model);
         }
+        if (reportData.agentType) {
+            setTaskMeta(task.meta, 'agentType', reportData.agentType);
+        }
+        if (reportData.agentTags) {
+            setTaskMeta(task.meta, 'agentTags', reportData.agentTags);
+        }
     }
 }
 
@@ -94,8 +103,10 @@ export class TestReportBuilder {
         prompts?: string[];
         response?: string;
         responses?: string[];
-        toolCalls?: string[] | DbAiAgentToolCall[];
+        toolCalls?: ToolCallWithResult[];
         agentInfo?: { provider: string; model: string };
+        agentType?: 'specialized' | 'generic';
+        agentTags?: string[];
     }) {
         if (config?.prompt) {
             this.data.prompts = [config.prompt];
@@ -110,16 +121,19 @@ export class TestReportBuilder {
         }
 
         if (config?.toolCalls) {
-            const toolNames = Array.isArray(config.toolCalls)
-                ? config.toolCalls.map((tc) =>
-                      typeof tc === 'string' ? tc : tc.tool_name,
-                  )
-                : [];
-            this.data.toolCalls = toolNames;
+            this.data.toolCalls = config.toolCalls;
         }
 
         if (config?.agentInfo) {
             this.data.agentInfo = config.agentInfo;
+        }
+
+        if (config?.agentType) {
+            this.data.agentType = config.agentType;
+        }
+
+        if (config?.agentTags) {
+            this.data.agentTags = config.agentTags;
         }
     }
 
@@ -156,8 +170,10 @@ export function createTestReport(config?: {
     prompts?: string[];
     response?: string;
     responses?: string[];
-    toolCalls?: string[] | DbAiAgentToolCall[];
+    toolCalls?: ToolCallWithResult[];
     agentInfo?: { provider: string; model: string };
+    agentType?: 'specialized' | 'generic';
+    agentTags?: string[];
 }): TestReportBuilder {
     return new TestReportBuilder(config);
 }

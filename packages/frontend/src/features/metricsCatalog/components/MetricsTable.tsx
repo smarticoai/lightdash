@@ -2,6 +2,7 @@ import {
     MAX_METRICS_TREE_NODE_COUNT,
     SpotlightTableColumns,
     assertUnreachable,
+    type CatalogCategoryFilterMode,
     type CatalogItem,
 } from '@lightdash/common';
 import {
@@ -52,9 +53,12 @@ import {
 import { useMetricsTree } from '../hooks/useMetricsTree';
 import { useSpotlightTableConfig } from '../hooks/useSpotlightTable';
 import {
+    setCategoryFilterMode,
     setCategoryFilters,
     setColumnConfig,
+    setOwnerFilters,
     setSearch,
+    setTableFilters,
     setTableSorting,
     toggleMetricExploreModal,
 } from '../store/metricsCatalogSlice';
@@ -86,6 +90,15 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
     );
     const categoryFilters = useAppSelector(
         (state) => state.metricsCatalog.categoryFilters,
+    );
+    const categoryFilterMode = useAppSelector(
+        (state) => state.metricsCatalog.categoryFilterMode,
+    );
+    const tableFilters = useAppSelector(
+        (state) => state.metricsCatalog.tableFilters,
+    );
+    const ownerFilters = useAppSelector(
+        (state) => state.metricsCatalog.ownerFilters,
     );
     const { canManageTags, canManageMetricsTree } = useAppSelector(
         (state) => state.metricsCatalog.abilities,
@@ -123,6 +136,9 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
         pageSize: 50,
         search: deferredSearch,
         categories: categoryFilters,
+        categoriesFilterMode: categoryFilterMode,
+        tables: tableFilters,
+        ownerUserUuids: ownerFilters,
         // TODO: Handle multiple sorting - this needs to be enabled and handled later in the backend
         ...(stateTableSorting.length > 0 && {
             sortBy: stateTableSorting[0].id as keyof CatalogItem,
@@ -211,12 +227,24 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
         }
     };
 
+    const handleSetTableFilters = (selectedTables: string[]) => {
+        dispatch(setTableFilters(selectedTables));
+    };
+
+    const handleSetCategoryFilterMode = (mode: CatalogCategoryFilterMode) => {
+        dispatch(setCategoryFilterMode(mode));
+    };
+
+    const handleSetOwnerFilters = (selectedOwners: string[]) => {
+        dispatch(setOwnerFilters(selectedOwners));
+    };
+
     // Reusable paper props to avoid duplicate when rendering tree view
     const mantinePaperProps: PaperProps = useMemo(
         () => ({
             shadow: undefined,
             sx: {
-                border: `1px solid ${theme.colors.gray[2]}`,
+                border: `1px solid ${theme.colors.ldGray[2]}`,
                 borderRadius: theme.spacing.sm, // ! radius doesn't have rem(12) -> 0.75rem
                 boxShadow: theme.shadows.subtle,
                 display: 'flex',
@@ -282,9 +310,20 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
             !isFetching &&
             !hasNextPage &&
             !search &&
-            categoryFilters.length === 0
+            categoryFilters.length === 0 &&
+            tableFilters.length === 0 &&
+            ownerFilters.length === 0
         );
-    }, [flatData, isLoading, isFetching, search, categoryFilters, hasNextPage]);
+    }, [
+        flatData,
+        isLoading,
+        isFetching,
+        search,
+        categoryFilters,
+        tableFilters,
+        ownerFilters,
+        hasNextPage,
+    ]);
 
     // Get column config from Redux
     const columnConfig = useAppSelector(
@@ -387,19 +426,19 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                 props.table.getVisibleLeafColumns().length - 1;
 
             return {
-                bg: 'gray.0',
+                bg: 'ldGray.0',
                 h: '3xl',
                 pos: 'relative',
                 // Adding to inline styles to override the default ones which can't be overridden with sx
                 style: {
                     padding: `${theme.spacing.xs} ${theme.spacing.xl}`,
-                    borderBottom: `1px solid ${theme.colors.gray[2]}`,
+                    borderBottom: `1px solid ${theme.colors.ldGray[2]}`,
                     borderRight: props.column.getIsResizing()
                         ? `2px solid ${theme.colors.blue[3]}`
                         : `1px solid ${
                               isLastVisibleColumn
                                   ? 'transparent'
-                                  : theme.colors.gray[2]
+                                  : theme.colors.ldGray[2]
                           }`,
                     borderTop: 'none',
                     borderLeft: 'none',
@@ -439,7 +478,7 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                 },
                 '&:hover': {
                     td: {
-                        backgroundColor: theme.colors.gray[0],
+                        backgroundColor: theme.colors.ldGray[0],
                         transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
                     },
 
@@ -471,12 +510,12 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                     padding: `${theme.spacing.md} ${theme.spacing.xl}`,
                     borderRight: isLastVisibleColumn
                         ? 'none'
-                        : `1px solid ${theme.colors.gray[2]}`,
+                        : `1px solid ${theme.colors.ldGray[2]}`,
                     // This is needed to remove the bottom border of the last row when there are rows
                     borderBottom:
                         isLastRow && hasScroll
                             ? 'none'
-                            : `1px solid ${theme.colors.gray[2]}`,
+                            : `1px solid ${theme.colors.ldGray[2]}`,
                     borderTop: 'none',
                     borderLeft: 'none',
                 },
@@ -495,6 +534,12 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                     totalResults={totalResults}
                     selectedCategories={categoryFilters}
                     setSelectedCategories={handleSetCategoryFilters}
+                    categoryFilterMode={categoryFilterMode}
+                    setCategoryFilterMode={handleSetCategoryFilterMode}
+                    selectedTables={tableFilters}
+                    setSelectedTables={handleSetTableFilters}
+                    selectedOwners={ownerFilters}
+                    setSelectedOwners={handleSetOwnerFilters}
                     position="apart"
                     p={`${theme.spacing.lg} ${theme.spacing.xl}`}
                     showCategoriesFilter={canManageTags || dataHasCategories}
@@ -504,7 +549,7 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                     metricCatalogView={metricCatalogView}
                     table={table}
                 />
-                <Divider color="gray.2" />
+                <Divider color="ldGray.2" />
             </Box>
         ),
         renderBottomToolbar: () => (
@@ -512,9 +557,9 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                 p={`${theme.spacing.sm} ${theme.spacing.xl} ${theme.spacing.md} ${theme.spacing.xl}`}
                 fz="xs"
                 fw={500}
-                color="gray.8"
+                color="ldGray.8"
                 sx={{
-                    borderTop: `1px solid ${theme.colors.gray[3]}`,
+                    borderTop: `1px solid ${theme.colors.ldGray[3]}`,
                 }}
             >
                 {isFetching ? (
@@ -526,7 +571,7 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                                 ? 'Scroll for more metrics'
                                 : 'All metrics loaded'}
                         </Text>
-                        <Text fw={400} color="gray.6">
+                        <Text fw={400} color="ldGray.6">
                             {hasNextPage
                                 ? `(${flatData.length} loaded)`
                                 : `(${flatData.length})`}
@@ -561,7 +606,7 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
         },
         icons: {
             IconArrowsSort: () => (
-                <MantineIcon icon={IconArrowsSort} size="md" color="gray.5" />
+                <MantineIcon icon={IconArrowsSort} size="md" color="ldGray.5" />
             ),
             IconSortAscending: () => (
                 <MantineIcon icon={IconArrowUp} size="md" color="blue.6" />
@@ -645,6 +690,12 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                             totalResults={totalResults}
                             selectedCategories={categoryFilters}
                             setSelectedCategories={handleSetCategoryFilters}
+                            categoryFilterMode={categoryFilterMode}
+                            setCategoryFilterMode={handleSetCategoryFilterMode}
+                            selectedTables={tableFilters}
+                            setSelectedTables={handleSetTableFilters}
+                            selectedOwners={ownerFilters}
+                            setSelectedOwners={handleSetOwnerFilters}
                             position="apart"
                             p={`${theme.spacing.lg} ${theme.spacing.xl}`}
                             showCategoriesFilter={
@@ -656,7 +707,7 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                             metricCatalogView={metricCatalogView}
                             table={table}
                         />
-                        <Divider color="gray.2" />
+                        <Divider color="ldGray.2" />
                     </Box>
                     <Box w="100%" h="calc(100dvh - 350px)" mih={600}>
                         <ReactFlowProvider>

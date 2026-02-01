@@ -5,7 +5,9 @@ import { type MostPopularAndRecentlyUpdated } from './resourceViewItem';
 import {
     type ApiJobScheduledResponse,
     type ApiJobStatusResponse,
+    type ApiReassignUserSchedulersResponse,
     type ApiSchedulersResponse,
+    type ApiUserSchedulersSummaryResponse,
     type SchedulerAndTargets,
     type SchedulerJobStatus,
 } from './scheduler';
@@ -52,6 +54,7 @@ import {
     type ApiChartAsCodeListResponse,
     type ApiChartAsCodeUpsertResponse,
     type ApiDashboardAsCodeListResponse,
+    type ApiSqlChartAsCodeListResponse,
 } from './coder';
 import {
     type ApiChartContentResponse,
@@ -61,7 +64,6 @@ import {
     type Dashboard,
     type DashboardAvailableFilters,
     type DashboardBasicDetails,
-    type DashboardSummary,
 } from './dashboard';
 import { type DbtExposure } from './dbt';
 import { type EmailStatusExpiring } from './email';
@@ -74,6 +76,7 @@ import {
 import { type FieldValueSearchResult } from './fieldMatch';
 import { type DashboardFilters } from './filter';
 import {
+    type ApiGitFileContent,
     type GitIntegrationConfiguration,
     type GitRepo,
     type PullRequestCreated,
@@ -164,6 +167,11 @@ import type {
     ApiAiAgentThreadMessageVizResponse,
     ApiAiAgentThreadResponse,
     ApiAiAgentThreadSummaryListResponse,
+    ApiAiAgentVerifiedArtifactsResponse,
+    ApiAiDashboardSummaryResponse,
+    ApiAiGenerateChartMetadataResponse,
+    ApiAiGenerateTableCalculationResponse,
+    ApiAiGetDashboardSummaryResponse,
     ApiAiOrganizationSettingsResponse,
     ApiAppendInstructionResponse,
     ApiCreateEvaluationResponse,
@@ -207,7 +215,9 @@ export type UpdateMetadata = {
 };
 export type ApiCompiledQueryResults = {
     query: string;
+    pivotQuery?: string;
     parameterReferences: string[];
+    compilationErrors?: string[];
 };
 
 export type ApiExploresResults = SummaryExplore[];
@@ -352,6 +362,9 @@ export type HealthState = {
         snowflake: {
             enabled: boolean;
         };
+        databricks: {
+            enabled: boolean;
+        };
     };
     posthog:
         | {
@@ -369,12 +382,21 @@ export type HealthState = {
         appId: string;
         verificationHash?: string;
     };
+    headway: {
+        enabled: boolean;
+    };
     staticIp: string;
+    signupUrl: string | undefined;
+    helpMenuUrl: string | undefined;
     query: {
         maxLimit: number;
         defaultLimit: number;
         csvCellsLimit: number;
         maxPageSize: number;
+    };
+    dashboard: {
+        maxTilesPerTab: number;
+        maxTabsPerDashboard: number;
     };
     pivotTable: {
         maxColumnLimit: number;
@@ -407,6 +429,13 @@ export type HealthState = {
     ai: {
         analyticsProjectUuid?: string;
         analyticsDashboardUuid?: string;
+        isAmbientAiEnabled: boolean;
+    };
+    echarts6: {
+        enabled: boolean;
+    };
+    funnelBuilder: {
+        enabled: boolean;
     };
 };
 
@@ -528,7 +557,7 @@ export type ReadyQueryResultsPage = ResultsPaginationMetadata<ResultRow> & {
     resultsPageExecutionMs: number;
     status: QueryHistoryStatus.READY;
     pivotDetails: {
-        // Unlimited total column count, this is used to display a warning to the user in the frontend when the number of columns is over MAX_PIVOT_COLUMN_LIMIT
+        // Unlimited total column count, this is used to display a warning to the user in the frontend when the number of columns is over maxColumnLimit
         totalColumnCount: number | null;
         indexColumn: PivotConfiguration['indexColumn'] | undefined;
         valuesColumns: PivotValuesColumn[];
@@ -651,26 +680,12 @@ export type CreateInviteLink = Pick<InviteLink, 'expiresAt' | 'email'> & {
 export type ApiCreateProjectResults = {
     project: Project;
     hasContentCopy: boolean;
+    contentCopyError?: string;
 };
 
 export type ProjectSavedChartStatus = boolean;
 
 export type ApiFlashResults = Record<string, string[]>;
-
-export type ApiAiDashboardSummaryResponse = {
-    status: 'ok';
-    results: DashboardSummary;
-};
-
-export type ApiAiGetDashboardSummaryResponse = {
-    status: 'ok';
-    results: DashboardSummary;
-};
-
-export type ApiAiGenerateCustomVizResponse = {
-    status: 'ok';
-    results: string;
-};
 
 type ApiResults =
     | ApiQueryResults
@@ -741,6 +756,7 @@ type ApiResults =
     | DecodedEmbed
     | Array<GitRepo>
     | PullRequestCreated
+    | ApiGitFileContent
     | GitIntegrationConfiguration
     | UserWarehouseCredentials
     | ApiJobStatusResponse['results']
@@ -756,6 +772,8 @@ type ApiResults =
     | ApiCreateProjectResults
     | ApiAiDashboardSummaryResponse['results']
     | ApiAiGetDashboardSummaryResponse['results']
+    | ApiAiGenerateChartMetadataResponse['results']
+    | ApiAiGenerateTableCalculationResponse['results']
     | ApiCatalogMetadataResults
     | ApiCatalogAnalyticsResults
     | ApiPromotionChangesResponse['results']
@@ -775,6 +793,7 @@ type ApiResults =
     | ApiGroupListResponse['results']
     | ApiCreateTagResponse['results']
     | ApiChartAsCodeListResponse['results']
+    | ApiSqlChartAsCodeListResponse['results']
     | ApiDashboardAsCodeListResponse['results']
     | ApiChartAsCodeUpsertResponse['results']
     | ApiGetMetricsTree['results']
@@ -787,6 +806,8 @@ type ApiResults =
     | ApiExecuteAsyncDashboardChartQueryResults
     | ApiGetAsyncQueryResults
     | ApiSchedulersResponse['results']
+    | ApiUserSchedulersSummaryResponse['results']
+    | ApiReassignUserSchedulersResponse['results']
     | ApiUserActivityDownloadCsv['results']
     | ApiRenameFieldsResponse['results']
     | ApiDownloadAsyncQueryResults
@@ -810,6 +831,7 @@ type ApiResults =
     | ApiAiAgentEvaluationRunResponse['results']
     | ApiAiAgentEvaluationRunSummaryListResponse['results']
     | ApiAiAgentEvaluationRunResultsResponse['results']
+    | ApiAiAgentVerifiedArtifactsResponse['results']
     | ApiCreateEvaluationResponse['results']
     | ApiAppendInstructionResponse['results']
     | ApiGetChangeResponse['results']

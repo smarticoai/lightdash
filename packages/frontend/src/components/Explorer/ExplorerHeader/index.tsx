@@ -1,24 +1,28 @@
 import { subject } from '@casl/ability';
-import { FeatureFlags } from '@lightdash/common';
+import { FeatureFlags, isTimeZone } from '@lightdash/common';
 import { Badge, Box, Button, Group, Tooltip } from '@mantine/core';
 import { IconAlertCircle, IconArrowLeft } from '@tabler/icons-react';
-import { useFeatureFlagEnabled } from 'posthog-js/react';
 import { memo, useEffect, useMemo, type FC } from 'react';
-import { useParams } from 'react-router';
 import useEmbed from '../../../ee/providers/Embed/useEmbed';
 import {
+    explorerActions,
     selectIsValidQuery,
     selectQueryLimit,
+    selectSavedChart,
     selectTimezone,
+    selectUnsavedChartVersion,
+    useExplorerDispatch,
     useExplorerSelector,
 } from '../../../features/explorer/store';
 import useDashboardStorage from '../../../hooks/dashboard/useDashboardStorage';
 import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../../hooks/useExplorerRoute';
+import { useProjectUuid } from '../../../hooks/useProjectUuid';
+import { useClientFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import useCreateInAnySpaceAccess from '../../../hooks/user/useCreateInAnySpaceAccess';
 import { Can } from '../../../providers/Ability';
+import { useAbilityContext } from '../../../providers/Ability/useAbilityContext';
 import useApp from '../../../providers/App/useApp';
-import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
 import { RefreshButton } from '../../RefreshButton';
 import RefreshDbtButton from '../../RefreshDbtButton';
 import MantineIcon from '../../common/MantineIcon';
@@ -28,9 +32,10 @@ import SaveChartButton from '../SaveChartButton';
 import QueryWarnings from './QueryWarnings';
 
 const ExplorerHeader: FC = memo(() => {
-    const { projectUuid } = useParams<{ projectUuid: string }>();
+    const projectUuid = useProjectUuid();
     const { user } = useApp();
     const { onBackToDashboard } = useEmbed();
+    const ability = useAbilityContext();
 
     // Get state from Redux and new hook
     const limit = useExplorerSelector(selectQueryLimit);
@@ -45,28 +50,59 @@ const ExplorerHeader: FC = memo(() => {
     );
     const queryWarnings = query.data?.warnings;
 
-    const savedChart = useExplorerContext(
-        (context) => context.state.savedChart,
-    );
-    const mergedUnsavedChartVersion = useExplorerContext(
-        (context) => context.state.mergedUnsavedChartVersion,
-    );
-    const setTimeZone = useExplorerContext(
-        (context) => context.actions.setTimeZone,
-    );
+    const dispatch = useExplorerDispatch();
+
+    const savedChart = useExplorerSelector(selectSavedChart);
+
+    const unsavedChartVersion = useExplorerSelector(selectUnsavedChartVersion);
+
+    const handleSetTimeZone = (timezone: string | null) => {
+        if (timezone && isTimeZone(timezone)) {
+            dispatch(explorerActions.setTimeZone(timezone));
+        }
+    };
 
     const { getHasDashboardChanges } = useDashboardStorage();
 
-    const userCanCreateCharts = useCreateInAnySpaceAccess(
+    const userCanCreateChartsInSpace = useCreateInAnySpaceAccess(
         projectUuid,
         'SavedChart',
     );
 
+    const userCanCreateSpace = ability.can(
+        'create',
+        subject('Space', {
+            organizationUuid: user.data?.organizationUuid,
+            projectUuid,
+        }),
+    );
+    const embed = useEmbed();
+    const isEmbedded = embed.embedToken !== undefined;
+
+    const buttonDisabledMessage = useMemo(() => {
+        // There is no concept on abilities about 'create' a SavedChart without space context
+        // We need a space to save the chart to whether it is public or user has editor permissions
+
+        // User has permissions to create charts in a public space (eg: interactive viewer with editor space permission)
+        if (userCanCreateChartsInSpace) return null;
+
+        // User has permissions to create spaces
+        // Therefore, he can create a space for him to save the chart (eg: editor)
+        if (userCanCreateSpace) return null;
+
+        // Edge case: there are no public spaces and the user does not have permissions to create spaces
+        if (!userCanCreateChartsInSpace && !userCanCreateSpace) {
+            return 'There are no public spaces to save this chart to';
+        }
+
+        return null;
+    }, [userCanCreateChartsInSpace, userCanCreateSpace]);
+
     const urlToShare = useMemo(() => {
-        if (mergedUnsavedChartVersion) {
+        if (unsavedChartVersion) {
             const urlArgs = getExplorerUrlFromCreateSavedChartVersion(
                 projectUuid,
-                mergedUnsavedChartVersion,
+                unsavedChartVersion,
                 true,
             );
             return {
@@ -74,7 +110,7 @@ const ExplorerHeader: FC = memo(() => {
                 search: `?${urlArgs.search}`,
             };
         }
-    }, [mergedUnsavedChartVersion, projectUuid]);
+    }, [unsavedChartVersion, projectUuid]);
 
     useEffect(() => {
         const checkReload = (event: BeforeUnloadEvent) => {
@@ -91,15 +127,11 @@ const ExplorerHeader: FC = memo(() => {
         };
     }, [getHasDashboardChanges]);
 
-    // FEATURE FLAG: this component doesn't appear when the feature flag is disabled
-    const userTimeZonesEnabled = useFeatureFlagEnabled(
+    const userTimeZonesEnabled = useClientFeatureFlag(
         FeatureFlags.EnableUserTimezones,
     );
 
-    const userCanManageCompileProject = user?.data?.ability?.can(
-        'manage',
-        'CompileProject',
-    );
+    const userCanManageCompileProject = ability.can('manage', 'CompileProject');
 
     return (
         <Group position="apart">
@@ -150,15 +182,27 @@ const ExplorerHeader: FC = memo(() => {
 
                 {userTimeZonesEnabled && (
                     <TimeZonePicker
-                        onChange={setTimeZone}
+                        onChange={handleSetTimeZone}
                         value={selectedTimezone as string}
                     />
                 )}
 
                 <RefreshButton size="xs" />
 
-                {!savedChart && userCanCreateCharts && (
-                    <SaveChartButton isExplorer />
+                {!savedChart && !isEmbedded && (
+                    <Tooltip
+                        disabled={buttonDisabledMessage === null}
+                        withinPortal
+                        position="bottom"
+                        label={buttonDisabledMessage}
+                    >
+                        <div>
+                            <SaveChartButton
+                                isExplorer
+                                disabled={buttonDisabledMessage !== null}
+                            />
+                        </div>
+                    </Tooltip>
                 )}
                 <Can
                     I="update"

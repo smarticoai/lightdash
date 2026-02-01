@@ -104,7 +104,9 @@ const ResourceView: FC<ResourceViewProps> = ({
     }
 
     const items =
-        hasTabs && activeTabId ? itemsByTabs.get(activeTabId) ?? [] : allItems;
+        hasTabs && activeTabId
+            ? (itemsByTabs.get(activeTabId) ?? [])
+            : allItems;
 
     return (
         <>
@@ -140,7 +142,7 @@ const ResourceView: FC<ResourceViewProps> = ({
                                                                 icon={
                                                                     IconInfoCircle
                                                                 }
-                                                                color="gray.6"
+                                                                color="ldGray.9"
                                                             />
                                                         </Tooltip>
                                                     ) : null
@@ -148,7 +150,7 @@ const ResourceView: FC<ResourceViewProps> = ({
                                             >
                                                 {tab.name ? (
                                                     <Text
-                                                        color="gray.7"
+                                                        color="ldGray.9"
                                                         fz={15}
                                                         fw={500}
                                                     >
@@ -186,7 +188,7 @@ const ResourceView: FC<ResourceViewProps> = ({
                                             position="right"
                                         >
                                             <IconInfoCircle
-                                                color={theme.colors.gray[6]}
+                                                color={theme.colors.ldGray[6]}
                                                 size={18}
                                             />
                                         </Tooltip>
@@ -197,7 +199,7 @@ const ResourceView: FC<ResourceViewProps> = ({
                             ) : null}
                         </Group>
 
-                        <Divider color="gray.3" />
+                        <Divider color="ldGray.3" />
                     </>
                 ) : null}
 

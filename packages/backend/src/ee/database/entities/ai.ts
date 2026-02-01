@@ -72,29 +72,36 @@ export type DbAiPrompt = {
     created_by_user_uuid: string | null;
     prompt: string;
     response: string | null;
+    error_message: string | null;
     responded_at: Date | null;
     viz_config_output: object | null;
     filters_output: object | null;
     human_score: number | null;
+    human_feedback: string | null;
     metric_query: object | null;
     saved_query_uuid: string | null;
+    model_config: { modelName: string; modelProvider: string } | null;
 };
 
 export type AiPromptTable = Knex.CompositeTableType<
     // base
     DbAiPrompt,
     // insert
-    Pick<DbAiPrompt, 'ai_thread_uuid' | 'created_by_user_uuid' | 'prompt'>,
+    Pick<DbAiPrompt, 'ai_thread_uuid' | 'created_by_user_uuid' | 'prompt'> &
+        Partial<Pick<DbAiPrompt, 'model_config'>>,
     // update
     Partial<
         Pick<
             DbAiPrompt,
             | 'response'
+            | 'error_message'
             | 'viz_config_output'
             | 'filters_output'
             | 'human_score'
+            | 'human_feedback'
             | 'metric_query'
             | 'saved_query_uuid'
+            | 'model_config'
         > & {
             responded_at: Knex.Raw;
         }

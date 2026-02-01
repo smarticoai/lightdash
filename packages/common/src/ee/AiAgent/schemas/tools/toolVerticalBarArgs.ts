@@ -4,7 +4,10 @@ import {
     legacyFollowUpToolsTransform,
 } from '../../followUpTools';
 import { AiResultType } from '../../types';
-import { customMetricsSchema } from '../customMetrics';
+import {
+    customMetricsSchema,
+    customMetricsSchemaTransformed,
+} from '../customMetrics';
 import { filtersSchemaTransformed, filtersSchemaV2 } from '../filters';
 import { baseOutputMetadataSchema } from '../outputMetadata';
 import { tableCalcsSchema } from '../tableCalcs/tableCalcs';
@@ -15,7 +18,6 @@ import { verticalBarMetricVizConfigSchema } from '../visualizations';
 export const TOOL_VERTICAL_BAR_VIZ_DESCRIPTION = `Use this tool to generate a Bar Chart Visualization.`;
 
 export const toolVerticalBarArgsSchema = createToolSchema({
-    type: AiResultType.VERTICAL_BAR_RESULT,
     description: TOOL_VERTICAL_BAR_VIZ_DESCRIPTION,
 })
     .extend({
@@ -60,6 +62,7 @@ export const toolVerticalBarArgsSchemaTransformed = toolVerticalBarArgsSchema
     })
     .transform((data) => ({
         ...data,
+        customMetrics: customMetricsSchemaTransformed.parse(data.customMetrics),
         followUpTools: legacyFollowUpToolsTransform(data.followUpTools),
     }));
 

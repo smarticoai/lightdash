@@ -1,15 +1,16 @@
 import { subject } from '@casl/ability';
 import {
+    ChartType,
     DashboardTileTypes,
     assertUnreachable,
     getDefaultChartTileSize,
+    hasUnusedDimensions,
     type CreateSavedChartVersion,
     type DashboardChartTile,
     type DashboardVersionedFields,
     type SavedChart,
 } from '@lightdash/common';
 import {
-    Box,
     Button,
     Group,
     LoadingOverlay,
@@ -18,7 +19,7 @@ import {
     Text,
     TextInput,
     Textarea,
-} from '@mantine/core';
+} from '@mantine-8/core';
 import { useForm, zodResolver } from '@mantine/form';
 import { IconPlus } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
@@ -34,25 +35,19 @@ import { useCreateMutation } from '../../../../hooks/useSavedQuery';
 import { useSpaceManagement } from '../../../../hooks/useSpaceManagement';
 import { useSpaceSummaries } from '../../../../hooks/useSpaces';
 import useApp from '../../../../providers/App/useApp';
-import MantineIcon from '../../../common/MantineIcon';
+import Callout from '../../Callout';
+import MantineIcon from '../../MantineIcon';
+import classes from './ChartCreateModal.module.css';
 import SaveToDashboardForm from './SaveToDashboardForm';
 import SaveToSpaceForm from './SaveToSpaceForm';
 import {
     DEFAULT_CHART_METADATA,
+    ModalStep,
+    SaveDestination,
     saveToDashboardSchema,
     saveToSpaceSchema,
     type ChartMetadata,
 } from './types';
-
-enum SaveDestination {
-    Dashboard = 'dashboard',
-    Space = 'space',
-}
-
-enum ModalStep {
-    InitialInfo,
-    SelectDestination,
-}
 
 const saveToSpaceOrDashboardSchema = z
     .object({
@@ -118,6 +113,18 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
         validate: zodResolver(saveToSpaceOrDashboardSchema),
     });
 
+    // Check if the chart has unused dimensions that may cause incorrect results
+    const showUnusedDimensionsWarning = useMemo(() => {
+        const pivotDimensions = savedData.pivotConfig?.columns ?? [];
+        const queryDimensions = savedData.metricQuery?.dimensions ?? [];
+        return hasUnusedDimensions({
+            chartType: savedData.chartConfig?.type,
+            chartConfig: savedData.chartConfig?.config,
+            pivotDimensions,
+            queryDimensions,
+        });
+    }, [savedData]);
+
     const {
         data: dashboards,
         isLoading: isLoadingDashboards,
@@ -149,7 +156,7 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
         staleTime: 0,
     });
 
-    const { initialize, setFieldValue } = form;
+    const { initialize, setFieldValue, setFieldError, clearFieldError } = form;
 
     useEffect(
         function initializeForm() {
@@ -204,9 +211,24 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
     const { mutateAsync: updateDashboard } = useUpdateDashboard(
         form.values.dashboardUuid ?? undefined,
     );
-    const { data: selectedDashboard } = useDashboardQuery(
-        form.values.dashboardUuid ?? undefined,
-    );
+    const {
+        data: selectedDashboard,
+        isLoading: isLoadingSelectedDashboard,
+        isError: isSelectedDashboardError,
+        error: selectedDashboardError,
+    } = useDashboardQuery(form.values.dashboardUuid ?? undefined);
+
+    // Handle dashboard selection errors
+    useEffect(() => {
+        if (selectedDashboardError) {
+            setFieldError(
+                'dashboardUuid',
+                `Failed to load dashboard. ${selectedDashboardError.error.message}`,
+            );
+        } else {
+            clearFieldError('dashboardUuid');
+        }
+    }, [selectedDashboardError, setFieldError, clearFieldError]);
 
     const isFormReadyToSave = useMemo(() => {
         if (currentStep === ModalStep.SelectDestination) {
@@ -218,11 +240,23 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
                 );
             }
             if (saveDestination === SaveDestination.Dashboard) {
-                return form.values.dashboardUuid;
+                return (
+                    form.values.dashboardUuid &&
+                    selectedDashboard &&
+                    !isLoadingSelectedDashboard &&
+                    !isSelectedDashboardError
+                );
             }
         }
         return false;
-    }, [currentStep, form.values, saveDestination]);
+    }, [
+        currentStep,
+        form.values,
+        saveDestination,
+        selectedDashboard,
+        isLoadingSelectedDashboard,
+        isSelectedDashboardError,
+    ]);
 
     const handleOnSubmit = useCallback(
         async (values: FormValues) => {
@@ -237,7 +271,9 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
              */
             if (saveDestination === SaveDestination.Dashboard) {
                 if (!selectedDashboard) {
-                    throw new Error('Expected dashboard');
+                    throw new Error(
+                        'Dashboard not found or failed to load. Please try selecting a different dashboard.',
+                    );
                 }
                 savedQuery = await createChart({
                     ...savedData,
@@ -254,6 +290,11 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
                         belongsToDashboard: true,
                         savedChartUuid: savedQuery.uuid,
                         chartName: values.name,
+                        // BigNumber charts default to hidden title for cleaner appearance
+                        hideTitle:
+                            savedData.chartConfig?.type === ChartType.BIG_NUMBER
+                                ? true
+                                : undefined,
                     },
                     ...getDefaultChartTileSize(savedData.chartConfig?.type),
                 };
@@ -349,9 +390,9 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
         >
             <LoadingOverlay visible={isLoading} />
 
-            <Box p="md">
+            <Stack gap="xs" p="md">
                 {currentStep === ModalStep.InitialInfo && (
-                    <Stack spacing="xs">
+                    <>
                         <TextInput
                             label="Chart name"
                             placeholder="eg. How many weekly active users do we have?"
@@ -369,39 +410,41 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
                             value={form.values.description ?? ''}
                         />
 
-                        <Stack spacing="sm" mt="sm">
+                        <Stack gap="sm" mt="sm">
                             <Text fw={500}>Save to</Text>
 
                             <Radio.Group
                                 value={saveDestination}
-                                onChange={(value: SaveDestination) =>
-                                    setSaveDestination(value)
+                                onChange={(value) =>
+                                    setSaveDestination(value as SaveDestination)
                                 }
                             >
-                                <Stack spacing="xs">
+                                <Stack gap="xs">
                                     <Radio
                                         value={SaveDestination.Space}
                                         label="Space"
-                                        styles={(theme) => ({
-                                            label: {
-                                                paddingLeft: theme.spacing.xs,
-                                            },
-                                        })}
                                         disabled={!spaces || isLoadingSpaces}
                                     />
                                     <Radio
                                         value={SaveDestination.Dashboard}
                                         label="Dashboard"
-                                        styles={(theme) => ({
-                                            label: {
-                                                paddingLeft: theme.spacing.xs,
-                                            },
-                                        })}
                                     />
                                 </Stack>
                             </Radio.Group>
                         </Stack>
-                    </Stack>
+
+                        {showUnusedDimensionsWarning && (
+                            <Callout
+                                variant="warning"
+                                title="Chart configuration warning"
+                            >
+                                This chart has dimensions in the query that are
+                                not used in the chart configuration (x-axis,
+                                y-axis, or group by). This may cause incorrect
+                                results.
+                            </Callout>
+                        )}
+                    </>
                 )}
 
                 {currentStep === ModalStep.SelectDestination && (
@@ -432,63 +475,65 @@ export const SaveToSpaceOrDashboard: FC<Props> = ({
                         )}
                     </>
                 )}
-            </Box>
-            <Group
-                position="right"
-                w="100%"
-                sx={(theme) => ({
-                    borderTop: `1px solid ${theme.colors.gray[4]}`,
-                    bottom: 0,
-                    padding: theme.spacing.md,
-                })}
-            >
-                {currentStep === ModalStep.InitialInfo ? (
-                    <>
-                        <Button onClick={onClose} variant="outline">
-                            Cancel
-                        </Button>
-                        <Button
-                            onClick={(
-                                e: React.MouseEvent<HTMLButtonElement>,
-                            ) => {
-                                e.preventDefault();
-                                handleNextStep();
-                            }}
-                            disabled={!form.values.name}
-                            type="button"
-                        >
-                            Next
-                        </Button>
-                    </>
-                ) : (
-                    <>
-                        {shouldShowNewSpaceButton && (
-                            <Button
-                                variant="subtle"
-                                size="xs"
-                                leftIcon={<MantineIcon icon={IconPlus} />}
-                                onClick={openCreateSpaceForm}
-                                mr="auto"
-                            >
-                                New Space
-                            </Button>
-                        )}
+            </Stack>
 
-                        <Button onClick={handleBack} variant="outline">
-                            Back
-                        </Button>
-                        <Button
-                            type="submit"
-                            loading={
-                                isSavingChart ||
-                                spaceManagement.createSpaceMutation.isLoading
-                            }
-                            disabled={!isFormReadyToSave}
-                        >
-                            Save
-                        </Button>
-                    </>
+            <Group
+                justify={
+                    shouldShowNewSpaceButton ? 'space-between' : 'flex-end'
+                }
+                className={classes.footer}
+            >
+                {shouldShowNewSpaceButton && (
+                    <Button
+                        variant="subtle"
+                        size="xs"
+                        leftSection={<MantineIcon icon={IconPlus} />}
+                        onClick={openCreateSpaceForm}
+                    >
+                        New Space
+                    </Button>
                 )}
+
+                <Group gap="sm">
+                    {currentStep === ModalStep.InitialInfo ? (
+                        <>
+                            <Button onClick={onClose} variant="default">
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={(
+                                    e: React.MouseEvent<HTMLButtonElement>,
+                                ) => {
+                                    e.preventDefault();
+                                    handleNextStep();
+                                }}
+                                disabled={!form.values.name}
+                                type="button"
+                            >
+                                Next
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <Button onClick={handleBack} variant="default">
+                                Back
+                            </Button>
+                            <Button
+                                type="submit"
+                                loading={
+                                    isSavingChart ||
+                                    spaceManagement.createSpaceMutation
+                                        .isLoading ||
+                                    (!!form.values.dashboardUuid &&
+                                        isLoadingSelectedDashboard)
+                                }
+                                disabled={!isFormReadyToSave}
+                            >
+                                Save
+                            </Button>
+                        </>
+                    )}
+                </Group>
             </Group>
         </form>
     );

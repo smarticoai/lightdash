@@ -1,17 +1,19 @@
 import { subject } from '@casl/ability';
-import { memo } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { Provider } from 'react-redux';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
-import { FeatureFlags } from '@lightdash/common';
 import { useHotkeys } from '@mantine/hooks';
 import Page from '../components/common/Page/Page';
 import Explorer from '../components/Explorer';
 import ExploreSideBar from '../components/Explorer/ExploreSideBar/index';
 import ForbiddenPanel from '../components/ForbiddenPanel';
 import {
-    explorerStore,
+    buildInitialExplorerState,
+    createExplorerStore,
+    explorerActions,
     selectTableName,
+    useExplorerDispatch,
     useExplorerSelector,
 } from '../features/explorer/store';
 import { useExplore } from '../hooks/useExplore';
@@ -20,29 +22,35 @@ import {
     useExplorerRoute,
     useExplorerUrlState,
 } from '../hooks/useExplorerRoute';
-import { useFeatureFlag } from '../hooks/useFeatureFlagEnabled';
-import { ProfilerWrapper } from '../perf/ProfilerWrapper';
 import useApp from '../providers/App/useApp';
 import { defaultState } from '../providers/Explorer/defaultState';
-import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
-import useExplorerContext from '../providers/Explorer/useExplorerContext';
 
-const ExplorerWithUrlParams = memo(() => {
-    // Run the query effects hook - orchestrates all query effects
-    useExplorerQueryEffects();
+const ExplorerContent = memo(() => {
+    // Sync URL params to Redux
     useExplorerRoute();
 
-    // Pre-load the feature flag to avoid trying to render old side bar while it is fetching it in ExploreTree
-    useFeatureFlag(FeatureFlags.ExperimentalVirtualizedSideBar);
+    // Run the query effects hook - orchestrates all query effects
+    useExplorerQueryEffects();
+
+    const dispatch = useExplorerDispatch();
+    const navigate = useNavigate();
 
     // Get table name from Redux
     const tableId = useExplorerSelector(selectTableName);
     const { data } = useExplore(tableId);
 
-    const clearQuery = useExplorerContext(
-        (context) => context.actions.clearQuery,
-    );
-    useHotkeys([['mod + alt + k', clearQuery]]);
+    const handleClearQuery = useCallback(() => {
+        dispatch(
+            explorerActions.clearQuery({
+                defaultState,
+                tableName: tableId,
+            }),
+        );
+        // Clear state in URL params
+        void navigate({ search: '' }, { replace: true });
+    }, [dispatch, tableId, navigate]);
+
+    useHotkeys([['mod + alt + k', handleClearQuery]]);
 
     return (
         <Page
@@ -51,18 +59,44 @@ const ExplorerWithUrlParams = memo(() => {
             withFullHeight
             withPaddedContent
         >
-            <ProfilerWrapper id="Explorer">
-                <Explorer />
-            </ProfilerWrapper>
+            <Explorer />
         </Page>
     );
 });
 
-const ExplorerPage = memo(() => {
-    const { projectUuid } = useParams<{ projectUuid: string }>();
+const ExplorerWithUrlParams = memo(() => {
+    const { health } = useApp();
 
+    // Get URL state for initialization
     const explorerUrlState = useExplorerUrlState();
-    const { user, health } = useApp();
+
+    // Create store once when component mounts with URL state
+    // Parent component uses key={tableId} so this unmounts/remounts when navigating between tables
+    // After initialization, useExplorerRoute handles syncing URL ↔ Redux
+    const [store] = useState(() => {
+        const initialState = buildInitialExplorerState({
+            initialState: explorerUrlState,
+            isEditMode: true,
+            defaultLimit: health.data?.query.defaultLimit,
+        });
+
+        return createExplorerStore({ explorer: initialState });
+    });
+
+    return (
+        <Provider store={store}>
+            <ExplorerContent />
+        </Provider>
+    );
+});
+
+const ExplorerPage = memo(() => {
+    const { projectUuid, tableId } = useParams<{
+        projectUuid: string;
+        tableId?: string;
+    }>();
+
+    const { user } = useApp();
 
     const cannotViewProject = user.data?.ability?.cannot(
         'view',
@@ -83,20 +117,11 @@ const ExplorerPage = memo(() => {
         return <ForbiddenPanel />;
     }
 
+    // Key ensures component remounts when navigating between tables
     return (
-        <Provider store={explorerStore}>
-            <ExplorerProvider
-                isEditMode={true}
-                initialState={
-                    explorerUrlState
-                        ? { ...explorerUrlState, isEditMode: true }
-                        : { ...defaultState, isEditMode: true }
-                }
-                defaultLimit={health.data?.query.defaultLimit}
-            >
-                <ExplorerWithUrlParams />
-            </ExplorerProvider>
-        </Provider>
+        <ExplorerWithUrlParams
+            key={`explorer-${projectUuid}-${tableId || 'none'}`}
+        />
     );
 });
 

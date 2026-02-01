@@ -96,13 +96,13 @@ export const AiChartVisualization: FC<Props> = ({
                     <ActionIcon
                         size="sm"
                         variant="subtle"
-                        color="gray"
+                        color="ldGray.9"
                         onClick={() => dispatch(clearArtifact())}
                     >
-                        <MantineIcon icon={IconX} color="gray" />
+                        <MantineIcon icon={IconX} />
                     </ActionIcon>
                 </Group>
-                <Paper h="100%" bg="gray.0">
+                <Paper h="100%" bg="ldGray.0">
                     <Stack gap="xs" align="center" justify="center" h="100%">
                         <MantineIcon
                             icon={IconExclamationCircle}
@@ -143,6 +143,8 @@ export const AiChartVisualization: FC<Props> = ({
                             <AiChartQuickOptions
                                 message={message}
                                 projectUuid={projectUuid}
+                                agentUuid={agentUuid}
+                                artifactData={artifactData}
                                 saveChartOptions={{
                                     name: queryExecutionHandle.data.metadata
                                         .title,
@@ -157,10 +159,10 @@ export const AiChartVisualization: FC<Props> = ({
                                 <ActionIcon
                                     size="sm"
                                     variant="subtle"
-                                    color="gray"
+                                    color="ldGray.4"
                                     onClick={() => dispatch(clearArtifact())}
                                 >
-                                    <MantineIcon icon={IconX} color="gray" />
+                                    <MantineIcon icon={IconX} />
                                 </ActionIcon>
                             )}
                         </Group>

@@ -1,20 +1,27 @@
-import { ChartType } from '@lightdash/common';
+import { ChartType, type Filters } from '@lightdash/common';
+import type { ExplorerSliceState } from '../../features/explorer/store/explorerSlice';
 import { EMPTY_CARTESIAN_CHART_CONFIG } from '../../hooks/cartesianChartConfig/useCartesianChartConfig';
-import { ExplorerSection, type ExplorerReduceState } from './types';
+import { ExplorerSection } from './types';
 
 // Helper to create default query execution state
-export const defaultQueryExecution: ExplorerReduceState['queryExecution'] = {
+export const defaultQueryExecution: ExplorerSliceState['queryExecution'] = {
     validQueryArgs: null,
     unpivotedQueryArgs: null,
     queryUuidHistory: [],
     unpivotedQueryUuidHistory: [],
+    pendingFetch: false,
 };
 
-export const defaultState: ExplorerReduceState = {
+const defaultFilters: Filters = {};
+
+export const defaultState: ExplorerSliceState = {
     isVisualizationConfigOpen: false,
+    isEditMode: false,
+    isMinimal: false,
     parameterReferences: [],
     parameterDefinitions: {},
     previouslyFetchedState: undefined,
+    cachedChartConfigs: {},
     expandedSections: [ExplorerSection.RESULTS, ExplorerSection.PARAMETERS],
     unsavedChartVersion: {
         tableName: '',
@@ -22,7 +29,7 @@ export const defaultState: ExplorerReduceState = {
             exploreName: '',
             dimensions: [],
             metrics: [],
-            filters: {},
+            filters: defaultFilters,
             sorts: [],
             limit: 500,
             tableCalculations: [],
@@ -52,6 +59,9 @@ export const defaultState: ExplorerReduceState = {
             isOpen: false,
         },
         itemDetail: {
+            isOpen: false,
+        },
+        periodOverPeriodComparison: {
             isOpen: false,
         },
     },

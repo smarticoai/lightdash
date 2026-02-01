@@ -3,24 +3,49 @@ import type { Explore } from '../types/explore';
 import type { Metric } from '../types/field';
 import type { LightdashProjectConfig } from '../types/lightdashProjectConfig';
 
+type SpotlightConfigArgs = {
+    visibility?: LightdashProjectConfig['spotlight']['default_visibility'];
+    categories?: string[];
+    filterBy?: string[];
+    segmentBy?: string[];
+    owner?: string;
+};
+
+const validateOwner = (owner: unknown): string | null => {
+    if (typeof owner === 'string') return owner;
+    if (owner === undefined)
+        // eslint-disable-next-line no-console
+        console.warn(
+            `Invalid spotlight owner: expected string, got ${typeof owner}`,
+        );
+    return null;
+};
+
 /**
  * Get the spotlight configuration for a resource
- * @param visibility - The visibility of the resource
- * @param categories - The categories of the resource
- * @returns The spotlight configuration for the resource
  */
-export const getSpotlightConfigurationForResource = (
-    visibility?: LightdashProjectConfig['spotlight']['default_visibility'],
-    categories?: string[],
-): Pick<Explore, 'spotlight'> | Pick<Metric, 'spotlight'> => {
+export const getSpotlightConfigurationForResource = ({
+    visibility,
+    categories,
+    filterBy,
+    segmentBy,
+    owner,
+}: SpotlightConfigArgs):
+    | Pick<Explore, 'spotlight'>
+    | Pick<Metric, 'spotlight'> => {
     if (visibility === undefined) {
         return {};
     }
+
+    const validatedOwner = validateOwner(owner);
 
     return {
         spotlight: {
             visibility,
             categories,
+            ...(filterBy ? { filterBy } : {}),
+            ...(segmentBy ? { segmentBy } : {}),
+            ...(validatedOwner ? { owner: validatedOwner } : {}),
         },
     };
 };

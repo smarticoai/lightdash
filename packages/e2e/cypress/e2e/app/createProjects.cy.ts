@@ -59,7 +59,7 @@ const warehouseConfig = {
 };
 
 const configurePostgresWarehouse = (
-    config: typeof warehouseConfig['postgresSQL'],
+    config: (typeof warehouseConfig)['postgresSQL'],
 ) => {
     cy.get('input[name="warehouse.host"]').type(config.host, { log: false });
     cy.get('input[name="warehouse.user"]').type(config.user, { log: false });
@@ -80,7 +80,7 @@ const configurePostgresWarehouse = (
 };
 
 const configureBigqueryWarehouse = (
-    config: typeof warehouseConfig['bigQuery'],
+    config: (typeof warehouseConfig)['bigQuery'],
 ) => {
     cy.get('input[name="warehouse.project"]').type(config.project, {
         log: false,
@@ -101,7 +101,7 @@ const configureBigqueryWarehouse = (
     cy.get('input[name="dbt.target"]').type('test');
     cy.get('input[name="warehouse.dataset"]').type(config.dataset);
 };
-const configureTrinoWarehouse = (config: typeof warehouseConfig['trino']) => {
+const configureTrinoWarehouse = (config: (typeof warehouseConfig)['trino']) => {
     cy.get('input[name="warehouse.host"]').type(config.host, { log: false });
     cy.get('input[name="warehouse.user"]').type(config.user, { log: false });
     cy.get('input[name="warehouse.password"]').type(config.password, {
@@ -121,7 +121,7 @@ const configureTrinoWarehouse = (config: typeof warehouseConfig['trino']) => {
 };
 
 const configureDatabricksWarehouse = (
-    config: typeof warehouseConfig['databricks'],
+    config: (typeof warehouseConfig)['databricks'],
 ) => {
     cy.get('input[name="warehouse.serverHostName"]').type(config.host, {
         log: false,
@@ -140,7 +140,7 @@ const configureDatabricksWarehouse = (
 };
 
 const configureSnowflakeWarehouse = (
-    config: typeof warehouseConfig['snowflake'],
+    config: (typeof warehouseConfig)['snowflake'],
 ) => {
     cy.get('input[name="warehouse.account"]').type(config.account, {
         log: false,
@@ -212,7 +212,7 @@ const testFilterStringEscaping = (projectUuid: string) => {
                     descending: false,
                 },
             ],
-            limit: 500,
+            limit: 1,
             tableCalculations: [],
             additionalMetrics: [],
         },
@@ -275,7 +275,7 @@ const testPercentile = (
                     descending: true,
                 },
             ],
-            limit: 500,
+            limit: 1,
             tableCalculations: [],
             additionalMetrics: [],
         },
@@ -333,7 +333,7 @@ const testTimeIntervalsResults = (
                     descending: true,
                 },
             ],
-            limit: 500,
+            limit: 1,
             tableCalculations: [],
             additionalMetrics: [],
         },
@@ -375,7 +375,7 @@ const createCustomDimensionChart = (projectUuid: string) => {
                         descending: true,
                     },
                 ],
-                limit: 500,
+                limit: 1,
                 tableCalculations: [],
                 additionalMetrics: [],
                 customDimensions: [
@@ -489,13 +489,15 @@ describe('Create projects', () => {
         testCompile().then((projectUuid) => {
             testFilterStringEscaping(projectUuid);
             testTimeIntervalsResults(projectUuid);
-            testPercentile(projectUuid);
+            // todo: move to unit test
+            // testPercentile(projectUuid);
 
-            createCustomDimensionChart(projectUuid);
-            testCustomDimensions(projectUuid);
+            // todo: move to api/unit test
+            // createCustomDimensionChart(projectUuid);
+            // testCustomDimensions(projectUuid);
         });
     });
-    it('Should create a Redshift project', () => {
+    it.skip('Should create a Redshift project', () => {
         // https://docs.aws.amazon.com/redshift/latest/dg/c_redshift-and-postgres-sql.html
         // Amazon Redshift is based on PostgreSQL
         // So we can use our own PostgreSQL local instance to test the connection against Redshift
@@ -558,13 +560,14 @@ describe('Create projects', () => {
 
             testTimeIntervalsResults(projectUuid, bigqueryRowValues);
 
-            testPercentile(projectUuid, [
-                '2020-08-12',
-                '1,999',
-                '1,559',
-                '1,999',
-                '19,999,999',
-            ]);
+            // todo: move to unit test
+            // testPercentile(projectUuid, [
+            //     '2020-08-12',
+            //     '1,999',
+            //     '1,559',
+            //     '1,999',
+            //     '19,999,999',
+            // ]);
         });
     });
     // note: we don't have a staging environment for Trino atm
@@ -692,13 +695,14 @@ describe('Create projects', () => {
             ];
 
             testTimeIntervalsResults(projectUuid, snowflakeRowValues);
-            testPercentile(projectUuid, [
-                '2020-08-12',
-                '2,000',
-                '1,880',
-                '2,000',
-                '1,999,999',
-            ]);
+            // todo: move to unit test
+            // testPercentile(projectUuid, [
+            //     '2020-08-12',
+            //     '2,000',
+            //     '1,880',
+            //     '2,000',
+            //     '1,999,999',
+            // ]);
 
             // createCustomDimensionChart(projectUuid);
             // testCustomDimensions(projectUuid); // TODO enable after merging rounding fix

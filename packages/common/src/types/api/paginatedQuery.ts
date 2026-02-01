@@ -36,6 +36,7 @@ export type ExecuteAsyncSavedChartRequestParams =
 export type ExecuteAsyncDashboardChartRequestParams =
     CommonExecuteQueryRequestParams & {
         chartUuid: string;
+        tileUuid: string;
         dashboardUuid: string;
         dashboardFilters: DashboardFilters;
         dashboardSorts: SortField[];
@@ -57,7 +58,8 @@ export type ExecuteAsyncUnderlyingDataRequestParams =
         underlyingDataItemId?: string;
         filters: Filters;
         dateZoom?: DateZoom;
-        limit?: number;
+        limit?: number | null;
+        sorts?: SortField[];
     };
 
 export type ExecuteAsyncSqlChartByUuidRequestParams =

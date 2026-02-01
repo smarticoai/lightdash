@@ -7,7 +7,7 @@ models:
 
       {{ doc("orders_status") }}
     config:
-      tags: ["ai"]
+      tags: ["core", "ai"]
       meta:
         primary_key: order_id
         spotlight:
@@ -21,6 +21,8 @@ models:
             description: The customer who placed this order (many orders can belong to one customer)
         metrics:
           completion_percentage:
+            spotlight:
+              owner: demo@lightdash.com
             type: number
             sql: ${total_completed_order_amount}/${total_order_amount}
             format: percent
@@ -31,16 +33,22 @@ models:
           field: order_date
           interval: MONTH
         explores:
-          completed_orders:
-            label: Completed Orders
-            description: Analysis of completed orders with customer information
-            group_label: Sales Analysis
-            joins:
-              - join: customers
-                sql_on: ${customers.customer_id} = ${orders.customer_id}
-                relationship: many-to-one
-            required_filters:
-              - is_completed: "true"
+          orders_with_custom_dims:
+            label: Orders with Custom Dimensions
+            # No need to specify joins - they are inherited from the parent model
+            additional_dimensions:
+              full_name:
+                type: string
+                sql: "CONCAT(${customers.first_name}, ' ', ${customers.last_name})"
+                label: Customer Full Name
+              order_value_category:
+                type: string
+                sql: "CASE WHEN ${orders.amount} > 100 THEN 'high' ELSE 'low' END"
+                label: Order Value Category
+              order_month:
+                type: date
+                sql: DATE(${orders.order_date})
+                time_intervals: [MONTH]
     columns:
       - name: order_id
         tests:
@@ -82,6 +90,8 @@ models:
                 show_underlying_values:
                   - amount
                   - customers.first_name
+                spotlight:
+                  owner: demo2@lightdash.com
               fulfillment_rate_with_format_expression:
                 type: average
                 format: "#,##0.0%"
@@ -102,13 +112,43 @@ models:
         meta:
           dimension:
             type: number
+      - name: date_dim_param_test
+        description: "Example of date based on another dimension"
+        meta:
+          dimension:
+            sql: |
+              CASE
+                WHEN ${TABLE}.order_date <= ${lightdash.parameters.date_dim_parameter}
+                  THEN 'param is greater'
+                WHEN ${TABLE}.order_date >= ${lightdash.parameters.date_dim_parameter}
+                  THEN 'param is smaller'
+              END
+            spotlight:
+              filter_by: false
+              segment_by: false
+        type: string
+      - name: date_custom_param_test
+        description: "Example of custom date"
+        meta:
+          dimension:
+            sql: |
+              CASE
+                WHEN ${TABLE}.order_date <= ${lightdash.parameters.date_custom_parameter}
+                  THEN 'I feel less than...'
+                WHEN ${TABLE}.order_date >= ${lightdash.parameters.date_custom_parameter}
+                  THEN 'I feel great!!!'
+              END
+            spotlight:
+              filter_by: false
+              segment_by: false
+        type: string
       - name: order_date
         description: Date (UTC) that the order was placed
         config:
           meta:
             dimension:
               type: date
-              time_intervals: ["DAY", "WEEK", "MONTH", "YEAR"]
+              time_intervals: ["DAY", "WEEK", "MONTH", "YEAR", "MONTH_NAME", "DAY_OF_WEEK_NAME", "QUARTER_NAME"]
             metrics:
               date_of_first_order:
                 type: min
@@ -163,6 +203,17 @@ models:
                 type: percent_of_total
                 sql: ${total_order_amount}
                 format: "#,##0.00%"
+                spotlight:
+                  owner: demo@lightdash.com
+                  filter_by:
+                    - status
+                    - currency
+                    - date_dim_param_test # to test that metric filter_by overrides dimension filter_by: false
+                  segment_by:
+                    - is_completed
+                    - order_source
+                    - order_priority
+                    - date_custom_param_test # to test that metric segment_by overrides dimension segment_by: false
               amount_running_total:
                 type: running_total
                 sql: ${total_order_amount}

@@ -58,10 +58,12 @@ export const getFilterRulesFromGroup = (
     filterGroup: FilterGroup | undefined,
 ): FilterRule[] => {
     if (filterGroup) {
-        const items = isAndFilterGroup(filterGroup)
+        const items: FilterGroupItem[] | undefined = isAndFilterGroup(
+            filterGroup,
+        )
             ? filterGroup.and
             : filterGroup.or;
-        return items.reduce<FilterRule[]>(
+        return (items ?? []).reduce<FilterRule[]>(
             (sum, item) =>
                 isFilterGroup(item)
                     ? [...sum, ...getFilterRulesFromGroup(item)]
@@ -826,6 +828,25 @@ export const getDashboardFiltersForTileAndTables = (
         tables,
         dashboardFilters.tableCalculations,
     ),
+});
+
+export const getDashboardFiltersForTile = (
+    tileUuid: string,
+    dashboardFilters: DashboardFilters,
+    dashboardTemporaryFilters?: DashboardFilters,
+): DashboardFilters => ({
+    dimensions: getDashboardFilterRulesForTile(tileUuid, [
+        ...dashboardFilters.dimensions,
+        ...(dashboardTemporaryFilters?.dimensions ?? []),
+    ]),
+    metrics: getDashboardFilterRulesForTile(tileUuid, [
+        ...dashboardFilters.metrics,
+        ...(dashboardTemporaryFilters?.metrics ?? []),
+    ]),
+    tableCalculations: getDashboardFilterRulesForTile(tileUuid, [
+        ...dashboardFilters.tableCalculations,
+        ...(dashboardTemporaryFilters?.tableCalculations ?? []),
+    ]),
 });
 
 const combineFilterGroups = (

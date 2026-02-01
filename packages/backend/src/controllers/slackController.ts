@@ -1,5 +1,6 @@
 import {
     ApiErrorPayload,
+    ApiSlackChannelResponse,
     ApiSlackChannelsResponse,
     ApiSlackCustomSettingsResponse,
     ApiSlackGetInstallationResponse,
@@ -15,6 +16,7 @@ import {
     Get,
     Middlewares,
     OperationId,
+    Path,
     Put,
     Query,
     Request,
@@ -40,6 +42,7 @@ import { BaseController } from './baseController';
 export class SlackController extends BaseController {
     /**
      * Get slack channels
+     * @summary Get Slack channels
      * @param req express request
      */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
@@ -53,6 +56,7 @@ export class SlackController extends BaseController {
         @Query() excludeDms?: boolean,
         @Query() excludeGroups?: boolean,
         @Query() forceRefresh?: boolean,
+        @Query() includeChannelIds?: string,
     ): Promise<ApiSlackChannelsResponse> {
         this.setStatus(200);
         return {
@@ -65,12 +69,40 @@ export class SlackController extends BaseController {
                     excludeDms,
                     excludeGroups,
                     forceRefresh,
+                    includeChannelIds: includeChannelIds
+                        ? includeChannelIds.split(',').filter(Boolean)
+                        : undefined,
                 }),
         };
     }
 
     /**
+     * Look up a single Slack channel by ID. Used for on-demand fetching when
+     * user pastes a channel ID not in the cache.
+     * @summary Lookup channel
+     * @param req express request
+     * @param channelId Slack channel ID (e.g., C01234567)
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/channels/{channelId}')
+    @OperationId('getSlackChannelById')
+    async getChannelById(
+        @Request() req: express.Request,
+        @Path() channelId: string,
+    ): Promise<ApiSlackChannelResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getSlackIntegrationService()
+                .lookupChannelById(req.user!, channelId),
+        };
+    }
+
+    /**
      * Update slack notification channel to send notifications to scheduled jobs fail
+     * @summary Update Slack custom settings
      * @param req express request
      */
     @Middlewares([
@@ -98,6 +130,7 @@ export class SlackController extends BaseController {
 
     /**
      * Check if the user has an OpenID identity for Slack
+     * @summary Check Slack OpenID link status
      * @param req express request
      */
     @Middlewares([isAuthenticated])
@@ -122,6 +155,10 @@ export class SlackController extends BaseController {
         };
     }
 
+    /**
+     * Get Slack installation details for the organization
+     * @summary Get Slack installation
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @SuccessResponse('200', 'Success')
     @Get('/')
@@ -137,6 +174,10 @@ export class SlackController extends BaseController {
         };
     }
 
+    /**
+     * Get a Slack image by nanoId
+     * @summary Get Slack image
+     */
     @SuccessResponse('200', 'Success')
     @Get('/image/:nanoId')
     @OperationId('getSlackImage')
@@ -160,6 +201,10 @@ export class SlackController extends BaseController {
         return fs.createReadStream(normalizedPath);
     }
 
+    /**
+     * Delete the Slack installation for the organization
+     * @summary Delete Slack installation
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @SuccessResponse('200', 'Success')
     @Delete('/')
@@ -177,6 +222,10 @@ export class SlackController extends BaseController {
         };
     }
 
+    /**
+     * Start the Slack installation flow
+     * @summary Install Slack
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @SuccessResponse('200', 'Success')
     @Get('/install')

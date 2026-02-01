@@ -3,9 +3,14 @@ models:
   - name: payments
     description: This table has information about individual payments
     config:
-      tags: ["ai"]
+      tags: ["core", "ai"]
       meta:
-        sets: 
+        spotlight:
+          owner: demo@lightdash.com
+        default_show_underlying_values:
+          - orders.customer_id
+          - unique_payment_count
+        sets:
           base_set:
             fields:
               - orders.status
@@ -44,6 +49,8 @@ models:
           meta:
             metrics:
               total_revenue:
+                spotlight:
+                  owner: demo2@lightdash.com
                 type: sum
                 description: Sum of all payments
                 # E2E tests rely on these values
@@ -55,4 +62,3 @@ models:
                   - orders.total_order_amount
                   # # Dimensions
                   - orders.customer_id
-                  

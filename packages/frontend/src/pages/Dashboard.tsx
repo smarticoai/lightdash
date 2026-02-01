@@ -3,27 +3,25 @@ import {
     type DashboardTile,
     type Dashboard as IDashboard,
 } from '@lightdash/common';
-import { Box, Button, Flex, Group, Modal, Stack, Text } from '@mantine/core';
-import { useDisclosure } from '@mantine/hooks';
-import { captureException, useProfiler } from '@sentry/react';
+import { Button, Text } from '@mantine-8/core';
+import { useDisclosure } from '@mantine-8/hooks';
+import { captureException } from '@sentry/react';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { type Layout } from 'react-grid-layout';
 import { useBlocker, useNavigate, useParams } from 'react-router';
-import DashboardFilter from '../components/DashboardFilter';
-import DashboardTabs from '../components/DashboardTabs';
-import PinnedParameters from '../components/PinnedParameters';
+import { dashboardCSSVars } from '../components/common/Dashboard/dashboard.constants';
+import styles from '../components/common/Dashboard/Dashboard.module.css';
 import DashboardHeader from '../components/common/Dashboard/DashboardHeader';
 import ErrorState from '../components/common/ErrorState';
-import MantineIcon from '../components/common/MantineIcon';
-import Page from '../components/common/Page/Page';
-import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
+import MantineModal from '../components/common/MantineModal';
 import DashboardDeleteModal from '../components/common/modal/DashboardDeleteModal';
 import DashboardDuplicateModal from '../components/common/modal/DashboardDuplicateModal';
 import { DashboardExportModal } from '../components/common/modal/DashboardExportModal';
+import Page from '../components/common/Page/Page';
+import PageSpinner from '../components/PageSpinner';
 import { useDashboardCommentsCheck } from '../features/comments';
-import { DateZoom } from '../features/dateZoom';
-import { Parameters } from '../features/parameters';
+import DashboardTabs from '../features/dashboardTabs';
 import {
     appendNewTilesToBottom,
     useUpdateDashboard,
@@ -32,7 +30,6 @@ import useDashboardStorage from '../hooks/dashboard/useDashboardStorage';
 import { useOrganization } from '../hooks/organization/useOrganization';
 import useToaster from '../hooks/toaster/useToaster';
 import { useContentAction } from '../hooks/useContent';
-import { useSpaceSummaries } from '../hooks/useSpaces';
 import useApp from '../providers/App/useApp';
 import DashboardProvider from '../providers/Dashboard/DashboardProvider';
 import useDashboardContext from '../providers/Dashboard/useDashboardContext';
@@ -46,7 +43,6 @@ const Dashboard: FC = () => {
         dashboardUuid: string;
         mode?: string;
     }>();
-    const { data: spaces } = useSpaceSummaries(projectUuid, true);
 
     const { clearIsEditingDashboardChart, clearDashboardStorage } =
         useDashboardStorage();
@@ -58,11 +54,6 @@ const Dashboard: FC = () => {
     const dashboardTemporaryFilters = useDashboardContext(
         (c) => c.dashboardTemporaryFilters,
     );
-    const requiredDashboardFilters = useDashboardContext(
-        (c) => c.requiredDashboardFilters,
-    );
-    const hasRequiredDashboardFiltersToSet =
-        requiredDashboardFilters.length > 0;
     const haveFiltersChanged = useDashboardContext((c) => c.haveFiltersChanged);
     const setHaveFiltersChanged = useDashboardContext(
         (c) => c.setHaveFiltersChanged,
@@ -157,12 +148,22 @@ const Dashboard: FC = () => {
             dashboardTemporaryFilters.metrics.length > 0,
         [dashboardTemporaryFilters],
     );
+    // Callback to sync local state with server response after save
+    // This is needed when the backend modifies tiles (e.g., duplicating charts during tab duplication)
+    const handleDashboardUpdateSuccess = useCallback(
+        (updatedDashboard: IDashboard) => {
+            setDashboardTiles(updatedDashboard.tiles);
+            setDashboardTabs(updatedDashboard.tabs);
+        },
+        [setDashboardTiles, setDashboardTabs],
+    );
+
     const {
         mutate,
         isSuccess,
         reset,
         isLoading: isSaving,
-    } = useUpdateDashboard(dashboardUuid);
+    } = useUpdateDashboard(dashboardUuid, false, handleDashboardUpdateSuccess);
 
     const { mutateAsync: contentAction, isLoading: isContentActionLoading } =
         useContentAction(projectUuid);
@@ -175,7 +176,6 @@ const Dashboard: FC = () => {
     // tabs state
     const [addingTab, setAddingTab] = useState<boolean>(false);
 
-    const hasDashboardTiles = dashboardTiles && dashboardTiles.length > 0;
     const tabsEnabled = dashboardTabs && dashboardTabs.length > 0;
 
     const defaultTab = dashboardTabs?.[0];
@@ -553,190 +553,152 @@ const Dashboard: FC = () => {
         (c) => c.hasTilesThatSupportFilters,
     );
 
+    if (isDashboardLoading) {
+        return <PageSpinner />;
+    }
+
     if (dashboardError) {
         return <ErrorState error={dashboardError.error} />;
     }
-    if (dashboard === undefined) {
+
+    if (!dashboard) {
         return (
-            <Box mt="md">
-                <SuboptimalState title="Loading..." loading />
-            </Box>
+            <ErrorState
+                error={{
+                    name: 'NotExistsError',
+                    statusCode: 404,
+                    message: 'Dashboard not found',
+                    data: {},
+                }}
+            />
         );
     }
+
+    const handleSaveDashboard = () => {
+        const dimensionFilters = [
+            ...dashboardFilters.dimensions,
+            ...dashboardTemporaryFilters.dimensions,
+        ];
+        // Reset value for required filter on save dashboard
+        const requiredFiltersWithoutValues = dimensionFilters.map((filter) => {
+            if (filter.required) {
+                return {
+                    ...filter,
+                    disabled: true,
+                    values: [],
+                };
+            }
+            return filter;
+        });
+
+        mutate({
+            tiles: dashboardTiles,
+            filters: {
+                dimensions: requiredFiltersWithoutValues,
+                metrics: [
+                    ...dashboardFilters.metrics,
+                    ...dashboardTemporaryFilters.metrics,
+                ],
+                tableCalculations: [
+                    ...dashboardFilters.tableCalculations,
+                    ...dashboardTemporaryFilters.tableCalculations,
+                ],
+            },
+            name: dashboard.name,
+            tabs: dashboardTabs,
+            config: {
+                isDateZoomDisabled,
+                pinnedParameters,
+            },
+            parameters: dashboardParameters,
+        });
+    };
+
+    const dashboardHeaderProps = {
+        dashboard,
+        organizationUuid: organization?.organizationUuid,
+        isEditMode,
+        isSaving,
+        oldestCacheTime,
+        isFullscreen,
+        activeTabUuid: activeTab?.uuid,
+        dashboardTabs,
+        isFullScreenFeatureEnabled,
+        onToggleFullscreen: handleToggleFullscreen,
+        hasDashboardChanged:
+            haveTilesChanged ||
+            haveFiltersChanged ||
+            hasTemporaryFilters ||
+            haveTabsChanged ||
+            hasDateZoomDisabledChanged ||
+            parametersHaveChanged ||
+            havePinnedParametersChanged,
+        onAddTiles: handleAddTiles,
+        onSaveDashboard: handleSaveDashboard,
+        onCancel: handleCancel,
+        onMoveToSpace: handleMoveDashboardToSpace,
+        isMovingDashboardToSpace: isContentActionLoading,
+        onDuplicate: duplicateModalHandlers.open,
+        onDelete: deleteModalHandlers.open,
+        onExport: exportDashboardModalHandlers.open,
+        setAddingTab,
+        onEditClicked: handleEnterEditMode,
+        ...(isEditMode && { className: styles.stickyHeader }),
+    };
 
     return (
         <>
             {blocker.state === 'blocked' && (
-                <Modal
+                <MantineModal
                     opened
                     onClose={() => {
                         blocker.reset();
                     }}
-                    title={null}
-                    withCloseButton={false}
-                    closeOnClickOutside={false}
+                    title="Unsaved changes"
+                    icon={IconAlertCircle}
+                    cancelLabel="Stay"
+                    actions={
+                        <Button
+                            color="red"
+                            onClick={() => {
+                                clearDashboardStorage();
+                                blocker.proceed();
+                            }}
+                        >
+                            Leave
+                        </Button>
+                    }
                 >
-                    <Stack>
-                        <Group noWrap spacing="xs">
-                            <MantineIcon
-                                icon={IconAlertCircle}
-                                color="red"
-                                size={50}
-                            />
-                            <Text fw={500}>
-                                You have unsaved changes to your dashboard! Are
-                                you sure you want to leave without saving?
-                            </Text>
-                        </Group>
-
-                        <Group position="right">
-                            <Button
-                                onClick={() => {
-                                    blocker.reset();
-                                }}
-                            >
-                                Stay
-                            </Button>
-                            <Button
-                                color="red"
-                                onClick={() => {
-                                    clearDashboardStorage();
-                                    blocker.proceed();
-                                }}
-                            >
-                                Leave
-                            </Button>
-                        </Group>
-                    </Stack>
-                </Modal>
+                    <Text fw={500}>
+                        You have unsaved changes to your dashboard! Are you sure
+                        you want to leave without saving?
+                    </Text>
+                </MantineModal>
             )}
 
             <Page
                 title={dashboard.name}
-                header={
-                    <DashboardHeader
-                        spaces={spaces}
-                        dashboard={dashboard}
-                        organizationUuid={organization?.organizationUuid}
-                        isEditMode={isEditMode}
-                        isSaving={isSaving}
-                        oldestCacheTime={oldestCacheTime}
-                        isFullscreen={isFullscreen}
-                        activeTabUuid={activeTab?.uuid}
-                        dashboardTabs={dashboardTabs}
-                        isFullScreenFeatureEnabled={isFullScreenFeatureEnabled}
-                        onToggleFullscreen={handleToggleFullscreen}
-                        hasDashboardChanged={
-                            haveTilesChanged ||
-                            haveFiltersChanged ||
-                            hasTemporaryFilters ||
-                            haveTabsChanged ||
-                            hasDateZoomDisabledChanged ||
-                            parametersHaveChanged ||
-                            havePinnedParametersChanged
-                        }
-                        onAddTiles={handleAddTiles}
-                        onSaveDashboard={() => {
-                            const dimensionFilters = [
-                                ...dashboardFilters.dimensions,
-                                ...dashboardTemporaryFilters.dimensions,
-                            ];
-                            // Reset value for required filter on save dashboard
-                            const requiredFiltersWithoutValues =
-                                dimensionFilters.map((filter) => {
-                                    if (filter.required) {
-                                        return {
-                                            ...filter,
-                                            disabled: true,
-                                            values: [],
-                                        };
-                                    }
-                                    return filter;
-                                });
-
-                            mutate({
-                                tiles: dashboardTiles,
-                                filters: {
-                                    dimensions: requiredFiltersWithoutValues,
-                                    metrics: [
-                                        ...dashboardFilters.metrics,
-                                        ...dashboardTemporaryFilters.metrics,
-                                    ],
-                                    tableCalculations: [
-                                        ...dashboardFilters.tableCalculations,
-                                        ...dashboardTemporaryFilters.tableCalculations,
-                                    ],
-                                },
-                                name: dashboard.name,
-                                tabs: dashboardTabs,
-                                config: {
-                                    isDateZoomDisabled,
-                                    pinnedParameters,
-                                },
-                                parameters: dashboardParameters,
-                            });
-                        }}
-                        onCancel={handleCancel}
-                        onMoveToSpace={handleMoveDashboardToSpace}
-                        isMovingDashboardToSpace={isContentActionLoading}
-                        onDuplicate={duplicateModalHandlers.open}
-                        onDelete={deleteModalHandlers.open}
-                        onExport={exportDashboardModalHandlers.open}
-                        setAddingTab={setAddingTab}
-                        onEditClicked={handleEnterEditMode}
-                    />
-                }
-                withFullHeight={true}
+                noContentPadding
+                withFullHeight
+                fullPageScroll
             >
-                <Group position="apart" align="flex-start" noWrap px={'lg'}>
-                    {/* This Group will take up remaining space (and not push DateZoom) */}
-                    <Group
-                        position="apart"
-                        align="flex-start"
-                        noWrap
-                        grow
-                        sx={{
-                            overflow: 'auto',
-                        }}
-                    >
-                        {hasTilesThatSupportFilters && (
-                            <DashboardFilter
-                                isEditMode={isEditMode}
-                                activeTabUuid={activeTab?.uuid}
-                            />
-                        )}
-                    </Group>
-                    {/* DateZoom section will adjust width dynamically */}
-                    {hasDashboardTiles && (
-                        <Group spacing="xs" style={{ marginLeft: 'auto' }}>
-                            <DateZoom isEditMode={isEditMode} />
-                        </Group>
-                    )}
-                </Group>
-                {hasDashboardTiles && (
-                    <Group spacing="xs" align="flex-start" noWrap px={'lg'}>
-                        <Parameters
-                            isEditMode={isEditMode}
-                            parameterValues={parameterValues}
-                            onParameterChange={handleParameterChange}
-                            onClearAll={clearAllParameters}
-                            parameters={referencedParameters}
-                            isLoading={!areAllChartsLoaded}
-                            missingRequiredParameters={
-                                missingRequiredParameters
-                            }
-                            pinnedParameters={pinnedParameters}
-                            onParameterPin={toggleParameterPin}
-                        />
-                        <PinnedParameters isEditMode={isEditMode} />
-                    </Group>
-                )}
-                <Flex style={{ flexGrow: 1, flexDirection: 'column' }}>
+                <div style={dashboardCSSVars as React.CSSProperties}>
+                    <DashboardHeader {...dashboardHeaderProps} />
+
                     <DashboardTabs
                         isEditMode={isEditMode}
-                        hasRequiredDashboardFiltersToSet={
-                            hasRequiredDashboardFiltersToSet
-                        }
+                        hasTilesThatSupportFilters={hasTilesThatSupportFilters}
+                        // parameters
+                        parameters={referencedParameters}
+                        parameterValues={parameterValues}
+                        onParameterChange={handleParameterChange}
+                        onParameterClearAll={clearAllParameters}
+                        isParameterLoading={!areAllChartsLoaded}
+                        missingRequiredParameters={missingRequiredParameters}
+                        pinnedParameters={pinnedParameters}
+                        onParameterPin={toggleParameterPin}
+                        // tabs
+                        activeTab={activeTab}
                         addingTab={addingTab}
                         dashboardTiles={dashboardTiles}
                         handleAddTiles={handleAddTiles}
@@ -745,10 +707,9 @@ const Dashboard: FC = () => {
                         handleBatchDeleteTiles={handleBatchDeleteTiles}
                         handleEditTile={handleEditTiles}
                         setGridWidth={setGridWidth}
-                        activeTab={activeTab}
                         setAddingTab={setAddingTab}
                     />
-                </Flex>
+                </div>
                 {isDeleteModalOpen && (
                     <DashboardDeleteModal
                         opened
@@ -789,8 +750,6 @@ const DashboardPage: FC = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const { user } = useApp();
     const dashboardCommentsCheck = useDashboardCommentsCheck(user?.data);
-
-    useProfiler('Dashboard');
 
     return (
         <DashboardProvider

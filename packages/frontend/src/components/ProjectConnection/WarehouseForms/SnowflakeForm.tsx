@@ -130,10 +130,10 @@ const SnowflakeForm: FC<{
     const defaultAuthType = savedAuthType
         ? savedAuthType
         : isSsoEnabled
-        ? SnowflakeAuthenticationType.SSO
-        : hasPrivateKey
-        ? SnowflakeAuthenticationType.PRIVATE_KEY
-        : SnowflakeAuthenticationType.PASSWORD;
+          ? SnowflakeAuthenticationType.SSO
+          : hasPrivateKey
+            ? SnowflakeAuthenticationType.PRIVATE_KEY
+            : SnowflakeAuthenticationType.PASSWORD;
 
     if (!form.isTouched()) {
         form.setFieldValue('warehouse.authenticationType', defaultAuthType);
@@ -566,6 +566,18 @@ const SnowflakeForm: FC<{
                                 <StartOfWeekSelect
                                     disabled={disabled}
                                     isRedeployRequired={false}
+                                />
+                                <BooleanSwitch
+                                    name="warehouse.disableTimestampConversion"
+                                    label="Disable timestamp conversion to UTC"
+                                    description="When disabled, Lightdash will skip converting timestamps to UTC. This can improve performance but requires your data to already be in UTC format."
+                                    onLabel="Yes"
+                                    offLabel="No"
+                                    disabled={disabled}
+                                    {...form.getInputProps(
+                                        'warehouse.disableTimestampConversion',
+                                        { type: 'checkbox' },
+                                    )}
                                 />
                             </Stack>
                         </FormSection>

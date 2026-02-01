@@ -8,17 +8,22 @@ import TableHeader from './TableHeader';
 interface ScrollableTableProps {
     minimal?: boolean;
     showSubtotals?: boolean;
+    isDashboard?: boolean;
 }
 
 const ScrollableTable: FC<ScrollableTableProps> = ({
     minimal = true,
     showSubtotals = true,
+    isDashboard = false,
 }) => {
     const { footer } = useTableContext();
     const tableContainerRef = useRef<HTMLDivElement>(null);
 
     return (
-        <TableScrollableWrapper ref={tableContainerRef}>
+        <TableScrollableWrapper
+            ref={tableContainerRef}
+            $isDashboard={isDashboard}
+        >
             <Table $showFooter={!!footer?.show}>
                 <TableHeader minimal={minimal} showSubtotals={showSubtotals} />
                 <TableBody

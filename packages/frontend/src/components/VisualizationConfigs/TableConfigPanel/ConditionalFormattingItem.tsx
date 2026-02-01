@@ -1,4 +1,5 @@
 import {
+    ConditionalFormattingColorApplyTo,
     ConditionalFormattingComparisonType,
     ConditionalFormattingConfigType,
     assertUnreachable,
@@ -319,6 +320,17 @@ export const ConditionalFormattingItem: FC<Props> = ({
         [handleChange, config],
     );
 
+    const handleChangeApplyTo = useCallback(
+        (newApplyTo: ConditionalFormattingColorApplyTo) => {
+            handleChange(
+                produce(config, (draft) => {
+                    draft.applyTo = newApplyTo;
+                }),
+            );
+        },
+        [handleChange, config],
+    );
+
     const controlLabel = `Rule ${configIndex}`;
     const accordionValue = `${configIndex}`;
 
@@ -402,14 +414,36 @@ export const ConditionalFormattingItem: FC<Props> = ({
                             ) : null}
                         </Group>
 
+                        <Group spacing="xs">
+                            <Config.Label>Apply to</Config.Label>
+
+                            <SegmentedControl
+                                data={[
+                                    {
+                                        value: ConditionalFormattingColorApplyTo.CELL,
+                                        label: 'Cell',
+                                    },
+                                    {
+                                        value: ConditionalFormattingColorApplyTo.TEXT,
+                                        label: 'Text',
+                                    },
+                                ]}
+                                value={
+                                    config.applyTo ??
+                                    ConditionalFormattingColorApplyTo.CELL
+                                }
+                                onChange={handleChangeApplyTo}
+                            />
+                        </Group>
+
                         {isConditionalFormattingConfigWithSingleColor(
                             config,
                         ) ? (
                             <Box
                                 p="xs"
                                 sx={(theme) => ({
-                                    backgroundColor: theme.colors.gray[1],
-                                    border: `1px solid ${theme.colors.gray[4]}`,
+                                    backgroundColor: theme.colors.ldGray[1],
+                                    border: `1px solid ${theme.colors.ldGray[4]}`,
                                     borderRadius: theme.radius.sm,
                                 })}
                             >

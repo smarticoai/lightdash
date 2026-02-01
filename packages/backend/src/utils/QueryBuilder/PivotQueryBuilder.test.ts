@@ -1,9 +1,15 @@
 import {
+    DimensionType,
+    FieldType,
     ParameterError,
     SortByDirection,
     SupportedDbtAdapter,
+    TimeFrames,
     VizAggregationOptions,
     VizIndexType,
+    WeekDay,
+    type CompiledDimension,
+    type ItemsMap,
     type WarehouseSqlBuilder,
 } from '@lightdash/common';
 import { PivotQueryBuilder } from './PivotQueryBuilder';
@@ -12,6 +18,7 @@ import { PivotQueryBuilder } from './PivotQueryBuilder';
 const mockWarehouseSqlBuilder = {
     getFieldQuoteChar: () => '"',
     getAdapterType: () => SupportedDbtAdapter.POSTGRES,
+    getStartOfWeek: () => WeekDay.MONDAY,
 } as unknown as WarehouseSqlBuilder;
 
 const replaceWhitespace = (str: string) => str.replace(/\s+/g, ' ').trim();
@@ -134,7 +141,7 @@ describe('PivotQueryBuilder', () => {
                 100,
             );
 
-            const result = builder.toSql();
+            const result = builder.toSql({ columnLimit: 100 });
 
             // Should contain all CTEs
             expect(result).toContain(
@@ -155,7 +162,7 @@ describe('PivotQueryBuilder', () => {
 
             // Should apply limits and column constraints
             expect(result).toContain('WHERE "row_index" <= 100');
-            expect(result).toContain('"column_index" <= 99');
+            expect(result).toContain('"column_index" <= 100');
 
             // Should join with total_columns for metadata
             expect(result).toContain('CROSS JOIN total_columns t');
@@ -219,14 +226,244 @@ describe('PivotQueryBuilder', () => {
                 mockWarehouseSqlBuilder,
             );
 
-            const result = builder.toSql();
+            const result = builder.toSql({ columnLimit: 100 });
 
-            // With 3 value columns: (100-1)/3 = 33 max columns per value column
+            // With 3 value columns: 100/3 = 33 max columns per value column
+            expect(result).toContain('"column_index" <= 33');
+        });
+
+        test('Should not apply column limit when columnLimit is not provided', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'event_type' }],
+                sortBy: undefined,
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                100,
+            );
+
+            const result = builder.toSql(); // No columnLimit provided
+
+            // Should NOT contain column_index filtering
+            expect(result).not.toContain('"column_index" <=');
+            // Should still contain row_index filtering
+            expect(result).toContain('"row_index" <= 100');
+        });
+
+        test('Should use full column limit when metricsAsRows is true', () => {
+            // When metricsAsRows is true, metrics become rows instead of columns,
+            // so we don't divide the column limit by the number of value columns
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                    {
+                        reference: 'user_id',
+                        aggregation: VizAggregationOptions.COUNT,
+                    },
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.AVERAGE,
+                    },
+                ],
+                groupByColumns: [{ reference: 'event_type' }],
+                sortBy: undefined,
+                metricsAsRows: true, // Metrics are rows, not columns
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql({ columnLimit: 100 });
+
+            // With metricsAsRows=true, should use full column limit (100)
+            // Without metricsAsRows, it would be 100/3 = 33
+            expect(result).toContain('"column_index" <= 100');
+        });
+
+        test('Should divide column limit by value columns when metricsAsRows is false or undefined', () => {
+            // When metricsAsRows is false/undefined, metrics become columns,
+            // so we divide the column limit by the number of value columns
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                    {
+                        reference: 'user_id',
+                        aggregation: VizAggregationOptions.COUNT,
+                    },
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.AVERAGE,
+                    },
+                ],
+                groupByColumns: [{ reference: 'event_type' }],
+                sortBy: undefined,
+                metricsAsRows: false, // Metrics are columns (default behavior)
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql({ columnLimit: 100 });
+
+            // With 3 value columns: 100/3 = 33 max columns per value column
             expect(result).toContain('"column_index" <= 33');
         });
     });
 
-    describe('Metric sorting CTEs', () => {
+    describe('Sorting strategies', () => {
+        // Two sorting strategies exist based on what column is being sorted:
+        //
+        // 1. Dimension sort (lexicographic): When sorting by an index or groupBy column,
+        //    rows are ordered directly by the dimension value. No extra CTEs needed.
+        //
+        // 2. Metric sort (anchor-based): When sorting by a value/metric column, we need
+        //    to determine what metric value represents each row/column. The metric value
+        //    used for sorting comes from the "first" pivot column (column_index = 1),
+        //    not MIN/MAX across all columns.
+
+        test('Dimension sort: should NOT create column_ranking or anchor_column CTEs when sorting by index column', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    { reference: 'date', direction: SortByDirection.DESC },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Dimension sort: row_index should use the dimension value directly
+            expect(result.toLowerCase()).toContain(
+                'dense_rank() over (order by g."date" desc) as "row_index"',
+            );
+
+            // Should NOT create column_ranking or anchor_column CTEs
+            // (these are only needed for metric-based sorting)
+            expect(result).not.toContain('column_ranking AS (');
+            expect(result).not.toContain('anchor_column AS (');
+
+            // Should NOT create row anchor CTEs for revenue
+            expect(result).not.toContain('revenue_row_anchor AS (');
+        });
+
+        test('Dimension sort: should NOT create metric anchor CTEs when sorting by groupBy column', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    { reference: 'category', direction: SortByDirection.ASC },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // GroupBy column sort: column_index should use the dimension value directly
+            expect(result.toLowerCase()).toContain(
+                'dense_rank() over (order by g."category" asc) as "column_index"',
+            );
+
+            // Should NOT create column_ranking or anchor_column CTEs
+            expect(result).not.toContain('column_ranking AS (');
+            expect(result).not.toContain('anchor_column AS (');
+
+            // Should NOT create metric anchor CTEs
+            expect(result).not.toContain('revenue_row_anchor AS (');
+            expect(result).not.toContain('revenue_column_anchor AS (');
+        });
+
+        test('Metric sort: should create column_ranking and anchor_column CTEs when sorting by value column', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    { reference: 'revenue', direction: SortByDirection.DESC },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Metric sort: should create column_ranking CTE to compute column_index per groupBy value
+            expect(result).toContain('column_ranking AS (');
+            expect(replaceWhitespace(result)).toContain(
+                'DENSE_RANK() OVER (ORDER BY revenue_column_anchor."revenue_column_anchor_value" DESC',
+            );
+
+            // Metric sort: should create anchor_column CTE to identify first pivot column (column_index = 1)
+            // Uses alias (anchor_category) and ORDER BY + LIMIT 1 for deterministic selection
+            expect(result).toContain('anchor_column AS (');
+            expect(replaceWhitespace(result)).toContain(
+                'SELECT cr."category" AS "anchor_category" FROM column_ranking cr WHERE "col_idx" = 1 ORDER BY cr."category" ASC LIMIT 1',
+            );
+
+            // Metric sort: row anchor should use CROSS JOIN with anchor_column
+            // (gets metric value at first pivot column only, not MIN/MAX across all columns)
+            expect(result).toContain('revenue_row_anchor AS (');
+            expect(replaceWhitespace(result)).toContain(
+                'MAX(CASE WHEN q."category" = ac."anchor_category" THEN q."revenue_sum" END)',
+            );
+            expect(result).toContain('CROSS JOIN anchor_column ac');
+        });
+
         test('Should include anchor CTEs and joins when sorting by a value column in pivot queries', () => {
             const pivotConfiguration = {
                 indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
@@ -304,6 +541,49 @@ describe('PivotQueryBuilder', () => {
             // Row index order must follow: revenue anchor ASC, store_id DESC, then date ASC (appended)
             expect(replaceWhitespace(result)).toContain(
                 'DENSE_RANK() OVER (ORDER BY revenue_row_anchor."revenue_row_anchor_value" ASC, g."store_id" DESC, g."date" ASC) AS "row_index"',
+            );
+        });
+
+        test('Should include explicit frame clauses in FIRST_VALUE for Redshift compatibility', () => {
+            // Redshift requires explicit frame clauses for aggregate window functions with ORDER BY
+            // See: https://docs.aws.amazon.com/redshift/latest/dg/r_WF_first_value.html
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    { reference: 'revenue', direction: SortByDirection.DESC },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Column anchor CTEs should have explicit frame clauses (for Redshift compatibility)
+            expect(result).toContain(
+                'ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING',
+            );
+
+            // Row anchor uses CROSS JOIN with anchor_column (cleaner than scalar subquery)
+            // (gets value at first pivot column, not MIN/MAX across all columns)
+            expect(replaceWhitespace(result)).toContain(
+                'MAX(CASE WHEN q."category" = ac."anchor_category" THEN q."revenue_sum" END)',
+            );
+            expect(result).toContain('CROSS JOIN anchor_column ac');
+
+            // Verify the complete FIRST_VALUE syntax in column anchor
+            expect(replaceWhitespace(result)).toContain(
+                'FIRST_VALUE("revenue_sum") OVER (PARTITION BY "category" ORDER BY "revenue_sum" DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)',
             );
         });
     });
@@ -767,32 +1047,6 @@ SELECT * FROM group_by_query LIMIT 50`);
             expect(result).toContain('"date"');
         });
 
-        test('Should throw error for undefined index column', () => {
-            const pivotConfiguration = {
-                indexColumn: undefined,
-                valuesColumns: [
-                    {
-                        reference: 'event_id',
-                        aggregation: VizAggregationOptions.SUM,
-                    },
-                ],
-                groupByColumns: undefined,
-                sortBy: undefined,
-            };
-
-            const builder = new PivotQueryBuilder(
-                baseSql,
-                pivotConfiguration,
-                mockWarehouseSqlBuilder,
-            );
-
-            // Should throw an error since no index columns are provided
-            expect(() => builder.toSql()).toThrow(ParameterError);
-            expect(() => builder.toSql()).toThrow(
-                'At least one valid index column is required',
-            );
-        });
-
         test('Should throw error when index and group by columns overlap', () => {
             const pivotConfiguration = {
                 indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
@@ -820,8 +1074,8 @@ SELECT * FROM group_by_query LIMIT 50`);
         });
     });
 
-    describe('Validation', () => {
-        test('Should throw error when indexColumn is undefined', () => {
+    describe('Pivoting without index columns', () => {
+        test('Should support undefined indexColumn when groupBy columns are present', () => {
             const pivotConfiguration = {
                 indexColumn: undefined,
                 valuesColumns: [
@@ -839,14 +1093,17 @@ SELECT * FROM group_by_query LIMIT 50`);
                 pivotConfiguration,
                 mockWarehouseSqlBuilder,
             );
+            const result = builder.toSql();
 
-            expect(() => builder.toSql()).toThrow(ParameterError);
-            expect(() => builder.toSql()).toThrow(
-                'At least one valid index column is required',
+            // Should generate a full pivot query with a constant row_index (no index columns)
+            expect(result).toContain('pivot_query AS (');
+            expect(result).toContain('1 AS "row_index"');
+            expect(result.toLowerCase()).toContain(
+                'dense_rank() over (order by g."event_type" asc) as "column_index"',
             );
         });
 
-        test('Should throw error when indexColumns array is empty', () => {
+        test('Should support empty indexColumns array when groupBy columns are present', () => {
             const pivotConfiguration = {
                 indexColumn: [],
                 valuesColumns: [
@@ -864,10 +1121,13 @@ SELECT * FROM group_by_query LIMIT 50`);
                 pivotConfiguration,
                 mockWarehouseSqlBuilder,
             );
+            const result = builder.toSql();
 
-            expect(() => builder.toSql()).toThrow(ParameterError);
-            expect(() => builder.toSql()).toThrow(
-                'At least one valid index column is required',
+            // Should generate a full pivot query with a constant row_index (no index columns)
+            expect(result).toContain('pivot_query AS (');
+            expect(result).toContain('1 AS "row_index"');
+            expect(result.toLowerCase()).toContain(
+                'dense_rank() over (order by g."event_type" asc) as "column_index"',
             );
         });
     });
@@ -1047,8 +1307,10 @@ SELECT * FROM group_by_query LIMIT 50`);
             expect(result).toContain(
                 'SELECT "category", "date" FROM original_query group by "category", "date"',
             );
-            // Should calculate total_columns correctly (1 value column default)
-            expect(result).toContain('* 1 as total_columns');
+            // Should calculate total_columns correctly using subquery approach
+            expect(result).toContain(
+                'SELECT COUNT(*) AS total_columns FROM (SELECT DISTINCT "category" FROM filtered_rows) AS distinct_groups',
+            );
         });
 
         test('Should handle undefined limit (defaults to 500)', () => {
@@ -1105,6 +1367,720 @@ SELECT * FROM group_by_query LIMIT 50`);
             // Should deduplicate in the group by clause
             // The Set() should handle this deduplication
             expect(result).toContain('group by "category", "region", "date"');
+        });
+    });
+
+    describe('NULLS FIRST/LAST handling', () => {
+        describe('getNullsFirstLast static method', () => {
+            test('Should return empty string when nullsFirst is undefined', () => {
+                expect(PivotQueryBuilder.getNullsFirstLast(undefined)).toBe('');
+            });
+
+            test('Should return NULLS FIRST when nullsFirst is true', () => {
+                expect(PivotQueryBuilder.getNullsFirstLast(true)).toBe(
+                    ' NULLS FIRST',
+                );
+            });
+
+            test('Should return NULLS LAST when nullsFirst is false', () => {
+                expect(PivotQueryBuilder.getNullsFirstLast(false)).toBe(
+                    ' NULLS LAST',
+                );
+            });
+        });
+
+        test('Should include NULLS FIRST in simple query ORDER BY', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'date',
+                        direction: SortByDirection.ASC,
+                        nullsFirst: true,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+            expect(result).toContain('ORDER BY "date" ASC NULLS FIRST');
+        });
+
+        test('Should include NULLS LAST in simple query ORDER BY', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'date',
+                        direction: SortByDirection.DESC,
+                        nullsFirst: false,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+            expect(result).toContain('ORDER BY "date" DESC NULLS LAST');
+        });
+
+        test('Should include NULLS FIRST in pivot query row_index DENSE_RANK', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'event_type' }],
+                sortBy: [
+                    {
+                        reference: 'date',
+                        direction: SortByDirection.ASC,
+                        nullsFirst: true,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+            expect(result.toLowerCase()).toContain(
+                'dense_rank() over (order by g."date" asc nulls first) as "row_index"',
+            );
+        });
+
+        test('Should include NULLS LAST in pivot query column_index DENSE_RANK', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'event_type' }],
+                sortBy: [
+                    {
+                        reference: 'event_type',
+                        direction: SortByDirection.DESC,
+                        nullsFirst: false,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+            expect(result.toLowerCase()).toContain(
+                'dense_rank() over (order by g."event_type" desc nulls last) as "column_index"',
+            );
+        });
+
+        test('Should include NULLS clause in value column anchor CTEs', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    {
+                        reference: 'revenue',
+                        direction: SortByDirection.DESC,
+                        nullsFirst: false,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Row anchor uses CROSS JOIN with anchor_column (cleaner than scalar subquery)
+            // The NULLS LAST is applied in the row_index ORDER BY, not the anchor CTE
+            expect(replaceWhitespace(result)).toContain(
+                'MAX(CASE WHEN q."category" = ac."anchor_category" THEN q."revenue_sum" END)',
+            );
+            expect(result).toContain('CROSS JOIN anchor_column ac');
+
+            // Check that row_index ORDER BY has NULLS LAST
+            expect(replaceWhitespace(result)).toContain(
+                'revenue_row_anchor."revenue_row_anchor_value" DESC NULLS LAST',
+            );
+
+            // Check column anchor CTE has NULLS LAST
+            expect(replaceWhitespace(result)).toContain(
+                'FIRST_VALUE("revenue_sum") OVER (PARTITION BY "category" ORDER BY "revenue_sum" DESC NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)',
+            );
+        });
+
+        test('Should include NULLS clause in row_index ordering when sorting by value column', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    {
+                        reference: 'revenue',
+                        direction: SortByDirection.ASC,
+                        nullsFirst: true,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Row index should include NULLS FIRST when sorting by value column
+            expect(replaceWhitespace(result)).toContain(
+                'DENSE_RANK() OVER (ORDER BY revenue_row_anchor."revenue_row_anchor_value" ASC NULLS FIRST, g."date" ASC) AS "row_index"',
+            );
+        });
+
+        test('Should include NULLS clause in column_index ordering when sorting by value column', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    {
+                        reference: 'revenue',
+                        direction: SortByDirection.DESC,
+                        nullsFirst: false,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Column index should include NULLS LAST when sorting by value column
+            expect(replaceWhitespace(result)).toContain(
+                'DENSE_RANK() OVER (ORDER BY revenue_column_anchor."revenue_column_anchor_value" DESC NULLS LAST, g."category" ASC) AS "column_index"',
+            );
+        });
+
+        test('Should handle mixed nullsFirst settings across multiple sort columns', () => {
+            const pivotConfiguration = {
+                indexColumn: [
+                    { reference: 'date', type: VizIndexType.TIME },
+                    { reference: 'store_id', type: VizIndexType.CATEGORY },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'date',
+                        direction: SortByDirection.ASC,
+                        nullsFirst: true,
+                    },
+                    {
+                        reference: 'store_id',
+                        direction: SortByDirection.DESC,
+                        nullsFirst: false,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+            expect(result).toContain(
+                'ORDER BY "date" ASC NULLS FIRST, "store_id" DESC NULLS LAST',
+            );
+        });
+
+        test('Should not include NULLS clause when nullsFirst is undefined', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'event_id',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'date',
+                        direction: SortByDirection.ASC,
+                        // nullsFirst not specified
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+            expect(result).toContain('ORDER BY "date" ASC');
+            expect(result).not.toContain('NULLS FIRST');
+            expect(result).not.toContain('NULLS LAST');
+        });
+
+        test('Should use LEFT JOIN for anchor CTEs to preserve rows with NULL anchor values', () => {
+            const pivotConfiguration = {
+                indexColumn: [{ reference: 'date', type: VizIndexType.TIME }],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'category' }],
+                sortBy: [
+                    {
+                        reference: 'revenue',
+                        direction: SortByDirection.DESC,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+            );
+
+            const result = builder.toSql();
+
+            // Should use LEFT JOIN for both row and column anchor CTEs
+            expect(result).toContain('LEFT JOIN revenue_row_anchor ON');
+            expect(result).toContain('LEFT JOIN revenue_column_anchor ON');
+            // Should not use regular JOIN (without LEFT)
+            expect(result).not.toMatch(/(?<!LEFT )JOIN revenue_row_anchor/);
+            expect(result).not.toMatch(/(?<!LEFT )JOIN revenue_column_anchor/);
+        });
+    });
+
+    describe('Time interval sorting', () => {
+        // Mock dimensions
+        const monthNameDimension: CompiledDimension = {
+            type: DimensionType.STRING,
+            name: 'month_name',
+            label: 'Month Name',
+            table: 'orders',
+            tableLabel: 'Orders',
+            fieldType: FieldType.DIMENSION,
+            sql: '${TABLE}.month_name',
+            compiledSql: '"orders".month_name',
+            tablesReferences: ['orders'],
+            timeInterval: TimeFrames.MONTH_NAME,
+            hidden: false,
+        };
+
+        const dayNameDimension: CompiledDimension = {
+            type: DimensionType.STRING,
+            name: 'day_name',
+            label: 'Day Name',
+            table: 'orders',
+            tableLabel: 'Orders',
+            fieldType: FieldType.DIMENSION,
+            sql: '${TABLE}.day_name',
+            compiledSql: '"orders".day_name',
+            tablesReferences: ['orders'],
+            timeInterval: TimeFrames.DAY_OF_WEEK_NAME,
+            hidden: false,
+        };
+
+        const quarterNameDimension: CompiledDimension = {
+            type: DimensionType.STRING,
+            name: 'quarter_name',
+            label: 'Quarter Name',
+            table: 'orders',
+            tableLabel: 'Orders',
+            fieldType: FieldType.DIMENSION,
+            sql: '${TABLE}.quarter_name',
+            compiledSql: '"orders".quarter_name',
+            tablesReferences: ['orders'],
+            timeInterval: TimeFrames.QUARTER_NAME,
+            hidden: false,
+        };
+
+        const categoryDimension: CompiledDimension = {
+            type: DimensionType.STRING,
+            name: 'category',
+            label: 'Category',
+            table: 'orders',
+            tableLabel: 'Orders',
+            fieldType: FieldType.DIMENSION,
+            sql: '${TABLE}.category',
+            compiledSql: '"orders".category',
+            tablesReferences: ['orders'],
+            hidden: false,
+        };
+
+        const regionDimension: CompiledDimension = {
+            type: DimensionType.STRING,
+            name: 'region',
+            label: 'Region',
+            table: 'orders',
+            tableLabel: 'Orders',
+            fieldType: FieldType.DIMENSION,
+            sql: '${TABLE}.region',
+            compiledSql: '"orders".region',
+            tablesReferences: ['orders'],
+            hidden: false,
+        };
+
+        test('Should sort MONTH_NAME descending', () => {
+            const itemsMap: ItemsMap = {
+                orders_month_name: monthNameDimension,
+            };
+
+            const pivotConfiguration = {
+                indexColumn: [
+                    {
+                        reference: 'orders_month_name',
+                        type: VizIndexType.CATEGORY,
+                    },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'orders_month_name',
+                        direction: SortByDirection.DESC,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                500,
+                itemsMap,
+            );
+
+            const result = builder.toSql();
+
+            // Should contain CASE statement with DESC
+            expect(result).toContain('CASE');
+            expect(result).toContain(
+                '"orders_month_name" = \'January\' THEN 1',
+            );
+        });
+
+        test('Should sort MONTH_NAME in pivot query with groupBy columns', () => {
+            const itemsMap: ItemsMap = {
+                orders_month_name: monthNameDimension,
+                orders_category: categoryDimension,
+            };
+
+            const pivotConfiguration = {
+                indexColumn: [
+                    {
+                        reference: 'orders_month_name',
+                        type: VizIndexType.CATEGORY,
+                    },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'orders_category' }],
+                sortBy: [
+                    {
+                        reference: 'orders_month_name',
+                        direction: SortByDirection.ASC,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                500,
+                itemsMap,
+            );
+
+            const result = builder.toSql();
+
+            // Should contain CASE statement in DENSE_RANK for row_index
+            expect(result).toContain('DENSE_RANK() OVER (ORDER BY');
+            expect(result).toContain('CASE');
+            expect(result).toContain(
+                'g."orders_month_name" = \'January\' THEN 1',
+            );
+            // Should use replaceAll - all occurrences should have g. prefix
+            const monthNameOccurrences = result.match(
+                /g\."orders_month_name" =/g,
+            );
+            expect(monthNameOccurrences).toBeTruthy();
+            expect(monthNameOccurrences!.length).toBe(12); // At least 12 in CASE statement
+        });
+
+        test('Should handle mixed time interval and regular fields in sorting', () => {
+            const itemsMap: ItemsMap = {
+                orders_month_name: monthNameDimension,
+                orders_region: regionDimension,
+            };
+
+            const pivotConfiguration = {
+                indexColumn: [
+                    {
+                        reference: 'orders_month_name',
+                        type: VizIndexType.CATEGORY,
+                    },
+                    { reference: 'orders_region', type: VizIndexType.CATEGORY },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'orders_month_name',
+                        direction: SortByDirection.ASC,
+                    },
+                    {
+                        reference: 'orders_region',
+                        direction: SortByDirection.ASC,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                500,
+                itemsMap,
+            );
+
+            const result = builder.toSql();
+
+            // Should contain CASE for month_name but not for region
+            expect(result).toContain(
+                'WHEN "orders_month_name" = \'January\' THEN 1',
+            );
+            expect(result).toContain('ORDER BY');
+            // Region should be simple field reference
+            expect(result).toContain('"orders_region" ASC');
+        });
+
+        test('Should include NULLS clause with time interval sorting', () => {
+            const itemsMap: ItemsMap = {
+                orders_month_name: monthNameDimension,
+            };
+
+            const pivotConfiguration = {
+                indexColumn: [
+                    {
+                        reference: 'orders_month_name',
+                        type: VizIndexType.CATEGORY,
+                    },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'orders_month_name',
+                        direction: SortByDirection.ASC,
+                        nullsFirst: true,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                500,
+                itemsMap,
+            );
+
+            const result = builder.toSql();
+
+            // Should contain CASE statement with NULLS FIRST at the end
+            expect(result).toContain('CASE');
+            expect(result).toContain(
+                '"orders_month_name" = \'January\' THEN 1',
+            );
+            // For simple queries (no groupBy), the CASE is wrapped in parens and NULLS comes after
+            // The sortMonthName function doesn't include ASC/DESC in the CASE statement - it's implicit
+            expect(result).toContain('NULLS FIRST');
+            expect(result).toContain('ORDER BY');
+        });
+
+        test('Should include NULLS LAST with DAY_OF_WEEK_NAME sorting in pivot query', () => {
+            const itemsMap: ItemsMap = {
+                orders_day_name: dayNameDimension,
+                orders_category: categoryDimension,
+            };
+
+            const pivotConfiguration = {
+                indexColumn: [
+                    {
+                        reference: 'orders_day_name',
+                        type: VizIndexType.CATEGORY,
+                    },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: [{ reference: 'orders_category' }],
+                sortBy: [
+                    {
+                        reference: 'orders_day_name',
+                        direction: SortByDirection.DESC,
+                        nullsFirst: false,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                500,
+                itemsMap,
+            );
+
+            const result = builder.toSql();
+
+            // Should contain CASE statement for day of week with NULLS LAST
+            expect(result).toContain('CASE');
+            // In pivot queries, the sortDayOfWeekName returns CASE...END) DESC and NULLS LAST is appended
+            expect(result).toContain('DESC NULLS LAST');
+        });
+
+        test('Should include NULLS FIRST with QUARTER_NAME sorting', () => {
+            const itemsMap: ItemsMap = {
+                orders_quarter_name: quarterNameDimension,
+            };
+
+            const pivotConfiguration = {
+                indexColumn: [
+                    {
+                        reference: 'orders_quarter_name',
+                        type: VizIndexType.CATEGORY,
+                    },
+                ],
+                valuesColumns: [
+                    {
+                        reference: 'revenue',
+                        aggregation: VizAggregationOptions.SUM,
+                    },
+                ],
+                groupByColumns: undefined,
+                sortBy: [
+                    {
+                        reference: 'orders_quarter_name',
+                        direction: SortByDirection.ASC,
+                        nullsFirst: true,
+                    },
+                ],
+            };
+
+            const builder = new PivotQueryBuilder(
+                baseSql,
+                pivotConfiguration,
+                mockWarehouseSqlBuilder,
+                500,
+                itemsMap,
+            );
+
+            const result = builder.toSql();
+
+            // Should contain CASE statement for quarter with NULLS FIRST
+            expect(result).toContain('CASE');
+            expect(result).toContain("'Q1' THEN 1");
+            // For simple queries (no groupBy), NULLS FIRST is appended after the sort expression
+            expect(result).toContain('NULLS FIRST');
+            expect(result).toContain('ORDER BY');
         });
     });
 });

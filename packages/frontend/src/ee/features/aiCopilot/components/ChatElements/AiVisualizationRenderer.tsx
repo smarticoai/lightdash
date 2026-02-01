@@ -8,12 +8,20 @@ import {
     type ApiAiAgentThreadMessageVizQuery,
     type ApiError,
     type ChartConfig,
+    type EChartsSeries,
     type ToolRunQueryArgs,
     type ToolTableVizArgs,
     type ToolTimeSeriesArgs,
     type ToolVerticalBarArgs,
 } from '@lightdash/common';
-import { Box, Center, Group, Stack, Text } from '@mantine-8/core';
+import {
+    Box,
+    Center,
+    Group,
+    Stack,
+    Text,
+    useMantineColorScheme,
+} from '@mantine-8/core';
 import { IconExclamationCircle } from '@tabler/icons-react';
 import { type QueryObserverSuccessResult } from '@tanstack/react-query';
 import { useCallback, useMemo, useState, type FC, type ReactNode } from 'react';
@@ -24,9 +32,8 @@ import VisualizationProvider from '../../../../../components/LightdashVisualizat
 import { DrillDownModal } from '../../../../../components/MetricQueryData/DrillDownModal';
 import MetricQueryDataProvider from '../../../../../components/MetricQueryData/MetricQueryDataProvider';
 import UnderlyingDataModal from '../../../../../components/MetricQueryData/UnderlyingDataModal';
-import { type EchartSeriesClickEvent } from '../../../../../components/SimpleChart';
+import { type EchartsSeriesClickEvent } from '../../../../../components/SimpleChart';
 import ErrorBoundary from '../../../../../features/errorBoundary/ErrorBoundary';
-import { type EChartSeries } from '../../../../../hooks/echarts/useEchartsCartesianConfig';
 import useHealth from '../../../../../hooks/health/useHealth';
 import { useOrganization } from '../../../../../hooks/organization/useOrganization';
 import { useExplore } from '../../../../../hooks/useExplore';
@@ -62,12 +69,21 @@ export const AiVisualizationRenderer: FC<Props> = ({
 }) => {
     const { data: health } = useHealth();
     const { data: organization } = useOrganization();
+    const { colorScheme } = useMantineColorScheme();
+
+    const colorPalette = useMemo(() => {
+        if (colorScheme === 'dark' && organization?.chartDarkColors) {
+            return organization.chartDarkColors;
+        }
+        return organization?.chartColors ?? ECHARTS_DEFAULT_COLORS;
+    }, [colorScheme, organization?.chartColors, organization?.chartDarkColors]);
+
     const { metricQuery, fields } = queryExecutionHandle.data.query;
     const tableName = metricQuery?.exploreName;
     const { data: explore } = useExplore(tableName);
     const [echartsClickEvent, setEchartsClickEvent] =
-        useState<EchartSeriesClickEvent | null>(null);
-    const [echartSeries, setEchartSeries] = useState<EChartSeries[]>([]);
+        useState<EchartsSeriesClickEvent | null>(null);
+    const [echartsSeries, setEchartsSeries] = useState<EChartsSeries[]>([]);
 
     // Initialize from cached data if available
     const [selectedChartType, setSelectedChartType] =
@@ -119,8 +135,9 @@ export const AiVisualizationRenderer: FC<Props> = ({
     );
 
     const defaultChartType =
-        chartConfig.type === AiResultType.QUERY_RESULT
-            ? chartConfig.chartConfig?.defaultVizType ?? 'table'
+        chartConfigFromAiAgentVizConfig.type === AiResultType.QUERY_RESULT
+            ? (chartConfigFromAiAgentVizConfig.vizTool.chartConfig
+                  ?.defaultVizType ?? 'table')
             : 'table';
 
     const handleChartConfigChange = useCallback(
@@ -182,16 +199,14 @@ export const AiVisualizationRenderer: FC<Props> = ({
                     health?.pivotTable.maxColumnLimit ?? 60
                 }
                 initialPivotDimensions={groupByDimensions}
-                colorPalette={
-                    organization?.chartColors ?? ECHARTS_DEFAULT_COLORS
-                }
+                colorPalette={colorPalette}
                 isLoading={resultsData.isFetchingRows}
                 onSeriesContextMenu={(
-                    e: EchartSeriesClickEvent,
-                    series: EChartSeries[],
+                    e: EchartsSeriesClickEvent,
+                    series: EChartsSeries[],
                 ) => {
                     setEchartsClickEvent(e);
-                    setEchartSeries(series);
+                    setEchartsSeries(series);
                 }}
                 onChartConfigChange={handleChartConfigChange}
                 unsavedMetricQuery={metricQuery}
@@ -214,7 +229,7 @@ export const AiVisualizationRenderer: FC<Props> = ({
                         </Group>
                     )}
                     <Box
-                        flex="1 0 0"
+                        flex="1"
                         style={{
                             // Scrolling for tables
                             overflow: 'auto',
@@ -228,11 +243,11 @@ export const AiVisualizationRenderer: FC<Props> = ({
                         {chartConfigFromAiAgentVizConfig.echartsConfig.type ===
                             ChartType.CARTESIAN && (
                             <SeriesContextMenu
-                                echartSeriesClickEvent={
+                                echartsSeriesClickEvent={
                                     echartsClickEvent ?? undefined
                                 }
                                 dimensions={metricQuery.dimensions}
-                                series={echartSeries}
+                                series={echartsSeries}
                                 explore={explore}
                             />
                         )}

@@ -1,6 +1,5 @@
 import {
     CreateOpenIdIdentity,
-    NotExistsError,
     NotFoundError,
     OpenIdIdentity,
     OpenIdIdentityIssuerType,
@@ -43,14 +42,9 @@ export class OpenIdIdentityModel {
     private getOpenIdQueryBuilder() {
         return this.database('openid_identities')
             .leftJoin('users', 'openid_identities.user_id', 'users.user_id')
-            .select<Array<DbOpenIdIdentity & Pick<DbUser, 'user_uuid'>>>(
-                'openid_identities.issuer',
-                'openid_identities.issuer_type',
-                'openid_identities.subject',
-                'openid_identities.created_at',
-                'users.user_uuid',
-                'openid_identities.email',
-            );
+            .select<
+                Array<DbOpenIdIdentity & Pick<DbUser, 'user_uuid'>>
+            >('openid_identities.issuer', 'openid_identities.issuer_type', 'openid_identities.subject', 'openid_identities.created_at', 'users.user_uuid', 'openid_identities.email');
     }
 
     async findIdentitiesByEmail(email: string): Promise<OpenIdIdentity[]> {
@@ -69,7 +63,7 @@ export class OpenIdIdentityModel {
             .where('issuer', issuer)
             .andWhere('subject', subject);
         if (identity === undefined) {
-            throw new NotExistsError('Cannot find openid identity');
+            throw new NotFoundError('Cannot find openid identity');
         }
         return OpenIdIdentityModel._parseDbIdentity(identity);
     }
@@ -215,5 +209,40 @@ export class OpenIdIdentityModel {
             throw new NotFoundError('No user found');
         }
         return row.refresh_token;
+    }
+
+    async deleteIdentitiesByEmail(email: string): Promise<number> {
+        return this.database(OpenIdIdentitiesTableName)
+            .where('email', email)
+            .delete();
+    }
+
+    async deleteIdentitiesByUserUuid(userUuid: string): Promise<number> {
+        const [user] = await this.database('users')
+            .select('user_id')
+            .where('user_uuid', userUuid);
+
+        if (!user) {
+            return 0;
+        }
+
+        return this.database(OpenIdIdentitiesTableName)
+            .where('user_id', user.user_id)
+            .delete();
+    }
+
+    async findIdentityByUserUuid(
+        userUuid: string,
+        issuerType: OpenIdIdentityIssuerType,
+    ): Promise<OpenIdIdentity | null> {
+        const [identity] = await this.getOpenIdQueryBuilder()
+            .where('users.user_uuid', userUuid)
+            .andWhere('issuer_type', issuerType);
+
+        if (!identity) {
+            return null;
+        }
+
+        return OpenIdIdentityModel._parseDbIdentity(identity);
     }
 }

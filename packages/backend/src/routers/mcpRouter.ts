@@ -10,19 +10,18 @@ import {
     ForbiddenError,
     getErrorMessage,
     LightdashError,
-    LightdashSessionUser,
     MissingConfigError,
-    NotImplementedError,
     OauthAccount,
-    OauthAuth,
+    ServiceAcctAccount,
+    UserAttributeValueMap,
 } from '@lightdash/common';
 import {
     allowApiKeyAuthentication,
     allowOauthAuthentication,
-    isAuthenticated,
 } from '../controllers/authentication';
 import { ExtraContext, McpService } from '../ee/services/McpService/McpService';
 import Logger from '../logging/logger';
+import { userAttributeOverridesSchema } from '../services/UserAttributesService/UserAttributeUtils';
 
 const mcpRouter: Router = express.Router({ mergeParams: true });
 
@@ -31,6 +30,43 @@ function getMcpService(req: express.Request): McpService {
         return req.services.getMcpService();
     } catch (e) {
         throw new MissingConfigError('MCP service not available');
+    }
+}
+
+const MCP_USER_ATTRIBUTE_HEADER = 'X-Lightdash-User-Attributes';
+
+/**
+ * Extracts user attribute overrides from the X-Lightdash-User-Attributes header.
+ * Header value should be a JSON object with string or string[] values.
+ * Example: {"organizer_id": "123"} or {"organizer_id": ["123", "456"]}
+ */
+function extractUserAttributesFromHeader(
+    req: express.Request,
+): UserAttributeValueMap | undefined {
+    const headerValue = req.headers[MCP_USER_ATTRIBUTE_HEADER.toLowerCase()];
+    if (!headerValue || typeof headerValue !== 'string') {
+        return undefined;
+    }
+
+    try {
+        const parsed = JSON.parse(headerValue);
+        const result = userAttributeOverridesSchema.safeParse(parsed);
+
+        if (!result.success) {
+            Logger.warn(
+                `Invalid ${MCP_USER_ATTRIBUTE_HEADER} header: ${result.error.message}`,
+            );
+            return undefined;
+        }
+
+        return Object.keys(result.data).length > 0 ? result.data : undefined;
+    } catch (e) {
+        Logger.warn(
+            `Failed to parse ${MCP_USER_ATTRIBUTE_HEADER} header: ${getErrorMessage(
+                e,
+            )}`,
+        );
+        return undefined;
     }
 }
 
@@ -112,6 +148,10 @@ mcpRouter.all(
                 });
                 await mcpServer.connect(transport);
 
+                // Extract user attributes from header (for row-level security)
+                const headerUserAttributes =
+                    extractUserAttributesFromHeader(req);
+
                 // Add auth info to request for the transport
                 // The token details is loaded on the authentication middleware allowOauthAuthentication
                 const authReq: IncomingMessage & {
@@ -123,6 +163,7 @@ mcpRouter.all(
                     const extra: ExtraContext = {
                         user: req.user,
                         account: oauthAuth,
+                        headerUserAttributes,
                     };
                     authReq.auth = {
                         token: oauthAuth.authentication.token,
@@ -137,10 +178,27 @@ mcpRouter.all(
                     const extra: ExtraContext = {
                         user: req.user,
                         account: apiKeyAuth,
+                        headerUserAttributes,
                     };
                     authReq.auth = {
                         token: apiKeyAuth.authentication.source,
                         clientId: 'API key', // hardcoded client and scopes for PAT authentication
+                        scopes: ['mcp:read', 'mcp:write'],
+                        extra,
+                    };
+                }
+
+                if (req.user && req.account?.isServiceAccount()) {
+                    const serviceAccountAuth =
+                        req.account as ServiceAcctAccount;
+                    const extra: ExtraContext = {
+                        user: req.user,
+                        account: serviceAccountAuth,
+                        headerUserAttributes,
+                    };
+                    authReq.auth = {
+                        token: serviceAccountAuth.authentication.source,
+                        clientId: 'Service account', // hardcoded client and scopes for Service Account authentication
                         scopes: ['mcp:read', 'mcp:write'],
                         extra,
                     };

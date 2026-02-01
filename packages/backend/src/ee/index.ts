@@ -22,7 +22,7 @@ import { ServiceAccountModel } from './models/ServiceAccountModel';
 import { CommercialSchedulerClient } from './scheduler/SchedulerClient';
 import { CommercialSchedulerWorker } from './scheduler/SchedulerWorker';
 import { AiAgentAdminService } from './services/AiAgentAdminService';
-import { AiAgentService } from './services/AiAgentService';
+import { AiAgentService } from './services/AiAgentService/AiAgentService';
 import { AiOrganizationSettingsService } from './services/AiOrganizationSettingsService';
 import { AiService } from './services/AiService/AiService';
 import { CommercialCacheService } from './services/CommercialCacheService';
@@ -88,6 +88,7 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     dashboardModel: models.getDashboardModel(),
                     dashboardSummaryModel: models.getDashboardSummaryModel(),
                     projectService: repository.getProjectService(),
+                    featureFlagService: repository.getFeatureFlagService(),
                     openAi: new OpenAi(), // TODO This should go in client repository as soon as it is available
                 }),
             aiAgentService: ({
@@ -112,7 +113,6 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     asyncQueryService: repository.getAsyncQueryService(),
                     userAttributesModel: models.getUserAttributesModel(),
                     searchModel: models.getSearchModel(),
-                    spaceModel: models.getSpaceModel(),
                     slackAuthenticationModel:
                         models.getSlackAuthenticationModel() as CommercialSlackAuthenticationModel,
                     schedulerClient:
@@ -122,6 +122,7 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     projectModel: models.getProjectModel(),
                     aiOrganizationSettingsService:
                         repository.getAiOrganizationSettingsService(),
+                    shareService: repository.getShareService(),
                     prometheusMetrics,
                 }),
             aiAgentAdminService: ({ models, context }) =>
@@ -150,6 +151,8 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     commercialFeatureFlagModel:
                         models.getFeatureFlagModel() as CommercialFeatureFlagModel,
                     rolesModel: models.getRolesModel(),
+                    projectModel: models.getProjectModel(),
+                    openIdIdentityModel: models.getOpenIdIdentityModel(),
                 }),
             serviceAccountService: ({ models, context }) =>
                 new ServiceAccountService({
@@ -304,11 +307,11 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                 new McpService({
                     lightdashConfig: context.lightdashConfig,
                     analytics: context.lightdashAnalytics,
+                    asyncQueryService: repository.getAsyncQueryService(),
                     catalogService: repository.getCatalogService(),
                     projectService: repository.getProjectService(),
                     userAttributesModel: models.getUserAttributesModel(),
                     searchModel: models.getSearchModel(),
-                    spaceModel: models.getSpaceModel(),
                     spaceService: repository.getSpaceService(),
                     mcpContextModel: models.getMcpContextModel(),
                     projectModel: models.getProjectModel(),
@@ -322,7 +325,8 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                 }),
         },
         modelProviders: {
-            aiAgentModel: ({ database }) => new AiAgentModel({ database }),
+            aiAgentModel: ({ database }) =>
+                new AiAgentModel({ database, lightdashConfig }),
             aiOrganizationSettingsModel: ({ database }) =>
                 new AiOrganizationSettingsModel({ database }),
             embedModel: ({ database }) => new EmbedModel({ database }),
@@ -383,12 +387,14 @@ export async function getEnterpriseAppArguments(): Promise<EnterpriseAppArgument
                     analytics: context.lightdashAnalytics,
                     schedulerModel: models.getSchedulerModel(),
                 }),
-            slackClient: ({ context, models }) =>
+            slackClient: ({ context, models, repository }) =>
                 new CommercialSlackClient({
                     analytics: context.lightdashAnalytics,
                     lightdashConfig: context.lightdashConfig,
                     slackAuthenticationModel:
                         models.getSlackAuthenticationModel() as CommercialSlackAuthenticationModel,
+                    slackChannelCacheModel: models.getSlackChannelCacheModel(),
+                    schedulerClient: repository.getSchedulerClient(),
                 }),
         },
     };

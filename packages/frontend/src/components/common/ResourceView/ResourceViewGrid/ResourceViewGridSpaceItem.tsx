@@ -49,7 +49,9 @@ const ResourceViewGridSpaceItem: FC<ResourceViewGridSpaceItemProps> = ({
             pos="relative"
             p={0}
             withBorder
-            bg={hovered ? theme.fn.rgba(theme.colors.gray[0], 0.5) : undefined}
+            bg={
+                hovered ? theme.fn.rgba(theme.colors.ldGray[0], 0.5) : undefined
+            }
             h="100%"
         >
             <Group p="md" align="center" spacing="md" noWrap>
@@ -61,7 +63,7 @@ const ResourceViewGridSpaceItem: FC<ResourceViewGridSpaceItemProps> = ({
                     withArrow
                     label={
                         <Stack spacing={4}>
-                            <Text lineClamp={1} fz="xs" fw={600} color="white">
+                            <Text lineClamp={1} fz="xs" fw={600}>
                                 {tooltipText}
                             </Text>
                             <Group>

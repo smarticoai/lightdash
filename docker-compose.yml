@@ -1,4 +1,3 @@
-version: '3.8'
 services:
     minio:
         image: coollabsio/minio:latest
@@ -57,12 +56,34 @@ services:
             - RUDDERSTACK_DATA_PLANE_URL=${RUDDERSTACK_DATA_PLANE_URL}
             - SCHEDULER_ENABLED=true
             - GROUPS_ENABLED=${GROUPS_ENABLED:-false}
+            - SERVICE_ACCOUNT_ENABLED=${SERVICE_ACCOUNT_ENABLED:-false}
             - POSTHOG_PROJECT_API_KEY=${POSTHOG_PROJECT_API_KEY}
             - POSTHOG_FE_API_HOST=${POSTHOG_FE_API_HOST}
             - POSTHOG_BE_API_HOST=${POSTHOG_BE_API_HOST}
+            - HEADWAY_ENABLED=${HEADWAY_ENABLED:-true}
             - OPENAI_API_KEY=${OPENAI_API_KEY}
             - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
             - AI_COPILOT_ENABLED=${AI_COPILOT_ENABLED}
+            - AI_DEFAULT_PROVIDER=${AI_DEFAULT_PROVIDER}
+            - AI_EMBEDDING_ENABLED=${AI_EMBEDDING_ENABLED}
+            - AI_DEFAULT_EMBEDDING_PROVIDER=${AI_DEFAULT_EMBEDDING_PROVIDER}
+            - AI_VERIFIED_ANSWER_SIMILARITY_THRESHOLD=${AI_VERIFIED_ANSWER_SIMILARITY_THRESHOLD}
+            - AZURE_AI_ENDPOINT=${AZURE_AI_ENDPOINT}
+            - AZURE_AI_API_KEY=${AZURE_AI_API_KEY}
+            - AZURE_AI_API_VERSION=${AZURE_AI_API_VERSION}
+            - AZURE_AI_DEPLOYMENT_NAME=${AZURE_AI_DEPLOYMENT_NAME}
+            - AZURE_EMBEDDING_DEPLOYMENT_NAME=${AZURE_EMBEDDING_DEPLOYMENT_NAME}
+            - AZURE_USE_DEPLOYMENT_BASED_URLS=${AZURE_USE_DEPLOYMENT_BASED_URLS}
+            - BEDROCK_API_KEY=${BEDROCK_API_KEY}
+            - BEDROCK_BASE_URL=${BEDROCK_BASE_URL}
+            - BEDROCK_REGION=${BEDROCK_REGION}
+            - BEDROCK_ACCESS_KEY_ID=${BEDROCK_ACCESS_KEY_ID}
+            - BEDROCK_SECRET_ACCESS_KEY=${BEDROCK_SECRET_ACCESS_KEY}
+            - BEDROCK_SESSION_TOKEN=${BEDROCK_SESSION_TOKEN}
+            - BEDROCK_MODEL_NAME=${BEDROCK_MODEL_NAME}
+            - BEDROCK_EMBEDDING_MODEL=${BEDROCK_EMBEDDING_MODEL}
+            - BEDROCK_TEMPERATURE=${BEDROCK_TEMPERATURE}
+            - BEDROCK_AVAILABLE_MODELS=${BEDROCK_AVAILABLE_MODELS}
             - GOOGLE_DRIVE_API_KEY=${GOOGLE_DRIVE_API_KEY}
             - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
             - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
@@ -85,6 +106,11 @@ services:
             - RESULTS_S3_BUCKET=${RESULTS_S3_BUCKET:-${RESULTS_CACHE_S3_BUCKET}}
             - RESULTS_S3_SECRET_KEY=${RESULTS_S3_SECRET_KEY:-${RESULTS_CACHE_S3_SECRET_KEY}}
             - RESULTS_S3_ACCESS_KEY=${RESULTS_S3_ACCESS_KEY:-${RESULTS_CACHE_S3_ACCESS_KEY}}
+            - TURBO_TOKEN=${TURBO_TOKEN}
+            - TURBO_TEAM=${TURBO_TEAM}
+            - TURBO_API=${TURBO_API}
+            - SIGNUP_URL=${SIGNUP_URL}
+            - HELP_MENU_URL=${HELP_MENU_URL}
         volumes:
             - '${DBT_PROJECT_DIR}:/usr/app/dbt'
         ports:
@@ -101,7 +127,8 @@ services:
             - db-data:/var/lib/postgresql/data
 
     headless-browser:
-        image: ghcr.io/browserless/chromium:v2.24.3
+        build:
+            dockerfile: docker/Dockerfile.headless-browser
         restart: always
         ports:
             - '3001:3000'

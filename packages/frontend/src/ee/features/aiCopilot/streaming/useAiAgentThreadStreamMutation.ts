@@ -1,11 +1,15 @@
 import {
-    AiResultType,
     toolImproveContextArgsSchema,
     ToolNameSchema,
     toolRunQueryOutputSchema,
 } from '@lightdash/common';
 import { captureException } from '@sentry/react';
-import { DefaultChatTransport, readUIMessageStream, type UIMessage } from 'ai';
+import {
+    DefaultChatTransport,
+    readUIMessageStream,
+    type ReasoningUIPart,
+    type UIMessage,
+} from 'ai';
 import { useCallback } from 'react';
 import { lightdashApiStream } from '../../../../api';
 import {
@@ -55,6 +59,28 @@ class ChatStreamParser extends DefaultChatTransport<UIMessage> {
     }
 }
 
+const getReasoningFromPart = (part: ReasoningUIPart) => {
+    switch (true) {
+        case part.providerMetadata?.openai !== undefined:
+            return {
+                reasoningId: part.providerMetadata.openai.itemId,
+                text: part.text,
+            };
+        case part.providerMetadata?.anthropic !== undefined:
+            return {
+                reasoningId: part.providerMetadata.anthropic.signature,
+                text: part.text,
+            };
+        case part.providerMetadata?.bedrock !== undefined:
+            return {
+                reasoningId: part.providerMetadata.bedrock.signature,
+                text: part.text,
+            };
+        default:
+            return null;
+    }
+};
+
 export function useAiAgentThreadStreamMutation() {
     const dispatch = useAiAgentStoreDispatch();
     const { setAbortController, abort } =
@@ -90,6 +116,8 @@ export function useAiAgentThreadStreamMutation() {
                 const stream = readUIMessageStream({
                     stream: chunkStream,
                 });
+
+                const handledToolOutputIds = new Set<string>();
 
                 for await (const uiMessage of stream) {
                     if (abortController.signal.aborted) return;
@@ -138,6 +166,14 @@ export function useAiAgentThreadStreamMutation() {
                                         break;
                                     }
 
+                                    if (
+                                        handledToolOutputIds.has(
+                                            part.toolCallId,
+                                        )
+                                    ) {
+                                        break;
+                                    }
+
                                     const output =
                                         toolRunQueryOutputSchema.safeParse(
                                             part.output,
@@ -148,6 +184,10 @@ export function useAiAgentThreadStreamMutation() {
                                         output.data.metadata.status ===
                                             'success'
                                     ) {
+                                        handledToolOutputIds.add(
+                                            part.toolCallId,
+                                        );
+
                                         void refetchThread?.();
                                     }
 
@@ -177,11 +217,7 @@ export function useAiAgentThreadStreamMutation() {
                                                 part.input,
                                             );
 
-                                        if (
-                                            improveContextArgs.success &&
-                                            improveContextArgs.data.type ===
-                                                AiResultType.IMPROVE_CONTEXT
-                                        ) {
+                                        if (improveContextArgs.success) {
                                             dispatch(
                                                 setImproveContextNotification({
                                                     threadUuid,
@@ -202,16 +238,17 @@ export function useAiAgentThreadStreamMutation() {
                                 }
                                 break;
                             case 'reasoning':
-                                const reasoningId =
-                                    part.providerMetadata?.openai?.itemId;
-                                const text = part.text;
+                                const reasoning = getReasoningFromPart(part);
 
-                                if (typeof reasoningId === 'string') {
+                                if (
+                                    reasoning &&
+                                    typeof reasoning.reasoningId === 'string'
+                                ) {
                                     dispatch(
                                         addReasoning({
                                             threadUuid,
-                                            reasoningId,
-                                            text,
+                                            reasoningId: reasoning.reasoningId,
+                                            text: reasoning.text,
                                         }),
                                     );
                                 }
@@ -237,7 +274,11 @@ export function useAiAgentThreadStreamMutation() {
                     return;
                 }
                 console.error('Error processing stream:', error);
-                captureException(error);
+                captureException(error, {
+                    tags: {
+                        errorType: 'AiAgentStreamError',
+                    },
+                });
                 const errorMessage =
                     error instanceof Error
                         ? error.message

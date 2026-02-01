@@ -8,8 +8,6 @@ import {
     AnyType,
     CacheMetadata,
     CatalogField,
-    CatalogTable,
-    ChangesetWithChanges,
     CreateChangeParams,
     DashboardSearchResult,
     Explore,
@@ -17,11 +15,8 @@ import {
     Filters,
     ItemsMap,
     KnexPaginateArgs,
-    SearchResult,
     SlackPrompt,
-    ToolFindChartsArgs,
     ToolFindContentArgs,
-    ToolFindDashboardsArgs,
     ToolFindFieldsArgs,
     UpdateSlackResponse,
     UpdateWebAppResponse,
@@ -40,14 +35,26 @@ type Pagination = KnexPaginateArgs & {
 export type ListExploresFn = () => Promise<Explore[]>;
 
 export type FindExploresFn = (args: {
-    exploreName: string;
     fieldSearchSize: number;
+    searchQuery?: string;
 }) => Promise<{
-    explore: Explore;
-    catalogFields: {
-        dimensions: CatalogField[];
-        metrics: CatalogField[];
-    };
+    exploreSearchResults?: Array<{
+        name: string;
+        label: string;
+        description?: string;
+        aiHints?: string[];
+        searchRank?: number;
+        joinedTables?: string[] | null;
+    }>;
+    topMatchingFields?: Array<{
+        name: string;
+        label: string;
+        tableName: string;
+        fieldType: string;
+        searchRank?: number;
+        description?: string;
+        chartUsage?: number;
+    }>;
 }>;
 
 export type FindFieldFn = (
@@ -58,24 +65,7 @@ export type FindFieldFn = (
 ) => Promise<{
     fields: CatalogField[];
     pagination: Pagination | undefined;
-}>;
-
-export type FindDashboardsFn = (
-    args: KnexPaginateArgs & {
-        dashboardSearchQuery: ToolFindDashboardsArgs['dashboardSearchQueries'][number];
-    },
-) => Promise<{
-    dashboards: DashboardSearchResult[];
-    pagination: Pagination | undefined;
-}>;
-
-export type FindChartsFn = (
-    args: KnexPaginateArgs & {
-        chartSearchQuery: ToolFindChartsArgs['chartSearchQueries'][number];
-    },
-) => Promise<{
-    charts: AllChartsSearchResult[];
-    pagination: Pagination | undefined;
+    explore?: Explore;
 }>;
 
 export type FindContentFn = (args: {
@@ -84,15 +74,12 @@ export type FindContentFn = (args: {
     content: (AllChartsSearchResult | DashboardSearchResult)[];
 }>;
 
-export type GetExploreFn = (args: { exploreName: string }) => Promise<Explore>;
-
 export type UpdateProgressFn = (progress: string) => Promise<void>;
 
 export type GetPromptFn = () => Promise<SlackPrompt | AiWebAppPrompt>;
 
-export type RunMiniMetricQueryFn = (
+export type RunAsyncQueryFn = (
     metricQuery: AiMetricQueryWithFilters,
-    maxLimit: number,
     additionalMetrics?: AdditionalMetric[],
 ) => Promise<{
     rows: Record<string, AnyType>[];

@@ -147,6 +147,7 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
     public async compileAllExplores(
         trackingParams?: TrackingParams,
         loadSources: boolean = false,
+        allowPartialCompilation: boolean = false,
     ): Promise<(Explore | ExploreError)[]> {
         Logger.debug('Install dependencies');
         // Install dependencies for dbt and fetch the manifest - may raise error meaning no explores compile
@@ -218,9 +219,8 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 : Object.values(manifest.metrics),
         );
 
-        const lightdashProjectConfig = await this.getLightdashProjectConfig(
-            trackingParams,
-        );
+        const lightdashProjectConfig =
+            await this.getLightdashProjectConfig(trackingParams);
 
         // Be lazy and try to attach types to the remaining models without refreshing the catalog
         try {
@@ -238,6 +238,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 adapterType !== 'snowflake',
             );
             Logger.info('Convert explores');
+            const disableTimestampConversion =
+                this.warehouseClient.credentials.type === 'snowflake' &&
+                this.warehouseClient.credentials.disableTimestampConversion ===
+                    true;
+
             const lazyExplores = await convertExplores(
                 lazyTypedModels,
                 loadSources,
@@ -245,6 +250,8 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 metrics,
                 this.warehouseClient,
                 lightdashProjectConfig,
+                disableTimestampConversion,
+                allowPartialCompilation,
             );
             Logger.info('Finished compiling explores');
             return [...lazyExplores, ...failedExplores];
@@ -259,9 +266,8 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     `Fetching table metadata for ${modelCatalog.length} tables`,
                 );
 
-                const warehouseCatalog = await this.warehouseClient.getCatalog(
-                    modelCatalog,
-                );
+                const warehouseCatalog =
+                    await this.warehouseClient.getCatalog(modelCatalog);
                 await this.cachedWarehouse?.onWarehouseCatalogChange(
                     warehouseCatalog,
                 );
@@ -277,6 +283,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     adapterType !== 'snowflake',
                 );
                 Logger.info('Convert explores after missing catalog error');
+                const disableTimestampConversion =
+                    this.warehouseClient.credentials.type === 'snowflake' &&
+                    this.warehouseClient.credentials
+                        .disableTimestampConversion === true;
+
                 const explores = await convertExplores(
                     typedModels,
                     loadSources,
@@ -284,6 +295,8 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     metrics,
                     this.warehouseClient,
                     lightdashProjectConfig,
+                    disableTimestampConversion,
+                    allowPartialCompilation,
                 );
                 Logger.info(
                     'Finished compiling explores after missing catalog error',

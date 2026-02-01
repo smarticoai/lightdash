@@ -1,15 +1,6 @@
 import { type EmailStatusExpiring } from '@lightdash/common';
-import {
-    Alert,
-    Anchor,
-    Button,
-    PinInput,
-    Stack,
-    Text,
-    Title,
-} from '@mantine/core';
+import { Anchor, Button, PinInput, Stack, Text, Title } from '@mantine-8/core';
 import { isNotEmpty, useForm } from '@mantine/form';
-import { IconAlertCircle } from '@tabler/icons-react';
 import { useEffect, type FC } from 'react';
 import Countdown, { zeroPad } from 'react-countdown';
 import {
@@ -17,15 +8,15 @@ import {
     useVerifyEmail,
 } from '../../hooks/useEmailVerification';
 import useApp from '../../providers/App/useApp';
+import Callout from '../common/Callout';
 import LoadingState from '../common/LoadingState';
-import MantineIcon from '../common/MantineIcon';
 
 const VerifyEmailForm: FC<{
     isLoading?: boolean;
     emailStatusData?: EmailStatusExpiring;
     statusLoading?: boolean;
 }> = ({ isLoading, emailStatusData, statusLoading }) => {
-    const { health, user } = useApp();
+    const { health } = useApp();
     const { mutate: verifyCode, isLoading: verificationLoading } =
         useVerifyEmail();
     const data = emailStatusData;
@@ -51,10 +42,10 @@ const VerifyEmailForm: FC<{
             const message = data.otp.isExpired
                 ? 'Your one-time password expired. Please resend a verification email.'
                 : data.otp.numberOfAttempts < 5
-                ? `The code doesn't match the one we sent you. You have ${remainingAttempts} attempt${
-                      remainingAttempts > 1 ? 's' : ''
-                  } left.`
-                : "Hmm that code doesn't match the one we sent you. You've already had 5 attempts, please resend a verification email and try again.";
+                  ? `The code doesn't match the one we sent you. You have ${remainingAttempts} attempt${
+                        remainingAttempts > 1 ? 's' : ''
+                    } left.`
+                  : "Hmm that code doesn't match the one we sent you. You've already had 5 attempts, please resend a verification email and try again.";
             setFieldError('code', message);
         } else {
             clearFieldError('code');
@@ -66,12 +57,15 @@ const VerifyEmailForm: FC<{
     }
 
     return (
-        // FIXME: update hardcoded widths with Mantine widths
-        <Stack spacing="md" justify="center" align="center" w={300} mx="auto">
+        <Stack gap="md" justify="center" align="center" w="100%" mx="auto">
             <Title order={3}>Check your inbox!</Title>
-            <Text color="gray.6" ta="center">
+            <Text c="ldGray.8" ta="center" fz="sm">
                 Verify your email address by entering the code we've just sent
-                to <b>{user?.data?.email || 'your email'}</b>
+                to{' '}
+                <Text span fw={500} fz="sm" c="ldGray.8">
+                    {data?.email || 'your email'}
+                </Text>
+                .
             </Text>
             <form
                 name="verifyEmail"
@@ -79,7 +73,7 @@ const VerifyEmailForm: FC<{
                     verifyCode(values.code),
                 )}
             >
-                <Stack spacing="xs" justify="center" align="center" mt="md">
+                <Stack gap="xs" justify="center" align="center">
                     <PinInput
                         aria-label="One-time password"
                         name="code"
@@ -92,7 +86,7 @@ const VerifyEmailForm: FC<{
                         data-testid="pin-input"
                         autoFocus
                     />
-                    <Text ta="center" color="red.7">
+                    <Text ta="center" c="red.7">
                         {errorMessage?.toString()}
                     </Text>
                 </Stack>
@@ -100,29 +94,32 @@ const VerifyEmailForm: FC<{
                     key={expirationTime?.toString()}
                     date={expirationTime}
                     renderer={({ minutes, seconds, completed }) => {
-                        if (completed) {
+                        if (completed && !emailStatusData?.isVerified) {
                             return (
-                                <Alert
-                                    icon={
-                                        <MantineIcon icon={IconAlertCircle} />
-                                    }
-                                    color="orange.8"
-                                    radius="xs"
+                                <Callout
+                                    variant="warning"
+                                    title="Your verification code has expired."
                                 >
-                                    Your verification code has expired. Hit{' '}
-                                    <Text span fw={500}>
+                                    Hit{' '}
+                                    <Text span fw={500} fz="sm">
                                         Resend verification email
                                     </Text>{' '}
                                     to receive a new code.
-                                </Alert>
+                                </Callout>
                             );
                         }
                         if (data?.otp?.isMaxAttempts) {
                             return <></>;
                         }
                         return (
-                            // FIXME: update hardcoded widths with Mantine widths
-                            <Stack spacing="xs" mt="md" w={250} align="center">
+                            <Stack
+                                gap="xs"
+                                mt="md"
+                                w="200"
+                                align="center"
+                                ml="auto"
+                                mr="auto"
+                            >
                                 <Button
                                     fullWidth
                                     loading={verificationLoading}
@@ -130,7 +127,7 @@ const VerifyEmailForm: FC<{
                                 >
                                     Submit
                                 </Button>
-                                <Text color="gray.6" ta="center">
+                                <Text c="ldGray.6" ta="center">
                                     Your one-time password expires in{' '}
                                     <b>
                                         {zeroPad(minutes)}:{zeroPad(seconds)}
@@ -142,7 +139,7 @@ const VerifyEmailForm: FC<{
                 />
             </form>
             <Anchor
-                size="sm"
+                fz="sm"
                 component="button"
                 onClick={() => {
                     form.reset();

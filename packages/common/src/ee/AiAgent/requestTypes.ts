@@ -37,7 +37,13 @@ export type AiPrompt = {
     prompt: string;
     createdAt: Date;
     response: string | null;
+    errorMessage: string | null;
     humanScore: number | null;
+    modelConfig: {
+        modelName: string;
+        modelProvider: string;
+        reasoning?: boolean;
+    } | null;
 };
 
 export type SlackPrompt = AiPrompt & {
@@ -68,17 +74,24 @@ export type CreateWebAppPrompt = {
     threadUuid: string;
     createdByUserUuid: string;
     prompt: string;
+    modelConfig?: {
+        modelName: string;
+        modelProvider: string;
+        reasoning?: boolean;
+    };
 };
 
 export type UpdateSlackResponse = {
     promptUuid: string;
     response?: string;
+    errorMessage?: string;
     humanScore?: number | null;
 };
 
 export type UpdateWebAppResponse = {
     promptUuid: string;
-    response: string;
+    response?: string;
+    errorMessage?: string;
     humanScore?: number | null;
 };
 
@@ -96,6 +109,18 @@ export type AiAgentEvalRunJobPayload = TraceTaskBase & {
     evalRunUuid: string;
     agentUuid: string;
     threadUuid: string;
+};
+
+export type EmbedArtifactVersionJobPayload = TraceTaskBase & {
+    artifactVersionUuid: string;
+    title: string | null;
+    description: string | null;
+};
+
+export type GenerateArtifactQuestionJobPayload = TraceTaskBase & {
+    artifactVersionUuid: string;
+    title: string | null;
+    description: string | null;
 };
 
 export type CloneThread = {

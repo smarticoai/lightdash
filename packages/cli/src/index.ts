@@ -23,6 +23,10 @@ import { diagnosticsHandler } from './handlers/diagnostics';
 import { downloadHandler, uploadHandler } from './handlers/download';
 import { generateHandler } from './handlers/generate';
 import { generateExposuresHandler } from './handlers/generateExposures';
+import { getProjectHandler } from './handlers/getProject';
+import { installSkillsHandler } from './handlers/installSkills';
+import { lintHandler } from './handlers/lint';
+import { listProjectsHandler } from './handlers/listProjects';
 import { login } from './handlers/login';
 import {
     previewHandler,
@@ -31,6 +35,7 @@ import {
 } from './handlers/preview';
 import { renameHandler } from './handlers/renameHandler';
 import { setProjectHandler } from './handlers/setProject';
+import { sqlHandler } from './handlers/sql';
 import { validateHandler } from './handlers/validate';
 import * as styles from './styles';
 // Trigger CLI tests
@@ -60,6 +65,15 @@ function parseUseDbtListOption(value: string | undefined): boolean {
         return true;
     }
     return value.toLowerCase() !== 'false';
+}
+
+function parseDisableTimestampConversionOption(
+    value: string | undefined,
+): boolean {
+    if (value === undefined) {
+        return false;
+    }
+    return value.toLowerCase() === 'true';
 }
 
 function parseProjectArgument(value: string | undefined): string | undefined {
@@ -144,48 +158,51 @@ ${styles.bold('Examples:')}
 
 // LOGIN
 program
-    .command('login <url>')
+    .command('login [url]')
     .description('Logs in to a Lightdash instance')
     .description(
-        'Logs in to a Lightdash instance.\n\n👀 See https://docs.lightdash.com/guides/cli/cli-authentication for more help and examples',
+        'Logs in to a Lightdash instance using OAuth2 (opens browser). Use --token to bypass OAuth.\n\nURL is optional - if not provided, uses the last URL you logged into. URL can be flexible: single words like "app" become "https://app.lightdash.cloud", protocol defaults to https, and paths are ignored.\n\n👀 See https://docs.lightdash.com/guides/cli/cli-authentication for more help and examples',
     )
     .addHelpText(
         'after',
         `
 ${styles.bold('Examples:')}
-  ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} https://app.lightdash.cloud ${styles.secondary(
-            '-- Logs in to Lightdash Cloud US instance',
+  ${styles.title('⚡')}️lightdash ${styles.bold('login')} ${styles.secondary(
+            '-- Uses previously saved URL (opens browser for OAuth)',
         )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
             'login',
-        )} https://eu1.lightdash.cloud ${styles.secondary(
-            '-- Logs in to Lightdash Cloud EU instance',
+        )} app ${styles.secondary(
+            '-- Short form for https://app.lightdash.cloud (opens browser for OAuth)',
         )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
             'login',
-        )} https://custom.lightdash.domain ${styles.secondary(
-            '-- Logs in to a self-hosted instance at a custom domain',
+        )} eu1 ${styles.secondary(
+            '-- Short form for https://eu1.lightdash.cloud (opens browser for OAuth)',
         )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
             'login',
-        )} https://custom.lightdash.domain --token 12345 ${styles.secondary(
-            '-- Logs in with an API access token (useful for users that use SSO in the browser)',
+        )} app.lightdash.cloud ${styles.secondary(
+            '-- Adds https:// automatically (opens browser for OAuth)',
         )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
             'login',
-        )} https://custom.lightdash.domain --oauth ${styles.secondary(
-            '-- Logs in using OAuth2 flow (opens browser for authentication)',
+        )} https://custom.lightdash.domain/projects/123 ${styles.secondary(
+            '-- Strips path, uses https://custom.lightdash.domain (opens browser for OAuth)',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'login',
+        )} http://localhost:3000 ${styles.secondary(
+            '-- Preserves http protocol for local development',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'login',
+        )} --token 12345 ${styles.secondary(
+            '-- Logs in with API token using saved URL (bypasses OAuth)',
         )}
 `,
     )
     .option('--token <token>', 'Login with an API access token', undefined)
-    .option(
-        '--oauth',
-        'Login using OAuth2 flow (opens browser for authentication)',
-        false,
-    )
     .option(
         '--project <project uuid>',
         'Select a project by UUID after login',
@@ -218,6 +235,18 @@ configProgram
         ).conflicts('name'),
     )
     .action(setProjectHandler);
+configProgram
+    .command('list-projects')
+    .description(
+        'List all projects in the organization (excludes preview projects)',
+    )
+    .option('--verbose', undefined, false)
+    .action(listProjectsHandler);
+configProgram
+    .command('get-project')
+    .description('Show the currently selected project')
+    .option('--verbose', undefined, false)
+    .action(getProjectHandler);
 
 const dbtProgram = program.command('dbt').description('Runs dbt commands');
 
@@ -249,7 +278,7 @@ ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
             'dbt run',
         )} -s +mymodel ${styles.secondary(
-            "-- runs mymodel and it's parents and generates .yml",
+            '-- runs mymodel and its parents and generates .yml',
         )}
 `,
     )
@@ -278,6 +307,11 @@ ${styles.bold('Examples:')}
     .option(
         '--no-defer',
         'dbt property. Do not resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .option(
+        '--favor-state',
+        'dbt property. When deferring, prioritize node definitions from the --state directory.',
         undefined,
     )
     .option('--full-refresh')
@@ -315,6 +349,11 @@ program
         undefined,
     )
     .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
     .option('--vars <vars>')
     .option('--threads <number>')
     .option('--no-version-check')
@@ -352,8 +391,25 @@ program
         undefined,
     )
     .option(
+        '--favor-state',
+        'dbt property. When deferring, prioritize node definitions from the --state directory.',
+        undefined,
+    )
+    .option(
         '--no-warehouse-credentials',
         'Compile without any warehouse credentials. Skips dbt compile + warehouse catalog',
+    )
+    .option(
+        '--use-dbt-list [true|false]',
+        'Use `dbt list` instead of `dbt compile` to generate dbt manifest.json',
+        parseUseDbtListOption,
+        true,
+    )
+    .option(
+        '--disable-timestamp-conversion [true|false]',
+        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
+        parseDisableTimestampConversionOption,
+        false,
     )
     .action(compileHandler);
 
@@ -380,6 +436,11 @@ program
         undefined,
     )
     .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
     .option('--vars <vars>')
     .option(
         '--defer',
@@ -389,6 +450,11 @@ program
     .option(
         '--no-defer',
         'dbt property. Do not resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .option(
+        '--favor-state',
+        'dbt property. When deferring, prioritize node definitions from the --state directory.',
         undefined,
     )
     .option('--threads <number>')
@@ -439,8 +505,20 @@ program
         false,
     )
     .option(
+        '--disable-timestamp-conversion [true|false]',
+        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
+        parseDisableTimestampConversionOption,
+        false,
+    )
+    .option(
         '--organization-credentials <name>',
         'Use organization warehouse credentials with the specified name (Enterprise Edition feature)',
+    )
+    .option(
+        '--disable-timestamp-conversion [true|false]',
+        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
+        parseDisableTimestampConversionOption,
+        false,
     )
     .action(previewHandler);
 
@@ -467,6 +545,11 @@ program
         undefined,
     )
     .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
     .option('--vars <vars>')
     .option(
         '--defer',
@@ -476,6 +559,11 @@ program
     .option(
         '--no-defer',
         'dbt property. Do not resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .option(
+        '--favor-state',
+        'dbt property. When deferring, prioritize node definitions from the --state directory.',
         undefined,
     )
     .option('--threads <number>')
@@ -523,6 +611,12 @@ program
     .option(
         '--skip-copy-content',
         'Skip copying content from the source project',
+        false,
+    )
+    .option(
+        '--disable-timestamp-conversion [true|false]',
+        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
+        parseDisableTimestampConversionOption,
         false,
     )
     .action(startPreviewHandler);
@@ -560,6 +654,11 @@ program
         '-p, --path <path>',
         'specify a custom path to download charts and dashboards',
         undefined,
+    )
+    .option(
+        '--nested',
+        'organize downloads in nested folders by project and space (default: flat structure)',
+        false,
     )
     .option(
         '--project <project uuid>',
@@ -604,6 +703,7 @@ program
         'Skip space creation if it does not exist',
         false,
     )
+    .option('--public', 'Create new spaces as public instead of private', false)
     .option(
         '--include-charts',
         'Include charts updates when uploading dashboards',
@@ -630,6 +730,11 @@ program
         undefined,
     )
     .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
     .option('--vars <vars>')
     .option('--threads <number>')
     .option('--no-version-check')
@@ -645,6 +750,21 @@ program
     .option('--selector <selector_name>')
     .option('--state <state>')
     .option('--full-refresh')
+    .option(
+        '--defer',
+        'dbt property. Resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .option(
+        '--no-defer',
+        'dbt property. Do not resolve unselected nodes by deferring to the manifest within the --state directory.',
+        undefined,
+    )
+    .option(
+        '--favor-state',
+        'dbt property. When deferring, prioritize node definitions from the --state directory.',
+        undefined,
+    )
     .option('--verbose', undefined, false)
 
     .option(
@@ -681,6 +801,12 @@ program
     .option(
         '--organization-credentials <name>',
         'Use organization warehouse credentials with the specified name (Enterprise Edition feature)',
+    )
+    .option(
+        '--disable-timestamp-conversion [true|false]',
+        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
+        parseDisableTimestampConversionOption,
+        false,
     )
     .action(deployHandler);
 
@@ -754,6 +880,17 @@ program
         parseUseDbtListOption,
         true,
     )
+    .option(
+        '--disable-timestamp-conversion [true|false]',
+        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
+        parseDisableTimestampConversionOption,
+        false,
+    )
+    .option(
+        '--show-chart-configuration-warnings',
+        'Show chart configuration warnings (e.g., unused dimensions). These are hidden by default.',
+        false,
+    )
     .addOption(
         new Option('--only <elems...>', 'Specify project elements to validate')
             .choices(Object.values(ValidationTarget))
@@ -822,6 +959,11 @@ ${styles.bold('Examples:')}
         undefined,
     )
     .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
     .option('--vars <vars>')
     .option('-y, --assume-yes', 'assume yes to prompts', false)
     .option('--skip-existing', 'skip files that already exist', false)
@@ -936,6 +1078,134 @@ ${styles.bold('Examples:')}
         undefined,
     )
     .action(diagnosticsHandler);
+
+program
+    .command('lint')
+    .description(
+        'Validates Lightdash Code files (models, charts, dashboards) against JSON schemas',
+    )
+    .addHelpText(
+        'after',
+        `
+${styles.bold('Examples:')}
+  ${styles.title('⚡')}️lightdash ${styles.bold('lint')} ${styles.secondary(
+            '-- validates all Lightdash Code files in current directory',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'lint',
+        )} --path ./chart.yml ${styles.secondary(
+            '-- validates a single chart file',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'lint',
+        )} --path ./lightdash ${styles.secondary(
+            '-- validates files in a specific directory',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'lint',
+        )} --verbose ${styles.secondary('-- shows detailed validation output')}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'lint',
+        )} --format json ${styles.secondary(
+            '-- outputs results in SARIF JSON format',
+        )}
+`,
+    )
+    .option(
+        '-p, --path <path>',
+        'Path to a file or directory to lint (defaults to current directory)',
+        undefined,
+    )
+    .option('--verbose', 'Show detailed output', false)
+    .option(
+        '-f, --format <format>',
+        'Output format: cli (default) or json (SARIF format)',
+        'cli',
+    )
+    .action(lintHandler);
+
+program
+    .command('sql')
+    .description(
+        'Run raw SQL query against the warehouse using project credentials',
+    )
+    .argument('<query>', 'SQL query to execute')
+    .requiredOption('-o, --output <file>', 'Output file path for CSV results')
+    .option(
+        '--limit <number>',
+        'Maximum rows to return from query',
+        parseIntArgument,
+    )
+    .option(
+        '--page-size <number>',
+        'Number of rows per page (default: 500, max: 5000)',
+        parseIntArgument,
+    )
+    .option('--verbose', 'Show detailed output', false)
+    .action(sqlHandler);
+
+program
+    .command('install-skills')
+    .description(
+        'Installs Lightdash skills for AI coding assistants (Claude, Cursor, Codex)',
+    )
+    .addHelpText(
+        'after',
+        `
+${styles.bold('Examples:')}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'install-skills',
+        )} ${styles.secondary(
+            '-- installs skills for Claude at git root (default)',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'install-skills',
+        )} --agent cursor ${styles.secondary('-- installs skills for Cursor')}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'install-skills',
+        )} --global ${styles.secondary(
+            '-- installs skills globally to ~/.claude/skills/',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'install-skills',
+        )} --agent codex --global ${styles.secondary(
+            '-- installs skills globally for Codex',
+        )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+            'install-skills',
+        )} --path ./my-project ${styles.secondary(
+            '-- installs skills to a specific path',
+        )}
+
+${styles.bold('Installation paths:')}
+  ${styles.secondary('Project-level (default):')}
+    .claude/skills/    (Claude)
+    .cursor/skills/    (Cursor)
+    .codex/skills/     (Codex)
+
+  ${styles.secondary('Global (--global):')}
+    ~/.claude/skills/  (Claude)
+    ~/.cursor/skills/  (Cursor)
+    ~/.codex/skills/   (Codex)
+`,
+    )
+    .option('--verbose', 'Show detailed output', false)
+    .addOption(
+        new Option('--agent <agent>', 'Target agent for skill installation')
+            .choices(['claude', 'cursor', 'codex'])
+            .default('claude'),
+    )
+    .option(
+        '--global',
+        'Install skills globally to home directory instead of project',
+        false,
+    )
+    .option(
+        '--path <path>',
+        'Override the install path (skills directory will be created inside)',
+        undefined,
+    )
+    .action(installSkillsHandler);
 
 const errorHandler = (err: Error) => {
     // Use error message with fallback for safety

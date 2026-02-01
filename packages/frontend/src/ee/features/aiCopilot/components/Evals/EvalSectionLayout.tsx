@@ -42,7 +42,6 @@ export const EvalSectionLayout: FC<EvalSectionLayoutProps> = ({ children }) => {
     }>();
     const { selectedThreadUuid, isSidebarOpen, clearThread } =
         useEvalSectionContext();
-
     // Fetch evaluation data if we're on an eval detail page
     const { data: evaluation } = useAiAgentEvaluation(
         projectUuid!,
@@ -235,7 +234,7 @@ export const EvalSectionLayout: FC<EvalSectionLayoutProps> = ({ children }) => {
                         className={styles.resizeHandle}
                         style={{
                             width: 1.5,
-                            backgroundColor: theme.colors.gray[2],
+                            backgroundColor: theme.colors.ldGray[2],
                             cursor: 'col-resize',
                             display: 'flex',
                             alignItems: 'center',
@@ -264,7 +263,8 @@ export const EvalSectionLayout: FC<EvalSectionLayoutProps> = ({ children }) => {
                                     threadUuid={selectedThreadUuid}
                                     isOpen={isSidebarOpen}
                                     onClose={handleCloseSidebar}
-                                    renderArtifactsInline
+                                    evalUuid={evalUuid}
+                                    runUuid={runUuid}
                                 />
                             )}
                     </Panel>

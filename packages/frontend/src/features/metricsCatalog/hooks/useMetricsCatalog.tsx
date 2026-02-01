@@ -3,6 +3,7 @@ import {
     type ApiGetMetricPeek,
     type ApiMetricsCatalog,
     type ApiSort,
+    type CatalogCategoryFilterMode,
     type KnexPaginateArgs,
 } from '@lightdash/common';
 import {
@@ -16,6 +17,9 @@ type UseMetricsCatalogOptions = {
     projectUuid?: string;
     search?: string;
     categories?: string[];
+    categoriesFilterMode?: CatalogCategoryFilterMode;
+    tables?: string[];
+    ownerUserUuids?: string[];
     sortBy?: ApiSort['sort'] | 'name' | 'chartUsage';
     sortDirection?: ApiSort['order'];
 };
@@ -26,6 +30,9 @@ const getMetricsCatalog = async ({
     projectUuid,
     search,
     categories,
+    categoriesFilterMode,
+    tables,
+    ownerUserUuids,
     paginateArgs,
     sortBy,
     sortDirection,
@@ -34,7 +41,13 @@ const getMetricsCatalog = async ({
     paginateArgs?: KnexPaginateArgs;
 } & Pick<
     UseMetricsCatalogOptions,
-    'search' | 'categories' | 'sortBy' | 'sortDirection'
+    | 'search'
+    | 'categories'
+    | 'categoriesFilterMode'
+    | 'tables'
+    | 'sortBy'
+    | 'sortDirection'
+    | 'ownerUserUuids'
 >) => {
     const urlParams = new URLSearchParams({
         ...(paginateArgs
@@ -51,6 +64,19 @@ const getMetricsCatalog = async ({
     if (categories && categories.length > 0) {
         categories.forEach((category) =>
             urlParams.append('categories', category),
+        );
+        if (categoriesFilterMode) {
+            urlParams.set('categoriesFilterMode', categoriesFilterMode);
+        }
+    }
+
+    if (tables && tables.length > 0) {
+        tables.forEach((table) => urlParams.append('tables', table));
+    }
+
+    if (ownerUserUuids && ownerUserUuids.length > 0) {
+        ownerUserUuids.forEach((ownerUserUuid) =>
+            urlParams.append('ownerUserUuids', ownerUserUuid),
         );
     }
 
@@ -69,6 +95,9 @@ export const useMetricsCatalog = ({
     sortBy,
     sortDirection,
     categories,
+    categoriesFilterMode,
+    tables,
+    ownerUserUuids,
     pageSize,
 }: UseMetricsCatalogOptions & Pick<KnexPaginateArgs, 'pageSize'>) => {
     const queryClient = useQueryClient();
@@ -81,6 +110,9 @@ export const useMetricsCatalog = ({
             sortBy,
             sortDirection,
             categories,
+            categoriesFilterMode,
+            tables,
+            ownerUserUuids,
         ],
         queryFn: ({ pageParam }) =>
             getMetricsCatalog({
@@ -89,6 +121,9 @@ export const useMetricsCatalog = ({
                 sortBy,
                 sortDirection,
                 categories,
+                categoriesFilterMode,
+                tables,
+                ownerUserUuids,
                 paginateArgs: {
                     page: pageParam ?? 1,
                     pageSize,

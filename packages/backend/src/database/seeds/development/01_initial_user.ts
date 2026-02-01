@@ -32,9 +32,11 @@ import bcrypt from 'bcrypt';
 import { Knex } from 'knex';
 import path from 'path';
 import { lightdashConfig } from '../../../config/lightdashConfig';
+import { CatalogModel } from '../../../models/CatalogModel/CatalogModel';
 import { ChangesetModel } from '../../../models/ChangesetModel';
 import { ProjectModel } from '../../../models/ProjectModel/ProjectModel';
 import { ProjectParametersModel } from '../../../models/ProjectParametersModel';
+import { TagsModel } from '../../../models/TagsModel';
 import { UserAttributesModel } from '../../../models/UserAttributesModel';
 import { projectAdapterFromConfig } from '../../../projectAdapters/projectAdapter';
 import { EncryptionUtil } from '../../../utils/EncryptionUtil/EncryptionUtil';
@@ -118,9 +120,8 @@ export async function seed(knex: Knex): Promise<void> {
         return { organizationId, user, organizationUuid };
     };
 
-    const { organizationId, organizationUuid } = await addOrganization(
-        SEED_ORG_1,
-    );
+    const { organizationId, organizationUuid } =
+        await addOrganization(SEED_ORG_1);
 
     // Add user attribute
     await new UserAttributesModel({ database: knex }).create(
@@ -245,6 +246,7 @@ export async function seed(knex: Knex): Promise<void> {
             slug: spaceSlug,
             parent_space_uuid: null,
             path: getLtreePathFromSlug(spaceSlug),
+            inherit_parent_permissions: true,
         })
         .returning(['space_id', 'space_uuid']);
 
@@ -271,13 +273,37 @@ export async function seed(knex: Knex): Promise<void> {
         });
 
         const changesetModel = new ChangesetModel({ database: knex });
-
-        await new ProjectModel({
+        const projectModel = new ProjectModel({
             database: knex,
             lightdashConfig,
             encryptionUtil: enc,
             changesetModel,
-        }).saveExploresToCache(SEED_PROJECT.project_uuid, explores);
+        });
+
+        await projectModel.saveExploresToCache(
+            SEED_PROJECT.project_uuid,
+            explores,
+        );
+
+        // Index catalog after saving explores to cache
+        // This is needed for catalog_search table to be populated in PR/preview environments
+        const catalogModel = new CatalogModel({
+            database: knex,
+            lightdashConfig,
+        });
+        const tagsModel = new TagsModel({ database: knex });
+        const projectYamlTags = await tagsModel.getYamlTags(projectUuid);
+        const cachedExploresMap = await projectModel.findExploresFromCache(
+            projectUuid,
+            'uuid',
+        );
+
+        await catalogModel.indexCatalog(
+            projectUuid,
+            cachedExploresMap,
+            projectYamlTags,
+            user.user_uuid,
+        );
 
         // Seed parameters
         const lightdashProjectConfig = await adapter.getLightdashProjectConfig({

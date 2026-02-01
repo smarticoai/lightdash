@@ -10,6 +10,7 @@ import {
     CreateInviteLink,
     CreatePasswordResetLink,
     CreateUserArgs,
+    DatabricksAuthenticationType,
     DeactivatedAccountError,
     DeleteOpenIdentity,
     EmailStatusExpiring,
@@ -28,7 +29,6 @@ import {
     LoginOptions,
     LoginOptionTypes,
     MissingConfigError,
-    NotExistsError,
     NotFoundError,
     NotImplementedError,
     OpenIdIdentityIssuerType,
@@ -303,9 +303,8 @@ export class UserService extends BaseService {
     }
 
     async delete(user: SessionUser, userUuidToDelete: string): Promise<void> {
-        const userToDelete = await this.userModel.getUserDetailsByUuid(
-            userUuidToDelete,
-        );
+        const userToDelete =
+            await this.userModel.getUserDetailsByUuid(userUuidToDelete);
         // The user might not have an org yet
         // This is expected on the "Cancel registration" flow on single org instances.
         if (userToDelete?.organizationUuid) {
@@ -375,12 +374,11 @@ export class UserService extends BaseService {
         const { expiresAt, email, role } = createInviteLink;
         const inviteCode = nanoid(30);
         if (organizationUuid === undefined) {
-            throw new NotExistsError('Organization not found');
+            throw new NotFoundError('Organization not found');
         }
 
-        const existingUserWithEmail = await this.userModel.findUserByEmail(
-            email,
-        );
+        const existingUserWithEmail =
+            await this.userModel.findUserByEmail(email);
         if (existingUserWithEmail && existingUserWithEmail.organizationUuid) {
             if (existingUserWithEmail.organizationUuid !== organizationUuid) {
                 throw new ParameterError(
@@ -472,7 +470,7 @@ export class UserService extends BaseService {
             throw new ForbiddenError();
         }
         if (organizationUuid === undefined) {
-            throw new NotExistsError('Organization not found');
+            throw new NotFoundError('Organization not found');
         }
         await this.inviteLinkModel.deleteByOrganization(organizationUuid);
         this.analytics.track({
@@ -602,9 +600,8 @@ export class UserService extends BaseService {
             };
 
             if (inviteCode) {
-                const inviteLink = await this.inviteLinkModel.getByCode(
-                    inviteCode,
-                );
+                const inviteLink =
+                    await this.inviteLinkModel.getByCode(inviteCode);
                 this.logger.info(
                     `Checking invite code - Invite email: ${inviteLink.email}, User email: ${loginUser.email}`,
                 );
@@ -1034,7 +1031,7 @@ export class UserService extends BaseService {
             try {
                 await this.inviteLinkModel.deleteByCode(inviteLink.inviteCode);
             } catch (e) {
-                throw new NotExistsError('Invite link not found');
+                throw new NotFoundError('Invite link not found');
             }
             throw new ExpiredError('Invite link expired');
         }
@@ -1128,6 +1125,8 @@ export class UserService extends BaseService {
         user: SessionUser,
         data: Partial<UpdateUserArgs>,
     ): Promise<LightdashUser> {
+        const emailChanged = data.email && user.email !== data.email;
+
         const updatedUser = await this.userModel.updateUser(
             user.userUuid,
             user.email,
@@ -1150,6 +1149,11 @@ export class UserService extends BaseService {
                 context: 'update_self',
             },
         });
+
+        if (emailChanged) {
+            await this.sendOneTimePasscodeToPrimaryEmail(updatedUser);
+        }
+
         return updatedUser;
     }
 
@@ -1237,9 +1241,9 @@ export class UserService extends BaseService {
             try {
                 await this.passwordResetLinkModel.deleteByCode(link.code);
             } catch (e) {
-                throw new NotExistsError('Password reset link not found');
+                throw new NotFoundError('Password reset link not found');
             }
-            throw new NotExistsError('Password reset link expired');
+            throw new NotFoundError('Password reset link expired');
         }
     }
 
@@ -1264,7 +1268,7 @@ export class UserService extends BaseService {
     async resetPassword(data: PasswordReset): Promise<void> {
         const link = await this.passwordResetLinkModel.getByCode(data.code);
         if (link.isExpired) {
-            throw new NotExistsError('Password reset link expired');
+            throw new NotFoundError('Password reset link expired');
         }
         const user = await this.userModel.findUserByEmail(link.email);
         if (user) {
@@ -1494,11 +1498,10 @@ export class UserService extends BaseService {
             'organizationUuid' | 'organizationCreatedAt' | 'organizationName'
         >
     > {
-        const organizations = await this.userModel.getOrganizationsForUser(
-            userUuid,
-        );
+        const organizations =
+            await this.userModel.getOrganizationsForUser(userUuid);
         if (organizations.length === 0) {
-            throw new NotExistsError('User not part of any organization');
+            throw new NotFoundError('User not part of any organization');
         } else if (organizations.length > 1) {
             throw new ForbiddenError('User is part of multiple organizations');
         }
@@ -1598,14 +1601,14 @@ export class UserService extends BaseService {
     }
 
     /**
-     * This method returns an access token for different sso providers, like snowflake or google
+     * This method returns an access token for different sso providers, like snowflake, databricks or google
      * this is used on the gdrive API to get the accessToken for listing files on the user's drive
      * @param user
      * @returns accessToken
      */
     async getAccessToken(
         user: SessionUser,
-        type: 'gdrive' | 'bigquery' | 'snowflake' = 'gdrive',
+        type: 'gdrive' | 'bigquery' | 'snowflake' | 'databricks' = 'gdrive',
     ): Promise<string> {
         if (type === 'snowflake') {
             if (this.lightdashConfig.auth.snowflake.clientId === undefined) {
@@ -1618,9 +1621,23 @@ export class UserService extends BaseService {
                 user.userUuid,
                 OpenIdIdentityIssuerType.SNOWFLAKE,
             );
-            const accessToken = await UserService.generateSnowflakeAccessToken(
-                refreshToken,
+            const accessToken =
+                await UserService.generateSnowflakeAccessToken(refreshToken);
+            return accessToken;
+        }
+        if (type === 'databricks') {
+            if (this.lightdashConfig.auth.databricks.clientId === undefined) {
+                // If databricks oauth is not configured, refresh strategy will not be loaded
+                throw new MissingConfigError(
+                    'Databricks client is not configured',
+                );
+            }
+            const refreshToken: string = await this.userModel.getRefreshToken(
+                user.userUuid,
+                OpenIdIdentityIssuerType.DATABRICKS,
             );
+            const accessToken =
+                await UserService.generateDatabricksAccessToken(refreshToken);
             return accessToken;
         }
         const refreshToken: string = await this.userModel.getRefreshToken(
@@ -1652,6 +1669,24 @@ export class UserService extends BaseService {
         });
     }
 
+    static async generateDatabricksAccessToken(
+        refreshToken: string,
+    ): Promise<string> {
+        return new Promise((resolve, reject) => {
+            refresh.requestNewAccessToken(
+                'databricks',
+                refreshToken,
+                (err: AnyType, accessToken: string, _refreshToken, result) => {
+                    if (err || !accessToken) {
+                        reject(err);
+                        return;
+                    }
+                    resolve(accessToken);
+                },
+            );
+        });
+    }
+
     async isLoginMethodAllowed(_email: string, loginMethod: LoginOptionTypes) {
         switch (loginMethod) {
             case LocalIssuerTypes.EMAIL:
@@ -1663,6 +1698,7 @@ export class UserService extends BaseService {
             case OpenIdIdentityIssuerType.AZUREAD:
             case OpenIdIdentityIssuerType.GENERIC_OIDC:
             case OpenIdIdentityIssuerType.SNOWFLAKE:
+            case OpenIdIdentityIssuerType.DATABRICKS:
                 return true;
             case OpenIdIdentityIssuerType.SLACK:
                 return false;
@@ -1727,10 +1763,33 @@ export class UserService extends BaseService {
                 user: user.userUuid,
                 type: WarehouseTypes.SNOWFLAKE,
                 authenticationType: SnowflakeAuthenticationType.SSO,
-                token: refreshToken,
+                refreshToken,
             },
         };
         await this.createWarehouseCredentials(user, snowflakeCredentials);
+    }
+
+    async createDatabricksWarehouseCredentials(
+        user: SessionUser,
+        refreshToken: string,
+    ) {
+        // Remove old Databricks credentials to prevent duplicates on re-authentication
+        await this.userWarehouseCredentialsModel.deleteAllByUserAndWarehouseType(
+            user.userUuid,
+            WarehouseTypes.DATABRICKS,
+        );
+
+        // Only store authentication fields - connection details (database, serverHostName, httpPath)
+        // come from the project configuration and shouldn't be stored in user credentials
+        const databricksCredentials: UpsertUserWarehouseCredentials = {
+            name: 'Default',
+            credentials: {
+                type: WarehouseTypes.DATABRICKS,
+                authenticationType: DatabricksAuthenticationType.OAUTH_U2M,
+                refreshToken,
+            },
+        };
+        await this.createWarehouseCredentials(user, databricksCredentials);
     }
 
     async createWarehouseCredentials(
@@ -1809,6 +1868,8 @@ export class UserService extends BaseService {
                 return this.lightdashConfig.auth.oidc.loginPath;
             case OpenIdIdentityIssuerType.SNOWFLAKE:
                 return this.lightdashConfig.auth.snowflake.loginPath;
+            case OpenIdIdentityIssuerType.DATABRICKS:
+                return this.lightdashConfig.auth.databricks.loginPath;
             case OpenIdIdentityIssuerType.SLACK:
                 throw new NotImplementedError('Slack login is not supported');
             default:
@@ -1893,8 +1954,8 @@ export class UserService extends BaseService {
         };
     }
 
-    /* 
-    For service accounts, we get the admin user from the userUuid who created the user 
+    /*
+    For service accounts, we get the admin user from the userUuid who created the user
     if this user no longer exist, then we will get another admin user from the org
     */
     async getAdminUser(userUuid: string | null, organizationUuid: string) {

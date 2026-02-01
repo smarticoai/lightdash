@@ -1,7 +1,7 @@
 import { subject } from '@casl/ability';
 import { getAvailableParametersFromTables } from '@lightdash/common';
 import { Stack } from '@mantine/core';
-import { memo, useEffect, useMemo, type FC } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import {
     explorerActions,
     selectAdditionalMetricModal,
@@ -13,6 +13,8 @@ import {
     selectMetrics,
     selectParameterReferences,
     selectParameters,
+    selectPeriodOverPeriodComparisonModal,
+    selectSavedChart,
     selectSorts,
     selectTableName,
     useExplorerDispatch,
@@ -26,15 +28,18 @@ import { useExplore } from '../../hooks/useExplore';
 import { useExplorerQuery } from '../../hooks/useExplorerQuery';
 import { useProjectUuid } from '../../hooks/useProjectUuid';
 import { Can } from '../../providers/Ability';
+import ScreenshotReadyIndicator from '../common/ScreenshotReadyIndicator';
 import { DrillDownModal } from '../MetricQueryData/DrillDownModal';
 import MetricQueryDataProvider from '../MetricQueryData/MetricQueryDataProvider';
 import UnderlyingDataModal from '../MetricQueryData/UnderlyingDataModal';
+import RefreshDbtButton from '../RefreshDbtButton';
 import { CustomDimensionModal } from './CustomDimensionModal';
 import { CustomMetricModal } from './CustomMetricModal';
 import ExplorerHeader from './ExplorerHeader';
 import FiltersCard from './FiltersCard/FiltersCard';
 import { FormatModal } from './FormatModal';
 import ParametersCard from './ParametersCard/ParametersCard';
+import { PeriodOverPeriodComparisonModal } from './PeriodOverPeriodComparisonModal/PeriodOverPeriodComparisonModal';
 import ResultsCard from './ResultsCard/ResultsCard';
 import SqlCard from './SqlCard/SqlCard';
 import VisualizationCard from './VisualizationCard/VisualizationCard';
@@ -54,20 +59,50 @@ const Explorer: FC<{ hideHeader?: boolean }> = memo(
         );
         const parameters = useExplorerSelector(selectParameters);
 
+        const savedChart = useExplorerSelector(selectSavedChart);
+
         const { isOpen: isAdditionalMetricModalOpen } = useExplorerSelector(
             selectAdditionalMetricModal,
         );
         const { isOpen: isFormatModalOpen } =
             useExplorerSelector(selectFormatModal);
 
+        const { isOpen: isPeriodOverPeriodComparisonModalOpen } =
+            useExplorerSelector(selectPeriodOverPeriodComparisonModal);
+
         const dispatch = useExplorerDispatch();
 
         const projectUuid = useProjectUuid();
 
-        const { query } = useExplorerQuery();
+        const { query, queryResults } = useExplorerQuery();
         const queryUuid = query.data?.queryUuid;
 
+        // Screenshot readiness tracking for EXPLORE pages (Slack unfurls)
+        const isLoadingQueryResults =
+            query.isFetching ||
+            queryResults.isFetchingRows ||
+            !query.data?.queryUuid ||
+            queryResults.queryUuid !== query.data.queryUuid;
+        const hasQueryError = !!query.error || !!queryResults.error;
+
+        const [isScreenshotReady, setIsScreenshotReady] = useState(false);
+        const hasSignaledReady = useRef(false);
+
         const { data: explore } = useExplore(tableName);
+
+        useEffect(() => {
+            if (hasSignaledReady.current) return;
+            if (!tableName) return;
+            if (!explore) return;
+
+            const isSuccessfullyLoaded = !isLoadingQueryResults;
+            if (!isSuccessfullyLoaded && !hasQueryError) {
+                return;
+            }
+
+            setIsScreenshotReady(true);
+            hasSignaledReady.current = true;
+        }, [tableName, isLoadingQueryResults, hasQueryError, explore]);
 
         const { data: { parameterReferences } = {}, isError } = useCompiledSql({
             enabled: !!tableName,
@@ -149,7 +184,12 @@ const Explorer: FC<{ hideHeader?: boolean }> = memo(
                 parameters={parameters}
             >
                 <Stack sx={{ flexGrow: 1 }}>
-                    {!hideHeader && isEditMode && <ExplorerHeader />}
+                    {!hideHeader &&
+                        (isEditMode ? (
+                            <ExplorerHeader />
+                        ) : (
+                            !savedChart && <RefreshDbtButton />
+                        ))}
 
                     {!!tableName &&
                         parameterReferencesFromRedux &&
@@ -188,6 +228,18 @@ const Explorer: FC<{ hideHeader?: boolean }> = memo(
 
                 {isAdditionalMetricModalOpen && <CustomMetricModal />}
                 {isFormatModalOpen && <FormatModal />}
+                {isPeriodOverPeriodComparisonModalOpen && (
+                    <PeriodOverPeriodComparisonModal />
+                )}
+
+                {/* Screenshot readiness indicator for EXPLORE pages (Slack unfurls) */}
+                {isScreenshotReady && (
+                    <ScreenshotReadyIndicator
+                        tilesTotal={1}
+                        tilesReady={hasQueryError ? 0 : 1}
+                        tilesErrored={hasQueryError ? 1 : 0}
+                    />
+                )}
             </MetricQueryDataProvider>
         );
     },

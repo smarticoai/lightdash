@@ -1,11 +1,12 @@
 import {
     AdditionalMetric,
+    AiAgentValidatorError,
     assertUnreachable,
     booleanFilterSchema,
     CompiledField,
     convertAdditionalMetric,
     convertAiTableCalcsSchemaToTableCalcs,
-    CustomMetricBase,
+    CustomMetricBaseTransformed,
     dateFilterSchema,
     DependencyNode,
     detectCircularDependencies,
@@ -24,7 +25,7 @@ import {
     isMetric,
     isTableCalculation,
     MetricType,
-    nillaryWindowFunctions,
+    nullaryWindowFunctions,
     numberFilterSchema,
     renderFilterRuleSql,
     renderFilterRuleSqlFromField,
@@ -52,7 +53,9 @@ import { serializeData } from './serializeData';
 export function validateSelectedFieldsExistence(
     explore: Explore,
     selectedFieldIds: string[],
-    customMetrics?: (CustomMetricBase | Omit<AdditionalMetric, 'sql'>)[] | null,
+    customMetrics?:
+        | (CustomMetricBaseTransformed | Omit<AdditionalMetric, 'sql'>)[]
+        | null,
     tableCalculations?: TableCalcsSchema | TableCalculation[],
 ) {
     const exploreFieldIds = getFields(explore).map(getItemId);
@@ -75,7 +78,7 @@ ${nonExploreFields.join('\n')}
             `[AiAgent][Validate Selected Fields Existence] ${errorMessage}`,
         );
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -90,7 +93,7 @@ ${nonExploreFields.join('\n')}
  */
 export function validateCustomMetricsDefinition(
     explore: Explore,
-    customMetrics: CustomMetricBase[] | null,
+    customMetrics: CustomMetricBaseTransformed[] | null,
 ) {
     if (!customMetrics || customMetrics.length === 0) {
         return;
@@ -152,7 +155,7 @@ export function validateCustomMetricsDefinition(
         Logger.error(
             `[AiAgent][Validate Custom Metric Definition] ${errorMessage}`,
         );
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -161,7 +164,7 @@ function validateFilterRule(
     field: CompiledField | AdditionalMetric | TableCalculation,
 ) {
     if (!field.type) {
-        throw new Error('Field type is required');
+        throw new AiAgentValidatorError('Field type is required');
     }
 
     const filterType = getFilterTypeFromItemType(field.type);
@@ -177,7 +180,7 @@ function validateFilterRule(
             });
 
             if (!parsedBooleanFilterRule.success) {
-                throw new Error(
+                throw new AiAgentValidatorError(
                     `Expected boolean filter rule for field ${filterRule.target.fieldId}. Error: ${parsedBooleanFilterRule.error.message}`,
                 );
             }
@@ -194,7 +197,7 @@ function validateFilterRule(
             });
 
             if (!parsedDateFilterRule.success) {
-                throw new Error(
+                throw new AiAgentValidatorError(
                     `Expected date filter rule for field ${filterRule.target.fieldId}. Error: ${parsedDateFilterRule.error.message}`,
                 );
             }
@@ -210,7 +213,7 @@ function validateFilterRule(
             });
 
             if (!parsedNumberFilterRule.success) {
-                throw new Error(
+                throw new AiAgentValidatorError(
                     `Expected number filter rule for field ${filterRule.target.fieldId}. Error: ${parsedNumberFilterRule.error.message}`,
                 );
             }
@@ -226,7 +229,7 @@ function validateFilterRule(
             });
 
             if (!parsedStringFilterRule.success) {
-                throw new Error(
+                throw new AiAgentValidatorError(
                     `Expected string filter rule for field ${filterRule.target.fieldId}. Error: ${parsedStringFilterRule.error.message}`,
                 );
             }
@@ -279,14 +282,14 @@ ${serializeData(filterRule, 'json')}`;
 
         Logger.error(`[AiAgent][Validate Filter Rule] ${errorMessage}`);
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
 export function validateFilterRules(
     explore: Explore,
     filterRules: FilterRule[],
-    customMetrics?: CustomMetricBase[] | null,
+    customMetrics?: CustomMetricBaseTransformed[] | null,
     tableCalculations?: TableCalcsSchema | null,
 ) {
     const exploreFields = getFields(explore);
@@ -339,7 +342,7 @@ ${filterRuleErrorStrings}`;
 
         Logger.error(`[AiAgent][Validate Filter Rules] ${errorMessage}`);
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -356,7 +359,7 @@ ${filterRuleErrorStrings}`;
  */
 export function validateMetricDimensionFilterPlacement(
     explore: Explore,
-    customMetrics: CustomMetricBase[] | null,
+    customMetrics: CustomMetricBaseTransformed[] | null,
     tableCalculations: TableCalcsSchema | null,
     filters?: Filters,
 ) {
@@ -521,7 +524,7 @@ Remember:
             `[AiAgent][Validate Metric/Dimension Filter Placement] ${errorMessage}`,
         );
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -537,7 +540,7 @@ export function validateSortFieldsAreSelected(
     sorts: ToolSortField[],
     selectedDimensions: string[],
     selectedMetrics: string[],
-    customMetrics?: CustomMetricBase[] | null,
+    customMetrics?: CustomMetricBaseTransformed[] | null,
     tableCalculations?: TableCalcsSchema,
 ) {
     if (!sorts || sorts.length === 0) {
@@ -575,7 +578,7 @@ ${errors.join('\n\n')}`;
             `[AiAgent][Validate Sort Fields Are Selected] ${errorMessage}`,
         );
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -589,7 +592,7 @@ export function validateFieldEntityType(
     explore: Explore,
     fieldIds: string[],
     expectedEntityType: 'dimension' | 'metric',
-    customMetrics?: CustomMetricBase[] | null,
+    customMetrics?: CustomMetricBaseTransformed[] | null,
 ) {
     const exploreFields = getFields(explore);
     const customMetricsProvided =
@@ -649,7 +652,7 @@ ${customMetricFields
 
         Logger.error(`[AiAgent][Validate Field Entity Type] ${errorMessage}`);
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -680,8 +683,29 @@ ${availableTableNames.map((t) => `- ${t}`).join('\n')}`;
 
         Logger.error(`[AiAgent][Validate Table Names] ${errorMessage}`);
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
+}
+
+/**
+ * Validate that an explore name exists in the list of available explores
+ * @param availableExploreNames - Array of available explore names
+ * @param exploreName - The explore name to validate
+ */
+export function validateExploreNameExists(
+    availableExplores: Explore[],
+    exploreName: string,
+) {
+    if (availableExplores.some((e) => e.name === exploreName)) return;
+
+    const errorMessage = `Invalid explore name: "${exploreName}"
+
+Available explores:
+${availableExplores.map((e) => `- ${e.name}`).join('\n')}`;
+
+    Logger.error(`[AiAgent][Validate Explore Name Exists] ${errorMessage}`);
+
+    throw new AiAgentValidatorError(errorMessage);
 }
 
 // Numeric metric types that support most table calculations
@@ -733,13 +757,14 @@ function buildTableCalcSchemaDependencyGraph(
 
 /**
  * Validate table calculations to ensure fieldId and orderBy.fieldId reference valid metrics/custom metrics
- * with compatible types for the calculation being performed
+ * with compatible types for the calculation being performed, and that all referenced fields are selected
  */
 export function validateTableCalculations(
     explore: Explore,
     tableCalcs: TableCalcsSchema,
+    selectedDimensions: string[],
     selectedMetrics: string[],
-    customMetrics: CustomMetricBase[] | null,
+    customMetrics: CustomMetricBaseTransformed[] | null,
 ) {
     if (!tableCalcs?.length) return;
 
@@ -760,17 +785,35 @@ export function validateTableCalculations(
     try {
         detectCircularDependencies(dependencies, 'table calculations');
     } catch (e) {
-        throw new Error(getTableCalcValidationError(getErrorMessage(e)));
+        throw new AiAgentValidatorError(
+            getTableCalcValidationError(getErrorMessage(e)),
+        );
     }
 
-    // Validate orderBy fields exist
-    const orderByFieldIds = tableCalcs.flatMap((calc) => {
+    // Collect orderBy fields with their calc names for validation
+    const orderByFields = tableCalcs.flatMap((calc) => {
         if ('orderBy' in calc && calc.orderBy !== null) {
-            return calc.orderBy.map((order) => order.fieldId);
+            return calc.orderBy.map((order) => ({
+                fieldId: order.fieldId,
+                calcName: calc.name,
+            }));
         }
         return [];
     });
 
+    // Collect partitionBy fields with their calc names for validation
+    const partitionByFields = tableCalcs.flatMap((calc) => {
+        if ('partitionBy' in calc && calc.partitionBy !== null) {
+            return calc.partitionBy.map((fieldId) => ({
+                fieldId,
+                calcName: calc.name,
+            }));
+        }
+        return [];
+    });
+
+    // Validate orderBy fields exist in explore/custom metrics/table calcs
+    const orderByFieldIds = orderByFields.map((f) => f.fieldId);
     if (orderByFieldIds.length > 0) {
         try {
             validateSelectedFieldsExistence(
@@ -786,13 +829,8 @@ export function validateTableCalculations(
         }
     }
 
-    const partitionByFieldIds = tableCalcs.flatMap((calc) => {
-        if ('partitionBy' in calc && calc.partitionBy !== null) {
-            return calc.partitionBy;
-        }
-        return [];
-    });
-
+    // Validate partitionBy fields exist in explore/custom metrics/table calcs
+    const partitionByFieldIds = partitionByFields.map((f) => f.fieldId);
     if (partitionByFieldIds.length > 0) {
         try {
             validateSelectedFieldsExistence(
@@ -806,6 +844,34 @@ export function validateTableCalculations(
         }
     }
 
+    // Validate that partitionBy and orderBy fields are selected in the query
+    // (not just that they exist in the explore)
+    const tableCalculationNames = tableCalcs.map((tc) => tc.name);
+    const allSelectedFieldIds = [
+        ...selectedDimensions,
+        ...selectedMetrics,
+        ...customMetricIds,
+        ...tableCalculationNames,
+    ];
+
+    // Check orderBy fields are selected
+    orderByFields.forEach(({ fieldId, calcName }) => {
+        if (!allSelectedFieldIds.includes(fieldId)) {
+            errors.push(
+                `Table calculation "${calcName}" uses orderBy field "${fieldId}" which is not selected in the query. The field must be included in dimensions, metrics, or be another table calculation.`,
+            );
+        }
+    });
+
+    // Check partitionBy fields are selected
+    partitionByFields.forEach(({ fieldId, calcName }) => {
+        if (!allSelectedFieldIds.includes(fieldId)) {
+            errors.push(
+                `Table calculation "${calcName}" uses partitionBy field "${fieldId}" which is not selected in the query. The field must be included in dimensions or metrics to be used for partitioning.`,
+            );
+        }
+    });
+
     const findField = (fieldId: string) =>
         allFields.find((f) => getItemId(f) === fieldId);
 
@@ -813,7 +879,7 @@ export function validateTableCalculations(
         const { type, name } = tableCalc;
 
         if (type === 'window_function') {
-            const needsFieldId = !nillaryWindowFunctions.includes(
+            const needsFieldId = !nullaryWindowFunctions.includes(
                 tableCalc.windowFunction,
             );
 
@@ -891,7 +957,7 @@ export function validateTableCalculations(
     if (errors.length > 0) {
         const errorMessage = getTableCalcValidationError(errors);
         Logger.error(`[AiAgent][Validate Table Calculations] ${errorMessage}`);
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -970,7 +1036,7 @@ ${exploreFields
 
         Logger.error(`[AiAgent][Validate GroupBy Fields] ${errorMessage}`);
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }
 
@@ -1087,6 +1153,6 @@ Remember:
 
         Logger.error(`[AiAgent][Validate Axis Fields] ${errorMessage}`);
 
-        throw new Error(errorMessage);
+        throw new AiAgentValidatorError(errorMessage);
     }
 }

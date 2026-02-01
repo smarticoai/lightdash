@@ -10,12 +10,16 @@ import {
     assertEmbeddedAuth,
     assertSessionAuth,
     CacheMetadata,
+    CalculateSubtotalsFromQuery,
+    CalculateTotalFromQuery,
+    CommonEmbedJwtContent,
     CreateEmbedJwt,
     CreateEmbedRequestBody,
     Dashboard,
     DashboardAvailableFilters,
     DashboardFilters,
     DateGranularity,
+    DateZoom,
     DecodedEmbed,
     EmbedUrl,
     ExecuteAsyncDashboardChartRequestParams,
@@ -56,7 +60,7 @@ export type ApiEmbedDashboardResponse = {
     status: 'ok';
     results: Dashboard & {
         // declare type as TSOA doesn't understand zod type InteractivityOptions
-        dashboardFiltersInteractivity?: CreateEmbedJwt['content']['dashboardFiltersInteractivity'];
+        dashboardFiltersInteractivity?: CommonEmbedJwtContent['dashboardFiltersInteractivity'];
         canExportCsv?: boolean;
         canExportImages?: boolean;
     };
@@ -138,7 +142,7 @@ export class EmbedController extends BaseController {
     @SuccessResponse('200', 'Success')
     @Patch('/config/dashboards')
     @OperationId('updateEmbeddedDashboards')
-    @Deprecated()
+    @Deprecated() // Use /config endpoint below instead
     async updateEmbeddedDashboards(
         @Request() req: express.Request,
         @Path() projectUuid: string,
@@ -157,6 +161,14 @@ export class EmbedController extends BaseController {
         };
     }
 
+    /**
+     * This endpoint is used for updating the embed config for dashboards and charts.
+     * @summary Update embed config
+     * @param req
+     * @param projectUuid
+     * @param body Contains dashboardUuids, allowAllDashboards, chartUuids, allowAllCharts
+     * @returns Empty response with status 'ok'
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Patch('/config')
@@ -367,6 +379,7 @@ export class EmbedController extends BaseController {
             columnOrder: string[];
             pivotDimensions?: string[];
             invalidateCache?: boolean;
+            dateZoom?: DateZoom;
         },
     ): Promise<ApiCalculateSubtotalsResponse> {
         this.setStatus(200);
@@ -385,7 +398,62 @@ export class EmbedController extends BaseController {
                     body.columnOrder,
                     body.pivotDimensions,
                     body.invalidateCache,
+                    body.dateZoom,
                 ),
+        };
+    }
+
+    /**
+     * Calculate totals from a raw metric query in embed context.
+     * This is used when exploring data directly (not from a saved chart).
+     * @summary Calculate totals for embed query
+     */
+    @SuccessResponse('200', 'Success')
+    @Post('/calculate-total')
+    @OperationId('embedCalculateTotalFromQuery')
+    async embedCalculateTotalFromQuery(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Body() body: CalculateTotalFromQuery,
+    ): Promise<ApiCalculateTotalResponse> {
+        this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
+        return {
+            status: 'ok',
+            results: await this.getEmbedService().calculateTotalFromQuery(
+                req.account,
+                projectUuid,
+                body,
+            ),
+        };
+    }
+
+    /**
+     * Calculate subtotals from a raw metric query in embed context.
+     * This is used when exploring data directly (not from a saved chart).
+     * @summary Calculate subtotals for embed query
+     */
+    @SuccessResponse('200', 'Success')
+    @Post('/calculate-subtotals')
+    @OperationId('embedCalculateSubtotalsFromQuery')
+    async embedCalculateSubtotalsFromQuery(
+        @Request() req: express.Request,
+        @Path() projectUuid: string,
+        @Body() body: CalculateSubtotalsFromQuery,
+    ): Promise<ApiCalculateSubtotalsResponse> {
+        this.setStatus(200);
+
+        assertEmbeddedAuth(req.account);
+
+        return {
+            status: 'ok',
+            results: await this.getEmbedService().calculateSubtotalsFromQuery(
+                req.account,
+                projectUuid,
+                body,
+            ),
         };
     }
 

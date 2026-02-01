@@ -11,6 +11,8 @@ import {
     DashboardTabsTableName,
     DashboardTileChartTable,
     DashboardTileChartTableName,
+    DashboardTileHeadingsTable,
+    DashboardTileHeadingsTableName,
     DashboardTileLoomsTable,
     DashboardTileLoomsTableName,
     DashboardTileMarkdownsTable,
@@ -110,6 +112,10 @@ import {
     SlackAuthTokensTable,
     SlackAuthTokensTableName,
 } from '../database/entities/slackAuthentication';
+import {
+    SlackChannelsTable,
+    SlackChannelsTableName,
+} from '../database/entities/slackChannels';
 import {
     SpaceTable,
     SpaceTableName,
@@ -294,6 +300,8 @@ import {
 import {
     AiEvalPromptTable,
     AiEvalPromptTableName,
+    AiEvalRunResultAssessmentTable,
+    AiEvalRunResultAssessmentTableName,
     AiEvalRunResultTable,
     AiEvalRunResultTableName,
     AiEvalRunTable,
@@ -342,6 +350,7 @@ declare module 'knex/types/tables' {
         [DashboardTileChartTableName]: DashboardTileChartTable;
         [DashboardTileLoomsTableName]: DashboardTileLoomsTable;
         [DashboardTileMarkdownsTableName]: DashboardTileMarkdownsTable;
+        [DashboardTileHeadingsTableName]: DashboardTileHeadingsTable;
         [OnboardingTableName]: OnboardingTable;
         [OpenIdIdentitiesTableName]: OpenIdIdentitiesTable;
         [OrganizationMembershipsTableName]: OrganizationMembershipsTable;
@@ -358,6 +367,7 @@ declare module 'knex/types/tables' {
         [ShareTableName]: ShareTable;
         [SpaceUserAccessTableName]: SpaceUserAccessTable;
         [SlackAuthTokensTableName]: SlackAuthTokensTable;
+        [SlackChannelsTableName]: SlackChannelsTable;
         [AnalyticsChartViewsTableName]: AnalyticsChartViews;
         [AnalyticsDashboardViewsTableName]: AnalyticsDashboardViews;
         [PinnedListTableName]: PinnedListTable;
@@ -423,6 +433,7 @@ declare module 'knex/types/tables' {
         [AiEvalPromptTableName]: AiEvalPromptTable;
         [AiEvalRunTableName]: AiEvalRunTable;
         [AiEvalRunResultTableName]: AiEvalRunResultTable;
+        [AiEvalRunResultAssessmentTableName]: AiEvalRunResultAssessmentTable;
         [ChangesetsTableName]: ChangesetsTable;
         [ChangesTableName]: ChangesTable;
     }

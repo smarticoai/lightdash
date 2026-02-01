@@ -62,7 +62,12 @@ describe('account', () => {
                 decodedToken: mockDecodedToken,
                 embed: mockEmbed,
                 source: 'test-jwt-token',
-                dashboardUuid: 'test-dashboard-uuid',
+                content: {
+                    type: 'dashboard',
+                    dashboardUuid: 'test-dashboard-uuid',
+                    chartUuids: [],
+                    explores: [],
+                },
                 userAttributes: mockUserAttributes,
             });
 
@@ -72,9 +77,13 @@ describe('account', () => {
 
             expect(result.organization).toEqual(mockEmbed.organization);
 
-            expect(result.access.dashboardId).toBe('test-dashboard-uuid');
+            expect(result.access.content.dashboardUuid).toBe(
+                'test-dashboard-uuid',
+            );
             expect(result.access.filtering).toEqual(
-                mockDecodedToken.content.dashboardFiltersInteractivity,
+                mockDecodedToken.content.type === 'dashboard'
+                    ? mockDecodedToken.content.dashboardFiltersInteractivity
+                    : undefined,
             );
             expect(result.access.controls).toBe(mockUserAttributes);
 
@@ -110,7 +119,12 @@ describe('account', () => {
                 decodedToken: tokenWithoutExternalId,
                 embed: mockEmbed,
                 source: 'anonymous-jwt-token',
-                dashboardUuid: 'test-dashboard-uuid',
+                content: {
+                    type: 'dashboard',
+                    dashboardUuid: 'test-dashboard-uuid',
+                    chartUuids: [],
+                    explores: [],
+                },
                 userAttributes: mockUserAttributes,
             });
 
@@ -137,7 +151,12 @@ describe('account', () => {
                 decodedToken: tokenWithoutUser,
                 embed: mockEmbed,
                 source: 'no-user-jwt-token',
-                dashboardUuid: 'test-dashboard-uuid',
+                content: {
+                    type: 'dashboard',
+                    dashboardUuid: 'test-dashboard-uuid',
+                    chartUuids: [],
+                    explores: [],
+                },
                 userAttributes: mockUserAttributes,
             });
 
@@ -158,7 +177,12 @@ describe('account', () => {
                 decodedToken: mockDecodedToken,
                 embed: mockEmbed,
                 source: 'test-jwt-token',
-                dashboardUuid: 'test-dashboard-uuid',
+                content: {
+                    type: 'dashboard',
+                    dashboardUuid: 'test-dashboard-uuid',
+                    chartUuids: [],
+                    explores: [],
+                },
                 userAttributes: emptyUserAttributes,
             });
 

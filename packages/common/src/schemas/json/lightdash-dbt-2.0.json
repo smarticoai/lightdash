@@ -233,13 +233,34 @@
                                                     "type": "object",
                                                     "properties": {
                                                         "url": {
-                                                            "type": "string"
+                                                            "type": "string",
+                                                            "description": "Liquidjs template for the URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}"
                                                         },
                                                         "label": {
                                                             "type": "string"
                                                         }
                                                     }
                                                 }
+                                            },
+                                            "image": {
+                                                "type": "object",
+                                                "description": "Displays the dimension value as an image",
+                                                "properties": {
+                                                    "url": {
+                                                        "type": "string",
+                                                        "description": "Liquidjs template for the image URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}. Only fields selected in the query are available in row context."
+                                                    },
+                                                    "width": {
+                                                        "type": "number"
+                                                    },
+                                                    "height": {
+                                                        "type": "number"
+                                                    },
+                                                    "fit": {
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": ["url"]
                                             },
                                             "tags": {
                                                 "oneOf": [
@@ -307,6 +328,24 @@
                                                             "type": "string"
                                                         },
                                                         "description": "An array of categories for the metric in Spotlight"
+                                                    },
+                                                    "filter_by": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": "An array of dimension names that are allowed for filtering this metric in the Metrics Explorer"
+                                                    },
+                                                    "segment_by": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": "An array of dimension names that are allowed for segmenting this metric in the Metrics Explorer"
+                                                    },
+                                                    "owner": {
+                                                        "type": "string",
+                                                        "description": "Email of the metric owner"
                                                     }
                                                 },
                                                 "anyOf": [
@@ -319,6 +358,19 @@
                                                         "required": [
                                                             "categories"
                                                         ]
+                                                    },
+                                                    {
+                                                        "required": [
+                                                            "filter_by"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "required": [
+                                                            "segment_by"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "required": ["owner"]
                                                     }
                                                 ]
                                             }
@@ -348,6 +400,13 @@
                                 },
                                 "required": ["field", "interval"]
                             },
+                            "default_show_underlying_values": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "Default show underlying values configuration that will be applied to all metrics in this model that don't have their own show_underlying_values defined"
+                            },
                             "spotlight": {
                                 "type": "object",
                                 "description": "Set the visibility and/or categories of a metric in Spotlight",
@@ -362,11 +421,16 @@
                                             "type": "string"
                                         },
                                         "description": "An optional array of categories for all metrics in this model in Spotlight"
+                                    },
+                                    "owner": {
+                                        "type": "string",
+                                        "description": "Email of the model owner (inherited by all metrics)"
                                     }
                                 },
                                 "anyOf": [
                                     { "required": ["visibility"] },
-                                    { "required": ["categories"] }
+                                    { "required": ["categories"] },
+                                    { "required": ["owner"] }
                                 ]
                             },
                             "primary_key": {
@@ -381,6 +445,10 @@
                                         }
                                     }
                                 ]
+                            },
+                            "owner": {
+                                "type": "string",
+                                "description": "Email of the model owner (inherited by all metrics). spotlight.owner takes precedence."
                             },
                             "sql_where": {
                                 "type": "string"
@@ -422,7 +490,11 @@
                                             "type": {
                                                 "description": "The data type of the parameter (defaults to 'string' for backwards compatibility)",
                                                 "type": "string",
-                                                "enum": ["string", "number"],
+                                                "enum": [
+                                                    "string",
+                                                    "number",
+                                                    "date"
+                                                ],
                                                 "default": "string"
                                             },
                                             "description": {
@@ -717,13 +789,25 @@
                                                                 "type": "object",
                                                                 "properties": {
                                                                     "url": {
-                                                                        "type": "string"
+                                                                        "type": "string",
+                                                                        "description": "Liquidjs template for the URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}"
                                                                     },
                                                                     "label": {
                                                                         "type": "string"
                                                                     }
                                                                 }
                                                             }
+                                                        },
+                                                        "image": {
+                                                            "type": "object",
+                                                            "description": "Displays the dimension value as an image",
+                                                            "properties": {
+                                                                "url": {
+                                                                    "type": "string",
+                                                                    "description": "Liquidjs template for the image URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}. Only fields selected in the query are available in row context."
+                                                                }
+                                                            },
+                                                            "required": ["url"]
                                                         },
                                                         "tags": {
                                                             "oneOf": [
@@ -794,6 +878,24 @@
                                                                         "type": "string"
                                                                     },
                                                                     "description": "An array of categories for the metric in Spotlight"
+                                                                },
+                                                                "filter_by": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "description": "An array of dimension names that are allowed for filtering this metric in the Metrics Explorer"
+                                                                },
+                                                                "segment_by": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "string"
+                                                                    },
+                                                                    "description": "An array of dimension names that are allowed for segmenting this metric in the Metrics Explorer"
+                                                                },
+                                                                "owner": {
+                                                                    "type": "string",
+                                                                    "description": "Email of the metric owner"
                                                                 }
                                                             },
                                                             "anyOf": [
@@ -805,6 +907,21 @@
                                                                 {
                                                                     "required": [
                                                                         "categories"
+                                                                    ]
+                                                                },
+                                                                {
+                                                                    "required": [
+                                                                        "filter_by"
+                                                                    ]
+                                                                },
+                                                                {
+                                                                    "required": [
+                                                                        "segment_by"
+                                                                    ]
+                                                                },
+                                                                {
+                                                                    "required": [
+                                                                        "owner"
                                                                     ]
                                                                 }
                                                             ]
@@ -952,13 +1069,25 @@
                                                         "type": "object",
                                                         "properties": {
                                                             "url": {
-                                                                "type": "string"
+                                                                "type": "string",
+                                                                "description": "Liquidjs template for the URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}"
                                                             },
                                                             "label": {
                                                                 "type": "string"
                                                             }
                                                         }
                                                     }
+                                                },
+                                                "image": {
+                                                    "type": "object",
+                                                    "description": "Displays the dimension value as an image",
+                                                    "properties": {
+                                                        "url": {
+                                                            "type": "string",
+                                                            "description": "Liquidjs template for the image URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}. Only fields selected in the query are available in row context."
+                                                        }
+                                                    },
+                                                    "required": ["url"]
                                                 },
                                                 "tags": {
                                                     "oneOf": [
@@ -988,6 +1117,20 @@
                                                                 "type": "string"
                                                             }
                                                         ]
+                                                    }
+                                                },
+                                                "spotlight": {
+                                                    "type": "object",
+                                                    "description": "Configure dimension visibility in the Metrics Explorer",
+                                                    "properties": {
+                                                        "filter_by": {
+                                                            "type": "boolean",
+                                                            "description": "Whether this dimension can be used for filtering in the Metrics Explorer. Defaults to true."
+                                                        },
+                                                        "segment_by": {
+                                                            "type": "boolean",
+                                                            "description": "Whether this dimension can be used for segmenting in the Metrics Explorer. Defaults to true."
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1127,13 +1270,25 @@
                                                                 "type": "object",
                                                                 "properties": {
                                                                     "url": {
-                                                                        "type": "string"
+                                                                        "type": "string",
+                                                                        "description": "Liquidjs template for the URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}"
                                                                     },
                                                                     "label": {
                                                                         "type": "string"
                                                                     }
                                                                 }
                                                             }
+                                                        },
+                                                        "image": {
+                                                            "type": "object",
+                                                            "description": "Displays the dimension value as an image",
+                                                            "properties": {
+                                                                "url": {
+                                                                    "type": "string",
+                                                                    "description": "Liquidjs template for the image URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}. Only fields selected in the query are available in row context."
+                                                                }
+                                                            },
+                                                            "required": ["url"]
                                                         },
                                                         "tags": {
                                                             "oneOf": [
@@ -1288,13 +1443,25 @@
                                     "type": "object",
                                     "properties": {
                                         "url": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "description": "Liquidjs template for the URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}"
                                         },
                                         "label": {
                                             "type": "string"
                                         }
                                     }
                                 }
+                            },
+                            "image": {
+                                "type": "object",
+                                "description": "Displays the dimension value as an image",
+                                "properties": {
+                                    "url": {
+                                        "type": "string",
+                                        "description": "Liquidjs template for the image URL. Available variables: ${value.raw}, ${value.formatted}, ${row.table_name.field_name.raw}, ${row.table_name.field_name.formatted}. Only fields selected in the query are available in row context."
+                                    }
+                                },
+                                "required": ["url"]
                             },
                             "tags": {
                                 "oneOf": [
@@ -1350,11 +1517,32 @@
                                             "type": "string"
                                         },
                                         "description": "An array of categories for the metric in Spotlight"
+                                    },
+                                    "filter_by": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "An array of dimension names that are allowed for filtering this metric in the Metrics Explorer"
+                                    },
+                                    "segment_by": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "An array of dimension names that are allowed for segmenting this metric in the Metrics Explorer"
+                                    },
+                                    "owner": {
+                                        "type": "string",
+                                        "description": "Email of the metric owner"
                                     }
                                 },
                                 "anyOf": [
                                     { "required": ["visibility"] },
-                                    { "required": ["categories"] }
+                                    { "required": ["categories"] },
+                                    { "required": ["filter_by"] },
+                                    { "required": ["segment_by"] },
+                                    { "required": ["owner"] }
                                 ]
                             }
                         }

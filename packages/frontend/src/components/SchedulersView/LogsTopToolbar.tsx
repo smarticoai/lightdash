@@ -2,25 +2,23 @@ import {
     ActionIcon,
     Divider,
     Group,
+    Pill,
+    Text,
     Tooltip,
     useMantineTheme,
 } from '@mantine-8/core';
 import { IconTrash } from '@tabler/icons-react';
 import { memo, type FC } from 'react';
-import {
-    type DestinationType,
-    type useLogsFilters,
-} from '../../features/scheduler/hooks/useLogsFilters';
+import { type useLogsFilters } from '../../features/scheduler/hooks/useLogsFilters';
 import MantineIcon from '../common/MantineIcon';
 import CreatedByFilter from './filters/CreatedByFilter';
 import DestinationFilter from './filters/DestinationFilter';
 import { SearchFilter } from './filters/SearchFilter';
 import StatusFilter from './filters/StatusFilter';
 
-type User = {
-    userUuid: string;
-    firstName: string;
-    lastName: string;
+type Scheduler = {
+    schedulerUuid: string;
+    name: string;
 };
 
 interface LogsTopToolbarProps
@@ -34,13 +32,15 @@ interface LogsTopToolbarProps
         | 'setSelectedCreatedByUserUuids'
         | 'selectedDestinations'
         | 'setSelectedDestinations'
+        | 'selectedSchedulerUuid'
+        | 'setSelectedSchedulerUuid'
         | 'hasActiveFilters'
         | 'resetFilters'
     > {
     isFetching: boolean;
     currentResultsCount: number;
-    availableUsers: User[];
-    availableDestinations: DestinationType[];
+    availableSchedulers: Scheduler[];
+    projectUuid?: string;
 }
 
 export const LogsTopToolbar: FC<LogsTopToolbarProps> = memo(
@@ -53,12 +53,18 @@ export const LogsTopToolbar: FC<LogsTopToolbarProps> = memo(
         setSelectedCreatedByUserUuids,
         selectedDestinations,
         setSelectedDestinations,
+        selectedSchedulerUuid,
+        setSelectedSchedulerUuid,
         hasActiveFilters,
         resetFilters,
-        availableUsers,
-        availableDestinations,
+        availableSchedulers,
+        projectUuid,
     }) => {
         const theme = useMantineTheme();
+
+        const selectedScheduler = availableSchedulers.find(
+            (s) => s.schedulerUuid === selectedSchedulerUuid,
+        );
 
         return (
             <Group
@@ -78,13 +84,35 @@ export const LogsTopToolbar: FC<LogsTopToolbarProps> = memo(
                         }}
                     />
 
+                    {selectedScheduler && (
+                        <>
+                            <Text fz="sm" c="ldGray.7" fw={500}>
+                                Scheduler:
+                            </Text>
+                            <Pill
+                                withRemoveButton
+                                onRemove={() => setSelectedSchedulerUuid('')}
+                            >
+                                {selectedScheduler.name}
+                            </Pill>
+                            <Divider
+                                orientation="vertical"
+                                w={1}
+                                h={20}
+                                style={{
+                                    alignSelf: 'center',
+                                }}
+                            />
+                        </>
+                    )}
+
                     <StatusFilter
                         selectedStatuses={selectedStatuses}
                         setSelectedStatuses={setSelectedStatuses}
                     />
 
                     <CreatedByFilter
-                        availableUsers={availableUsers}
+                        projectUuid={projectUuid}
                         selectedCreatedByUserUuids={selectedCreatedByUserUuids}
                         setSelectedCreatedByUserUuids={
                             setSelectedCreatedByUserUuids
@@ -94,7 +122,6 @@ export const LogsTopToolbar: FC<LogsTopToolbarProps> = memo(
                     <DestinationFilter
                         selectedDestinations={selectedDestinations}
                         setSelectedDestinations={setSelectedDestinations}
-                        availableDestinations={availableDestinations}
                     />
                 </Group>
 

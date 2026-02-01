@@ -3,8 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { explorerStore } from '../features/explorer/store';
-import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
+import { createExplorerStore } from '../features/explorer/store';
 import { useExplorerQuery } from './useExplorerQuery';
 
 // Mock the hooks that depend on external APIs
@@ -12,8 +11,8 @@ vi.mock('./useExplore', () => ({
     useExplore: vi.fn(() => ({ data: null })),
 }));
 
-vi.mock('./useFeatureFlagEnabled', () => ({
-    useFeatureFlag: vi.fn(() => ({ data: { enabled: false } })),
+vi.mock('./useServerOrClientFeatureFlag', () => ({
+    useServerFeatureFlag: vi.fn(() => ({ data: { enabled: false } })),
 }));
 
 vi.mock('./parameters/useParameters', () => ({
@@ -43,13 +42,12 @@ const createWrapper = () => {
             mutations: { retry: false },
         },
     });
+    const store = createExplorerStore();
 
     return ({ children }: { children: React.ReactNode }) => (
         <QueryClientProvider client={queryClient}>
-            <Provider store={explorerStore}>
-                <MemoryRouter>
-                    <ExplorerProvider>{children}</ExplorerProvider>
-                </MemoryRouter>
+            <Provider store={store}>
+                <MemoryRouter>{children}</MemoryRouter>
             </Provider>
         </QueryClientProvider>
     );

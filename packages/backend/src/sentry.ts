@@ -4,17 +4,19 @@ import { lightdashConfig } from './config/lightdashConfig';
 import { VERSION } from './version';
 
 export const IGNORE_ERRORS = [
+    'WarehouseConnectionError',
     'WarehouseQueryError',
     'FieldReferenceError',
     'NotEnoughResults',
     'CompileError',
-    'NotExistsError',
     'NotFoundError',
     'ForbiddenError',
     'TokenError',
     'AuthorizationError',
     'SshTunnelError',
     'ReadFileError',
+    'AiAgentValidatorError',
+    'UserInfoError', // Google oauth2 error when using invalid credentials
 ];
 
 Sentry.init({
@@ -70,17 +72,6 @@ Sentry.init({
             request?.headers?.['user-agent']?.includes('GoogleHC')
         ) {
             return 0.0;
-        }
-
-        if (
-            request?.url?.includes('aiAgents') &&
-            request?.url?.endsWith('stream')
-        ) {
-            return 1.0;
-        }
-
-        if (request?.url?.includes('mcp')) {
-            return 1.0;
         }
 
         if (context.parentSampled) {

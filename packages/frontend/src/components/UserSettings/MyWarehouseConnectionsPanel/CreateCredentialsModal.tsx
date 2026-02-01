@@ -3,24 +3,20 @@ import {
     type UpsertUserWarehouseCredentials,
     type UserWarehouseCredentials,
 } from '@lightdash/common';
-import {
-    Button,
-    Group,
-    Modal,
-    Select,
-    Stack,
-    TextInput,
-    Title,
-    type ModalProps,
-} from '@mantine/core';
+import { Button, Select, Stack, TextInput } from '@mantine-8/core';
 import { useForm } from '@mantine/form';
+import { IconPlus } from '@tabler/icons-react';
 import React, { type FC } from 'react';
+import useHealth from '../../../hooks/health/useHealth';
 import { useUserWarehouseCredentialsCreateMutation } from '../../../hooks/userWarehouseCredentials/useUserWarehouseCredentials';
+import MantineModal, {
+    type MantineModalProps,
+} from '../../common/MantineModal';
 import { getWarehouseLabel } from '../../ProjectConnection/ProjectConnectFlow/utils';
 import { WarehouseFormInputs } from './WarehouseFormInputs';
 
-type Props = Pick<ModalProps, 'opened' | 'onClose'> & {
-    title?: React.ReactNode;
+type Props = Pick<MantineModalProps, 'opened' | 'onClose'> & {
+    title?: string;
     description?: React.ReactNode;
     nameValue?: string;
     warehouseType?: WarehouseTypes;
@@ -66,6 +62,8 @@ const defaultCredentials: Record<
     },
 };
 
+const FORM_ID = 'create-credentials-form';
+
 export const CreateCredentialsModal: FC<Props> = ({
     opened,
     onClose,
@@ -75,6 +73,8 @@ export const CreateCredentialsModal: FC<Props> = ({
     warehouseType,
     onSuccess,
 }) => {
+    const health = useHealth();
+    const isDatabricksEnabled = health.data?.auth.databricks.enabled ?? false;
     const { mutateAsync, isLoading: isSaving } =
         useUserWarehouseCredentialsCreateMutation({
             onSuccess,
@@ -86,13 +86,35 @@ export const CreateCredentialsModal: FC<Props> = ({
                 defaultCredentials[warehouseType || WarehouseTypes.POSTGRES],
         },
     });
+
+    const showSaveButton = ![
+        WarehouseTypes.BIGQUERY,
+        WarehouseTypes.SNOWFLAKE,
+        WarehouseTypes.DATABRICKS,
+    ].includes(warehouseType ?? form.values.credentials.type);
+
     return (
-        <Modal
-            title={title || <Title order={4}>Add new credentials</Title>}
+        <MantineModal
             opened={opened}
             onClose={onClose}
+            title={title ?? 'Add new credentials'}
+            icon={IconPlus}
+            actions={
+                showSaveButton ? (
+                    <Button
+                        type="submit"
+                        form={FORM_ID}
+                        disabled={isSaving}
+                        loading={isSaving}
+                    >
+                        Save
+                    </Button>
+                ) : undefined
+            }
+            cancelDisabled={isSaving}
         >
             <form
+                id={FORM_ID}
                 onSubmit={form.onSubmit(async (formData) => {
                     await mutateAsync({
                         ...formData,
@@ -101,7 +123,7 @@ export const CreateCredentialsModal: FC<Props> = ({
                     onClose();
                 })}
             >
-                <Stack spacing="xs">
+                <Stack gap="xs">
                     {description}
 
                     {!nameValue && (
@@ -121,22 +143,15 @@ export const CreateCredentialsModal: FC<Props> = ({
                             size="xs"
                             disabled={isSaving}
                             data={Object.values(WarehouseTypes).map((type) => {
-                                const isNotSupportedYet = [
-                                    WarehouseTypes.DATABRICKS,
-                                ].includes(type);
+                                const isDisabled =
+                                    type === WarehouseTypes.DATABRICKS &&
+                                    !isDatabricksEnabled;
                                 return {
                                     value: type,
-                                    label: `${
-                                        getWarehouseLabel(type) || type
-                                    } ${
-                                        isNotSupportedYet
-                                            ? ' (coming soon)'
-                                            : ''
-                                    }`,
-                                    disabled: isNotSupportedYet,
+                                    label: getWarehouseLabel(type) || type,
+                                    disabled: isDisabled,
                                 };
                             })}
-                            withinPortal
                             {...form.getInputProps('credentials.type')}
                         />
                     )}
@@ -146,34 +161,8 @@ export const CreateCredentialsModal: FC<Props> = ({
                         disabled={isSaving}
                         onClose={onClose}
                     />
-
-                    <Group position="right" spacing="xs" mt="sm">
-                        <Button
-                            size="xs"
-                            variant="outline"
-                            color="dark"
-                            onClick={onClose}
-                            disabled={isSaving}
-                        >
-                            Cancel
-                        </Button>
-                        {warehouseType !== WarehouseTypes.BIGQUERY &&
-                            warehouseType !== WarehouseTypes.SNOWFLAKE && (
-                                /* On bigquery, we login using google oauth, 
-                            on snowflake, we also use oauth
-                            those warehouse credentials will be saved during the oauth process (googleStratey.ts)
-                            so we don't need the save button */
-                                <Button
-                                    size="xs"
-                                    type="submit"
-                                    disabled={isSaving}
-                                >
-                                    Save
-                                </Button>
-                            )}
-                    </Group>
                 </Stack>
             </form>
-        </Modal>
+        </MantineModal>
     );
 };

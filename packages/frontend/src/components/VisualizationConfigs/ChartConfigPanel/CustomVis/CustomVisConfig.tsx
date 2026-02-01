@@ -1,11 +1,18 @@
 import { FeatureFlags } from '@lightdash/common';
-import { Button, Flex, Group, Loader, Text } from '@mantine/core';
+import {
+    Button,
+    Flex,
+    Group,
+    Loader,
+    Text,
+    useMantineTheme,
+} from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import Editor, { type EditorProps, type Monaco } from '@monaco-editor/react';
 import { type IDisposable, type languages } from 'monaco-editor';
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useDeepCompareEffect } from 'react-use';
-import { useFeatureFlagEnabled } from '../../../../hooks/useFeatureFlagEnabled';
+import { useClientFeatureFlag } from '../../../../hooks/useServerOrClientFeatureFlag';
 import DocumentationHelpButton from '../../../DocumentationHelpButton';
 import { isCustomVisualizationConfig } from '../../../LightdashVisualization/types';
 import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
@@ -27,9 +34,8 @@ const MONACO_DEFAULT_OPTIONS: EditorProps['options'] = {
 };
 
 const initVegaLazySchema = async () => {
-    const vegaLiteSchema = await import(
-        'vega-lite/build/vega-lite-schema.json'
-    );
+    // @ts-expect-error no types available for this
+    const vegaLiteSchema = await import('vega-lite/vega-lite-schema.json');
 
     return [
         {
@@ -59,6 +65,20 @@ const loadMonaco = (monaco: Monaco, schemas: Schema[]) => {
         colors: true,
         foldingRanges: true,
         diagnostics: true,
+    });
+
+    // Define light and dark themes
+    monaco.editor.defineTheme('lightdash-light', {
+        base: 'vs',
+        inherit: true,
+        rules: [],
+        colors: {},
+    });
+    monaco.editor.defineTheme('lightdash-dark', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [],
+        colors: {},
     });
 };
 
@@ -97,6 +117,7 @@ const registerCustomCompletionProvider = (
 
 export const ConfigTabs: React.FC = memo(() => {
     const { visualizationConfig } = useVisualizationContext();
+    const theme = useMantineTheme();
 
     const isCustomConfig = isCustomVisualizationConfig(visualizationConfig);
 
@@ -171,7 +192,7 @@ export const ConfigTabs: React.FC = memo(() => {
         EditorProps['options'] | undefined
     >();
 
-    const isAiEnabled = useFeatureFlagEnabled(FeatureFlags.AiCustomViz);
+    const isAiEnabled = useClientFeatureFlag(FeatureFlags.AiCustomViz);
     useDeepCompareEffect(() => {
         /** Creates a container that belongs to body, outside of the sidebar
          * so we can place the autocomplete tooltip and it doesn't overflow
@@ -253,7 +274,7 @@ export const ConfigTabs: React.FC = memo(() => {
                     <Text
                         pos="absolute"
                         w="330px"
-                        color="gray.5"
+                        color="ldGray.5"
                         sx={{
                             pointerEvents: 'none',
                             zIndex: 100,
@@ -297,6 +318,11 @@ export const ConfigTabs: React.FC = memo(() => {
                     onChange={(config) => {
                         setEditorConfig(config ?? '');
                     }}
+                    theme={
+                        theme.colorScheme === 'dark'
+                            ? 'lightdash-dark'
+                            : 'lightdash-light'
+                    }
                 />
             </Group>
         </>

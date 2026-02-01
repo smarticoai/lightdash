@@ -1,4 +1,7 @@
-import { type DashboardMarkdownTile } from '@lightdash/common';
+import {
+    MARKDOWN_TILE_CLASS,
+    type DashboardMarkdownTile,
+} from '@lightdash/common';
 import { Menu, Text, useMantineTheme } from '@mantine/core';
 import { IconCopy } from '@tabler/icons-react';
 import MarkdownPreview from '@uiw/react-markdown-preview';
@@ -24,7 +27,7 @@ const MarkdownTile: FC<Props> = (props) => {
 
     const {
         tile: {
-            properties: { title, content },
+            properties: { title, content, hideFrame },
             uuid,
         },
         isEditMode,
@@ -81,7 +84,8 @@ const MarkdownTile: FC<Props> = (props) => {
 
     return (
         <TileBase
-            title={title}
+            title={hideFrame ? '' : title}
+            transparent={hideFrame}
             lockHeaderVisibility={isCommentsMenuOpen}
             visibleHeaderElement={
                 tileHasComments ? dashboardComments : undefined
@@ -107,12 +111,14 @@ const MarkdownTile: FC<Props> = (props) => {
                     overflow: 'auto',
                     '.wmde-markdown': {
                         fontSize: '14px',
+                        backgroundColor: 'transparent',
+                        fontFamily: theme.fontFamily,
                     },
                 }}
             >
                 <div data-color-mode={theme.colorScheme}>
                     <MarkdownPreview
-                        className="markdown-tile"
+                        className={MARKDOWN_TILE_CLASS}
                         source={content}
                         rehypePlugins={[
                             [rehypeExternalLinks, { target: '_blank' }],

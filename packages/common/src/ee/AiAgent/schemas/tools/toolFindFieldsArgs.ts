@@ -17,7 +17,6 @@ Usage tips:
 `;
 
 export const toolFindFieldsArgsSchema = createToolSchema({
-    type: 'find_fields',
     description: TOOL_FIND_FIELDS_DESCRIPTION,
 })
     .extend({
@@ -31,15 +30,41 @@ export const toolFindFieldsArgsSchema = createToolSchema({
     .withPagination()
     .build();
 
-export type ToolFindFieldsArgs = z.infer<typeof toolFindFieldsArgsSchema>;
-
 export const toolFindFieldsArgsSchemaTransformed = toolFindFieldsArgsSchema;
 
-export type ToolFindFieldsArgsTransformed = ToolFindFieldsArgs;
+export const findFieldsRankingMetadataSchema = z.object({
+    searchQueries: z.array(
+        z.object({
+            label: z.string(),
+            results: z.array(
+                z.object({
+                    name: z.string(),
+                    label: z.string(),
+                    tableName: z.string(),
+                    fieldType: z.string(),
+                    searchRank: z.number().nullable().optional(),
+                    chartUsage: z.number().nullable().optional(),
+                }),
+            ),
+            pagination: z
+                .object({
+                    page: z.number(),
+                    pageSize: z.number(),
+                    totalResults: z.number(),
+                    totalPageCount: z.number(),
+                })
+                .optional(),
+        }),
+    ),
+});
 
 export const toolFindFieldsOutputSchema = z.object({
     result: z.string(),
-    metadata: baseOutputMetadataSchema,
+    metadata: baseOutputMetadataSchema.extend({
+        ranking: findFieldsRankingMetadataSchema.optional(),
+    }),
 });
 
+export type ToolFindFieldsArgs = z.infer<typeof toolFindFieldsArgsSchema>;
+export type ToolFindFieldsArgsTransformed = ToolFindFieldsArgs;
 export type ToolFindFieldsOutput = z.infer<typeof toolFindFieldsOutputSchema>;

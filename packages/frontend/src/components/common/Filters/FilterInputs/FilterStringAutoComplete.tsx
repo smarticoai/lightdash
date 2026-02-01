@@ -71,7 +71,8 @@ const FilterStringAutoComplete: FC<Props> = ({
     ...rest
 }) => {
     const multiSelectRef = useRef<HTMLInputElement>(null);
-    const { projectUuid, getAutocompleteFilterGroup } = useFiltersContext();
+    const { projectUuid, getAutocompleteFilterGroup, parameterValues } =
+        useFiltersContext();
     if (!projectUuid) {
         throw new Error('projectUuid is required in FiltersProvider');
     }
@@ -110,6 +111,7 @@ const FilterStringAutoComplete: FC<Props> = ({
         {
             refetchOnMount: 'always',
         },
+        parameterValues,
     );
 
     useEffect(() => {
@@ -206,14 +208,7 @@ const FilterStringAutoComplete: FC<Props> = ({
             <Stack w="100%" spacing={0}>
                 <ScrollArea {...props}>
                     {searchedMaxResults ? (
-                        <Text
-                            color="dimmed"
-                            size="xs"
-                            px="sm"
-                            pt="xs"
-                            pb="xxs"
-                            bg="white"
-                        >
+                        <Text color="dimmed" size="xs" px="sm" pt="xs" pb="xxs">
                             Showing first {MAX_AUTOCOMPLETE_RESULTS} results.{' '}
                             {search ? 'Continue' : 'Start'} typing...
                         </Text>
@@ -235,9 +230,9 @@ const FilterStringAutoComplete: FC<Props> = ({
                                 p="xxs"
                                 sx={(theme) => ({
                                     cursor: 'pointer',
-                                    borderTop: `1px solid ${theme.colors.gray[2]}`,
+                                    borderTop: `1px solid ${theme.colors.ldGray[2]}`,
                                     '&:hover': {
-                                        backgroundColor: theme.colors.gray[1],
+                                        backgroundColor: theme.colors.ldGray[1],
                                     },
                                 })}
                                 onClick={() => setForceRefresh(true)}
@@ -303,27 +298,34 @@ const FilterStringAutoComplete: FC<Props> = ({
                 }
                 getCreateLabel={(query) => (
                     <Group spacing="xxs">
-                        <MantineIcon icon={IconPlus} color="blue" size="sm" />
-                        <Text color="blue">Add "{query}"</Text>
+                        <MantineIcon icon={IconPlus} color="blue.6" size="sm" />
+                        <Text c="blue.6">Add "{query}"</Text>
                     </Group>
                 )}
-                styles={{
+                styles={(theme) => ({
+                    input: {
+                        maxHeight: '350px',
+                        overflowY: 'auto',
+                    },
                     item: {
                         // makes add new item button sticky to bottom
                         '&:last-child:not([value])': {
                             position: 'sticky',
                             bottom: 4,
-                            // casts shadow on the bottom of the list to avoid transparency
-                            boxShadow: '0 4px 0 0 white',
-                        },
-                        '&:last-child:not([value]):not(:hover)': {
-                            background: 'white',
+                            zIndex: 10,
+                            backgroundColor:
+                                theme.colorScheme === 'dark'
+                                    ? theme.colors.dark[6]
+                                    : theme.white,
+                            boxShadow: `0 -1px 0 0 ${theme.colors.ldGray[2]}`,
+                            paddingTop: theme.spacing.xs,
+                            borderRadius: 0,
+                            marginTop: theme.spacing.xs,
                         },
                     },
-                }}
+                })}
                 disableSelectedItemFiltering
                 searchable
-                clearable={singleValue}
                 clearSearchOnChange
                 {...rest}
                 searchValue={search}

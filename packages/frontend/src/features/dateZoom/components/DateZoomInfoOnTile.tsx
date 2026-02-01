@@ -1,18 +1,10 @@
-import {
-    type CompiledDimension,
-    type DateGranularity,
-} from '@lightdash/common';
-import { Text, Tooltip } from '@mantine/core';
-import { IconCalendarSearch } from '@tabler/icons-react';
+import { Group, Paper, Text, Tooltip } from '@mantine-8/core';
+import { IconCalendar } from '@tabler/icons-react';
 import { type FC } from 'react';
 import MantineIcon from '../../../components/common/MantineIcon';
+import { type DateZoomInfoOnTileProps } from './types';
 
-type Props = {
-    dateZoomGranularity: DateGranularity;
-    dateDimension: Pick<CompiledDimension, 'label' | 'name'>;
-};
-
-export const DateZoomInfoOnTile: FC<Props> = ({
+export const DateZoomInfoOnTile: FC<DateZoomInfoOnTileProps> = ({
     dateZoomGranularity,
     dateDimension,
 }) => {
@@ -22,13 +14,13 @@ export const DateZoomInfoOnTile: FC<Props> = ({
                 <>
                     <Text fz="xs">
                         Date zoom:{' '}
-                        <Text span fw={500}>
+                        <Text span fw={500} fz="inherit">
                             {dateZoomGranularity}
                         </Text>
                     </Text>
                     <Text fz="xs">
                         On:{' '}
-                        <Text span fw={500}>
+                        <Text span fw={500} fz="inherit">
                             {dateDimension?.label}
                         </Text>
                     </Text>
@@ -38,12 +30,12 @@ export const DateZoomInfoOnTile: FC<Props> = ({
             multiline
             withinPortal
         >
-            <MantineIcon
-                icon={IconCalendarSearch}
-                color="blue"
-                size={20}
-                style={{ flexShrink: 0 }}
-            />
+            <Paper radius="sm" py="xxs" px="xs" shadow="0">
+                <Group wrap="nowrap" gap="xxs">
+                    <MantineIcon icon={IconCalendar} size="sm" />
+                    <Text fz={11}>{dateZoomGranularity}</Text>
+                </Group>
+            </Paper>
         </Tooltip>
     );
 };

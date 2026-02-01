@@ -44,8 +44,12 @@ export const MetricChartUsageButton = ({
 
     return (
         <Tooltip
+            withinPortal
             variant="xs"
             disabled={!hasChartsUsage}
+            openDelay={200}
+            maw={250}
+            fz="xs"
             label={
                 <Text>
                     Used by {row.original.chartUsage} charts.
@@ -57,19 +61,19 @@ export const MetricChartUsageButton = ({
             <Button
                 size="xs"
                 compact
-                color="gray.6"
                 variant="subtle"
                 disabled={!hasChartsUsage}
                 onClick={handleChartUsageClick}
                 leftIcon={<BarChart />}
                 opacity={hasChartsUsage ? 1 : 0.8}
                 fz="sm"
-                c="dark.4"
+                c="ldGray.7"
                 fw={500}
                 sx={{
                     '&[data-disabled]': {
                         backgroundColor: 'transparent',
                         fontWeight: 400,
+                        color: `var(--mantine-color-ldDark-7)`,
                     },
                 }}
                 styles={(theme) => ({

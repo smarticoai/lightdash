@@ -1,10 +1,16 @@
-import { ActionIcon, MantineProvider, Menu, Text, Title } from '@mantine/core';
+import {
+    ActionIcon,
+    MantineProvider,
+    Menu,
+    Text,
+    useMantineTheme,
+} from '@mantine/core';
 import { IconCheck, IconDatabaseCog, IconPlus } from '@tabler/icons-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { matchRoutes, useLocation } from 'react-router';
 import { useActiveProjectUuid } from '../../hooks/useActiveProject';
-import { useProjects } from '../../hooks/useProjects';
+import { useProject } from '../../hooks/useProject';
 import {
     useProjectUserWarehouseCredentialsPreference,
     useProjectUserWarehouseCredentialsPreferenceMutation,
@@ -24,6 +30,7 @@ const routesThatNeedWarehouseCredentials = [
 
 const UserCredentialsSwitcher = () => {
     const { user } = useApp();
+    const theme = useMantineTheme();
     const location = useLocation();
     const [showCreateModalOnPageLoad, setShowCreateModalOnPageLoad] =
         useState(false);
@@ -38,10 +45,10 @@ const UserCredentialsSwitcher = () => {
     } = useUserWarehouseCredentials();
     const queryClient = useQueryClient();
 
-    const { isInitialLoading: isLoadingProjects, data: projects } =
-        useProjects();
     const { isLoading: isLoadingActiveProjectUuid, activeProjectUuid } =
         useActiveProjectUuid();
+    const { data: activeProject, isInitialLoading: isLoadingActiveProject } =
+        useProject(activeProjectUuid);
     const { data: preferredCredentials } =
         useProjectUserWarehouseCredentialsPreference(activeProjectUuid);
     const { mutate } = useProjectUserWarehouseCredentialsPreferenceMutation({
@@ -52,14 +59,11 @@ const UserCredentialsSwitcher = () => {
             }
         },
     });
-    const activeProject = useMemo(() => {
-        return projects?.find((p) => p.projectUuid === activeProjectUuid);
-    }, [projects, activeProjectUuid]);
 
     const compatibleCredentials = useMemo(() => {
         return userWarehouseCredentials?.filter(
             ({ credentials }) =>
-                credentials.type === activeProject?.warehouseType,
+                credentials.type === activeProject?.warehouseConnection?.type,
         );
     }, [userWarehouseCredentials, activeProject]);
 
@@ -74,8 +78,10 @@ const UserCredentialsSwitcher = () => {
                     // Check if this is a SnowflakeTokenError and we have a Snowflake project
                     if (
                         error?.error?.name === 'SnowflakeTokenError' &&
-                        activeProject?.warehouseType === 'snowflake' &&
-                        activeProject?.requireUserCredentials
+                        activeProject?.warehouseConnection?.type ===
+                            'snowflake' &&
+                        activeProject?.warehouseConnection
+                            ?.requireUserCredentials
                     ) {
                         console.info('Triggering reauth modal for Snowflake');
                         // Trigger the reauth modal
@@ -89,8 +95,8 @@ const UserCredentialsSwitcher = () => {
         return unsubscribe;
     }, [
         queryClient,
-        activeProject?.warehouseType,
-        activeProject?.requireUserCredentials,
+        activeProject?.warehouseConnection?.type,
+        activeProject?.warehouseConnection?.requireUserCredentials,
     ]);
 
     useEffect(() => {
@@ -103,7 +109,7 @@ const UserCredentialsSwitcher = () => {
         if (
             isRouteThatNeedsWarehouseCredentials &&
             !showCreateModalOnPageLoad &&
-            activeProject?.requireUserCredentials &&
+            activeProject?.warehouseConnection?.requireUserCredentials &&
             !!compatibleCredentials &&
             compatibleCredentials.length === 0
         ) {
@@ -119,10 +125,10 @@ const UserCredentialsSwitcher = () => {
 
     if (
         isLoadingCredentials ||
-        isLoadingProjects ||
+        isLoadingActiveProject ||
         isLoadingActiveProjectUuid ||
         !activeProjectUuid ||
-        !activeProject?.requireUserCredentials
+        !activeProject?.warehouseConnection?.requireUserCredentials
     ) {
         return null;
     }
@@ -183,27 +189,27 @@ const UserCredentialsSwitcher = () => {
                 </Menu.Dropdown>
             </Menu>
             {isCreatingCredentials && (
-                <MantineProvider inherit theme={{ colorScheme: 'light' }}>
+                <MantineProvider
+                    inherit
+                    theme={{ colorScheme: theme.colorScheme }}
+                >
                     <CreateCredentialsModal
                         opened={isCreatingCredentials}
                         title={
-                            showCreateModalOnPageLoad ? (
-                                <Title order={4}>
-                                    Login to{' '}
-                                    {getWarehouseLabel(
-                                        activeProject.warehouseType,
-                                    )}
-                                </Title>
-                            ) : undefined
+                            showCreateModalOnPageLoad
+                                ? `Login to ${getWarehouseLabel(
+                                      activeProject.warehouseConnection?.type,
+                                  )}`
+                                : undefined
                         }
                         description={
                             showCreateModalOnPageLoad ? (
                                 <Text>
-                                    The admin of your organization “
-                                    {user.data?.organizationName}” requires that
+                                    The admin of your organization "
+                                    {user.data?.organizationName}" requires that
                                     you login to{' '}
                                     {getWarehouseLabel(
-                                        activeProject.warehouseType,
+                                        activeProject.warehouseConnection?.type,
                                     )}{' '}
                                     to continue.
                                 </Text>
@@ -212,7 +218,7 @@ const UserCredentialsSwitcher = () => {
                         nameValue={
                             showCreateModalOnPageLoad ? 'Default' : undefined
                         }
-                        warehouseType={activeProject.warehouseType}
+                        warehouseType={activeProject.warehouseConnection?.type}
                         onSuccess={(data) => {
                             mutate({
                                 projectUuid: activeProjectUuid,

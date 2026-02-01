@@ -8,6 +8,7 @@ import {
     DEFAULT_EMPTY_EXPLORE_CONFIG,
     getExplorerUrlFromCreateSavedChartVersion,
 } from '../../../hooks/useExplorerRoute';
+import { LD_FIELD_COLORS } from '../../../mantineTheme';
 import { useCatalogContext } from '../context/useCatalogContext';
 
 type Props = {
@@ -45,10 +46,10 @@ export const CatalogFieldListItem: FC<React.PropsWithChildren<Props>> = ({
                               dimensions: [fieldToExplore],
                           }
                         : field.fieldType === FieldType.METRIC
-                        ? {
-                              metrics: [fieldToExplore],
-                          }
-                        : []),
+                          ? {
+                                metrics: [fieldToExplore],
+                            }
+                          : []),
                 },
             },
         );
@@ -67,7 +68,9 @@ export const CatalogFieldListItem: FC<React.PropsWithChildren<Props>> = ({
                 margin: 0,
                 alignItems: 'center',
                 borderRadius: theme.radius.sm,
-                backgroundColor: hovered ? theme.colors.gray[1] : 'transparent',
+                backgroundColor: hovered
+                    ? theme.colors.ldGray[1]
+                    : 'transparent',
                 border: `2px solid ${
                     isSelected ? theme.colors.blue[6] : 'transparent'
                 }`,
@@ -89,8 +92,8 @@ export const CatalogFieldListItem: FC<React.PropsWithChildren<Props>> = ({
                     // TODO: Add icon for field type and for subtype
                     color={
                         field.fieldType === FieldType.DIMENSION
-                            ? 'blue'
-                            : 'orange'
+                            ? LD_FIELD_COLORS.dimension.color
+                            : LD_FIELD_COLORS.metric.color
                     }
                 />
             </Grid.Col>
@@ -111,7 +114,7 @@ export const CatalogFieldListItem: FC<React.PropsWithChildren<Props>> = ({
                     <Highlight
                         fz="13px"
                         w="auto"
-                        c="gray.7"
+                        c="ldGray.7"
                         lineClamp={2}
                         highlight={searchString}
                         highlightColor="yellow"
@@ -136,9 +139,9 @@ export const CatalogFieldListItem: FC<React.PropsWithChildren<Props>> = ({
                         target="_blank"
                         compact
                         sx={(theme) => ({
-                            backgroundColor: theme.colors.gray[8],
+                            backgroundColor: theme.colors.ldGray[8],
                             '&:hover': {
-                                backgroundColor: theme.colors.gray[9],
+                                backgroundColor: theme.colors.ldGray[9],
                             },
                         })}
                         onClick={(e) => e.stopPropagation()}

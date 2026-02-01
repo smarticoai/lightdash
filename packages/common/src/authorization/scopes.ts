@@ -229,18 +229,16 @@ const scopes: Scope[] = [
         getConditions: addDefaultUuidCondition,
     },
     {
-        name: 'create:Project',
-        description: 'Create new projects',
+        name: 'create:Project@preview',
+        description: 'Create new preview projects',
         isEnterprise: false,
         group: ScopeGroup.PROJECT_MANAGEMENT,
-        getConditions: (context) =>
-            // Allow creating preview projects by default
-            [
-                {
-                    upstreamProjectUuid: context.projectUuid,
-                    type: ProjectType.PREVIEW,
-                },
-            ],
+        getConditions: (context) => [
+            {
+                upstreamProjectUuid: context.projectUuid,
+                type: ProjectType.PREVIEW,
+            },
+        ],
     },
     {
         name: 'update:Project',
@@ -248,6 +246,19 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.PROJECT_MANAGEMENT,
         getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'update:Project@self',
+        description: 'Update projects created by the user',
+        isEnterprise: false,
+        group: ScopeGroup.PROJECT_MANAGEMENT,
+        getConditions: (context) => [
+            {
+                projectUuid: context.projectUuid,
+                createdByUserUuid: context.userUuid || false,
+                type: ProjectType.PREVIEW,
+            },
+        ],
     },
     {
         name: 'delete:Project',
@@ -263,6 +274,7 @@ const scopes: Scope[] = [
         group: ScopeGroup.PROJECT_MANAGEMENT,
         getConditions: (context) => [
             {
+                projectUuid: context.projectUuid,
                 createdByUserUuid: context.userUuid || false,
                 type: ProjectType.PREVIEW,
             },
@@ -288,6 +300,15 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.PROJECT_MANAGEMENT,
         getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:ScheduledDeliveries@self',
+        description: 'Manage user own scheduled deliveries',
+        isEnterprise: false,
+        group: ScopeGroup.PROJECT_MANAGEMENT,
+        getConditions: (context) => [
+            addUuidCondition(context, { userUuid: context.userUuid || false }),
+        ],
     },
     {
         name: 'create:ScheduledDeliveries',
@@ -513,6 +534,20 @@ const scopes: Scope[] = [
     {
         name: 'manage:ChangeCsvResults',
         description: 'Modify CSV export results',
+        isEnterprise: false,
+        group: ScopeGroup.DATA,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'view:SourceCode',
+        description: 'View source code for explores and models',
+        isEnterprise: false,
+        group: ScopeGroup.DATA,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:SourceCode',
+        description: 'Create pull requests to update source code',
         isEnterprise: false,
         group: ScopeGroup.DATA,
         getConditions: addDefaultUuidCondition,

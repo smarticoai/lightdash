@@ -16,6 +16,7 @@ import {
     Select,
     Text,
     Tooltip,
+    useMantineTheme,
     type SelectProps,
 } from '@mantine/core';
 import {
@@ -54,18 +55,13 @@ const ItemComponent = forwardRef<HTMLDivElement, ItemComponentProps>(
             openDelay={500}
         >
             <Box ref={ref} {...rest}>
-                <Group
-                    noWrap
-                    spacing={size}
-                    maw="100%"
-                    sx={{ overflow: 'hidden' }}
-                >
+                <Group noWrap spacing={size} maw="100%">
                     <FieldIcon
                         style={{ flexShrink: 0 }}
                         item={item}
                         selected={rest.selected}
                     />
-                    <Text truncate size={size}>
+                    <Text span size={size} style={{ wordBreak: 'normal' }}>
                         {label}
                     </Text>
                 </Group>
@@ -105,6 +101,7 @@ const FieldSelectComponent = <T extends Item = Item>({
     focusOnRender = false,
     ...rest
 }: FieldSelectProps<T>) => {
+    const theme = useMantineTheme();
     const inputRef = useRef<HTMLInputElement | null>(null); // Input ref for focus handling
     useEffect(() => {
         if (focusOnRender) {
@@ -234,7 +231,10 @@ const FieldSelectComponent = <T extends Item = Item>({
                     position: 'sticky',
                     top: 0,
                     zIndex: 1,
-                    backgroundColor: 'white',
+                    backgroundColor:
+                        theme.colorScheme === 'dark'
+                            ? theme.colors.dark[6]
+                            : 'white',
                 },
                 separatorLabel: {
                     fontWeight: 600,
@@ -256,10 +256,10 @@ const FieldSelectComponent = <T extends Item = Item>({
                     hasGrouping && isField(i)
                         ? i.tableLabel
                         : isCustomDimension(i)
-                        ? tableLabelMap.get(i.table) // Custom dimensions don't have table labels, so we use the table map to get them
-                        : isTableCalculation(i)
-                        ? 'Table Calculations'
-                        : undefined,
+                          ? tableLabelMap.get(i.table) // Custom dimensions don't have table labels, so we use the table map to get them
+                          : isTableCalculation(i)
+                            ? 'Table Calculations'
+                            : undefined,
                 disabled: inactiveItemIds.includes(getItemId(i)),
                 size: rest.size,
             }))}

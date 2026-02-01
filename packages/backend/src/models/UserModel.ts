@@ -12,7 +12,6 @@ import {
     LightdashUser,
     LightdashUserWithAbilityRules,
     MemberAbility,
-    NotExistsError,
     NotFoundError,
     OpenIdIdentityIssuerType,
     OpenIdUser,
@@ -127,25 +126,22 @@ type UserModelArguments = {
     lightdashConfig: LightdashConfig;
 };
 
+const sessionUserCache =
+    process.env.EXPERIMENTAL_CACHE === 'true'
+        ? new NodeCache({
+              stdTTL: 30, // time to live in seconds
+              checkperiod: 60, // cleanup interval in seconds
+          })
+        : undefined;
+
 export class UserModel {
     private readonly lightdashConfig: LightdashConfig;
 
     private readonly database: Knex;
 
-    private readonly sessionUserCache: NodeCache | undefined;
-
     constructor({ database, lightdashConfig }: UserModelArguments) {
         this.database = database;
         this.lightdashConfig = lightdashConfig;
-
-        // Initialize cache with 30 seconds TTL
-        this.sessionUserCache =
-            process.env.EXPERIMENTAL_CACHE === 'true'
-                ? new NodeCache({
-                      stdTTL: 30, // time to live in seconds
-                      checkperiod: 60, // cleanup interval in seconds
-                  })
-                : undefined;
     }
 
     private canTrackingBeAnonymized() {
@@ -158,7 +154,7 @@ export class UserModel {
     ) {
         const cacheKey = `${userUuid}::${organizationUuid}`;
         // Try to get from cache first
-        const cachedUser = this.sessionUserCache?.get<SessionUser>(cacheKey);
+        const cachedUser = sessionUserCache?.get<SessionUser>(cacheKey);
         if (cachedUser) {
             // Return cached user
             return { sessionUser: cachedUser, cacheHit: true };
@@ -169,7 +165,7 @@ export class UserModel {
             organizationUuid,
         );
         // Store in cache
-        this.sessionUserCache?.set(cacheKey, sessionUser);
+        sessionUserCache?.set(cacheKey, sessionUser);
         return { sessionUser, cacheHit: false };
     }
 
@@ -200,12 +196,9 @@ export class UserModel {
                 `${UserTableName}.user_id`,
                 `${OpenIdIdentitiesTableName}.user_id`,
             )
-            .select<{ user_uuid: string; has_authentication: false }[]>(
-                `${UserTableName}.user_uuid`,
-                trx.raw(
-                    `CASE WHEN COALESCE(password_logins.user_id, openid_identities.user_id, null) IS NOT NULL THEN TRUE ELSE FALSE END as has_authentication`,
-                ),
-            )
+            .select<
+                { user_uuid: string; has_authentication: false }[]
+            >(`${UserTableName}.user_uuid`, trx.raw(`CASE WHEN COALESCE(password_logins.user_id, openid_identities.user_id, null) IS NOT NULL THEN TRUE ELSE FALSE END as has_authentication`))
             .distinctOn(`user_uuid`)
             .whereIn(`${UserTableName}.user_uuid`, filters.userUuids);
     }
@@ -308,11 +301,9 @@ export class UserModel {
                     .where('user_uuid', userUuid)
                     .select('user_id'),
             )
-            .select<DbOrganization[]>(
-                'organizations.organization_uuid',
-                'organizations.created_at',
-                'organizations.organization_name',
-            );
+            .select<
+                DbOrganization[]
+            >('organizations.organization_uuid', 'organizations.created_at', 'organizations.organization_name');
 
         return organizations.map((organization) => ({
             organizationUuid: organization.organization_uuid,
@@ -364,10 +355,9 @@ export class UserModel {
                 'password_logins.user_id',
             )
             .where('email', email)
-            .select<(DbUserDetails & { password_hash: string })[]>(
-                '*',
-                'organizations.created_at as organization_created_at',
-            );
+            .select<
+                (DbUserDetails & { password_hash: string })[]
+            >('*', 'organizations.created_at as organization_created_at');
         if (user === undefined) {
             throw new NotFoundError(
                 `No user found with email ${email} and password`,
@@ -412,10 +402,9 @@ export class UserModel {
                 'password_logins.user_id',
             )
             .where('users.user_uuid', userUuid)
-            .select<(DbUserDetails & { password_hash: string })[]>(
-                '*',
-                'organizations.created_at as organization_created_at',
-            );
+            .select<
+                (DbUserDetails & { password_hash: string })[]
+            >('*', 'organizations.created_at as organization_created_at');
         if (user === undefined) {
             throw new NotFoundError(`No user found with uuid ${userUuid}`);
         }
@@ -441,6 +430,7 @@ export class UserModel {
             isSetupComplete,
             isActive,
         }: Partial<UpdateUserArgs>,
+        isEmailVerified: boolean = false,
     ): Promise<LightdashUser> {
         await this.database.transaction(async (trx) => {
             const [user] = await trx(UserTableName)
@@ -470,6 +460,19 @@ export class UserModel {
                     email: email.toLowerCase(),
                     is_primary: true,
                 });
+                // If user needs to create a new email
+                // we can automatically verify the email
+                // This is useful for SCIM users who changed their email
+                if (isEmailVerified) {
+                    await trx(EmailTableName)
+                        .where({
+                            user_id: user.user_id,
+                            email: email.toLowerCase(),
+                        })
+                        .update({
+                            is_verified: true,
+                        });
+                }
             }
         });
         return this.getUserDetailsByUuid(userUuid);
@@ -481,8 +484,7 @@ export class UserModel {
             .delete();
     }
 
-    private async getUserProjectRoles(
-        userId: number,
+    async getUserProjectRoles(
         userUuid: string,
     ): Promise<
         Pick<
@@ -496,8 +498,9 @@ export class UserModel {
                 'project_memberships.project_id',
                 'projects.project_id',
             )
+            .leftJoin('users', 'project_memberships.user_id', 'users.user_id')
             .select('*')
-            .where('user_id', userId);
+            .where('users.user_uuid', userUuid);
 
         return projectMemberships.map((membership) => ({
             projectUuid: membership.project_uuid,
@@ -578,7 +581,7 @@ export class UserModel {
         const [hasAuthentication, projectRoles, groupProjectRoles] =
             await Promise.all([
                 this.hasAuthentication(user.user_uuid),
-                this.getUserProjectRoles(user.user_id, user.user_uuid),
+                this.getUserProjectRoles(user.user_uuid),
                 this.getUserGroupProjectRoles(
                     user.user_id,
                     user.organization_id,
@@ -624,10 +627,9 @@ export class UserModel {
             )
             .where('openid_identities.issuer', issuer)
             .andWhere('openid_identities.subject', subject)
-            .select<DbUserDetails[]>(
-                '*',
-                'organizations.created_at as organization_created_at',
-            );
+            .select<
+                DbUserDetails[]
+            >('*', 'organizations.created_at as organization_created_at');
         if (user === undefined) {
             return user;
         }
@@ -649,7 +651,7 @@ export class UserModel {
             .where('organization_uuid', organizationUuid)
             .select('organization_id');
         if (!org) {
-            throw new NotExistsError('Cannot find organization');
+            throw new NotFoundError('Cannot find organization');
         }
         const email = isOpenIdUser(createUser)
             ? createUser.openId.email
@@ -857,7 +859,7 @@ export class UserModel {
         const user = await this.findSessionUserByUUID(userUuid);
 
         if (!user?.userId) {
-            throw new NotExistsError('User is missing user_id');
+            throw new NotFoundError('User is missing user_id');
         }
 
         await this.database(PasswordLoginTableName)
@@ -932,7 +934,7 @@ export class UserModel {
             .select('user_id')
             .first();
         if (!user) {
-            throw new NotExistsError('Cannot find user');
+            throw new NotFoundError('Cannot find user');
         }
         return this.database(PasswordLoginTableName)
             .where({
@@ -956,14 +958,14 @@ export class UserModel {
             .where('organization_uuid', organizationUuid)
             .select('organization_id');
         if (!org) {
-            throw new NotExistsError('Cannot find organization');
+            throw new NotFoundError('Cannot find organization');
         }
 
         const [user] = await this.database(UserTableName)
             .where('user_uuid', userUuid)
             .select('user_id');
         if (!user) {
-            throw new NotExistsError('Cannot find user');
+            throw new NotFoundError('Cannot find user');
         }
 
         await this.database.transaction(async (trx) => {
@@ -1023,11 +1025,11 @@ export class UserModel {
             .select('refresh_token');
 
         if (!row) {
-            throw new NotExistsError('Cannot find user with refresh token');
+            throw new NotFoundError('Cannot find user with refresh token');
         }
 
         if (!row.refresh_token) {
-            throw new NotExistsError('Cannot find refresh token');
+            throw new NotFoundError('Cannot find refresh token');
         }
 
         return row.refresh_token;

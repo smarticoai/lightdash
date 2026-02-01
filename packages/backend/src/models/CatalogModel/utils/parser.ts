@@ -1,6 +1,7 @@
 import {
     CatalogField,
     CatalogItemIcon,
+    CatalogOwner,
     CatalogTable,
     CatalogType,
     CompiledDimension,
@@ -9,6 +10,7 @@ import {
     convertToAiHints,
     Explore,
     getBasicType,
+    isMetric,
     type Tag,
 } from '@lightdash/common';
 import { DbCatalog } from '../../../database/entities/catalog';
@@ -26,6 +28,7 @@ const parseFieldFromMetricOrDimension = (
         chartUsage: number | undefined;
         icon: CatalogItemIcon | null;
         searchRank?: number;
+        owner: CatalogOwner | null;
     },
 ): CatalogField => ({
     name: field.name,
@@ -46,6 +49,13 @@ const parseFieldFromMetricOrDimension = (
     catalogSearchUuid: catalogArgs.catalogSearchUuid,
     icon: catalogArgs.icon,
     searchRank: catalogArgs.searchRank,
+    owner: catalogArgs.owner,
+    ...(isMetric(field) && field.spotlight?.filterBy
+        ? { spotlightFilterBy: field.spotlight.filterBy }
+        : {}),
+    ...(isMetric(field) && field.spotlight?.segmentBy
+        ? { spotlightSegmentBy: field.spotlight.segmentBy }
+        : {}),
 });
 
 export const parseFieldsFromCompiledTable = (
@@ -67,6 +77,7 @@ export const parseFieldsFromCompiledTable = (
             chartUsage: undefined,
             catalogSearchUuid: '',
             icon: null,
+            owner: null, // Not resolved until indexed
         }),
     );
 };
@@ -79,8 +90,24 @@ export const parseCatalog = (
             'tagUuid' | 'name' | 'color' | 'yamlReference'
         >[];
         search_rank: number;
+        owner_first_name?: string;
+        owner_last_name?: string;
+        owner_email?: string;
     },
-): CatalogTable | CatalogField => {
+): CatalogTable | CatalogField | null => {
+    // Construct owner object from joined user data
+    const owner: CatalogOwner | null =
+        dbCatalog.owner_user_uuid &&
+        dbCatalog.owner_first_name &&
+        dbCatalog.owner_last_name &&
+        dbCatalog.owner_email
+            ? {
+                  userUuid: dbCatalog.owner_user_uuid,
+                  firstName: dbCatalog.owner_first_name,
+                  lastName: dbCatalog.owner_last_name,
+                  email: dbCatalog.owner_email,
+              }
+            : null;
     const baseTable = dbCatalog.explore.tables[dbCatalog.explore.baseTable];
 
     if (dbCatalog.type === CatalogType.Table) {
@@ -102,9 +129,20 @@ export const parseCatalog = (
         };
     }
 
+    // Find the correct table that contains this field
+    // This is important for fields from joined tables which may not be in the base table
+    const catalogTable = dbCatalog.explore.tables[dbCatalog.table_name];
+
+    if (!catalogTable) {
+        // Table exists in catalog but not in the current explore definition.
+        // This can happen when a joined table is removed from the explore but the catalog
+        // hasn't been fully re-indexed yet. Return null to skip this stale entry.
+        return null;
+    }
+
     const dimensionsAndMetrics = [
-        ...Object.values(baseTable.dimensions),
-        ...Object.values(baseTable.metrics),
+        ...Object.values(catalogTable.dimensions),
+        ...Object.values(catalogTable.metrics),
     ];
     // This is the most computationally expensive part of the code
     // Perhaps we should add metadata (requiredAttributes) to the catalog database
@@ -113,11 +151,12 @@ export const parseCatalog = (
         (d) => d.name === dbCatalog.name,
     );
     if (!findField) {
-        throw new Error(
-            `Field ${dbCatalog.name} not found in explore ${dbCatalog.explore.name}`,
-        );
+        // Field exists in catalog but not in the current explore definition.
+        // This can happen when a field is removed from the dbt/YAML model but the catalog
+        // hasn't been fully re-indexed yet. Return null to skip this stale entry.
+        return null;
     }
-    return parseFieldFromMetricOrDimension(baseTable, findField, {
+    return parseFieldFromMetricOrDimension(catalogTable, findField, {
         label: dbCatalog.label,
         description: dbCatalog.description,
         catalogSearchUuid: dbCatalog.catalog_search_uuid,
@@ -127,5 +166,6 @@ export const parseCatalog = (
         chartUsage: dbCatalog.chart_usage ?? 0,
         icon: dbCatalog.icon ?? null,
         searchRank: dbCatalog.search_rank,
+        owner,
     });
 };

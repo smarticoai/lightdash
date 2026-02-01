@@ -10,6 +10,7 @@ import {
     applyEmbeddedAbility,
     buildAccountHelpers,
     CreateEmbedJwt,
+    EmbedContent,
     ForbiddenError,
     MemberAbility,
     OauthAccount,
@@ -76,25 +77,19 @@ export const fromJwt = ({
     decodedToken,
     embed,
     source,
-    dashboardUuid,
     userAttributes,
+    content,
 }: {
     decodedToken: CreateEmbedJwt;
     embed: OssEmbed;
     source: string;
-    dashboardUuid: string;
     userAttributes: UserAccessControls;
+    content: EmbedContent;
 }): AnonymousAccount => {
     const builder = new AbilityBuilder<MemberAbility>(Ability);
     const externalId = getExternalId(decodedToken, source, embed.organization);
 
-    applyEmbeddedAbility(
-        decodedToken,
-        dashboardUuid,
-        embed,
-        externalId,
-        builder,
-    );
+    applyEmbeddedAbility(decodedToken, content, embed, externalId, builder);
     const abilities = builder.build();
 
     return createAccount({
@@ -106,7 +101,7 @@ export const fromJwt = ({
         organization: embed.organization,
         embed,
         access: {
-            dashboardId: dashboardUuid,
+            content,
             filtering: decodedToken.content.dashboardFiltersInteractivity,
             parameters: decodedToken.content.parameterInteractivity,
             controls: userAttributes,

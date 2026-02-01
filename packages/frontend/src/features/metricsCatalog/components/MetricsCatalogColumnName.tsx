@@ -7,11 +7,10 @@ import {
     Highlight,
     Paper,
     Portal,
-    Tooltip,
     getDefaultZIndex,
 } from '@mantine/core';
 import { useClickOutside } from '@mantine/hooks';
-import { IconTable, IconTrash } from '@tabler/icons-react';
+import { IconTrash } from '@tabler/icons-react';
 import EmojiPicker, {
     Emoji,
     EmojiStyle,
@@ -25,6 +24,7 @@ import { MetricIconPlaceholder } from '../../../svgs/metricsCatalog';
 import { EventName } from '../../../types/Events';
 import { useAppSelector } from '../../sqlRunner/store/hooks';
 import { useUpdateCatalogItemIcon } from '../hooks/useCatalogItemIcon';
+import { MetricDetailPopover } from './MetricDetailPopover';
 
 import '../../../styles/emoji-picker-react.css';
 
@@ -57,7 +57,15 @@ const SharedEmojiPicker = forwardRef(
                         zIndex: getDefaultZIndex('overlay'),
                     }}
                 >
-                    <Paper shadow="xs" withBorder pt="xs" px="two">
+                    <Paper
+                        shadow="xs"
+                        withBorder
+                        pt="xs"
+                        px="two"
+                        sx={(theme) => ({
+                            border: `1px solid ${theme.colors.ldGray[2]}`,
+                        })}
+                    >
                         {emoji && (
                             <Group position="right">
                                 <Button
@@ -211,10 +219,9 @@ export const MetricsCatalogColumnName = forwardRef<HTMLDivElement, Props>(
                             height: 28,
                             flexShrink: 0,
                             borderRadius: '8px',
-                            border: `1px solid ${theme.colors.gray[3]}`,
+                            border: `1px solid ${theme.colors.ldGray[3]}`,
                             ...(!isEmojiIcon(row.original.icon) && {
-                                boxShadow:
-                                    '0px -2px 0px 0px rgba(10, 13, 18, 0.07) inset, 0px 1px 2px 0px rgba(16, 24, 40, 0.05)',
+                                boxShadow: `0px -2px 0px 0px rgba(10, 13, 18, 0.07) inset, 0px 1px 2px 0px rgba(16, 24, 40, 0.05)`,
                             }),
                             '&:disabled': {
                                 backgroundColor: 'initial',
@@ -230,34 +237,22 @@ export const MetricsCatalogColumnName = forwardRef<HTMLDivElement, Props>(
                             <MetricIconPlaceholder width={12} height={12} />
                         )}
                     </ActionIcon>
-                    <Tooltip
-                        label={
-                            <Group spacing={4}>
-                                <MantineIcon
-                                    color="gray.2"
-                                    icon={IconTable}
-                                    stroke={2.0}
-                                />
-                                {row.original.tableName}
-                            </Group>
-                        }
-                        disabled={!row.original.tableName}
-                        variant="xs"
-                        openDelay={300}
-                    >
-                        <Highlight
-                            highlight={table.getState().globalFilter || ''}
-                            c="dark.9"
-                            fw={500}
-                            fz="sm"
-                            lh="150%"
-                            sx={{
-                                cursor: 'default',
-                            }}
+                    {projectUuid && (
+                        <MetricDetailPopover
+                            tableName={row.original.tableName}
+                            metricName={row.original.name}
+                            projectUuid={projectUuid}
                         >
-                            {row.original.label}
-                        </Highlight>
-                    </Tooltip>
+                            <Highlight
+                                highlight={table.getState().globalFilter || ''}
+                                fw={500}
+                                fz="sm"
+                                lh="150%"
+                            >
+                                {row.original.label}
+                            </Highlight>
+                        </MetricDetailPopover>
+                    )}
                 </Group>
                 <SharedEmojiPicker
                     emoji={row.original.icon}

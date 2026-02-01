@@ -1,7 +1,7 @@
 import * as JsonPatch from 'fast-json-patch';
 import { type ChangeBase } from '../types/changeset';
 import {
-    ForbiddenError,
+    ChangesetConflictError,
     NotImplementedError,
     ParameterError,
 } from '../types/errors';
@@ -133,9 +133,16 @@ export class ChangesetUtils {
                                         entityType
                                     ][change.entityName]
                                 ) {
-                                    throw new ForbiddenError(
+                                    const error = new ChangesetConflictError(
                                         `Entity "${change.entityName}" already exists in table "${tableName}" of explore`,
+                                        {
+                                            entityName: change.entityName,
+                                            entityTableName: tableName,
+                                        },
                                     );
+                                    // eslint-disable-next-line no-console
+                                    console.warn(error);
+                                    break;
                                 }
 
                                 const createPatch = JsonPatch.applyPatch(
@@ -156,6 +163,16 @@ export class ChangesetUtils {
                                     break;
                                 }
 
+                                const existingEntity =
+                                    patchedExplore.tables[tableName][
+                                        entityType
+                                    ][change.entityName];
+
+                                // Skip update if entity doesn't exist to avoid setting undefined values
+                                if (!existingEntity) {
+                                    break;
+                                }
+
                                 const updatePatch = JsonPatch.applyPatch(
                                     patchedExplore,
                                     [
@@ -163,11 +180,7 @@ export class ChangesetUtils {
                                             op: 'replace',
                                             path: `/tables/${tableName}/${entityType}/${change.entityName}`,
                                             value: this.applyChange(
-                                                patchedExplore.tables[
-                                                    tableName
-                                                ][entityType][
-                                                    change.entityName
-                                                ],
+                                                existingEntity,
                                                 change,
                                             ),
                                         },

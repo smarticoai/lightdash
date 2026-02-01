@@ -135,6 +135,7 @@ export const spaceEntry: SpaceTable['base'] = {
     search_vector: '',
     parent_space_uuid: null,
     path: 'space-name',
+    inherit_parent_permissions: true,
 };
 export const savedChartEntry: SavedChartTable['base'] = {
     saved_query_id: 0,
@@ -238,6 +239,7 @@ export const markdownTileEntry = {
     type: DashboardTileTypes.MARKDOWN,
     title: 'my markdown title',
     content: 'my markdown content',
+    hide_frame: false,
 };
 
 export const dashboardChartTileEntry: GetChartTileQuery = {
@@ -291,6 +293,7 @@ export const expectedDashboard: DashboardDAO = {
                 title: markdownTileEntry.title,
                 content: markdownTileEntry.content,
                 hideTitle: false,
+                hideFrame: false,
             },
             x: dashboardTileEntry.x_offset,
             y: dashboardTileEntry.y_offset,

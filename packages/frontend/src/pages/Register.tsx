@@ -4,19 +4,12 @@ import {
     type CreateUserArgs,
     type LightdashUser,
 } from '@lightdash/common';
-import {
-    Anchor,
-    Card,
-    Divider,
-    Image,
-    Stack,
-    Text,
-    Title,
-} from '@mantine/core';
+import { Anchor, Box, Card, Divider, Stack, Text, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, type FC } from 'react';
 import { useLocation } from 'react-router';
 import { lightdashApi } from '../api';
+import LightdashLogo from '../components/LightdashLogo/LightdashLogo';
 import PageSpinner from '../components/PageSpinner';
 import CreateUserForm from '../components/RegisterForms/CreateUserForm';
 import Page from '../components/common/Page/Page';
@@ -25,7 +18,6 @@ import useToaster from '../hooks/toaster/useToaster';
 import { useFlashMessages } from '../hooks/useFlashMessages';
 import useApp from '../providers/App/useApp';
 import useTracking from '../providers/Tracking/useTracking';
-import LightdashLogo from '../svgs/lightdash-black.svg';
 import { smrIsEmbeddedMode } from '../utils/smarticoUtils';
 
 const registerQuery = async (data: CreateUserArgs) =>
@@ -111,7 +103,7 @@ const Register: FC = () => {
                     my="md"
                     labelPosition="center"
                     label={
-                        <Text color="gray.5" size="sm" fw={500}>
+                        <Text color="ldGray.5" size="sm" fw={500}>
                             OR
                         </Text>
                     }
@@ -123,39 +115,35 @@ const Register: FC = () => {
     return (
         <Page title="Register" withCenteredContent withNavbar={false}>
             <Stack w={400} mt="4xl">
-                <Image
-                    src={LightdashLogo}
-                    alt="lightdash logo"
-                    width={130}
-                    mx="auto"
-                    my="lg"
-                />
+                <Box mx="auto" my="lg">
+                    <LightdashLogo />
+                </Box>
                 <Card p="xl" radius="xs" withBorder shadow="xs">
                     <Title order={3} ta="center" mb="md">
                         Sign up
                     </Title>
                     {logins}
                 </Card>
-                {!smrIsEmbeddedMode() &&
-                <Text color="gray.6" ta="center">
-                    By creating an account, you agree to
-                    <br />
-                    our{' '}
-                    <Anchor
-                        href="https://www.lightdash.com/privacy-policy"
-                        target="_blank"
-                    >
-                        Privacy Policy
-                    </Anchor>{' '}
-                    and our{' '}
-                    <Anchor
-                        href="https://www.lightdash.com/terms-of-service"
-                        target="_blank"
-                    >
-                        Terms of Service.
-                    </Anchor>
-                </Text>
-                }
+                {!smrIsEmbeddedMode() && (
+                    <Text color="ldGray.6" ta="center">
+                        By creating an account, you agree to
+                        <br />
+                        our{' '}
+                        <Anchor
+                            href="https://www.lightdash.com/privacy-policy"
+                            target="_blank"
+                        >
+                            Privacy Policy
+                        </Anchor>{' '}
+                        and our{' '}
+                        <Anchor
+                            href="https://www.lightdash.com/terms-of-service"
+                            target="_blank"
+                        >
+                            Terms of Service.
+                        </Anchor>
+                    </Text>
+                )}
             </Stack>
         </Page>
     );

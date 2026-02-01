@@ -1,10 +1,11 @@
-import { Image, Stack } from '@mantine/core';
+import { Box, Stack } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { type FC } from 'react';
 import { useParams } from 'react-router';
 import { useMount } from 'react-use';
+import { DocumentTitle } from '../components/common/DocumentTitle';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
-import LightdashLogo from '../svgs/lightdash-black.svg';
+import LightdashLogo from '../components/LightdashLogo/LightdashLogo';
 
 const AuthPopupResult: FC = () => {
     const { status } = useParams<{ status: string }>();
@@ -21,16 +22,12 @@ const AuthPopupResult: FC = () => {
 
     return (
         <>
-            <title>Authentication - Lightdash</title>
+            <DocumentTitle title="Authentication" />
 
             <Stack>
-                <Image
-                    src={LightdashLogo}
-                    alt="lightdash logo"
-                    width={130}
-                    mx="auto"
-                    my="lg"
-                />
+                <Box mx="auto" my="lg">
+                    <LightdashLogo />
+                </Box>
                 {status === 'success' ? (
                     <SuboptimalState
                         title={'Thank you for authenticating'}
@@ -60,16 +57,12 @@ export const SuccessAuthPopupResult: FC = () => {
 
     return (
         <>
-            <title>Authentication - Lightdash</title>
+            <DocumentTitle title="Authentication" />
 
             <Stack>
-                <Image
-                    src={LightdashLogo}
-                    alt="lightdash logo"
-                    width={130}
-                    mx="auto"
-                    my="lg"
-                />
+                <Box mx="auto" my="lg">
+                    <LightdashLogo />
+                </Box>
 
                 <SuboptimalState
                     title={'Thank you for authenticating'}

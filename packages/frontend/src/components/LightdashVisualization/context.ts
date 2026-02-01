@@ -2,24 +2,25 @@ import type {
     ApiErrorDetail,
     ChartConfig,
     ChartType,
+    EChartsSeries,
     ItemsMap,
     MetricQuery,
     ParametersValuesMap,
     StackType,
 } from '@lightdash/common';
-import type EChartsReact from 'echarts-for-react';
+import type { Map as LeafletMap } from 'leaflet';
 import { createContext, type RefObject } from 'react';
 import { type CartesianTypeOptions } from '../../hooks/cartesianChartConfig/useCartesianChartConfig';
-import { type EChartSeries } from '../../hooks/echarts/useEchartsCartesianConfig';
 import { type SeriesLike } from '../../hooks/useChartColorConfig/types';
 import { type InfiniteQueryResults } from '../../hooks/useQueryResults';
-import { type EchartSeriesClickEvent } from '../SimpleChart';
+import { type EChartsReact } from '../EChartsReactWrapper';
+import { type EchartsSeriesClickEvent } from '../SimpleChart';
 import { type VisualizationConfig } from './types';
 
 type VisualizationContext = {
     minimal: boolean;
-    isDashboard: boolean;
     chartRef: RefObject<EChartsReact | null>;
+    leafletMapRef: RefObject<LeafletMap | null>;
     pivotDimensions: string[] | undefined;
     resultsData:
         | (InfiniteQueryResults & {
@@ -36,8 +37,8 @@ type VisualizationContext = {
     setCartesianType(args: CartesianTypeOptions | undefined): void;
     // --
     onSeriesContextMenu?: (
-        e: EchartSeriesClickEvent,
-        series: EChartSeries[],
+        e: EchartsSeriesClickEvent,
+        series: EChartsSeries[],
     ) => void;
     setChartType: (value: ChartType) => void;
     setPivotDimensions: (value: string[] | undefined) => void;
@@ -48,6 +49,12 @@ type VisualizationContext = {
     chartConfig: ChartConfig;
     apiErrorDetail?: ApiErrorDetail | null;
     parameters?: ParametersValuesMap;
+    // Container dimensions for responsive visualizations
+    containerWidth?: number;
+    containerHeight?: number;
+    isDashboard?: boolean;
+    // Touch device detection for tooltip positioning
+    isTouchDevice: boolean;
 };
 
 const Context = createContext<VisualizationContext | undefined>(undefined);

@@ -2,14 +2,13 @@ import { subject } from '@casl/ability';
 import { type Dashboard, type Space } from '@lightdash/common';
 import {
     Button,
-    Group,
     LoadingOverlay,
-    MantineProvider,
     Stack,
     TextInput,
     Textarea,
     type ModalProps,
-} from '@mantine/core';
+} from '@mantine-8/core';
+import { MantineProvider, useMantineColorScheme } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconLayoutDashboard, IconPlus } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, type FC } from 'react';
@@ -43,6 +42,7 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
     ...modalProps
 }) => {
     const { user } = useApp();
+    const { colorScheme } = useMantineColorScheme();
     const { mutateAsync: createDashboard, isLoading: isCreatingDashboard } =
         useCreateMutation(projectUuid);
 
@@ -75,6 +75,7 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
         isSuccess,
     } = useSpaceSummaries(projectUuid, true, {
         staleTime: 0,
+        enabled: modalProps.opened, // Only fetch when modal is open
         select: (data) => {
             // Only get spaces that the user can create dashboards to
             return data.filter((space) =>
@@ -181,65 +182,49 @@ const DashboardCreateModal: FC<DashboardCreateModalProps> = ({
     if (isLoadingSpaces || !spaces) return null;
 
     return (
-        <MantineProvider inherit theme={{ colorScheme: 'light' }}>
+        <MantineProvider inherit theme={{ colorScheme }}>
             <MantineModal
                 {...modalProps}
                 title="Create Dashboard"
                 icon={IconLayoutDashboard}
                 onClose={() => handleClose()}
-                actions={
-                    <Group position="right" w="100%">
-                        {shouldShowNewSpaceButton && (
-                            <Button
-                                variant="subtle"
-                                size="xs"
-                                leftIcon={<MantineIcon icon={IconPlus} />}
-                                onClick={openCreateSpaceForm}
-                                mr="auto"
-                            >
-                                New Space
-                            </Button>
-                        )}
-
+                modalRootProps={{ keepMounted: false }}
+                leftActions={
+                    shouldShowNewSpaceButton ? (
                         <Button
-                            size="sm"
-                            variant="outline"
-                            color="gray"
-                            onClick={handleClose}
+                            variant="subtle"
+                            size="xs"
+                            leftSection={<MantineIcon icon={IconPlus} />}
+                            onClick={openCreateSpaceForm}
                         >
-                            Cancel
+                            New Space
                         </Button>
-
-                        {modalSteps.currentStep === ModalStep.InitialInfo ? (
-                            <Button
-                                size="sm"
-                                onClick={handleNextStep}
-                                disabled={!form.values.dashboardName}
-                                data-testid="DashboardCreateModal/Next"
-                            >
-                                Next
+                    ) : null
+                }
+                actions={
+                    modalSteps.currentStep === ModalStep.InitialInfo ? (
+                        <Button
+                            onClick={handleNextStep}
+                            disabled={!form.values.dashboardName}
+                            data-testid="DashboardCreateModal/Next"
+                        >
+                            Next
+                        </Button>
+                    ) : (
+                        <>
+                            <Button variant="default" onClick={handleBack}>
+                                Back
                             </Button>
-                        ) : (
-                            <>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={handleBack}
-                                >
-                                    Back
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    disabled={!isFormReadyToSave}
-                                    loading={isCreatingDashboard}
-                                    type="submit"
-                                    form="dashboard-create-modal"
-                                >
-                                    Create
-                                </Button>
-                            </>
-                        )}
-                    </Group>
+                            <Button
+                                disabled={!isFormReadyToSave}
+                                loading={isCreatingDashboard}
+                                type="submit"
+                                form="dashboard-create-modal"
+                            >
+                                Create
+                            </Button>
+                        </>
+                    )
                 }
             >
                 <LoadingOverlay visible={isLoading} />

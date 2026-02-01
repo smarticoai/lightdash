@@ -9,7 +9,7 @@ import {
     ForbiddenError,
     KnexPaginateArgs,
     KnexPaginatedData,
-    NotExistsError,
+    NotFoundError,
     SessionUser,
     SummaryContent,
 } from '@lightdash/common';
@@ -22,6 +22,7 @@ import {
 } from '../../models/ContentModel/ContentModelTypes';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { SpaceModel } from '../../models/SpaceModel';
+import { wrapSentryTransaction } from '../../utils';
 import { BaseService } from '../BaseService';
 import { DashboardService } from '../DashboardService/DashboardService';
 import { SavedChartService } from '../SavedChartsService/SavedChartService';
@@ -81,10 +82,17 @@ export class ContentService extends BaseService {
     ): Promise<KnexPaginatedData<SummaryContent[]>> {
         const { organizationUuid } = user;
         if (organizationUuid === undefined) {
-            throw new NotExistsError('Organization not found');
+            throw new NotFoundError('Organization not found');
         }
         const projectUuids = (
-            await this.projectModel.getAllByOrganizationUuid(organizationUuid)
+            await wrapSentryTransaction(
+                'ContentService.find.getAllByOrganizationUuid',
+                { organizationUuid },
+                async () =>
+                    this.projectModel.getAllByOrganizationUuid(
+                        organizationUuid,
+                    ),
+            )
         )
             .filter((project) =>
                 user.ability.can(
@@ -140,12 +148,11 @@ export class ContentService extends BaseService {
         targetSpaceUuid: string | null,
     ) {
         if (user.organizationUuid === undefined) {
-            throw new NotExistsError('Organization not found');
+            throw new NotFoundError('Organization not found');
         }
 
-        const { organizationUuid } = await this.projectModel.getSummary(
-            projectUuid,
-        );
+        const { organizationUuid } =
+            await this.projectModel.getSummary(projectUuid);
         if (
             user.ability.cannot(
                 'view',
@@ -231,12 +238,11 @@ export class ContentService extends BaseService {
         targetSpaceUuid: string | null,
     ) {
         if (user.organizationUuid === undefined) {
-            throw new NotExistsError('Organization not found');
+            throw new NotFoundError('Organization not found');
         }
 
-        const { organizationUuid } = await this.projectModel.getSummary(
-            projectUuid,
-        );
+        const { organizationUuid } =
+            await this.projectModel.getSummary(projectUuid);
         if (
             user.ability.cannot(
                 'view',

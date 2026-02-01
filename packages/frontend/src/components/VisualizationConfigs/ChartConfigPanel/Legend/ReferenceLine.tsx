@@ -339,7 +339,7 @@ export const ReferenceLine: FC<ReferenceLineProps> = ({
 
             <Accordion.Panel>
                 <Stack
-                    bg={'gray.0'}
+                    bg={'ldGray.0'}
                     spacing="xs"
                     sx={(theme) => ({
                         borderRadius: theme.radius.sm,
@@ -388,8 +388,8 @@ export const ReferenceLine: FC<ReferenceLineProps> = ({
                             value={label}
                             placeholder={
                                 useAverage && averageAvailable
-                                    ? value ?? 'Average'
-                                    : value ?? ''
+                                    ? (value ?? 'Average')
+                                    : (value ?? '')
                             }
                             onChange={(e) => {
                                 setLabel(e.target.value);

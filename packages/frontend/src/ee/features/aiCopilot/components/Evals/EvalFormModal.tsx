@@ -4,10 +4,12 @@ import type {
     ApiUpdateEvaluationRequest,
     CreateEvaluationPrompt,
 } from '@lightdash/common';
+import { isStringPrompt } from '@lightdash/common';
 import {
     ActionIcon,
     Box,
     Button,
+    Divider,
     Group,
     Stack,
     Text,
@@ -28,10 +30,14 @@ const evaluationFormSchema = z.object({
     prompts: z
         .array(
             z.union([
-                z.string().min(1, 'Question cannot be empty'),
+                z.object({
+                    prompt: z.string().min(1, 'Question cannot be empty'),
+                    expectedResponse: z.string().nullable(),
+                }),
                 z.object({
                     promptUuid: z.string(),
                     threadUuid: z.string(),
+                    expectedResponse: z.string().nullable(),
                 }),
             ]),
         )
@@ -75,20 +81,26 @@ export const EvalFormModal: FC<Props> = ({
                 prompts: evaluation.prompts?.map(
                     (p): CreateEvaluationPrompt => {
                         if (p.type === 'string') {
-                            return p.prompt;
+                            return {
+                                prompt: p.prompt,
+                                expectedResponse: p.expectedResponse,
+                            };
                         }
                         return {
                             promptUuid: p.promptUuid,
                             threadUuid: p.threadUuid,
+                            expectedResponse: p.expectedResponse,
                         };
                     },
-                ) || [''],
+                ) || [{ prompt: '', expectedResponse: '' }],
             };
         }
         return {
             title: '',
             description: '',
-            prompts: [''] as CreateEvaluationPrompt[],
+            prompts: [
+                { prompt: '', expectedResponse: '' },
+            ] as CreateEvaluationPrompt[],
         };
     }, [mode, evaluation]);
 
@@ -117,22 +129,36 @@ export const EvalFormModal: FC<Props> = ({
         event?: React.FormEvent,
     ) => {
         event?.preventDefault();
-        const filteredPrompts = values.prompts.filter((p) => {
-            if (typeof p === 'string') {
-                return p.trim().length > 0;
-            }
-            return p.promptUuid && p.threadUuid;
-        });
+        const filteredPrompts = values.prompts
+            .filter((p) => {
+                if (isStringPrompt(p)) {
+                    return p.prompt.trim().length > 0;
+                }
+                return p.promptUuid && p.threadUuid;
+            })
+            .map((p): CreateEvaluationPrompt => {
+                if (isStringPrompt(p)) {
+                    return {
+                        prompt: p.prompt,
+                        expectedResponse: p.expectedResponse?.trim() || null,
+                    };
+                }
+                return {
+                    promptUuid: p.promptUuid,
+                    threadUuid: p.threadUuid,
+                    expectedResponse: p.expectedResponse?.trim() || null,
+                };
+            });
         const submissionData = {
             title: values.title,
             description: values.description || undefined,
-            prompts: filteredPrompts as CreateEvaluationPrompt[],
+            prompts: filteredPrompts,
         };
         onSubmit(submissionData);
     };
 
     const addPrompt = () => {
-        form.insertListItem('prompts', '');
+        form.insertListItem('prompts', { prompt: '', expectedResponse: '' });
     };
 
     const removePrompt = (index: number) => {
@@ -152,34 +178,30 @@ export const EvalFormModal: FC<Props> = ({
     const submitButtonText =
         mode === 'create' ? 'Create Evaluation' : 'Save Changes';
 
-    const actions = (
-        <Group justify="space-between" w="100%">
-            {mode === 'edit' && onDelete ? (
-                <Button
-                    variant="outline"
-                    color="red"
-                    type="button"
-                    leftSection={<MantineIcon icon={IconTrash} />}
-                    onClick={handleDelete}
-                    disabled={isLoading || isDeleting}
-                    loading={isDeleting}
-                    form="eval-form"
-                >
-                    Delete
-                </Button>
-            ) : (
-                <div />
-            )}
-
-            <Group gap="sm">
-                <Button
-                    variant="outline"
-                    type="button"
-                    onClick={handleClose}
-                    disabled={isLoading || isDeleting}
-                >
-                    Cancel
-                </Button>
+    return (
+        <MantineModal
+            opened={isOpened}
+            onClose={handleClose}
+            icon={IconSettings}
+            title={modalTitle}
+            size="full"
+            cancelDisabled={isLoading || isDeleting}
+            leftActions={
+                mode === 'edit' && onDelete ? (
+                    <Button
+                        variant="outline"
+                        color="red"
+                        type="button"
+                        leftSection={<MantineIcon icon={IconTrash} />}
+                        onClick={handleDelete}
+                        disabled={isLoading || isDeleting}
+                        loading={isDeleting}
+                    >
+                        Delete
+                    </Button>
+                ) : null
+            }
+            actions={
                 <Button
                     type="submit"
                     loading={isLoading}
@@ -188,25 +210,12 @@ export const EvalFormModal: FC<Props> = ({
                 >
                     {submitButtonText}
                 </Button>
-            </Group>
-        </Group>
-    );
-
-    return (
-        <MantineModal
-            opened={isOpened}
-            onClose={handleClose}
-            icon={IconSettings}
-            title={modalTitle}
-            size="lg"
-            actions={actions}
-            modalRootProps={{
-                zIndex: 1000,
-            }}
+            }
         >
             <form id="eval-form" onSubmit={form.onSubmit(handleSubmit)}>
                 <Stack gap="md">
                     <TextInput
+                        variant="subtle"
                         label="Title"
                         placeholder="Enter evaluation title"
                         required
@@ -215,6 +224,7 @@ export const EvalFormModal: FC<Props> = ({
                     />
 
                     <Textarea
+                        variant="subtle"
                         label="Description"
                         placeholder="Enter evaluation description (optional)"
                         rows={3}
@@ -239,47 +249,78 @@ export const EvalFormModal: FC<Props> = ({
 
                         <Stack gap="sm">
                             {form.values.prompts.map((prompt, index) => (
-                                <Group key={index} gap="sm" align="flex-start">
-                                    <Text
-                                        size="sm"
-                                        fw={500}
-                                        c="dimmed"
-                                        miw={20}
-                                        mt={8}
+                                <>
+                                    <Group
+                                        key={index}
+                                        gap="sm"
+                                        align="flex-start"
                                     >
-                                        {index + 1}.
-                                    </Text>
-                                    <Box flex={1}>
-                                        {typeof prompt === 'string' ? (
-                                            <Textarea
-                                                placeholder="Enter your prompt"
-                                                rows={2}
-                                                {...form.getInputProps(
-                                                    `prompts.${index}`,
+                                        <Text
+                                            size="sm"
+                                            fw={500}
+                                            c="dimmed"
+                                            miw={20}
+                                        >
+                                            {index + 1}.
+                                        </Text>
+                                        <Stack flex={1}>
+                                            <Box flex={1}>
+                                                {isStringPrompt(prompt) ? (
+                                                    <Textarea
+                                                        variant="subtle"
+                                                        placeholder="Enter your prompt"
+                                                        rows={2}
+                                                        {...form.getInputProps(
+                                                            `prompts.${index}.prompt`,
+                                                        )}
+                                                        flex={1}
+                                                        resize="vertical"
+                                                        label="Prompt"
+                                                    />
+                                                ) : (
+                                                    <EvalPromptThreadReference
+                                                        projectUuid={
+                                                            projectUuid
+                                                        }
+                                                        agentUuid={agentUuid}
+                                                        threadUuid={
+                                                            prompt.threadUuid
+                                                        }
+                                                        promptUuid={
+                                                            prompt.promptUuid
+                                                        }
+                                                    />
                                                 )}
-                                                radius="md"
+                                            </Box>
+                                            <Textarea
+                                                flex={1}
+                                                rows={2}
+                                                label="Expected Response"
+                                                variant="subtle"
+                                                resize="vertical"
+                                                {...form.getInputProps(
+                                                    `prompts.${index}.expectedResponse`,
+                                                )}
                                             />
-                                        ) : (
-                                            <EvalPromptThreadReference
-                                                projectUuid={projectUuid}
-                                                agentUuid={agentUuid}
-                                                threadUuid={prompt.threadUuid}
-                                                promptUuid={prompt.promptUuid}
-                                            />
-                                        )}
-                                    </Box>
-                                    <ActionIcon
-                                        variant="subtle"
-                                        color="red"
-                                        disabled={
-                                            form.values.prompts.length <= 1
-                                        }
-                                        onClick={() => removePrompt(index)}
-                                        mt={4}
-                                    >
-                                        <MantineIcon icon={IconTrash} />
-                                    </ActionIcon>
-                                </Group>
+                                        </Stack>
+
+                                        <ActionIcon
+                                            variant="subtle"
+                                            color="red"
+                                            disabled={
+                                                form.values.prompts.length <= 1
+                                            }
+                                            onClick={() => removePrompt(index)}
+                                            mt={4}
+                                        >
+                                            <MantineIcon icon={IconTrash} />
+                                        </ActionIcon>
+                                    </Group>
+                                    <Divider
+                                        variant="dashed"
+                                        color="ldGray.3"
+                                    />
+                                </>
                             ))}
                         </Stack>
                     </Box>

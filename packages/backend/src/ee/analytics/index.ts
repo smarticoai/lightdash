@@ -69,6 +69,34 @@ export type CustomVizGenerated = BaseTrack & {
         timeOpenAi: number;
     };
 };
+
+export type GenerateChartMetadataGenerated = BaseTrack & {
+    event: 'ai.chart_metadata.generated';
+    properties: {
+        organizationId: string;
+        projectId: string;
+        chartType: string;
+    };
+};
+
+export type GenerateTableCalculationGenerated = BaseTrack & {
+    event: 'ai.table_calculation.generated';
+    properties: {
+        organizationId: string;
+        projectId: string;
+        userId: string;
+    };
+};
+
+export type GenerateTooltipGenerated = BaseTrack & {
+    event: 'ai.tooltip.generated';
+    properties: {
+        organizationId: string;
+        projectId: string;
+        userId: string;
+    };
+};
+
 // SCIM events
 
 export type ScimAccessTokenAuthenticationEvent = BaseTrack & {

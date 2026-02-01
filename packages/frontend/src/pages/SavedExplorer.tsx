@@ -1,5 +1,4 @@
-import { FeatureFlags } from '@lightdash/common';
-import { lazy, memo, Suspense, useEffect } from 'react';
+import { lazy, memo, Suspense, useEffect, useState } from 'react';
 import { Provider } from 'react-redux';
 import { useParams } from 'react-router';
 import ErrorState from '../components/common/ErrorState';
@@ -8,26 +7,27 @@ import SuboptimalState from '../components/common/SuboptimalState/SuboptimalStat
 import Explorer from '../components/Explorer';
 import LoadingSkeleton from '../components/Explorer/ExploreTree/LoadingSkeleton';
 import SavedChartsHeader from '../components/Explorer/SavedChartsHeader';
-import { explorerStore } from '../features/explorer/store';
+import {
+    buildInitialExplorerState,
+    createExplorerStore,
+    explorerActions,
+} from '../features/explorer/store';
 import useDashboardStorage from '../hooks/dashboard/useDashboardStorage';
 import { useExplorerQueryEffects } from '../hooks/useExplorerQueryEffects';
-import { useFeatureFlag } from '../hooks/useFeatureFlagEnabled';
 import { useSavedQuery } from '../hooks/useSavedQuery';
 import useApp from '../providers/App/useApp';
-import { defaultQueryExecution } from '../providers/Explorer/defaultState';
-import ExplorerProvider from '../providers/Explorer/ExplorerProvider';
 import { ExplorerSection } from '../providers/Explorer/types';
 
 const LazyExplorePanel = lazy(
     () => import('../components/Explorer/ExplorePanel'),
 );
 
-const SavedExplorerContent = memo<{ isEditMode: boolean }>(({ isEditMode }) => {
+const SavedExplorerContent = memo(() => {
+    const { mode } = useParams<{ mode?: string }>();
+    const isEditMode = mode === 'edit';
+
     // Run the query effects hook - orchestrates all query effects
     useExplorerQueryEffects();
-
-    // Pre-load the feature flag to avoid trying to render old side bar while it is fetching it in ExploreTree
-    useFeatureFlag(FeatureFlags.ExperimentalVirtualizedSideBar);
 
     return (
         <Page
@@ -74,64 +74,50 @@ const SavedExplorer = () => {
         }
     }, [data, setDashboardChartInfo]);
 
-    if (isInitialLoading) {
+    // Create store once with useState
+    const [store] = useState(() => createExplorerStore());
+
+    // Reset store state when data/mode changes
+    useEffect(() => {
+        if (!data) return;
+
+        const currentSavedChart = store.getState().explorer.savedChart;
+        const isNewChart = currentSavedChart?.uuid !== data.uuid;
+
+        if (isNewChart) {
+            const initialState = buildInitialExplorerState({
+                savedChart: data,
+                isEditMode,
+                expandedSections: [ExplorerSection.VISUALIZATION],
+                defaultLimit: health.data?.query.defaultLimit,
+            });
+            store.dispatch(explorerActions.reset(initialState));
+        } else {
+            store.dispatch(explorerActions.setSavedChart(data));
+        }
+    }, [data, store, isEditMode, health.data?.query.defaultLimit]);
+
+    useEffect(() => {
+        store.dispatch(explorerActions.setIsEditMode(isEditMode));
+    }, [isEditMode, store]);
+
+    // Check for error first
+    if (error) {
+        return <ErrorState error={error.error} />;
+    }
+
+    // Early return if no data yet
+    if (isInitialLoading || !data) {
         return (
             <div style={{ marginTop: '20px' }}>
                 <SuboptimalState title="Loading..." loading />
             </div>
         );
     }
-    if (error) {
-        return <ErrorState error={error.error} />;
-    }
 
     return (
-        <Provider store={explorerStore}>
-            <ExplorerProvider
-                isEditMode={isEditMode}
-                initialState={
-                    data
-                        ? {
-                              isEditMode,
-                              parameterReferences: Object.keys(
-                                  data.parameters ?? {},
-                              ),
-                              parameterDefinitions: {},
-                              expandedSections: [ExplorerSection.VISUALIZATION],
-                              unsavedChartVersion: {
-                                  tableName: data.tableName,
-                                  chartConfig: data.chartConfig,
-                                  metricQuery: data.metricQuery,
-                                  tableConfig: data.tableConfig,
-                                  pivotConfig: data.pivotConfig,
-                                  parameters: data.parameters,
-                              },
-                              modals: {
-                                  format: {
-                                      isOpen: false,
-                                  },
-                                  additionalMetric: {
-                                      isOpen: false,
-                                  },
-                                  customDimension: {
-                                      isOpen: false,
-                                  },
-                                  writeBack: {
-                                      isOpen: false,
-                                  },
-                                  itemDetail: {
-                                      isOpen: false,
-                                  },
-                              },
-                              queryExecution: defaultQueryExecution,
-                          }
-                        : undefined
-                }
-                savedChart={data}
-                defaultLimit={health.data?.query.defaultLimit}
-            >
-                <SavedExplorerContent isEditMode={isEditMode} />
-            </ExplorerProvider>
+        <Provider store={store} key={`saved-${savedQueryUuid}`}>
+            <SavedExplorerContent />
         </Provider>
     );
 };

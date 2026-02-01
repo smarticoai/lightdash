@@ -19,16 +19,23 @@ import {
     Switch,
     Tabs,
     Tooltip,
+    useMantineColorScheme,
 } from '@mantine/core';
-import { memo, type FC } from 'react';
+import { memo, useMemo, type FC } from 'react';
 import FieldSelect from '../../common/FieldSelect';
 import { isFunnelVisualizationConfig } from '../../LightdashVisualization/types';
 import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
 import { Config } from '../common/Config';
-import { themeOverride } from '../mantineTheme';
+import { getVizConfigThemeOverride } from '../mantineTheme';
 import { StepConfig } from './StepConfig';
 
 export const ConfigTabs: FC = memo(() => {
+    const { colorScheme } = useMantineColorScheme();
+    const themeOverride = useMemo(
+        () => getVizConfigThemeOverride(colorScheme),
+        [colorScheme],
+    );
+
     const { visualizationConfig } = useVisualizationContext();
 
     if (!isFunnelVisualizationConfig(visualizationConfig)) return null;
@@ -85,11 +92,11 @@ export const ConfigTabs: FC = memo(() => {
                                         data={[
                                             {
                                                 value: FunnelChartDataInput.COLUMN,
-                                                label: 'rows',
+                                                label: 'Rows',
                                             },
                                             {
                                                 value: FunnelChartDataInput.ROW,
-                                                label: 'columns',
+                                                label: 'Columns',
                                             },
                                         ]}
                                         onChange={(value) =>
@@ -229,18 +236,15 @@ export const ConfigTabs: FC = memo(() => {
                                     .map((step) => {
                                         return (
                                             <StepConfig
-                                                key={step.name}
+                                                key={step.id}
+                                                id={step.id}
                                                 defaultColor={
-                                                    colorDefaults[step.name]
+                                                    colorDefaults[step.id]
                                                 }
                                                 defaultLabel={step.name}
                                                 swatches={[]}
-                                                color={
-                                                    colorOverrides[step.name]
-                                                }
-                                                label={
-                                                    labelOverrides[step.name]
-                                                }
+                                                color={colorOverrides[step.id]}
+                                                label={labelOverrides[step.id]}
                                                 onColorChange={
                                                     onColorOverridesChange
                                                 }

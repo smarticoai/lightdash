@@ -1,11 +1,13 @@
 import {
     CreateDashboard,
     CreateDashboardChartTile,
+    CreateDashboardHeadingTile,
     CreateDashboardLoomTile,
     CreateDashboardMarkdownTile,
     CreateDashboardSqlChartTile,
     DashboardChartTile,
     DashboardDAO,
+    DashboardHeadingTile,
     DashboardLoomTile,
     DashboardMarkdownTile,
     DashboardSqlChartTile,
@@ -22,6 +24,7 @@ import {
     UpdateMultipleDashboards,
     assertUnreachable,
     isDashboardChartTileType,
+    isDashboardHeadingTileType,
     isDashboardLoomTileType,
     isDashboardMarkdownTileType,
     isDashboardSqlChartTile,
@@ -37,6 +40,7 @@ import {
     DashboardTabsTableName,
     DashboardTileChartTable,
     DashboardTileChartTableName,
+    DashboardTileHeadingsTableName,
     DashboardTileLoomsTableName,
     DashboardTileMarkdownsTableName,
     DashboardTileSqlChartTableName,
@@ -166,6 +170,7 @@ export class DashboardModel {
             | (CreateDashboardMarkdownTile & { uuid: string })
             | (CreateDashboardLoomTile & { uuid: string })
             | (CreateDashboardSqlChartTile & { uuid: string })
+            | (CreateDashboardHeadingTile & { uuid: string })
         > = version.tiles.map((tile) => ({
             ...tile,
             uuid: tile.uuid || uuidv4(),
@@ -248,6 +253,19 @@ export class DashboardModel {
                         properties.content,
                         HTML_SANITIZE_MARKDOWN_TILE_RULES,
                     ),
+                    hide_frame: properties.hideFrame ?? false,
+                })),
+            );
+        }
+
+        const headingTiles = tilesWithUuids.filter(isDashboardHeadingTileType);
+        if (headingTiles.length > 0) {
+            await trx(DashboardTileHeadingsTableName).insert(
+                headingTiles.map(({ uuid, properties }) => ({
+                    dashboard_version_id: versionId.dashboard_version_id,
+                    dashboard_tile_uuid: uuid,
+                    text: properties.text,
+                    show_divider: properties.showDivider ?? false,
                 })),
             );
         }
@@ -289,14 +307,14 @@ export class DashboardModel {
                             : undefined,
                     })) ?? [],
                 metrics:
-                    version.filters?.metrics.map((filter) => ({
+                    version.filters?.metrics?.map((filter) => ({
                         ...filter,
                         tileTargets: filter.tileTargets
                             ? pick(filter.tileTargets, tileUuids)
                             : undefined,
                     })) ?? [],
                 tableCalculations:
-                    version.filters?.tableCalculations.map((filter) => ({
+                    version.filters?.tableCalculations?.map((filter) => ({
                         ...filter,
                         tileTargets: filter.tileTargets
                             ? pick(filter.tileTargets, tileUuids)
@@ -471,9 +489,10 @@ export class DashboardModel {
                     validation_errors,
                     dashboard_version_id,
                 }) => {
-                    const tileTypes = await this.getDashboardVersionTileTypes(
-                        dashboard_version_id,
-                    );
+                    const tileTypes =
+                        await this.getDashboardVersionTileTypes(
+                            dashboard_version_id,
+                        );
 
                     return {
                         organizationUuid: organization_uuid,
@@ -767,7 +786,10 @@ export class DashboardModel {
                     saved_sql_uuid: string | null;
                     url: string | null;
                     content: string | null;
+                    text: string | null;
                     hide_title: boolean | null;
+                    hide_frame: boolean | null;
+                    show_divider: boolean | null;
                     title: string | null;
                     views_count: string;
                     first_viewed_at: Date | null;
@@ -820,6 +842,9 @@ export class DashboardModel {
                 ),
                 `${DashboardTileLoomsTableName}.url`,
                 `${DashboardTileMarkdownsTableName}.content`,
+                `${DashboardTileMarkdownsTableName}.hide_frame`,
+                `${DashboardTileHeadingsTableName}.text`,
+                `${DashboardTileHeadingsTableName}.show_divider`,
             )
             .leftJoin(DashboardTileChartTableName, function chartsJoin() {
                 this.on(
@@ -869,6 +894,18 @@ export class DashboardModel {
                     `${DashboardTilesTableName}.dashboard_version_id`,
                 );
             })
+            .leftJoin(DashboardTileHeadingsTableName, function headingsJoin() {
+                this.on(
+                    `${DashboardTileHeadingsTableName}.dashboard_tile_uuid`,
+                    '=',
+                    `${DashboardTilesTableName}.dashboard_tile_uuid`,
+                );
+                this.andOn(
+                    `${DashboardTileHeadingsTableName}.dashboard_version_id`,
+                    '=',
+                    `${DashboardTilesTableName}.dashboard_version_id`,
+                );
+            })
             .leftJoin(
                 SavedSqlTableName,
                 `${DashboardTileSqlChartTableName}.saved_sql_uuid`,
@@ -889,11 +926,9 @@ export class DashboardModel {
             ]);
 
         const tabs = await this.database(DashboardTabsTableName)
-            .select<DashboardTab[]>(
-                `${DashboardTabsTableName}.name`,
-                `${DashboardTabsTableName}.uuid`,
-                `${DashboardTabsTableName}.order`,
-            )
+            .select<
+                DashboardTab[]
+            >(`${DashboardTabsTableName}.name`, `${DashboardTabsTableName}.uuid`, `${DashboardTabsTableName}.order`)
             .where(
                 `${DashboardTabsTableName}.dashboard_version_id`,
                 dashboard.dashboard_version_id,
@@ -930,6 +965,9 @@ export class DashboardModel {
                     hide_title,
                     url,
                     content,
+                    hide_frame,
+                    show_divider,
+                    text,
                     belongs_to_dashboard,
                     name,
                     last_version_chart_kind,
@@ -974,6 +1012,7 @@ export class DashboardModel {
                                 properties: {
                                     ...commonProperties,
                                     content: content || '',
+                                    hideFrame: hide_frame ?? false,
                                 },
                             };
                         case DashboardTileTypes.LOOM:
@@ -994,6 +1033,15 @@ export class DashboardModel {
                                     chartName: name,
                                     savedSqlUuid: saved_sql_uuid,
                                     chartSlug: chart_slug,
+                                },
+                            };
+                        case DashboardTileTypes.HEADING:
+                            return <DashboardHeadingTile>{
+                                ...base,
+                                type: DashboardTileTypes.HEADING,
+                                properties: {
+                                    text: text || '',
+                                    showDivider: show_divider ?? false,
                                 },
                             };
                         default: {

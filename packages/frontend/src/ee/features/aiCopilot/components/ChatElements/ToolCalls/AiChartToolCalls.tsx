@@ -6,6 +6,7 @@ import {
 import { Paper, Stack, Text, Timeline } from '@mantine-8/core';
 import { type FC } from 'react';
 import MantineIcon from '../../../../../../components/common/MantineIcon';
+import ErrorBoundary from '../../../../../../features/errorBoundary/ErrorBoundary';
 import { ToolCallDescription } from './descriptions/ToolCallDescription';
 import { ImproveContextToolCall } from './ImproveContextToolCall';
 import { ToolCallContainer } from './ToolCallContainer';
@@ -46,7 +47,7 @@ export const AiChartToolCalls: FC<AiChartToolCallsProps> = ({
     const { title, icon } = getContainerMetadata(calculationToolCalls, type);
 
     return (
-        <>
+        <ErrorBoundary>
             {projectUuid && agentUuid && threadUuid && (
                 <ImproveContextToolCall
                     projectUuid={projectUuid}
@@ -86,7 +87,7 @@ export const AiChartToolCalls: FC<AiChartToolCallsProps> = ({
                                         radius="sm"
                                         bullet={
                                             <Paper
-                                                bg="white"
+                                                bg="ldGray.0"
                                                 p="two"
                                                 radius="sm"
                                                 shadow="subtle"
@@ -101,13 +102,18 @@ export const AiChartToolCalls: FC<AiChartToolCallsProps> = ({
                                         }
                                         mt="xs"
                                         title={
-                                            <Text fw={400} size="xs" c="gray.7">
+                                            <Text
+                                                fw={400}
+                                                size="xs"
+                                                c="ldGray.7"
+                                            >
                                                 {texts[toolName]}
                                             </Text>
                                         }
                                         lineVariant={'dashed'}
                                     >
                                         <ToolCallDescription
+                                            toolName={toolName}
                                             toolCall={toolCall}
                                         />
                                     </Timeline.Item>
@@ -117,6 +123,6 @@ export const AiChartToolCalls: FC<AiChartToolCallsProps> = ({
                     </Stack>
                 </ToolCallContainer>
             )}
-        </>
+        </ErrorBoundary>
     );
 };

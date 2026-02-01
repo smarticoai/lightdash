@@ -16,7 +16,6 @@ Usage tips:
 - It doesn't provide summaries for dashboards yet, so don't suggest this capability.`;
 
 export const toolFindContentArgsSchema = createToolSchema({
-    type: 'find_content',
     description: TOOL_FIND_CONTENT_DESCRIPTION,
 })
     .extend({
@@ -32,15 +31,13 @@ export const toolFindContentArgsSchema = createToolSchema({
     })
     .build();
 
-export type ToolFindContentArgs = z.infer<typeof toolFindContentArgsSchema>;
-
 export const toolFindContentArgsSchemaTransformed = toolFindContentArgsSchema;
-
-export type ToolFindContentArgsTransformed = ToolFindContentArgs;
 
 export const toolFindContentOutputSchema = z.object({
     result: z.string(),
     metadata: baseOutputMetadataSchema,
 });
 
+export type ToolFindContentArgs = z.infer<typeof toolFindContentArgsSchema>;
+export type ToolFindContentArgsTransformed = ToolFindContentArgs;
 export type ToolFindContentOutput = z.infer<typeof toolFindContentOutputSchema>;

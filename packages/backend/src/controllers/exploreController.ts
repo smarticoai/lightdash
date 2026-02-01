@@ -8,6 +8,7 @@ import {
     MetricQuery,
     PivotConfig,
     type ParametersValuesMap,
+    type PivotConfiguration,
 } from '@lightdash/common';
 import {
     Body,
@@ -36,6 +37,10 @@ import { BaseController } from './baseController';
 @Response<ApiErrorPayload>('default', 'Error')
 @Tags('Projects')
 export class ExploreController extends BaseController {
+    /**
+     * Set explores for a project
+     * @summary Set explores
+     */
     @Middlewares([
         allowApiKeyAuthentication,
         isAuthenticated,
@@ -60,6 +65,10 @@ export class ExploreController extends BaseController {
         };
     }
 
+    /**
+     * Get all explores for a project
+     * @summary List explores
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('/')
@@ -83,6 +92,10 @@ export class ExploreController extends BaseController {
         };
     }
 
+    /**
+     * Get a specific explore
+     * @summary Get explore
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('{exploreId}')
@@ -104,6 +117,10 @@ export class ExploreController extends BaseController {
         };
     }
 
+    /**
+     * Compile a metric query for an explore
+     * @summary Compile query
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Post('{exploreId}/compileQuery')
@@ -113,11 +130,15 @@ export class ExploreController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
         // ! TODO: we need to fix this type
-        @Body() body: MetricQuery & { parameters?: ParametersValuesMap },
+        @Body()
+        body: MetricQuery & {
+            parameters?: ParametersValuesMap;
+            pivotConfiguration?: PivotConfiguration;
+        },
     ): Promise<{ status: 'ok'; results: ApiCompiledQueryResults }> {
         this.setStatus(200);
 
-        const { parameterReferences, query } = await this.services
+        const { parameterReferences, query, pivotQuery } = await this.services
             .getProjectService()
             .compileQuery({
                 account: req.account!,
@@ -131,10 +152,15 @@ export class ExploreController extends BaseController {
             results: {
                 query,
                 parameterReferences,
+                ...(pivotQuery && { pivotQuery }),
             },
         };
     }
 
+    /**
+     * Download CSV from an explore query
+     * @summary Download CSV from explore
+     */
     @Middlewares([
         allowApiKeyAuthentication,
         isAuthenticated,
@@ -180,6 +206,7 @@ export class ExploreController extends BaseController {
             additionalMetrics: body.additionalMetrics,
             customDimensions: body.customDimensions,
             metricOverrides: body.metricOverrides,
+            dimensionOverrides: body.dimensionOverrides,
         };
 
         const { jobId } = await req.services

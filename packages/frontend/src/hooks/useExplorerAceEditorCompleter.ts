@@ -130,7 +130,12 @@ export const useTableCalculationAceEditorCompleter = (): {
                         ...customMetrics.filter(
                             (customMetric) => customMetric.table === table.name,
                         ),
-                    ].filter((field) => activeFields.has(getItemId(field))),
+                    ]
+                        .filter((field) => activeFields.has(getItemId(field)))
+                        .reduce<Metric[]>((acc2, metric) => {
+                            acc2.push(metric);
+                            return acc2;
+                        }, []),
                     'Metric',
                 ),
                 ...mapFieldsToCompletions(

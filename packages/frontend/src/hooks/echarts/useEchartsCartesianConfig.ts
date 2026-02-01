@@ -1,20 +1,40 @@
 import {
     applyCustomFormat,
+    applyRoundedCornersToStackData,
     assertUnreachable,
+    buildCartesianTooltipFormatter,
+    calculateDynamicBorderRadius,
     CartesianSeriesType,
-    createStack100TooltipFormatter,
+    CustomFormatType,
     DimensionType,
     evaluateConditionalFormatExpression,
     formatItemValue,
+    formatNumberValue,
     formatValueWithExpression,
     friendlyName,
     getCartesianAxisFormatterConfig as getAxisFormatterConfig,
+    getAxisLabelStyle,
+    getAxisLineStyle,
     getAxisName,
+    getAxisPointerStyle,
+    getAxisTickStyle,
+    getAxisTitleStyle,
+    getBarBorderRadius,
+    getBarChartGridStyle,
+    getBarStyle,
+    getBarTotalLabelStyle,
     getCustomFormatFromLegacy,
     getDateGroupLabel,
+    getFormattedValue,
+    getIndexFromEncode,
     getItemLabelWithoutTableName,
     getItemType,
+    getLineChartGridStyle,
+    getReadableColor,
+    getReferenceLineStyle,
     getResultValueArray,
+    getTooltipStyle,
+    getValueLabelStyle,
     hashFieldReference,
     hasValidFormatExpression,
     isCompleteLayout,
@@ -26,35 +46,40 @@ import {
     isMetric,
     isPivotReferenceWithValues,
     isTableCalculation,
+    LightdashParameters,
     MetricType,
     StackType,
     TableCalculationType,
     TimeFrames,
     transformToPercentageStacking,
+    valueFormatter,
     XAxisSortType,
     type CartesianChart,
     type CustomDimension,
+    type EChartsSeries,
     type Field,
     type Item,
     type ItemsMap,
+    type MarkLine,
+    type MarkLineData,
     type ParametersValuesMap,
     type PivotReference,
     type PivotValuesColumn,
     type ResultRow,
     type Series,
     type TableCalculation,
-    type TooltipParam,
+    type XAxis,
 } from '@lightdash/common';
+import { getLegendStyle } from '@lightdash/common/src/visualizations/helpers/styles/legendStyles';
 import { useMantineTheme } from '@mantine/core';
 import dayjs from 'dayjs';
-import DOMPurify from 'dompurify';
 import {
     type DefaultLabelFormatterCallbackParams,
-    type LineSeriesOption,
     type TooltipComponentFormatterCallback,
     type TooltipComponentOption,
 } from 'echarts';
 import groupBy from 'lodash/groupBy';
+import maxBy from 'lodash/maxBy';
 import toNumber from 'lodash/toNumber';
 import { useMemo } from 'react';
 import { isCartesianVisualizationConfig } from '../../components/LightdashVisualization/types';
@@ -62,6 +87,7 @@ import { useVisualizationContext } from '../../components/LightdashVisualization
 import {
     defaultAxisLabelGap,
     defaultGrid,
+    legendTopSpacing,
 } from '../../components/VisualizationConfigs/ChartConfigPanel/Grid/constants';
 import { EMPTY_X_AXIS } from '../cartesianChartConfig/useCartesianChartConfig';
 import {
@@ -89,9 +115,6 @@ type TooltipOption = Omit<TooltipComponentOption, 'formatter'> & {
           >;
 };
 
-export const isLineSeriesOption = (obj: unknown): obj is LineSeriesOption =>
-    typeof obj === 'object' && obj !== null && 'showSymbol' in obj;
-
 const getLabelFromField = (fields: ItemsMap, key: string | undefined) => {
     const item = key ? fields[key] : undefined;
 
@@ -104,10 +127,16 @@ const getLabelFromField = (fields: ItemsMap, key: string | undefined) => {
     }
 };
 
-export const getAxisTypeFromField = (
-    item?: ItemsMap[string],
-    hasReferenceLine?: boolean,
-): string => {
+const addPx = (pxValue: string, amount: number): string => {
+    const base = parseInt(pxValue.replace('px', ''), 10);
+    return `${base + amount}px`;
+};
+
+const isPxValue = (value: string): boolean => {
+    return value.endsWith('px');
+};
+
+export const getAxisTypeFromField = (item?: ItemsMap[string]): string => {
     if (item && isCustomBinDimension(item)) return 'category';
     if (item && isTableCalculation(item) && !item.type) return 'value';
     if (
@@ -140,16 +169,6 @@ export const getAxisTypeFromField = (
             case MetricType.DATE:
             case TableCalculationType.DATE:
             case TableCalculationType.TIMESTAMP:
-                // Use categorical axis for weeks only. Echarts handles the
-                // other time frames well with a time axis
-                // For week intervals, only switch to time axis if there's a reference line on this specific axis
-                if (
-                    'timeInterval' in item &&
-                    item.timeInterval === TimeFrames.WEEK &&
-                    !hasReferenceLine
-                ) {
-                    return 'category';
-                }
                 return 'time';
             default: {
                 return 'category';
@@ -159,6 +178,15 @@ export const getAxisTypeFromField = (
         return 'value';
     }
 };
+
+// Time intervals that benefit from category axis in bar charts.
+// These must match intervals handled by getCategoryDateAxisConfig.
+const TIME_INTERVALS_FOR_CATEGORY_AXIS: TimeFrames[] = [
+    TimeFrames.WEEK,
+    TimeFrames.MONTH,
+    TimeFrames.QUARTER,
+    TimeFrames.YEAR,
+];
 
 type GetAxisTypeArg = {
     validCartesianConfig: CartesianChart;
@@ -176,48 +204,44 @@ const getAxisType = ({
     rightAxisYId,
     leftAxisYId,
 }: GetAxisTypeArg) => {
-    const hasReferenceLine = (
-        axisId: string | undefined,
-        isXAxis: boolean = false,
-    ) => {
-        if (axisId === undefined) return false;
+    // Check if axis has reference lines (which need continuous 'time' axis for positioning)
+    const hasReferenceLine = (axisId?: string, isXAxis: boolean = false) => {
+        if (!axisId) return false;
         return validCartesianConfig.eChartsConfig.series?.some((serie) => {
-            if (
-                serie.markLine === undefined ||
-                serie.markLine.data === undefined ||
-                serie.markLine.data.length === 0
-            ) {
-                return false;
-            }
-
-            // Check if any reference line data affects the specified axis
-            return serie.markLine.data.some((markData) => {
-                if (isXAxis) {
-                    // X-axis reference lines are vertical lines (have xAxis value)
-                    return markData.xAxis !== undefined;
-                } else {
-                    // Y-axis reference lines are horizontal lines (have yAxis value)
-                    return markData.yAxis !== undefined;
-                }
-            });
+            if (!serie.markLine?.data?.length) return false;
+            return serie.markLine.data.some((markData) =>
+                isXAxis
+                    ? markData.xAxis !== undefined
+                    : markData.yAxis !== undefined,
+            );
         });
     };
-    const topAxisType = getAxisTypeFromField(
-        topAxisXId ? itemsMap[topAxisXId] : undefined,
-        hasReferenceLine(topAxisXId, true), // X-axis reference lines
-    );
+
+    // For coarse time intervals (week, month, quarter, year), use category axis to prevent
+    // ECharts from generating misleading intermediate ticks (e.g., daily ticks for weekly data).
+    // Exception: keep 'time' axis if there's a reference line (needs continuous positioning)
+    const inferAxisType = (axisId?: string, isXAxis: boolean = false) => {
+        const field = axisId ? itemsMap[axisId] : undefined;
+        const axisType = getAxisTypeFromField(field);
+        const shouldUseCategory =
+            axisType === 'time' &&
+            !hasReferenceLine(axisId, isXAxis) &&
+            field &&
+            'timeInterval' in field &&
+            TIME_INTERVALS_FOR_CATEGORY_AXIS.includes(
+                field.timeInterval as TimeFrames,
+            );
+        return shouldUseCategory ? 'category' : axisType;
+    };
+
+    const topAxisType = inferAxisType(topAxisXId, true);
     const bottomAxisType =
         bottomAxisXId === EMPTY_X_AXIS
             ? 'category'
-            : getAxisTypeFromField(
-                  bottomAxisXId ? itemsMap[bottomAxisXId] : undefined,
-                  hasReferenceLine(bottomAxisXId, true), // X-axis reference lines
-              );
+            : inferAxisType(bottomAxisXId, true);
+
     // horizontal bar chart needs the type 'category' in the left/right axis
-    const defaultRightAxisType = getAxisTypeFromField(
-        rightAxisYId ? itemsMap[rightAxisYId] : undefined,
-        hasReferenceLine(rightAxisYId, false), // Y-axis reference lines
-    );
+    const defaultRightAxisType = inferAxisType(rightAxisYId, false);
     const rightAxisType =
         validCartesianConfig.layout.flipAxes &&
         defaultRightAxisType === 'value' &&
@@ -228,10 +252,8 @@ const getAxisType = ({
         )?.type === CartesianSeriesType.BAR
             ? 'category'
             : defaultRightAxisType;
-    const defaultLeftAxisType = getAxisTypeFromField(
-        leftAxisYId ? itemsMap[leftAxisYId] : undefined,
-        hasReferenceLine(leftAxisYId, false), // Y-axis reference lines
-    );
+
+    const defaultLeftAxisType = inferAxisType(leftAxisYId, false);
     const leftAxisType =
         validCartesianConfig.layout.flipAxes &&
         defaultLeftAxisType === 'value' &&
@@ -297,48 +319,6 @@ export const getAxisDefaultMaxValue = ({
 const maybeGetAxisDefaultMaxValue = (allowFunction: boolean) =>
     allowFunction ? getAxisDefaultMaxValue : undefined;
 
-export type EChartSeries = {
-    type: Series['type'];
-    connectNulls: boolean;
-    stack?: string;
-    stackLabel?: {
-        show?: boolean;
-    };
-    name?: string;
-    color?: string;
-    yAxisIndex?: number;
-    xAxisIndex?: number;
-    encode?: {
-        x: string;
-        y: string;
-        tooltip: string[];
-        seriesName: string;
-    };
-    dimensions?: Array<{ name: string; displayName: string }>;
-    emphasis?: {
-        focus?: string;
-    };
-    areaStyle?: any;
-    pivotReference?: PivotReference;
-    label?: {
-        show?: boolean;
-        fontSize?: number;
-        fontWeight?: string;
-        position?: 'left' | 'top' | 'right' | 'bottom' | 'inside';
-        formatter?: (param: { data: Record<string, unknown> }) => string;
-    };
-    labelLayout?: {
-        hideOverlap?: boolean;
-    };
-    tooltip?: {
-        show?: boolean;
-        valueFormatter?: (value: unknown) => string;
-    };
-    data?: unknown[];
-    showSymbol?: boolean;
-    symbolSize?: number;
-};
-
 const convertPivotValuesColumnsIntoMap = (
     valuesColumns?: PivotValuesColumn[],
 ) => {
@@ -347,37 +327,6 @@ const convertPivotValuesColumnsIntoMap = (
         valuesColumns.map((column) => [column.pivotColumnName, column]),
     );
 };
-
-export const getFormattedValue = (
-    value: any,
-    key: string,
-    itemsMap: ItemsMap,
-    convertToUTC: boolean = true,
-    pivotValuesColumnsMap?: Record<string, PivotValuesColumn> | null,
-    parameters?: ParametersValuesMap,
-): string => {
-    const pivotValuesColumn = pivotValuesColumnsMap?.[key];
-    const item = itemsMap[pivotValuesColumn?.referenceField ?? key];
-    return formatItemValue(item, value, convertToUTC, parameters);
-};
-
-const valueFormatter =
-    (
-        yFieldId: string,
-        itemsMap: ItemsMap,
-        pivotValuesColumnsMap?: Record<string, PivotValuesColumn> | null,
-        parameters?: ParametersValuesMap,
-    ) =>
-    (rawValue: any) => {
-        return getFormattedValue(
-            rawValue,
-            yFieldId,
-            itemsMap,
-            undefined,
-            pivotValuesColumnsMap,
-            parameters,
-        );
-    };
 
 const removeEmptyProperties = <T = Record<any, any>>(obj: T | undefined) => {
     if (!obj) return undefined;
@@ -393,17 +342,24 @@ const removeEmptyProperties = <T = Record<any, any>>(obj: T | undefined) => {
 const mergeLegendSettings = <T = Record<any, any>>(
     legendConfig: T | undefined,
     legendsSelected: LegendValues,
-    series: EChartSeries[],
+    series: EChartsSeries[],
 ) => {
     const normalizedConfig = removeEmptyProperties(legendConfig);
     if (!normalizedConfig) {
         return {
             show: series.length > 1,
             type: 'scroll',
+            orient: 'horizontal',
+            top: 0,
             selected: legendsSelected,
         };
     }
     return {
+        orient: 'horizontal',
+        // After echarts v6, the new default legend is positioned at bottom. We need to keep old behavior in placeholders
+        // so we only define top 0 if there is no 'bottom' configuration.
+        // spreading `normalizedConfig` will overwrite top value if needed
+        top: 'bottom' in normalizedConfig ? undefined : 0,
         ...normalizedConfig,
         selected: legendsSelected,
     };
@@ -425,16 +381,40 @@ const maxDate = (a: number | string, b: string) => {
     return dateA > dateB ? a : b;
 };
 
+/**
+ * Get actual column names for a field ID from pivotDetails.
+ * For backend pivoting, rows have pivot column names (e.g., "payments_total_revenue_any_bank_transfer")
+ * instead of field IDs (e.g., "payments_total_revenue").
+ * This helper maps field IDs to their actual column names in the pivoted data.
+ */
+const getColumnNamesForField = (
+    fieldId: string,
+    pivotDetails: InfiniteQueryResults['pivotDetails'],
+): string[] => {
+    if (!pivotDetails?.valuesColumns) return [fieldId];
+
+    const columnNames = pivotDetails.valuesColumns
+        .filter((col) => col.referenceField === fieldId)
+        .map((col) => col.pivotColumnName);
+
+    return columnNames.length > 0 ? columnNames : [fieldId];
+};
+
 export const getMinAndMaxValues = (
     series: string[] | undefined,
     rows: ResultRow[],
+    pivotDetails?: InfiniteQueryResults['pivotDetails'],
 ): (string | number)[] => {
     if (!series || series.length === 0) return [];
 
     let rawValues = [];
     for (const s of series) {
-        for (const row of rows) {
-            rawValues.push(row[s]?.value.raw);
+        // Get the actual column names to look up (handles backend pivoting)
+        const columnNames = getColumnNamesForField(s, pivotDetails);
+        for (const columnName of columnNames) {
+            for (const row of rows) {
+                rawValues.push(row[columnName]?.value.raw);
+            }
         }
     }
 
@@ -484,6 +464,7 @@ const getMinAndMaxReferenceLines = (
     rows: ResultRow[] | undefined,
     series: Series[] | undefined,
     items: ItemsMap,
+    pivotDetails?: InfiniteQueryResults['pivotDetails'],
 ) => {
     if (rows === undefined || series === undefined) return {};
     // Skip method if there are no reference lines
@@ -596,14 +577,17 @@ const getMinAndMaxReferenceLines = (
     const [minValueLeftY, maxValueLeftY] = getMinAndMaxValues(
         leftAxisFieldYIds,
         rows,
+        pivotDetails,
     );
     const [minValueRightY, maxValueRightY] = getMinAndMaxValues(
         rightAxisYFieldIds,
         rows,
+        pivotDetails,
     );
     const [minValueX, maxValueX] = getMinAndMaxValues(
         bottomAxisXFieldIds,
         rows,
+        pivotDetails,
     );
 
     const [minReferenceLineX, maxReferenceLineX] =
@@ -646,6 +630,7 @@ type GetPivotSeriesArg = {
     pivotReference: Required<PivotReference>;
     pivotValuesColumnsMap?: Record<string, PivotValuesColumn> | null;
     parameters?: ParametersValuesMap;
+    isStack100?: boolean;
 };
 
 const seriesValueFormatter = (
@@ -656,7 +641,8 @@ const seriesValueFormatter = (
     if (hasValidFormatExpression(item)) {
         // Check if format uses parameter placeholders
         const hasParameterPlaceholders =
-            item.format.includes('${ld.parameters');
+            item.format.includes(`\${${LightdashParameters.PREFIX_SHORT}`) ||
+            item.format.includes(`\${${LightdashParameters.PREFIX}`);
 
         // Evaluate conditional expressions if parameters are provided
         const formatExpression =
@@ -678,9 +664,119 @@ const seriesValueFormatter = (
             round: item.round,
             compact: item.compact,
         });
-        const formatOptions = isMetric(item) ? item.formatOptions : undefined;
+        // Check for formatOptions from both metrics and dimension overrides
+        // Dimension overrides add formatOptions to the item via the itemsMap
+        const formatOptions =
+            isMetric(item) || isDimension(item)
+                ? item.formatOptions
+                : undefined;
         return applyCustomFormat(value, formatOptions || defaultFormatOptions);
     }
+};
+
+/**
+ * Format value for 100% stacked charts
+ * For stack100, values are already percentages (0-100) so we just append %
+ */
+const formatStack100Value = (value: unknown): string => {
+    return typeof value === 'number'
+        ? `${formatNumberValue(value, {
+              type: CustomFormatType.NUMBER,
+              round: 1,
+          })}%`
+        : `${value}%`;
+};
+
+/**
+ * Get the metric from the param
+ * @param param - The param
+ * @param series - The series
+ * @param yFieldHash - The y field hash
+ * @param isHorizontal - Whether the chart is horizontal
+ * @returns The metric
+ */
+const getMetricFromParam = (
+    param: any,
+    series: Series,
+    yFieldHash: string,
+    isHorizontal: boolean,
+) => {
+    const v = param?.value;
+    // dataset mode (object): use column key directly
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+        return v[yFieldHash];
+    }
+
+    // tuple mode (array) = when stacked bar charts are used
+    if (Array.isArray(v)) {
+        const enc = param?.encode ?? series.encode;
+        const dimNames: string[] | undefined = param?.dimensionNames;
+
+        // Prefer the actual index of the metric column name
+        let metricIdx = dimNames ? dimNames.indexOf(yFieldHash) : -1;
+        if (metricIdx < 0) {
+            // Fallback: use x for horizontal, y for vertical
+            const xIdx = getIndexFromEncode(enc, dimNames, 'x');
+            const yIdx = getIndexFromEncode(enc, dimNames, 'y');
+            metricIdx = (isHorizontal ? xIdx : yIdx) ?? -1;
+        }
+        return metricIdx >= 0 ? v[metricIdx] : undefined;
+    }
+
+    // primitive
+    return v;
+};
+
+const isPrimaryYAxis = (series: Series) => {
+    return (series.yAxisIndex ?? 0) === 0;
+};
+
+/**
+ * Create a labelLayout configuration for stacked bar charts.
+ * When showOverlappingLabels is enabled, uses smaller font for labels that don't fit
+ * in small segments to keep them visible.
+ *
+ * @param isStacked - Whether the series is part of a stack
+ * @param flipAxes - Whether the chart is horizontal (flipped)
+ * @param showOverlappingLabels - Force display labels even when they don't fit
+ */
+const createStackedBarLabelLayout = ({
+    isStacked,
+    flipAxes,
+    showOverlappingLabels,
+}: {
+    isStacked: boolean;
+    flipAxes: boolean;
+    showOverlappingLabels: boolean;
+}):
+    | { hideOverlap: boolean }
+    | ((params: {
+          rect: { x: number; y: number; width: number; height: number };
+          labelRect: { x: number; y: number; width: number; height: number };
+      }) => { fontSize?: number } | undefined) => {
+    // Only apply small-font treatment when showOverlappingLabels is enabled for stacked bars
+    if (!isStacked || !showOverlappingLabels) {
+        return { hideOverlap: true };
+    }
+
+    // Return callback function for dynamic font sizing
+    return (params) => {
+        const { rect, labelRect } = params;
+
+        // Check if label fits inside the segment at normal size
+        const segmentSize = flipAxes ? rect.width : rect.height;
+        const labelSize = flipAxes ? labelRect.width : labelRect.height;
+        const padding = 4;
+
+        const labelFits = labelSize + padding <= segmentSize;
+
+        if (labelFits) {
+            return undefined; // Keep default size
+        }
+
+        // Label doesn't fit - use smaller font
+        return { fontSize: 8 };
+    };
 };
 
 const getPivotSeries = ({
@@ -693,7 +789,8 @@ const getPivotSeries = ({
     cartesianChart,
     pivotValuesColumnsMap,
     parameters,
-}: GetPivotSeriesArg): EChartSeries => {
+    isStack100,
+}: GetPivotSeriesArg): EChartsSeries => {
     const pivotLabel = pivotReference.pivotValues.reduce(
         (acc, { field, value }) => {
             const formattedValue = getFormattedValue(
@@ -753,22 +850,38 @@ const getPivotSeries = ({
         ...(series.label?.show && {
             label: {
                 ...series.label,
+                ...(series.color &&
+                    getValueLabelStyle(
+                        series.label.position,
+                        series.type,
+                        series.color,
+                    )),
                 ...(itemsMap &&
                     itemsMap[series.encode.yRef.field] && {
-                        formatter: (value: any) => {
+                        formatter: (param: any) => {
                             const field = itemsMap[series.encode.yRef.field];
-                            const rawValue = value?.value?.[yFieldHash];
-                            return seriesValueFormatter(
-                                field,
-                                rawValue,
-                                parameters,
+                            const raw = getMetricFromParam(
+                                param,
+                                series,
+                                yFieldHash,
+                                !!flipAxes,
                             );
+
+                            // For 100% stacked bar charts on the primary axis, values are already percentages (0-100)
+                            // Only apply stack100 formatting if this series is on yAxisIndex 0
+                            if (isStack100 && isPrimaryYAxis(series)) {
+                                return formatStack100Value(raw);
+                            }
+
+                            return seriesValueFormatter(field, raw, parameters);
                         },
                     }),
             },
-            labelLayout: {
-                hideOverlap: true,
-            },
+            labelLayout: createStackedBarLabelLayout({
+                isStacked: !!series.stack,
+                flipAxes: !!flipAxes,
+                showOverlappingLabels: !!series.label?.showOverlappingLabels,
+            }),
         }),
     };
 };
@@ -798,6 +911,45 @@ const getSimpleSeriesSymbolConfig = (series: Series) => {
     }
 };
 
+const applyReadableColorsToMarkLine = (
+    markLine: MarkLine,
+    baseColor?: string,
+    backgroundColor?: string,
+) => {
+    const baseStyle = getReferenceLineStyle(baseColor, backgroundColor);
+
+    // Apply readable color adjustment to each reference line
+    const adjustedData = markLine.data?.map((item: any) => {
+        if (!item.lineStyle?.color || !backgroundColor) {
+            return item;
+        }
+
+        const adjustedColor = getReadableColor(
+            item.lineStyle.color,
+            backgroundColor,
+        );
+        const itemStyle = getReferenceLineStyle(adjustedColor, backgroundColor);
+
+        return {
+            ...item,
+            lineStyle: {
+                ...item.lineStyle,
+                color: adjustedColor,
+            },
+            label: {
+                ...itemStyle.label,
+                position: item.label?.position,
+            },
+        };
+    });
+
+    return {
+        ...markLine,
+        ...baseStyle,
+        data: adjustedData,
+    };
+};
+
 type GetSimpleSeriesArg = {
     series: Series;
     itemsMap: ItemsMap;
@@ -806,6 +958,8 @@ type GetSimpleSeriesArg = {
     xFieldHash: string;
     pivotValuesColumnsMap?: Record<string, PivotValuesColumn> | null;
     parameters?: ParametersValuesMap;
+    isStack100?: boolean;
+    backgroundColor?: string;
 };
 
 const getSimpleSeries = ({
@@ -816,6 +970,8 @@ const getSimpleSeries = ({
     itemsMap,
     pivotValuesColumnsMap,
     parameters,
+    isStack100,
+    backgroundColor,
 }: GetSimpleSeriesArg) => ({
     ...series,
     xAxisIndex: flipAxes ? series.yAxisIndex : undefined,
@@ -853,11 +1009,30 @@ const getSimpleSeries = ({
     ...(series.label?.show && {
         label: {
             ...series.label,
+            // Apply value label styling for all series types
+            ...getValueLabelStyle(
+                series.label.position,
+                series.type,
+                series.color,
+            ),
             ...(itemsMap &&
                 itemsMap[yFieldHash] && {
-                    formatter: (value: any) => {
+                    formatter: (param: any) => {
                         const field = itemsMap[yFieldHash];
-                        const rawValue = value?.value?.[yFieldHash];
+
+                        const rawValue = getMetricFromParam(
+                            param,
+                            series,
+                            yFieldHash,
+                            !!flipAxes,
+                        );
+
+                        // For 100% stacked charts on the primary axis, values are already percentages (0-100)
+                        // Only apply stack100 formatting if this series is on yAxisIndex 0
+                        if (isStack100 && (series.yAxisIndex ?? 0) === 0) {
+                            return formatStack100Value(rawValue);
+                        }
+
                         return seriesValueFormatter(
                             field,
                             rawValue,
@@ -866,9 +1041,18 @@ const getSimpleSeries = ({
                     },
                 }),
         },
-        labelLayout: {
-            hideOverlap: true,
-        },
+        labelLayout: createStackedBarLabelLayout({
+            isStacked: !!series.stack,
+            flipAxes: !!flipAxes,
+            showOverlappingLabels: !!series.label?.showOverlappingLabels,
+        }),
+    }),
+    ...(series.markLine && {
+        markLine: applyReadableColorsToMarkLine(
+            series.markLine,
+            series.color,
+            backgroundColor,
+        ),
     }),
 });
 
@@ -877,9 +1061,16 @@ const getEchartsSeriesFromPivotedData = (
     itemsMap: ItemsMap,
     cartesianChart: CartesianChart,
     rowKeyMap: RowKeyMap,
-    pivotValuesColumnsMap?: Record<string, PivotValuesColumn> | null,
+    pivotValuesColumnsMap?:
+        | Record<string, PivotValuesColumn>
+        | null
+        | undefined,
     parameters?: ParametersValuesMap,
-): EChartSeries[] => {
+    backgroundColor?: string,
+): EChartsSeries[] => {
+    // Check if 100% stacking is enabled
+    const isStack100 = cartesianChart.layout.stack === StackType.PERCENT;
+
     // Use pivotDetails to find the correct column name for each series
     const findMatchingColumnName = (series: Series): string | undefined => {
         if (isPivotReferenceWithValues(series.encode.yRef)) {
@@ -907,27 +1098,11 @@ const getEchartsSeriesFromPivotedData = (
 
     const allSeries = cartesianChart.eChartsConfig.series || [];
 
+    // Don't sort here - series order is already set correctly by useCartesianChartConfig
+    // which respects the user's columnOrder preference
     const resultSeries = allSeries
         .filter((s) => !s.hidden)
-        .sort((a, b) => {
-            const aColumnName = findMatchingColumnName(a);
-            const bColumnName = findMatchingColumnName(b);
-
-            if (aColumnName && bColumnName && pivotValuesColumnsMap) {
-                const aColumn = pivotValuesColumnsMap[aColumnName];
-                const bColumn = pivotValuesColumnsMap[bColumnName];
-
-                if (
-                    aColumn?.columnIndex !== undefined &&
-                    bColumn?.columnIndex !== undefined
-                ) {
-                    return aColumn.columnIndex - bColumn.columnIndex;
-                }
-            }
-
-            return 0;
-        })
-        .map<EChartSeries>((series) => {
+        .map<EChartsSeries>((series) => {
             const { flipAxes } = cartesianChart.layout;
             const xFieldHash = hashFieldReference(series.encode.xRef);
 
@@ -956,6 +1131,7 @@ const getEchartsSeriesFromPivotedData = (
                     yFieldHash,
                     pivotValuesColumnsMap,
                     parameters,
+                    isStack100,
                 });
             }
 
@@ -968,6 +1144,8 @@ const getEchartsSeriesFromPivotedData = (
                 xFieldHash,
                 pivotValuesColumnsMap,
                 parameters,
+                isStack100,
+                backgroundColor,
             });
         });
 
@@ -979,10 +1157,13 @@ const getEchartsSeries = (
     cartesianChart: CartesianChart,
     pivotKeys: string[] | undefined,
     parameters?: ParametersValuesMap,
-): EChartSeries[] => {
+): EChartsSeries[] => {
+    // Check if 100% stacking is enabled
+    const isStack100 = cartesianChart.layout.stack === StackType.PERCENT;
+
     return (cartesianChart.eChartsConfig.series || [])
         .filter((s) => !s.hidden)
-        .map<EChartSeries>((series) => {
+        .map<EChartsSeries>((series) => {
             const { flipAxes } = cartesianChart.layout;
             const xFieldHash = hashFieldReference(series.encode.xRef);
             const yFieldHash = hashFieldReference(series.encode.yRef);
@@ -996,6 +1177,7 @@ const getEchartsSeries = (
                     xFieldHash,
                     yFieldHash,
                     parameters,
+                    isStack100,
                 });
             }
 
@@ -1006,6 +1188,7 @@ const getEchartsSeries = (
                 yFieldHash,
                 xFieldHash,
                 parameters,
+                isStack100,
             });
         });
 };
@@ -1030,6 +1213,9 @@ const calculateWidthText = (text: string | undefined): number => {
     return width;
 };
 
+const findLongest = (strings: string[]): string | undefined =>
+    strings.length > 0 ? maxBy(strings, 'length') : undefined;
+
 const getLongestLabel = ({
     rows = [],
     axisId,
@@ -1037,44 +1223,125 @@ const getLongestLabel = ({
     rows?: ResultRow[];
     axisId?: string;
 }): string | undefined => {
-    return (
-        axisId &&
-        rows
-            .map((row) => row[axisId]?.value.formatted)
-            .reduce<string>(
-                (acc, p) => (p && acc.length > p.length ? acc : p),
-                '',
-            )
-    );
+    if (!axisId || rows.length === 0) return undefined;
+
+    const directValues = rows
+        .map((row) => row[axisId]?.value.formatted)
+        .filter((v): v is string => v !== undefined);
+
+    if (directValues.length > 0) return findLongest(directValues);
+
+    // If no direct match, check if this is a hashed field reference with pivot values
+    // In that case, we need to find all row keys that could be pivot variants of this field
+    const baseField = axisId.split('.')[0];
+
+    const allValues: string[] = [];
+    rows.forEach((row) => {
+        Object.keys(row).forEach((key) => {
+            if (key.startsWith(baseField)) {
+                const formatted = row[key]?.value.formatted;
+                if (formatted) {
+                    allValues.push(formatted);
+                }
+            }
+        });
+    });
+
+    return findLongest(allValues);
 };
 
-const getWeekAxisConfig = (
+/**
+ * Generate continuous date range config for category axes with date intervals.
+ * This ensures bar charts only show data points that exist in the dataset,
+ * preventing ECharts from auto-extending the axis range.
+ */
+export const getCategoryDateAxisConfig = (
     axisId?: string,
     axisField?: Field | TableCalculation | CustomDimension,
     rows?: ResultRow[],
     axisType?: string,
+    series?: Series[],
 ) => {
-    if (!axisId || !rows || !axisField) return {};
-    if (
-        'timeInterval' in axisField &&
-        axisField.timeInterval === TimeFrames.WEEK &&
-        axisType === 'category' // Only apply week config for category axes
-    ) {
-        const [minX, maxX] = getMinAndMaxValues([axisId], rows || []);
-        const continuousWeekRange = [];
+    if (!axisId || !rows || !axisField || axisType !== 'category') return {};
+    if (!('timeInterval' in axisField)) return {};
+
+    const { timeInterval } = axisField;
+    const [minX, maxX] = getMinAndMaxValues([axisId], rows || []);
+
+    // Guard against invalid dates to prevent infinite loops
+    const minDateValue = dayjs.utc(minX);
+    const maxDateValue = dayjs.utc(maxX);
+    if (!minDateValue.isValid() || !maxDateValue.isValid()) return {};
+
+    // Bar charts need boundary gap for proper bar spacing, but line/area charts
+    // look better extending to the edges
+    const hasBarSeries = series?.some(
+        (s) => s.type === CartesianSeriesType.BAR,
+    );
+    const boundaryGap = hasBarSeries;
+
+    if (timeInterval === TimeFrames.WEEK) {
+        const continuousRange: string[] = [];
         let nextDate = dayjs.utc(minX);
         while (nextDate.isBefore(dayjs(maxX))) {
-            continuousWeekRange.push(nextDate.format());
+            continuousRange.push(nextDate.format());
             nextDate = nextDate.add(1, 'week');
         }
-        continuousWeekRange.push(dayjs.utc(maxX).format());
+        continuousRange.push(dayjs.utc(maxX).format());
         return {
-            data: continuousWeekRange,
+            data: continuousRange,
             axisTick: { alignWithLabel: true, interval: 0 },
+            boundaryGap,
         };
-    } else {
-        return {};
     }
+
+    if (timeInterval === TimeFrames.YEAR) {
+        const continuousRange: string[] = [];
+        let nextDate = dayjs.utc(minX).startOf('year');
+        const endDate = dayjs.utc(maxX).startOf('year');
+        while (!nextDate.isAfter(endDate)) {
+            continuousRange.push(nextDate.format());
+            nextDate = nextDate.add(1, 'year');
+        }
+        return {
+            data: continuousRange,
+            axisTick: { alignWithLabel: true, interval: 0 },
+            boundaryGap,
+        };
+    }
+
+    if (timeInterval === TimeFrames.QUARTER) {
+        const continuousRange: string[] = [];
+        let nextDate = dayjs.utc(minX).startOf('quarter');
+        const endDate = dayjs.utc(maxX).startOf('quarter');
+        while (!nextDate.isAfter(endDate)) {
+            continuousRange.push(nextDate.format());
+            // dayjs requires quarterOfYear plugin for .add(1, 'quarter')
+            nextDate = nextDate.add(3, 'months');
+        }
+        return {
+            data: continuousRange,
+            axisTick: { alignWithLabel: true, interval: 0 },
+            boundaryGap,
+        };
+    }
+
+    if (timeInterval === TimeFrames.MONTH) {
+        const continuousRange: string[] = [];
+        let nextDate = dayjs.utc(minX).startOf('month');
+        const endDate = dayjs.utc(maxX).startOf('month');
+        while (!nextDate.isAfter(endDate)) {
+            continuousRange.push(nextDate.format());
+            nextDate = nextDate.add(1, 'month');
+        }
+        return {
+            data: continuousRange,
+            axisTick: { alignWithLabel: true, interval: 0 },
+            boundaryGap,
+        };
+    }
+
+    return {};
 };
 
 const getEchartAxes = ({
@@ -1087,7 +1354,7 @@ const getEchartAxes = ({
 }: {
     validCartesianConfig: CartesianChart;
     itemsMap: ItemsMap;
-    series: EChartSeries[];
+    series: EChartsSeries[];
     resultsData: InfiniteQueryResults | undefined;
     minsAndMaxes: ReturnType<typeof getResultValueArray>['minsAndMaxes'];
     parameters?: ParametersValuesMap;
@@ -1148,7 +1415,14 @@ const getEchartAxes = ({
             ? validCartesianConfig.layout.showYAxis
             : true;
 
+    const hasBarChart = series.some((s) => s.type === CartesianSeriesType.BAR);
+    const gridStyle = hasBarChart
+        ? getBarChartGridStyle()
+        : getLineChartGridStyle();
+
     // There is no Top x axis when no flipped
+    // Use base field ID for itemsMap lookups (axis formatting).
+    // For min/max value lookups, pivotDetails maps these to actual column names.
     const topAxisXFieldIds = validCartesianConfig.layout.flipAxes
         ? validCartesianConfig.eChartsConfig.series
               ?.filter((serie) => serie.yAxisIndex === 1)
@@ -1236,30 +1510,120 @@ const getEchartAxes = ({
         resultsData?.rows,
         validCartesianConfig.eChartsConfig.series,
         itemsMap,
+        resultsData?.pivotDetails,
     );
-    const bottomAxisExtraConfig = getWeekAxisConfig(
+    const eChartsSeries = validCartesianConfig.eChartsConfig.series;
+    const bottomAxisExtraConfig = getCategoryDateAxisConfig(
         bottomAxisXId,
         bottomAxisXField,
         resultsData?.rows,
         bottomAxisType,
+        eChartsSeries,
     );
-    const topAxisExtraConfig = getWeekAxisConfig(
+    const topAxisExtraConfig = getCategoryDateAxisConfig(
         topAxisXId,
         topAxisXField,
         resultsData?.rows,
         topAxisType,
+        eChartsSeries,
     );
-    const rightAxisExtraConfig = getWeekAxisConfig(
+    const rightAxisExtraConfig = getCategoryDateAxisConfig(
         rightAxisYId,
         rightAxisYField,
         resultsData?.rows,
         rightAxisType,
+        eChartsSeries,
     );
-    const leftAxisExtraConfig = getWeekAxisConfig(
+    const leftAxisExtraConfig = getCategoryDateAxisConfig(
         leftAxisYId,
         leftAxisYField,
         resultsData?.rows,
         leftAxisType,
+        eChartsSeries,
+    );
+
+    const axisLabelFontSize =
+        validCartesianConfig?.eChartsConfig?.axisLabelFontSize;
+    const axisTitleFontSize =
+        validCartesianConfig?.eChartsConfig?.axisTitleFontSize;
+
+    const bottomAxisFormatterConfig = getAxisFormatterConfig({
+        axisItem: bottomAxisXField,
+        longestLabelWidth: calculateWidthText(longestValueXAxisBottom),
+        rotate: xAxisConfiguration?.[0]?.rotate,
+        defaultNameGap: 30,
+        show: showXAxis,
+        parameters,
+    });
+    const bottomAxisConfigWithStyle: Record<string, unknown> = Object.assign(
+        {},
+        bottomAxisFormatterConfig,
+        showXAxis && bottomAxisFormatterConfig.axisLabel
+            ? {
+                  axisLabel: {
+                      ...getAxisLabelStyle(axisLabelFontSize),
+                      ...bottomAxisFormatterConfig.axisLabel,
+                  },
+              }
+            : {},
+    );
+
+    const topAxisFormatterConfig = getAxisFormatterConfig({
+        axisItem: topAxisXField,
+        longestLabelWidth: calculateWidthText(longestValueXAxisTop),
+        defaultNameGap: 30,
+        show: showXAxis,
+        parameters,
+    });
+    const topAxisConfigWithStyle: Record<string, unknown> = Object.assign(
+        {},
+        topAxisFormatterConfig,
+        showXAxis && topAxisFormatterConfig.axisLabel
+            ? {
+                  axisLabel: {
+                      ...getAxisLabelStyle(axisLabelFontSize),
+                      ...topAxisFormatterConfig.axisLabel,
+                  },
+              }
+            : {},
+    );
+
+    const leftAxisFormatterConfig = getAxisFormatterConfig({
+        axisItem: leftAxisYField,
+        defaultNameGap: leftYaxisGap + defaultAxisLabelGap,
+        show: showYAxis,
+        parameters,
+    });
+    const leftAxisConfigWithStyle: Record<string, unknown> = Object.assign(
+        {},
+        leftAxisFormatterConfig,
+        showYAxis && leftAxisFormatterConfig.axisLabel
+            ? {
+                  axisLabel: {
+                      ...getAxisLabelStyle(axisLabelFontSize),
+                      ...leftAxisFormatterConfig.axisLabel,
+                  },
+              }
+            : {},
+    );
+
+    const rightAxisFormatterConfig = getAxisFormatterConfig({
+        axisItem: rightAxisYField,
+        defaultNameGap: rightYaxisGap + defaultAxisLabelGap,
+        show: showYAxis,
+        parameters,
+    });
+    const rightAxisConfigWithStyle: Record<string, unknown> = Object.assign(
+        {},
+        rightAxisFormatterConfig,
+        showYAxis && rightAxisFormatterConfig.axisLabel
+            ? {
+                  axisLabel: {
+                      ...getAxisLabelStyle(axisLabelFontSize),
+                      ...rightAxisFormatterConfig.axisLabel,
+                  },
+              }
+            : {},
     );
 
     const bottomAxisOffset = {
@@ -1389,6 +1753,13 @@ const getEchartAxes = ({
               maybeGetAxisDefaultMinValue(allowFirstAxisDefaultRange)
             : undefined;
 
+    const showSecondaryXAxis = validCartesianConfig.layout.flipAxes
+        ? topAxisXFieldIds && topAxisXFieldIds.length > 0
+        : false;
+    const showSecondaryYAxis = !validCartesianConfig.layout.flipAxes
+        ? rightAxisYFieldIds && rightAxisYFieldIds.length > 0
+        : false;
+
     return {
         xAxis: [
             {
@@ -1412,32 +1783,41 @@ const getEchartAxes = ({
                                       getItemLabelWithoutTableName(xAxisItem)
                                     : undefined),
                           nameLocation: 'center',
-                          nameTextStyle: {
-                              fontWeight: 'bold',
-                          },
+                          nameTextStyle: getAxisTitleStyle(axisTitleFontSize),
                       }
                     : {}),
-                ...getAxisFormatterConfig({
-                    axisItem: bottomAxisXField,
-                    longestLabelWidth: calculateWidthText(
-                        longestValueXAxisBottom,
-                    ),
-                    rotate: xAxisConfiguration?.[0]?.rotate,
-                    defaultNameGap: 30,
-                    show: showXAxis,
-                    parameters,
-                }),
-                splitLine: {
-                    show: validCartesianConfig.layout.flipAxes
-                        ? showGridY
-                        : showGridX,
-                },
+                ...bottomAxisConfigWithStyle,
+                splitLine: validCartesianConfig.layout.flipAxes
+                    ? showGridY
+                        ? gridStyle
+                        : { show: false }
+                    : showGridX
+                      ? gridStyle
+                      : { show: false },
+                axisLine: getAxisLineStyle(),
+                axisTick: getAxisTickStyle(
+                    validCartesianConfig?.eChartsConfig?.showAxisTicks,
+                ),
                 // Override formatter for 100% stacking with flipped axes
                 ...(shouldStack100 &&
                     validCartesianConfig.layout.flipAxes &&
                     showXAxis && {
                         axisLabel: {
+                            ...(bottomAxisConfigWithStyle.axisLabel || {}),
                             formatter: '{value}%',
+                        },
+                    }),
+                // Override axisLabel settings when scrollable is enabled (not flipped)
+                ...(!validCartesianConfig.layout.flipAxes &&
+                    (xAxisConfiguration?.[0] as XAxis | undefined)
+                        ?.enableDataZoom &&
+                    bottomAxisType === 'category' &&
+                    showXAxis && {
+                        axisLabel: {
+                            ...(bottomAxisConfigWithStyle.axisLabel || {}),
+                            interval: 0,
+                            // Keep hideOverlap true to avoid overlapping when labels are long on X axis
+                            hideOverlap: true,
                         },
                     }),
                 inverse: !!xAxisConfiguration?.[0].inverse,
@@ -1447,6 +1827,7 @@ const getEchartAxes = ({
             },
             {
                 type: topAxisType,
+                show: showSecondaryXAxis,
                 ...(showXAxis
                     ? {
                           name: validCartesianConfig.layout.flipAxes
@@ -1462,9 +1843,7 @@ const getEchartAxes = ({
                                 })
                               : undefined,
                           nameLocation: 'center',
-                          nameTextStyle: {
-                              fontWeight: 'bold',
-                          },
+                          nameTextStyle: getAxisTitleStyle(axisTitleFontSize),
                       }
                     : {}),
                 min:
@@ -1481,16 +1860,15 @@ const getEchartAxes = ({
                               allowSecondAxisDefaultRange,
                           )
                         : undefined,
-                ...getAxisFormatterConfig({
-                    axisItem: topAxisXField,
-                    longestLabelWidth: calculateWidthText(longestValueXAxisTop),
-                    defaultNameGap: 30,
-                    show: showXAxis,
-                    parameters,
-                }),
-                splitLine: {
-                    show: isAxisTheSameForAllSeries,
-                },
+                ...topAxisConfigWithStyle,
+                splitLine: isAxisTheSameForAllSeries
+                    ? gridStyle
+                    : { show: false },
+                axisLine: getAxisLineStyle(),
+                axisTick: getAxisTickStyle(
+                    validCartesianConfig?.eChartsConfig?.showAxisTicks,
+                ),
+                inverse: !!xAxisConfiguration?.[1]?.inverse,
                 ...topAxisExtraConfig,
             },
         ],
@@ -1517,37 +1895,53 @@ const getEchartAxes = ({
                                 }),
                           nameLocation: 'center',
                           nameTextStyle: {
-                              fontWeight: 'bold',
+                              ...getAxisTitleStyle(axisTitleFontSize),
                               align: 'center',
                           },
                       }
                     : {}),
                 min: minYAxisValue,
                 max: maxYAxisValue,
-                ...getAxisFormatterConfig({
-                    axisItem: leftAxisYField,
-                    defaultNameGap: leftYaxisGap + defaultAxisLabelGap,
-                    show: showYAxis,
-                    parameters,
-                }),
+                ...leftAxisConfigWithStyle,
                 // Override formatter for 100% stacking without flipped axes
                 ...(shouldStack100 &&
                     !validCartesianConfig.layout.flipAxes &&
                     showYAxis && {
                         axisLabel: {
+                            ...(leftAxisConfigWithStyle.axisLabel || {}),
                             formatter: '{value}%',
                         },
                     }),
-                splitLine: {
-                    show: validCartesianConfig.layout.flipAxes
-                        ? showGridX
-                        : showGridY,
-                },
+                // Override axisLabel settings when scrollable is enabled and axes are flipped
+                ...(validCartesianConfig.layout.flipAxes &&
+                    (yAxisConfiguration?.[0] as XAxis | undefined)
+                        ?.enableDataZoom &&
+                    leftAxisType === 'category' &&
+                    showYAxis && {
+                        axisLabel: {
+                            ...(leftAxisConfigWithStyle.axisLabel || {}),
+                            interval: 0,
+                            // Set hideOverlap to false to avoid hiding labels
+                            hideOverlap: false,
+                        },
+                    }),
+                splitLine: validCartesianConfig.layout.flipAxes
+                    ? showGridX
+                        ? gridStyle
+                        : { show: false }
+                    : showGridY
+                      ? gridStyle
+                      : { show: false },
+                axisLine: getAxisLineStyle(),
+                axisTick: getAxisTickStyle(
+                    validCartesianConfig?.eChartsConfig?.showAxisTicks,
+                ),
                 inverse: !!yAxisConfiguration?.[0].inverse,
                 ...leftAxisExtraConfig,
             },
             {
                 type: rightAxisType,
+                show: showSecondaryYAxis,
                 ...(showYAxis
                     ? {
                           name: validCartesianConfig.layout.flipAxes
@@ -1565,7 +1959,7 @@ const getEchartAxes = ({
                           nameLocation: 'center',
                           nameRotate: -90,
                           nameTextStyle: {
-                              fontWeight: 'bold',
+                              ...getAxisTitleStyle(axisTitleFontSize),
                               align: 'center',
                           },
                       }
@@ -1586,22 +1980,22 @@ const getEchartAxes = ({
                               allowSecondAxisDefaultRange,
                           )
                         : undefined,
-                ...getAxisFormatterConfig({
-                    axisItem: rightAxisYField,
-                    defaultNameGap: rightYaxisGap + defaultAxisLabelGap,
-                    show: showYAxis,
-                    parameters,
-                }),
-                splitLine: {
-                    show: isAxisTheSameForAllSeries,
-                },
+                ...rightAxisConfigWithStyle,
+                splitLine: isAxisTheSameForAllSeries
+                    ? gridStyle
+                    : { show: false },
+                axisLine: getAxisLineStyle(),
+                axisTick: getAxisTickStyle(
+                    validCartesianConfig?.eChartsConfig?.showAxisTicks,
+                ),
+                inverse: !!yAxisConfiguration?.[1]?.inverse,
                 ...rightAxisExtraConfig,
             },
         ],
     };
 };
 
-const getValidStack = (series: EChartSeries | undefined) => {
+const getValidStack = (series: EChartsSeries | undefined) => {
     return series && (series.type === 'bar' || !!series.areaStyle)
         ? series.stack
         : undefined;
@@ -1611,7 +2005,7 @@ type LegendValues = { [name: string]: boolean } | undefined;
 
 const calculateStackTotal = (
     row: ResultRow,
-    series: EChartSeries[],
+    series: EChartsSeries[],
     flipAxis: boolean | undefined,
     selectedLegendNames: LegendValues,
 ) => {
@@ -1640,7 +2034,7 @@ const calculateStackTotal = (
 // The x/axis value and the "0" need to flip position if the axis are flipped
 const getStackTotalRows = (
     rows: ResultRow[],
-    series: EChartSeries[],
+    series: EChartsSeries[],
     flipAxis: boolean | undefined,
     selectedLegendNames: LegendValues,
 ): [unknown, unknown, number][] => {
@@ -1670,22 +2064,25 @@ const getStackTotalRows = (
 // To hack the stack totals in echarts we need to create a fake series with the value 0 and display the total in the label
 const getStackTotalSeries = (
     rows: ResultRow[],
-    seriesWithStack: EChartSeries[],
+    seriesWithStack: EChartsSeries[],
     itemsMap: ItemsMap,
     flipAxis: boolean | undefined,
     selectedLegendNames: LegendValues,
+    isStack100: boolean,
 ) => {
     const seriesGroupedByStack = groupBy(seriesWithStack, 'stack');
-    return Object.entries(seriesGroupedByStack).reduce<EChartSeries[]>(
+    return Object.entries(seriesGroupedByStack).reduce<EChartsSeries[]>(
         (acc, [stack, series]) => {
             if (!stack || !series[0] || !series[0].stackLabel?.show) {
                 return acc;
             }
-            const stackSeries: EChartSeries = {
+            const stackSeries: EChartsSeries = {
                 type: series[0].type,
                 connectNulls: true,
                 stack: stack,
+                clip: !isStack100,
                 label: {
+                    ...getBarTotalLabelStyle(),
                     show: series[0].stackLabel?.show,
                     formatter: (param) => {
                         const stackTotal = param.data[2];
@@ -1699,11 +2096,10 @@ const getStackTotalSeries = (
                         }
                         return '';
                     },
-                    fontWeight: 'bold',
                     position: flipAxis ? 'right' : 'top',
                 },
                 labelLayout: {
-                    hideOverlap: true,
+                    hideOverlap: !isStack100,
                 },
                 tooltip: {
                     show: false,
@@ -1734,6 +2130,7 @@ const useEchartsCartesianConfig = (
         getSeriesColor,
         minimal,
         parameters,
+        isTouchDevice,
     } = useVisualizationContext();
 
     const theme = useMantineTheme();
@@ -1746,6 +2143,11 @@ const useEchartsCartesianConfig = (
     const tooltipConfig = useMemo(() => {
         if (!isCartesianVisualizationConfig(visualizationConfig)) return;
         return visualizationConfig.chartConfig.tooltip;
+    }, [visualizationConfig]);
+
+    const tooltipSortConfig = useMemo(() => {
+        if (!isCartesianVisualizationConfig(visualizationConfig)) return;
+        return visualizationConfig.chartConfig.tooltipSort;
     }, [visualizationConfig]);
 
     const [pivotedKeys, nonPivotedKeys] = useMemo(() => {
@@ -1858,30 +2260,122 @@ const useEchartsCartesianConfig = (
     const stackedSeriesWithColorAssignments = useMemo(() => {
         if (!itemsMap) return;
 
-        const seriesWithValidStack = series.map<EChartSeries>((serie) => {
-            return {
-                ...serie,
-                color: getSeriesColor(serie),
-                stack: getValidStack(serie),
-            };
-        });
+        const isHorizontal = Boolean(validCartesianConfig?.layout.flipAxes);
+
+        // Calculate dynamic border radius based on chart characteristics
+        const barSeries = series.filter(
+            (s) => s.type === CartesianSeriesType.BAR,
+        );
+        const isStacked = barSeries.some((s) => s.stack);
+        const nonStackedBarCount = isStacked
+            ? barSeries.filter((s) => !s.stack).length
+            : barSeries.length;
+
+        const dynamicRadius = calculateDynamicBorderRadius(
+            rows.length,
+            Math.max(1, nonStackedBarCount),
+            isStacked,
+            isHorizontal,
+        );
+
+        const seriesColors = series.map((serie) => getSeriesColor(serie));
+
+        const seriesWithValidStack = series.map<EChartsSeries>(
+            (serie, index) => {
+                const computedColor = seriesColors[index];
+
+                const baseConfig = {
+                    ...serie,
+                    color: computedColor,
+                    stack: getValidStack(serie),
+                    // Ensure label styles are applied after color is known
+                    ...(serie.label?.show && {
+                        label: {
+                            ...serie.label,
+                            ...getValueLabelStyle(
+                                serie.label.position,
+                                serie.type,
+                                computedColor,
+                            ),
+                        },
+                    }),
+                    // Apply reference line styling with readable colors
+                    ...(serie.markLine && {
+                        markLine: applyReadableColorsToMarkLine(
+                            serie.markLine as MarkLine,
+                            computedColor,
+                            theme.colors.background[0],
+                        ),
+                    }),
+                };
+
+                // Apply bar styling for bar charts
+                if (serie.type === CartesianSeriesType.BAR) {
+                    return {
+                        ...baseConfig,
+                        ...getBarStyle(),
+                        // Non-stacked bars get border radius on all bars
+                        ...((!serie.stack ||
+                            getValidStack(serie) === undefined) && {
+                            itemStyle: {
+                                borderRadius: getBarBorderRadius(
+                                    isHorizontal,
+                                    true,
+                                    dynamicRadius,
+                                ),
+                            },
+                        }),
+                    };
+                }
+
+                return baseConfig;
+            },
+        );
+
+        // Apply border radius to stacked bar charts (only regular stacked, not 100%)
+        const isStack100 =
+            validCartesianConfig?.layout?.stack === StackType.PERCENT;
+
+        const isStackNone =
+            validCartesianConfig?.layout?.stack === StackType.NONE;
+
+        const stackedBarSeries = seriesWithValidStack.filter(
+            (s) =>
+                s.type === CartesianSeriesType.BAR &&
+                s.stack &&
+                !isStack100 &&
+                !isStackNone,
+        );
+
+        const seriesWithRoundedStacks =
+            stackedBarSeries.length > 0
+                ? applyRoundedCornersToStackData(seriesWithValidStack, rows, {
+                      radius: dynamicRadius,
+                      isHorizontal: !!isHorizontal,
+                      legendSelected: validCartesianConfigLegend,
+                  })
+                : seriesWithValidStack;
+
         return [
-            ...seriesWithValidStack,
+            ...seriesWithRoundedStacks,
             ...getStackTotalSeries(
                 rows,
-                seriesWithValidStack,
+                seriesWithRoundedStacks,
                 itemsMap,
                 validCartesianConfig?.layout.flipAxes,
                 validCartesianConfigLegend,
+                isStack100,
             ),
         ];
     }, [
-        series,
-        rows,
         itemsMap,
         validCartesianConfig?.layout.flipAxes,
+        validCartesianConfig?.layout?.stack,
+        series,
+        rows,
         validCartesianConfigLegend,
         getSeriesColor,
+        theme.colors,
     ]);
     const sortedResults = useMemo(() => {
         const results =
@@ -1914,7 +2408,7 @@ const useEchartsCartesianConfig = (
                       const isGreaterThan =
                           min === undefined ||
                           typeof min !== 'string' ||
-                          value > min;
+                          value >= min;
 
                       return isGreaterThan;
                   })
@@ -1987,8 +2481,13 @@ const useEchartsCartesianConfig = (
         resultsData?.metricQuery?.sorts,
     ]);
 
-    const sortedResultsByTotals = useMemo(() => {
-        if (!stackedSeriesWithColorAssignments?.length) return sortedResults;
+    const { xAxisSortedResults, xAxisSortedCategoryValues } = useMemo(() => {
+        if (!stackedSeriesWithColorAssignments?.length) {
+            return {
+                xAxisSortedResults: sortedResults,
+                xAxisSortedCategoryValues: undefined,
+            };
+        }
 
         const axis = validCartesianConfig?.layout.flipAxes
             ? axes.yAxis[0]
@@ -1997,6 +2496,7 @@ const useEchartsCartesianConfig = (
         const xFieldId = validCartesianConfig?.layout?.xField;
         const xAxisConfig = validCartesianConfig?.eChartsConfig.xAxis?.[0];
 
+        // Handle bar totals sorting
         if (
             xFieldId &&
             axis?.type === 'category' &&
@@ -2022,11 +2522,11 @@ const useEchartsCartesianConfig = (
                     key,
                     totals.reduce((sum, total) => sum + total[2], 0),
                 ]);
-
                 return acc;
             }, []);
 
-            return sortedResults.sort((a, b) => {
+            // ! good candidate for deduplication, we loop over the result set in many places in this file - should mostly impact very large datasets
+            const sorted = sortedResults.sort((a, b) => {
                 const totalA =
                     stackTotalEntries.find(
                         (entry) => entry[0] === a[xFieldId],
@@ -2039,9 +2539,57 @@ const useEchartsCartesianConfig = (
 
                 return totalA - totalB; // Asc/Desc will be taken care of by inverse config
             });
+
+            // Extract sorted category values for ECharts axis data property
+            const categoryValues = Array.from(
+                new Set(
+                    sorted.map((row) =>
+                        EMPTY_X_AXIS in row ? undefined : row[xFieldId],
+                    ),
+                ),
+            );
+
+            return {
+                xAxisSortedResults: sorted,
+                xAxisSortedCategoryValues: categoryValues,
+            };
         }
 
-        return sortedResults;
+        // Handle alphabetical category sorting
+        if (
+            xFieldId &&
+            axis?.type === 'category' &&
+            xAxisConfig?.sortType === XAxisSortType.CATEGORY
+        ) {
+            const sorted = [...sortedResults].sort((a, b) => {
+                const valueA = EMPTY_X_AXIS in a ? '' : a[xFieldId];
+                const valueB = EMPTY_X_AXIS in b ? '' : b[xFieldId];
+
+                const valA = String(valueA ?? '');
+                const valB = String(valueB ?? '');
+
+                return valA.localeCompare(valB);
+            });
+
+            // Extract sorted category values for ECharts axis data property
+            const categoryValues = Array.from(
+                new Set(
+                    sorted.map((row) =>
+                        EMPTY_X_AXIS in row ? undefined : row[xFieldId],
+                    ),
+                ),
+            );
+
+            return {
+                xAxisSortedResults: sorted,
+                xAxisSortedCategoryValues: categoryValues,
+            };
+        }
+
+        return {
+            xAxisSortedResults: sortedResults,
+            xAxisSortedCategoryValues: undefined,
+        };
     }, [
         stackedSeriesWithColorAssignments,
         sortedResults,
@@ -2068,14 +2616,19 @@ const useEchartsCartesianConfig = (
             !stackedSeriesWithColorAssignments
         ) {
             return {
-                dataToRender: sortedResultsByTotals,
+                dataToRender: xAxisSortedResults,
                 originalValues: undefined,
             };
         }
 
-        // Collect all y-field hashes from stacked series
+        // Collect all y-field hashes from stacked series ON THE PRIMARY AXIS ONLY
+        // 100% stacking should only affect series on yAxisIndex 0 (the left/primary Y-axis)
         const yFieldRefs = stackedSeriesWithColorAssignments
-            .filter((serie) => serie.stack && serie.encode)
+            .filter((serie) => {
+                return (
+                    serie.stack && serie.encode && (serie.yAxisIndex ?? 0) === 0 // Only primary axis
+                );
+            })
             .map((serie) =>
                 validCartesianConfig?.layout.flipAxes
                     ? serie.encode!.x
@@ -2097,222 +2650,255 @@ const useEchartsCartesianConfig = (
         validCartesianConfig?.layout?.xField,
         validCartesianConfig?.layout.flipAxes,
         stackedSeriesWithColorAssignments,
-        sortedResultsByTotals,
+        xAxisSortedResults,
     ]);
 
-    const tooltip = useMemo<TooltipOption>(
-        () => ({
+    const tooltip = useMemo<TooltipOption>(() => {
+        // Check if any series is line/area/scatter (use line pointer) vs bar (use shadow pointer)
+        const hasLineAreaScatterSeries = series.some(
+            (s) =>
+                s.type === CartesianSeriesType.LINE ||
+                s.type === CartesianSeriesType.AREA ||
+                s.type === CartesianSeriesType.SCATTER,
+        );
+
+        return {
             show: true,
-            confine: true,
             trigger: 'axis',
             enterable: true,
-            extraCssText: 'overflow-y: auto; max-height:280px;',
-            axisPointer: {
-                type: 'shadow',
-                label: {
-                    show: true,
-                },
-            },
-            formatter: (params) => {
-                if (!Array.isArray(params) || !itemsMap) return '';
+            ...getTooltipStyle({ appendToBody: !isTouchDevice }),
+            extraCssText: `overflow-y: auto; max-height:280px; ${
+                getTooltipStyle({ appendToBody: !isTouchDevice }).extraCssText
+            }`,
+            axisPointer: getAxisPointerStyle(hasLineAreaScatterSeries),
+            formatter: buildCartesianTooltipFormatter({
+                itemsMap,
+                stackValue: validCartesianConfig?.layout?.stack,
+                flipAxes: validCartesianConfig?.layout.flipAxes,
+                xFieldId: validCartesianConfig?.layout?.xField,
+                originalValues,
+                series,
+                tooltipHtmlTemplate: tooltipConfig,
+                tooltipSort: tooltipSortConfig,
+                pivotValuesColumnsMap,
+                parameters,
+                rows: dataToRender,
+            }),
+        };
+    }, [
+        itemsMap,
+        validCartesianConfig?.layout.flipAxes,
+        validCartesianConfig?.layout?.stack,
+        validCartesianConfig?.layout?.xField,
+        tooltipConfig,
+        tooltipSortConfig,
+        pivotValuesColumnsMap,
+        originalValues,
+        parameters,
+        series,
+        dataToRender,
+        isTouchDevice,
+    ]);
 
-                // Check if 100% stacking is enabled and we have original values
-                const stackValue = validCartesianConfig?.layout?.stack;
-                const shouldStack100 = stackValue === StackType.PERCENT;
-                // For grouping in 100% stacking, always use the dimension field (xField)
-                const xFieldId = validCartesianConfig?.layout?.xField;
+    // Calculate max stack label padding for 100% stacking grid
+    // Returns { right, top } padding values based on chart orientation
+    const stackLabelPaddingCalc = useMemo(() => {
+        const isStack100 =
+            validCartesianConfig?.layout?.stack === StackType.PERCENT;
+        if (
+            !isStack100 ||
+            !stackedSeriesWithColorAssignments ||
+            !itemsMap ||
+            !rows
+        )
+            return { right: 0, top: 0 };
 
-                // Custom formatter for 100% stacking: show percentage and actual count
-                if (shouldStack100 && xFieldId && originalValues) {
-                    const flipAxes = validCartesianConfig?.layout.flipAxes;
-                    const s = createStack100TooltipFormatter(
-                        originalValues,
-                        (param) => {
-                            const { encode, dimensionNames } = param;
-                            if (!dimensionNames || !encode) return undefined;
+        const hasStackLabels = stackedSeriesWithColorAssignments.some(
+            (s) => s.stackLabel?.show,
+        );
+        if (!hasStackLabels) return { right: 0, top: 0 };
 
-                            // Get the dimension name (field hash) from encode indices
-                            if (flipAxes) {
-                                return dimensionNames[1];
-                            } else {
-                                // encode.y can be a string, number, or array
-                                const yIndex = Array.isArray(encode.y)
-                                    ? encode.y[0]
-                                    : encode.y;
-                                return typeof yIndex === 'number'
-                                    ? dimensionNames[yIndex]
-                                    : undefined;
-                            }
-                        },
-                        xFieldId,
-                    )(params as TooltipParam[]);
-                    return s;
-                }
+        const flipAxis = validCartesianConfig?.layout?.flipAxes;
+        const seriesWithStack = stackedSeriesWithColorAssignments.filter(
+            (s) => s.stack,
+        );
 
-                const flipAxes = validCartesianConfig?.layout.flipAxes;
-                const getTooltipHeader = () => {
-                    if (flipAxes && !('axisDim' in params[0])) {
-                        // When flipping axes, the axisValueLabel is the value, not the serie name
-                        return params[0].seriesName;
-                    }
-                    return params[0].axisValueLabel;
-                };
-                // When flipping axes, we get all series in the chart
-                const tooltipRows = params
-                    .map((param) => {
-                        const {
-                            marker,
-                            seriesName,
-                            dimensionNames,
-                            encode,
-                            value,
-                        } = param;
+        // Group by stack and calculate max formatted label width
+        const seriesGroupedByStack = groupBy(seriesWithStack, 'stack');
+        let maxCharCount = 0;
 
-                        if (dimensionNames) {
-                            let dim = '';
-                            if (flipAxes) {
-                                // When flipping axes, the dimensionName is different
-                                dim = dimensionNames[1];
-                            } else {
-                                dim =
-                                    encode?.y?.[0] !== undefined
-                                        ? dimensionNames[encode?.y[0]]
-                                        : '';
-                            }
-                            const tooltipValue = (
-                                value as Record<string, unknown>
-                            )[dim];
-                            if (
-                                value &&
-                                typeof value === 'object' &&
-                                dim in value
-                            ) {
-                                return `<tr>
-                                <td>${marker}</td>
-                                <td>${seriesName}</td>
-                                <td style="text-align: right;"><b>${getFormattedValue(
-                                    tooltipValue,
-                                    dim.split('.')[0],
-                                    itemsMap,
-                                    undefined,
-                                    pivotValuesColumnsMap,
-                                    parameters,
-                                )}</b></td>
-                            </tr>
-                        `;
-                            }
-                        }
-                        return '';
-                    })
-                    .join('');
+        Object.entries(seriesGroupedByStack).forEach(([stack, stackSeries]) => {
+            if (!stack || !stackSeries[0]?.stackLabel?.show) return;
 
-                // At the moment, we only correctly filter fields that are
-                // part of the chart config when no pivot is used
-                // TODO In order to show other fields,
-                // we will have to filter resultData using the xAxis value and groups
-                let tooltipHtml = tooltipConfig ?? '';
-                if (tooltipHtml) {
-                    // Sanitize HTML code to avoid XSS
-                    tooltipHtml = DOMPurify.sanitize(tooltipHtml);
-                    const firstValue = params[0].value as Record<
-                        string,
-                        unknown
-                    >;
-                    const fields = tooltipHtml.match(/\${(.*?)}/g);
-                    fields?.forEach((field) => {
-                        const fieldValueReference = field
-                            .replace('${', '')
-                            .replace('}', '');
+            const stackTotalData = getStackTotalRows(
+                rows,
+                stackSeries,
+                flipAxis,
+                validCartesianConfigLegend,
+            );
+            const fieldId = stackSeries[0].pivotReference?.field;
 
-                        const fieldValue = firstValue[fieldValueReference];
+            if (fieldId) {
+                stackTotalData.forEach((dataPoint) => {
+                    const total = dataPoint[2];
+                    const formatted = getFormattedValue(
+                        total,
+                        fieldId,
+                        itemsMap,
+                    );
+                    maxCharCount = Math.max(maxCharCount, formatted.length);
+                });
+            }
+        });
 
-                        const formattedValue = getFormattedValue(
-                            fieldValue,
-                            fieldValueReference.split('.')[0],
-                            itemsMap,
-                            undefined,
-                            pivotValuesColumnsMap,
-                            parameters,
-                        );
-                        tooltipHtml = tooltipHtml.replace(
-                            field,
-                            formattedValue,
-                        );
-                    });
-                }
-
-                const dimensionId = params[0].dimensionNames?.[0];
-                if (dimensionId !== undefined) {
-                    const field = itemsMap[dimensionId];
-                    if (isTableCalculation(field)) {
-                        const tooltipHeader = formatItemValue(
-                            field,
-                            getTooltipHeader(),
-                            false,
-                            parameters,
-                        );
-
-                        return `${tooltipHeader}<br/><table>${tooltipRows}</table>`;
-                    }
-
-                    const hasFormat = isField(field)
-                        ? field.format !== undefined
-                        : false;
-
-                    if (hasFormat) {
-                        const tooltipHeader = getFormattedValue(
-                            getTooltipHeader(),
-                            dimensionId,
-                            itemsMap,
-                            undefined,
-                            pivotValuesColumnsMap,
-                            parameters,
-                        );
-
-                        return `${tooltipHeader}<br/>${tooltipHtml}<table>${tooltipRows}</table>`;
-                    }
-                }
-                return `${getTooltipHeader()}<br/>${tooltipHtml}<table>${tooltipRows}</table>`;
-            },
-        }),
-        [
-            itemsMap,
-            validCartesianConfig?.layout.flipAxes,
-            validCartesianConfig?.layout?.stack,
-            validCartesianConfig?.layout?.xField,
-            tooltipConfig,
-            pivotValuesColumnsMap,
-            originalValues,
-            parameters,
-        ],
-    );
+        if (flipAxis) {
+            // ~7px per character + 10px buffer
+            return { right: maxCharCount * 7 + 10, top: 0 };
+        } else {
+            // Vertical bars: labels on top, need height-based padding
+            // Fixed ~25px for label height (font size + small margin)
+            return { right: 0, top: maxCharCount > 0 ? 25 : 0 };
+        }
+    }, [
+        stackedSeriesWithColorAssignments,
+        itemsMap,
+        rows,
+        validCartesianConfig?.layout?.stack,
+        validCartesianConfig?.layout?.flipAxes,
+        validCartesianConfigLegend,
+    ]);
 
     const currentGrid = useMemo(() => {
-        const grid = {
+        const enableDataZoom =
+            validCartesianConfig?.eChartsConfig?.xAxis?.[0]?.enableDataZoom;
+        const flipAxes = validCartesianConfig?.layout?.flipAxes;
+
+        const grid: {
+            containLabel: boolean;
+            left: string;
+            right: string;
+            top: string;
+            bottom: string;
+        } = {
             ...defaultGrid,
             ...removeEmptyProperties(validCartesianConfig?.eChartsConfig.grid),
         };
 
+        const legendConfig = removeEmptyProperties(
+            validCartesianConfig?.eChartsConfig.legend,
+        );
+        const isLegendShown = legendConfig
+            ? 'show' in legendConfig
+                ? legendConfig.show !== false
+                : true
+            : series.length > 1;
+
+        const hasExplicitTop =
+            validCartesianConfig?.eChartsConfig.grid?.top !== undefined;
+        if (isLegendShown && !hasExplicitTop && isPxValue(grid.top)) {
+            grid.top = addPx(grid.top, legendTopSpacing);
+        }
+
         const gridLeft = grid.left;
         const gridRight = grid.right;
+        const gridBottom = grid.bottom;
+
+        // Check if any series has a markLine (reference line) and determine label positions
+        let maxLeftLabelLength = 0;
+        let maxRightLabelLength = 0;
+
+        series.forEach((s) => {
+            if (s.markLine && s.markLine.data) {
+                const dataArray = s.markLine.data as MarkLineData[];
+                dataArray.forEach((d) => {
+                    if ('yAxis' in d || d.type === 'average') {
+                        // Horizontal line - check label position and text length
+                        const labelPosition =
+                            d.label?.position ||
+                            (s.markLine?.label as { position?: string })
+                                ?.position ||
+                            'start';
+                        const labelText =
+                            d.name ||
+                            d.label?.formatter ||
+                            String(d.yAxis || '');
+                        const textLength = labelText.length;
+
+                        if (
+                            labelPosition === 'start' ||
+                            labelPosition.includes('Start')
+                        ) {
+                            maxLeftLabelLength = Math.max(
+                                maxLeftLabelLength,
+                                textLength,
+                            );
+                        } else if (
+                            labelPosition === 'end' ||
+                            labelPosition.includes('End')
+                        ) {
+                            maxRightLabelLength = Math.max(
+                                maxRightLabelLength,
+                                textLength,
+                            );
+                        }
+                    }
+                });
+            }
+        });
+
+        // Calculate padding based on text length (3px per char + 5px buffer, cap at 20px)
+        const extraLeftPadding =
+            maxLeftLabelLength > 0
+                ? Math.min(20, maxLeftLabelLength * 2 + 5)
+                : 0;
+        const extraRightPadding =
+            maxRightLabelLength > 0
+                ? Math.min(20, maxRightLabelLength * 2 + 5)
+                : 0;
 
         // Adds extra gap to grid to make room for axis labels -> there is an open ticket in echarts to fix this: https://github.com/apache/echarts/issues/9265
         // Only works for px values, percentage values are not supported because it cannot use calc()
         return {
             ...grid,
-            left: gridLeft.includes('px')
-                ? `${
-                      parseInt(gridLeft.replace('px', '')) + defaultAxisLabelGap
-                  }px`
+            left: isPxValue(gridLeft)
+                ? addPx(gridLeft, defaultAxisLabelGap + extraLeftPadding)
                 : grid.left,
-            right: gridRight.includes('px')
-                ? `${
-                      parseInt(gridRight.replace('px', '')) +
-                      defaultAxisLabelGap
-                  }px`
-                : grid.right,
+            right:
+                isPxValue(gridRight) && !enableDataZoom
+                    ? addPx(
+                          gridRight,
+                          defaultAxisLabelGap +
+                              extraRightPadding +
+                              stackLabelPaddingCalc.right,
+                      )
+                    : isPxValue(gridRight) && enableDataZoom && flipAxes
+                      ? addPx(
+                            gridRight,
+                            defaultAxisLabelGap +
+                                extraRightPadding +
+                                stackLabelPaddingCalc.right +
+                                30,
+                        )
+                      : grid.right,
+            // Add extra top spacing for 100% stacking labels when not flipped (vertical bars)
+            top:
+                stackLabelPaddingCalc.top > 0 && isPxValue(grid.top)
+                    ? addPx(grid.top, stackLabelPaddingCalc.top)
+                    : grid.top,
+            // Add extra bottom spacing for dataZoom slider when not flipped
+            bottom:
+                enableDataZoom && !flipAxes && isPxValue(gridBottom)
+                    ? addPx(gridBottom, 30)
+                    : grid.bottom,
         };
-    }, [validCartesianConfig?.eChartsConfig.grid]);
+    }, [
+        validCartesianConfig?.eChartsConfig.grid,
+        validCartesianConfig?.eChartsConfig?.xAxis,
+        validCartesianConfig?.eChartsConfig.legend,
+        validCartesianConfig?.layout?.flipAxes,
+        series,
+        stackLabelPaddingCalc,
+    ]);
 
     const { tooltip: legendDoubleClickTooltip } = useLegendDoubleClickTooltip();
 
@@ -2323,8 +2909,20 @@ const useEchartsCartesianConfig = (
             series,
         );
 
+        // Use line icon only for line/area charts, otherwise use square with border radius
+        const hasOnlyLineCharts = series.every(
+            (s) =>
+                s.type === CartesianSeriesType.LINE ||
+                s.type === CartesianSeriesType.AREA,
+        );
+
+        const legendStyle = getLegendStyle(
+            hasOnlyLineCharts ? 'line' : 'square',
+        );
+
         return {
             ...mergedLegendConfig,
+            ...legendStyle,
             tooltip: legendDoubleClickTooltip,
         };
     }, [
@@ -2334,10 +2932,45 @@ const useEchartsCartesianConfig = (
         series,
     ]);
 
-    const eChartsOptions = useMemo(
-        () => ({
-            xAxis: axes.xAxis,
-            yAxis: axes.yAxis,
+    // When BAR_TOTALS or CATEGORY sorting is active, we need to explicitly set the category axis data
+    // to preserve our sorted order, as ECharts would otherwise sort it differently
+    const sortedAxes = useMemo(() => {
+        if (!xAxisSortedCategoryValues) {
+            return { xAxis: axes.xAxis, yAxis: axes.yAxis };
+        }
+
+        const flipAxes = validCartesianConfig?.layout?.flipAxes;
+
+        return {
+            xAxis: flipAxes
+                ? axes.xAxis
+                : axes.xAxis.map((axis, index) =>
+                      index === 0
+                          ? { ...axis, data: xAxisSortedCategoryValues }
+                          : axis,
+                  ),
+            yAxis: flipAxes
+                ? axes.yAxis.map((axis, index) =>
+                      index === 0
+                          ? { ...axis, data: xAxisSortedCategoryValues }
+                          : axis,
+                  )
+                : axes.yAxis,
+        };
+    }, [
+        axes,
+        xAxisSortedCategoryValues,
+        validCartesianConfig?.layout?.flipAxes,
+    ]);
+
+    const eChartsOptions = useMemo(() => {
+        const enableDataZoom =
+            validCartesianConfig?.eChartsConfig?.xAxis?.[0]?.enableDataZoom;
+        const flipAxes = validCartesianConfig?.layout?.flipAxes;
+
+        return {
+            xAxis: sortedAxes.xAxis,
+            yAxis: sortedAxes.yAxis,
             useUTC: true,
             series: stackedSeriesWithColorAssignments,
             animation: !(isInDashboard || minimal),
@@ -2353,20 +2986,41 @@ const useEchartsCartesianConfig = (
             },
             // We assign colors per series, so we specify an empty list here.
             color: [],
-        }),
-        [
-            axes.xAxis,
-            axes.yAxis,
-            stackedSeriesWithColorAssignments,
-            isInDashboard,
-            minimal,
-            legendConfigWithInstructionsTooltip,
-            dataToRender,
-            tooltip,
-            theme?.other.chartFont,
-            currentGrid,
-        ],
-    );
+            ...(enableDataZoom && {
+                dataZoom: [
+                    {
+                        type: 'slider',
+                        show: true,
+                        [flipAxes ? 'yAxisIndex' : 'xAxisIndex']: 0,
+                        startValue: 0,
+                        endValue: 10,
+                        brushSelect: false,
+                        zoomLock: true,
+                        minValueSpan: 5,
+                        maxValueSpan: 30,
+                        // Reduce scroll bar size
+                        ...(flipAxes && {
+                            width: 20,
+                        }),
+                        ...(!flipAxes && {
+                            height: 20,
+                        }),
+                    },
+                ],
+            }),
+        };
+    }, [
+        sortedAxes,
+        stackedSeriesWithColorAssignments,
+        isInDashboard,
+        minimal,
+        legendConfigWithInstructionsTooltip,
+        dataToRender,
+        tooltip,
+        currentGrid,
+        theme?.other.chartFont,
+        validCartesianConfig,
+    ]);
 
     if (
         !itemsMap ||

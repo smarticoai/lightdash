@@ -1,5 +1,6 @@
 import {
     type AdditionalMetric,
+    type AnyType,
     type BigNumberConfig,
     type CartesianChartConfig,
     type ChartConfig,
@@ -11,7 +12,10 @@ import {
     type Dimension,
     type FieldId,
     type FunnelChartConfig,
+    type GaugeChartConfig,
     type Item,
+    type ItemsMap,
+    type MapChartConfig,
     type Metric,
     type MetricQuery,
     type MetricType,
@@ -62,18 +66,43 @@ export enum ActionType {
     TOGGLE_CUSTOM_DIMENSION_MODAL,
     TOGGLE_FORMAT_MODAL,
     UPDATE_METRIC_FORMAT,
+    UPDATE_DIMENSION_FORMAT,
     REPLACE_FIELDS,
     SET_PARAMETER_REFERENCES,
 }
 
+export type ChartConfigCache<T = AnyType> = {
+    chartConfig: T;
+    pivotConfig?: { columns: string[] };
+};
+
+/**
+ * Map extent representing the current view state of a map.
+ * Used for saving/restoring map position.
+ */
+export type MapExtent = {
+    zoom: number;
+    lat: number;
+    lng: number;
+};
+
+// Extended cache type for map charts that includes temporary map extent
+export type MapChartConfigCache = ChartConfigCache<MapChartConfig['config']> & {
+    // Temporary map extent - updated on pan/zoom, read at save time
+    // This is NOT used during render to avoid re-renders on map interaction
+    tempMapExtent?: MapExtent | null;
+};
+
 export type ConfigCacheMap = {
-    [ChartType.PIE]: PieChartConfig['config'];
-    [ChartType.FUNNEL]: FunnelChartConfig['config'];
-    [ChartType.BIG_NUMBER]: BigNumberConfig['config'];
-    [ChartType.TABLE]: TableChartConfig['config'];
-    [ChartType.CARTESIAN]: CartesianChartConfig['config'];
-    [ChartType.TREEMAP]: TreemapChartConfig['config'];
-    [ChartType.CUSTOM]: CustomVisConfig['config'];
+    [ChartType.PIE]: ChartConfigCache<PieChartConfig['config']>;
+    [ChartType.FUNNEL]: ChartConfigCache<FunnelChartConfig['config']>;
+    [ChartType.BIG_NUMBER]: ChartConfigCache<BigNumberConfig['config']>;
+    [ChartType.TABLE]: ChartConfigCache<TableChartConfig['config']>;
+    [ChartType.CARTESIAN]: ChartConfigCache<CartesianChartConfig['config']>;
+    [ChartType.TREEMAP]: ChartConfigCache<TreemapChartConfig['config']>;
+    [ChartType.GAUGE]: ChartConfigCache<GaugeChartConfig['config']>;
+    [ChartType.MAP]: MapChartConfigCache;
+    [ChartType.CUSTOM]: ChartConfigCache<CustomVisConfig['config']>;
 };
 
 export type Action =
@@ -177,11 +206,18 @@ export type Action =
       }
     | {
           type: ActionType.TOGGLE_FORMAT_MODAL;
-          payload?: { metric: Metric };
+          payload?: { item: Metric | Dimension };
       }
     | {
           type: ActionType.UPDATE_METRIC_FORMAT;
           payload: { metric: Metric; formatOptions: CustomFormat | undefined };
+      }
+    | {
+          type: ActionType.UPDATE_DIMENSION_FORMAT;
+          payload: {
+              dimension: Dimension;
+              formatOptions: CustomFormat | undefined;
+          };
       }
     | {
           type: ActionType.REPLACE_FIELDS;
@@ -205,6 +241,8 @@ export interface ExplorerReduceState {
     isEditMode?: boolean;
     unsavedChartVersion: CreateSavedChartVersion;
     previouslyFetchedState?: MetricQuery;
+
+    cachedChartConfigs: Partial<ConfigCacheMap>;
     /**
      * The parameters that are referenced in the query.
      * If null, this means we can't calculate the missing parameters, so we can't run the query.
@@ -215,7 +253,7 @@ export interface ExplorerReduceState {
     modals: {
         format: {
             isOpen: boolean;
-            metric?: Metric;
+            item?: Metric | Dimension;
         };
         additionalMetric: {
             isOpen: boolean;
@@ -240,6 +278,11 @@ export interface ExplorerReduceState {
             description?: string;
             fieldItem?: Item | AdditionalMetric;
         };
+        periodOverPeriodComparison: {
+            isOpen: boolean;
+            metric?: Metric;
+            itemsMap?: ItemsMap;
+        };
     };
 
     // Query execution state - manages TanStack Query arguments and history
@@ -248,81 +291,10 @@ export interface ExplorerReduceState {
         unpivotedQueryArgs: QueryResultsProps | null;
         queryUuidHistory: string[];
         unpivotedQueryUuidHistory: string[];
+        // Flag to trigger a query execution from components (works regardless of auto-fetch setting)
+        pendingFetch: boolean;
     };
     fromDashboard?: string;
-}
-
-export interface ExplorerState extends ExplorerReduceState {
-    // activeFields removed - use selectActiveFields Redux selector instead
-    // isValidQuery removed - use selectIsValidQuery Redux selector instead
-    isEditMode: boolean;
-    savedChart: SavedChart | undefined;
-    // Merged version combining Context fields (chartConfig, pivotConfig) with Redux fields
-    // This is the complete version that should be used when saving charts
-    mergedUnsavedChartVersion: CreateSavedChartVersion;
-}
-
-export interface ExplorerContextType {
-    state: ExplorerState;
-    actions: {
-        clearExplore: () => void;
-        clearQuery: () => void;
-        reset: () => void;
-        setTableName: (tableName: string) => void;
-        setRowLimit: (limit: number) => void;
-        setTimeZone: (timezone: string | null) => void;
-        setFilters: (filters: MetricQuery['filters']) => void;
-        addAdditionalMetric: (metric: AdditionalMetric) => void;
-        editAdditionalMetric: (
-            metric: AdditionalMetric,
-            previousMetricName: string,
-        ) => void;
-        removeAdditionalMetric: (key: FieldId) => void;
-        toggleAdditionalMetricModal: (
-            additionalMetricModalData?: Omit<
-                ExplorerReduceState['modals']['additionalMetric'],
-                'isOpen'
-            >,
-        ) => void;
-        setColumnOrder: (order: string[]) => void;
-        addTableCalculation: (tableCalculation: TableCalculation) => void;
-        updateTableCalculation: (
-            oldName: string,
-            tableCalculation: TableCalculation,
-        ) => void;
-        deleteTableCalculation: (name: string) => void;
-        setPivotFields: (fields: FieldId[] | undefined) => void;
-        setChartType: (chartType: ChartType) => void;
-        setChartConfig: (chartConfig: ChartConfig) => void;
-        addCustomDimension: (customDimension: CustomDimension) => void;
-        editCustomDimension: (
-            customDimension: CustomDimension,
-            previousCustomDimensionId: string,
-        ) => void;
-        removeCustomDimension: (key: FieldId) => void;
-        toggleCustomDimensionModal: (
-            additionalMetricModalData?: Omit<
-                ExplorerReduceState['modals']['customDimension'],
-                'isOpen'
-            >,
-        ) => void;
-        toggleWriteBackModal: (
-            writeBackModalData?: Omit<
-                ExplorerReduceState['modals']['writeBack'],
-                'isOpen'
-            >,
-        ) => void;
-        toggleFormatModal: (args?: { metric: Metric }) => void;
-        updateMetricFormat: (args: {
-            metric: Metric;
-            formatOptions: CustomFormat | undefined;
-        }) => void;
-        replaceFields: (fieldsToReplace: ReplaceCustomFields[string]) => void;
-        openVisualizationConfig: () => void;
-        closeVisualizationConfig: () => void;
-        setParameterReferences: (parameterReferences: string[] | null) => void;
-        isUnsavedChartChanged: (
-            chartVersion: CreateSavedChartVersion,
-        ) => boolean;
-    };
+    isExploreFromHere?: boolean;
+    savedChart?: SavedChart;
 }

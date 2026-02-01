@@ -4,10 +4,11 @@ import { useDisclosure, useElementSize } from '@mantine/hooks';
 import { type FC } from 'react';
 import ErrorBoundary from '../../../features/errorBoundary/ErrorBoundary';
 import { useActiveProjectUuid } from '../../../hooks/useActiveProject';
-import { useProjects } from '../../../hooks/useProjects';
+import { useProject } from '../../../hooks/useProject';
 import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
 import AboutFooter from '../../AboutFooter';
+import { DocumentTitle } from '../DocumentTitle';
 import Sidebar from './Sidebar';
 import {
     BANNER_HEIGHT,
@@ -44,32 +45,38 @@ type StyleProps = {
     noSidebarPadding?: boolean;
     isSidebarResizing?: boolean;
     backgroundColor?: string;
+    fullPageScroll?: boolean;
 };
 
 const usePageStyles = createStyles<string, StyleProps>((theme, params) => {
     let containerHeight = '100vh';
 
-    if (params.withNavbar) {
+    if (params.withNavbar && !params.fullPageScroll) {
         containerHeight = `calc(${containerHeight} - ${NAVBAR_HEIGHT}px)`;
     }
     if (params.withHeader) {
         containerHeight = `calc(${containerHeight} - ${PAGE_HEADER_HEIGHT}px)`;
     }
-    if (params.hasBanner) {
+    if (params.hasBanner && !params.fullPageScroll) {
         containerHeight = `calc(${containerHeight} - ${BANNER_HEIGHT}px)`;
     }
+
     return {
         root: {
-            ...(params.withFullHeight
+            ...(params.fullPageScroll
                 ? {
-                      height: containerHeight,
-                      maxHeight: containerHeight,
+                      minHeight: '100%',
                   }
-                : {
-                      height: containerHeight,
+                : params.withFullHeight
+                  ? {
+                        height: containerHeight,
+                        maxHeight: containerHeight,
+                    }
+                  : {
+                        height: containerHeight,
 
-                      overflowY: 'auto',
-                  }),
+                        overflowY: 'auto',
+                    }),
 
             ...(params.withSidebar || params.withRightSidebar
                 ? {
@@ -132,7 +139,7 @@ const usePageStyles = createStyles<string, StyleProps>((theme, params) => {
                       height: '100%',
                       maxHeight: '100%',
 
-                      overflowY: 'auto',
+                      ...(params.fullPageScroll ? {} : { overflowY: 'auto' }),
                   }
                 : {}),
 
@@ -173,7 +180,7 @@ const usePageStyles = createStyles<string, StyleProps>((theme, params) => {
 
             ...(params.withSidebarBorder
                 ? {
-                      borderLeft: `1px solid ${theme.colors.gray[3]}`,
+                      borderLeft: `1px solid ${theme.colors.ldGray[3]}`,
                   }
                 : {}),
         },
@@ -196,7 +203,7 @@ type Props = {
     isRightSidebarOpen?: boolean;
     rightSidebarWidthProps?: SidebarWidthProps;
     header?: React.ReactNode;
-} & Omit<StyleProps, 'withSidebar' | 'withHeader'>;
+} & Omit<StyleProps, 'withSidebar' | 'withHeader' | 'hasBanner'>;
 
 const Page: FC<React.PropsWithChildren<Props>> = ({
     title,
@@ -223,6 +230,7 @@ const Page: FC<React.PropsWithChildren<Props>> = ({
     noSidebarPadding = false,
     flexContent = false,
     backgroundColor,
+    fullPageScroll = false,
     children,
 }) => {
     const { ref: mainRef, width: mainWidth } = useElementSize();
@@ -235,16 +243,9 @@ const Page: FC<React.PropsWithChildren<Props>> = ({
         refetchOnMount: true,
         enabled: withNavbar,
     } as AnyType);
-    const { data: projects } = useProjects({
-        enabled: withNavbar,
-    });
-    const isCurrentProjectPreview =
-        withNavbar &&
-        !!projects?.find(
-            (project) =>
-                project.projectUuid === activeProjectUuid &&
-                project.type === ProjectType.PREVIEW,
-        );
+    const { data: project } = useProject(activeProjectUuid);
+
+    const isCurrentProjectPreview = project?.type === ProjectType.PREVIEW;
 
     const { classes } = usePageStyles(
         {
@@ -268,13 +269,14 @@ const Page: FC<React.PropsWithChildren<Props>> = ({
             flexContent,
             isSidebarResizing,
             backgroundColor,
+            fullPageScroll,
         },
         { name: 'Page' },
     );
 
     return (
         <>
-            {title ? <title>{`${title} - Lightdash`}</title> : null}
+            <DocumentTitle title={title} />
 
             {header}
 

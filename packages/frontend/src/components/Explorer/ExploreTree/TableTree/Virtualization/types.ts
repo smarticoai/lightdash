@@ -14,6 +14,7 @@ export enum TreeSection {
     Metrics = 'metrics',
     CustomMetrics = 'custom-metrics',
     CustomDimensions = 'custom-dimensions',
+    MissingFields = 'missing-fields',
 }
 
 /**
@@ -24,8 +25,10 @@ export function buildGroupKey(
     tableName: string,
     sectionType: TreeSection,
     nodeKey: string,
+    parentPath: string = '',
 ): string {
-    return `${tableName}-${sectionType}-group-${nodeKey}`;
+    const pathPrefix = parentPath ? `${parentPath}-` : '';
+    return `${tableName}-${sectionType}-group-${pathPrefix}${nodeKey}`;
 }
 
 /**
@@ -65,6 +68,12 @@ export interface TableHeaderItem extends BaseFlattenedItem {
     };
 }
 
+// Help button configuration for section headers
+export interface SectionHelpButton {
+    href: string;
+    tooltipText: string; // Plain text for the tooltip
+}
+
 // Section header item (Dimensions, Metrics, etc.)
 export interface SectionHeaderItem extends BaseFlattenedItem {
     type: 'section-header';
@@ -74,6 +83,7 @@ export interface SectionHeaderItem extends BaseFlattenedItem {
         label: string;
         color: string; // Mantine color like 'blue.9', 'yellow.9'
         depth?: number; // Depth for indentation when table headers are present
+        helpButton?: SectionHelpButton;
     };
 }
 
@@ -168,6 +178,9 @@ export interface FlattenTreeOptions {
     missingCustomMetrics: AdditionalMetric[];
     missingCustomDimensions: CustomDimension[];
     missingFieldIds: string[];
+
+    // Selected fields (for determining if missing field is dimension or metric)
+    selectedDimensions: string[];
 
     // Active fields (for pinning selected items to top)
     activeFields: Set<string>;

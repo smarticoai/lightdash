@@ -2,12 +2,14 @@ import {
     formatItemValue,
     getSubtotalKey,
     isCustomDimension,
+    isDimension,
     isField,
     type ItemsMap,
     type ParametersValuesMap,
     type ResultRow,
 } from '@lightdash/common';
 import { Text } from '@mantine/core';
+import { captureException } from '@sentry/react';
 import type { CellContext } from '@tanstack/react-table';
 import {
     TableHeaderBoldLabel,
@@ -75,6 +77,23 @@ export function getSubtotalValueFromGroup(
     return subtotal?.[columnId];
 }
 
+const getImageSize = (item: ItemsMap[string] | undefined) => {
+    if (isDimension(item) && item.image?.url) {
+        const defaultWidth = 100;
+        const defaultPadding = 8 * 2;
+        const width = (item.image?.width || defaultWidth) + defaultPadding;
+
+        return {
+            style: {
+                width,
+                minWidth: width,
+                maxWidth: width,
+            },
+        };
+    }
+    return {};
+};
+
 const getDataAndColumns = ({
     itemsMap,
     selectedItemIds,
@@ -87,10 +106,26 @@ const getDataAndColumns = ({
     groupedSubtotals,
     parameters,
 }: Args): Array<TableHeader | TableColumn> => {
-    return columnOrder.reduce<Array<TableHeader | TableColumn>>(
+    // Deduplicate columnOrder to prevent duplicate columns if the same field appears multiple times
+    const uniqueColumnOrder = [...new Set(columnOrder)];
+
+    if (uniqueColumnOrder.length !== columnOrder.length) {
+        console.warn(
+            'Duplicate columns in columnOrder',
+            columnOrder,
+            uniqueColumnOrder,
+        );
+        captureException(new Error('Duplicate columns in columnOrder'), {
+            level: 'error',
+            tags: { errorType: 'duplicateColumns' },
+            extra: { columnOrder, uniqueColumnOrder },
+        });
+    }
+
+    return uniqueColumnOrder.reduce<Array<TableHeader | TableColumn>>(
         (acc, itemId) => {
             const item = itemsMap[itemId] as
-                | typeof itemsMap[number]
+                | (typeof itemsMap)[number]
                 | undefined;
 
             if (!selectedItemIds.includes(itemId)) {
@@ -99,7 +134,7 @@ const getDataAndColumns = ({
             const headerOverride = getFieldLabelOverride(itemId);
 
             const column: TableHeader | TableColumn = columnHelper.accessor(
-                (row) => row[itemId],
+                (row: ResultRow) => row[itemId],
                 {
                     id: itemId,
                     header: () => (
@@ -148,6 +183,8 @@ const getDataAndColumns = ({
                         item,
                         isVisible: isColumnVisible(itemId),
                         frozen: isColumnFrozen(itemId),
+                        // For image columns with explicit width: set fixed width constraints
+                        ...getImageSize(item),
                     },
                     // Some features work in the TanStack Table demos but not here, for unknown reasons.
                     // For example, setting grouping value here does not work. The workaround is to use

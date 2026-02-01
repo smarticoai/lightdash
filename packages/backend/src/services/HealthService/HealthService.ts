@@ -44,8 +44,10 @@ export class HealthService extends BaseService {
     async getHealthState(user: SessionUser | undefined): Promise<HealthState> {
         const isAuthenticated: boolean = !!user?.userUuid;
 
+        const migrationStartTime = performance.now();
         const { status: migrationStatus, currentVersion } =
             await this.migrationModel.getMigrationStatus();
+        const migrationExecutionTime = performance.now() - migrationStartTime;
 
         if (migrationStatus < 0) {
             throw new UnexpectedDatabaseError(
@@ -58,13 +60,31 @@ export class HealthService extends BaseService {
             );
         } // else migrationStatus === 0 (all migrations are up to date)
 
+        const hasOrgsStartTime = performance.now();
         const requiresOrgRegistration =
             !(await this.organizationModel.hasOrgs());
+        const hasOrgsExecutionTime = performance.now() - hasOrgsStartTime;
 
         const localDbtEnabled =
             process.env.LIGHTDASH_INSTALL_TYPE !==
                 LightdashInstallType.HEROKU &&
             this.lightdashConfig.mode !== LightdashMode.CLOUD_BETA;
+
+        const getDockerHubVersionStartTime = performance.now();
+        const dockerHubVersion = getDockerHubVersion();
+        const getDockerHubVersionExecutionTime =
+            performance.now() - getDockerHubVersionStartTime;
+
+        this.logger.info(
+            `Health check execution times: getMigrationStatus ${migrationExecutionTime.toFixed(
+                2,
+            )}ms, hasOrgs ${hasOrgsExecutionTime.toFixed(
+                2,
+            )}ms, getDockerHubVersion ${getDockerHubVersionExecutionTime.toFixed(
+                2,
+            )}ms`,
+        );
+
         return {
             healthy: true,
             mode: this.lightdashConfig.mode,
@@ -73,7 +93,7 @@ export class HealthService extends BaseService {
             defaultProject: undefined,
             isAuthenticated,
             requiresOrgRegistration,
-            latest: { version: getDockerHubVersion() },
+            latest: { version: dockerHubVersion },
             rudder: this.lightdashConfig.rudder,
             sentry: {
                 frontend: this.lightdashConfig.sentry.frontend,
@@ -86,20 +106,15 @@ export class HealthService extends BaseService {
             intercom: this.lightdashConfig.intercom,
             pylon: {
                 appId: this.lightdashConfig.pylon.appId,
-                verificationHash:
-                    this.lightdashConfig.pylon.identityVerificationSecret &&
-                    user?.email
-                        ? createHmac(
-                              'sha256',
-                              this.lightdashConfig.pylon
-                                  .identityVerificationSecret,
-                          )
-                              .update(user?.email)
-                              .digest('hex')
-                        : undefined,
+                verificationHash: this.getPylonVerificationHash(user?.email),
+            },
+            headway: {
+                enabled: this.lightdashConfig.headway.enabled,
             },
             siteUrl: this.lightdashConfig.siteUrl,
             staticIp: this.lightdashConfig.staticIp,
+            signupUrl: this.lightdashConfig.signupUrl,
+            helpMenuUrl: this.lightdashConfig.helpMenuUrl,
             posthog: this.lightdashConfig.posthog,
             query: {
                 csvCellsLimit: this.lightdashConfig.query.csvCellsLimit,
@@ -107,6 +122,7 @@ export class HealthService extends BaseService {
                 maxPageSize: this.lightdashConfig.query.maxPageSize,
                 defaultLimit: this.lightdashConfig.query.defaultLimit,
             },
+            dashboard: this.lightdashConfig.dashboard,
             pivotTable: this.lightdashConfig.pivotTable,
             hasSlack: this.hasSlackConfig(),
             hasGithub: process.env.GITHUB_PRIVATE_KEY !== undefined,
@@ -152,6 +168,14 @@ export class HealthService extends BaseService {
                         !!this.lightdashConfig.auth.snowflake.clientId &&
                         this.isEnterpriseEnabled(),
                 },
+                databricks: {
+                    // U2M OAuth only requires endpoints - client ID defaults to 'databricks-cli'
+                    enabled:
+                        !!this.lightdashConfig.auth.databricks.clientId &&
+                        !!this.lightdashConfig.auth.databricks
+                            .authorizationEndpoint &&
+                        !!this.lightdashConfig.auth.databricks.tokenEndpoint,
+                },
             },
             hasEmailClient: !!this.lightdashConfig.smtp,
             hasHeadlessBrowser:
@@ -189,6 +213,15 @@ export class HealthService extends BaseService {
                     this.lightdashConfig.ai.analyticsProjectUuid,
                 analyticsDashboardUuid:
                     this.lightdashConfig.ai.analyticsDashboardUuid,
+                isAmbientAiEnabled:
+                    !!this.lightdashConfig.ai.copilot.providers.anthropic
+                        ?.apiKey,
+            },
+            echarts6: {
+                enabled: this.lightdashConfig.echarts6.enabled,
+            },
+            funnelBuilder: {
+                enabled: this.lightdashConfig.funnelBuilder.enabled,
             },
         };
     }
@@ -206,5 +239,18 @@ export class HealthService extends BaseService {
             this.lightdashConfig.auth.google.oauth2ClientSecret !== undefined &&
             this.lightdashConfig.auth.google.enabled
         );
+    }
+
+    private getPylonVerificationHash(email: string | undefined) {
+        if (!this.lightdashConfig.pylon.identityVerificationSecret || !email) {
+            return undefined;
+        }
+
+        const secretBytes = Buffer.from(
+            this.lightdashConfig.pylon.identityVerificationSecret,
+            'hex',
+        );
+
+        return createHmac('sha256', secretBytes).update(email).digest('hex');
     }
 }

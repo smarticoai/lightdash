@@ -78,6 +78,14 @@ export const lightdashConfigMock: LightdashConfig = {
             clientId: undefined,
             clientSecret: undefined,
         },
+        databricks: {
+            loginPath: '/login/databricks',
+            callbackPath: '/oauth/redirect/databricks',
+            authorizationEndpoint: undefined,
+            tokenEndpoint: undefined,
+            clientId: undefined,
+            clientSecret: undefined,
+        },
     },
     lightdashCloudInstance: 'test-instance',
     k8s: {
@@ -91,6 +99,7 @@ export const lightdashConfigMock: LightdashConfig = {
         path: '/metrics',
     },
     chart: { versionHistory: { daysLimit: 0 } },
+    dashboard: { maxTilesPerTab: 50, maxTabsPerDashboard: 20 },
     database: {
         connectionUri: undefined,
         maxConnections: undefined,
@@ -102,6 +111,9 @@ export const lightdashConfigMock: LightdashConfig = {
     },
     pylon: {
         appId: '',
+    },
+    headway: {
+        enabled: false,
     },
     lightdashSecret: 'look away this is a secret',
     logging: {
@@ -171,6 +183,8 @@ export const lightdashConfigMock: LightdashConfig = {
         },
     },
     staticIp: '',
+    signupUrl: undefined,
+    helpMenuUrl: undefined,
     trustProxy: false,
     mode: LightdashMode.DEFAULT,
     license: {
@@ -191,6 +205,7 @@ export const lightdashConfigMock: LightdashConfig = {
         csvCellsLimit: 100000,
         timezone: undefined,
         useSqlPivotResults: false,
+        showExecutionTime: false,
     },
     ai: {
         copilot: {
@@ -200,24 +215,26 @@ export const lightdashConfigMock: LightdashConfig = {
             telemetryEnabled: false,
             requiresFeatureFlag: false,
             askAiButtonEnabled: false,
+            embeddingEnabled: true,
             defaultProvider: 'openai',
             providers: {
                 openai: {
                     apiKey: 'mock_api_key',
-                    modelName: 'mock_model_name',
-                    temperature: 0.2,
-                    responsesApi: false,
-                    reasoning: {
-                        enabled: false,
-                        reasoningSummary: 'auto',
-                        reasoningEffort: 'medium',
-                    },
+                    modelName: 'gpt-4.1-2025-04-14',
+                    embeddingModelName: 'text-embedding-3-small',
+                    zeroDataRetention: false,
                 },
             },
+            verifiedAnswerSimilarityThreshold: 0.6,
+            defaultEmbeddingModelProvider: 'openai',
         },
     },
     embedding: {
         enabled: false,
+        allowAll: {
+            dashboards: false,
+            charts: false,
+        },
         events: undefined,
     },
     scim: {
@@ -246,6 +263,8 @@ export const lightdashConfigMock: LightdashConfig = {
     headlessBrowser: {
         internalLightdashHost: 'https://test.lightdash.cloud',
         browserEndpoint: 'ws://headless-browser:3000',
+        maxScreenshotRetries: 5,
+        retryBaseDelayMs: 3000,
     },
     contentAsCode: {
         maxDownloads: 100,
@@ -269,9 +288,28 @@ export const lightdashConfigMock: LightdashConfig = {
     customRoles: {
         enabled: false,
     },
-    experimentalExplorerImprovements: false,
-    experimentalVirtualizedSideBar: false,
     dashboardComments: {
         enabled: true,
+    },
+    echarts6: {
+        enabled: false,
+    },
+    editYamlInUi: {
+        enabled: false,
+    },
+    partialCompilation: {
+        enabled: false,
+    },
+    funnelBuilder: {
+        enabled: false,
+    },
+    metricsCatalog: {
+        echartsVisualizationEnabled: false,
+    },
+    maps: {
+        enabled: false,
+    },
+    nestedSpacesPermissions: {
+        enabled: false,
     },
 };

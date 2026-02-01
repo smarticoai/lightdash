@@ -25,6 +25,7 @@ export type DbCatalog = {
     yaml_tags: string[] | null;
     ai_hints: string[] | null;
     joined_tables: string[] | null;
+    owner_user_uuid: string | null;
 };
 
 export type DbCatalogIn = Pick<
@@ -43,6 +44,7 @@ export type DbCatalogIn = Pick<
     | 'yaml_tags'
     | 'ai_hints'
     | 'joined_tables'
+    | 'owner_user_uuid'
 >;
 export type DbCatalogRemove = Pick<DbCatalog, 'project_uuid' | 'name'>;
 export type DbCatalogUpdate = Partial<
@@ -64,8 +66,9 @@ export type CatalogTable = Knex.CompositeTableType<
 >;
 
 // Utility to get the column name in the `catalog` table from a `CatalogItem` property
+// Also accepts 'tableLabel' and 'owner' which are only in CatalogField but needed for sorting/filtering
 export function getDbCatalogColumnFromCatalogProperty(
-    property: keyof CatalogItem,
+    property: keyof CatalogItem | 'tableLabel' | 'owner',
 ): keyof DbCatalog {
     switch (property) {
         case 'name':
@@ -86,6 +89,10 @@ export function getDbCatalogColumnFromCatalogProperty(
             return 'ai_hints';
         case 'icon':
             return 'icon';
+        case 'tableLabel':
+            return 'table_name';
+        case 'owner':
+            return 'owner_user_uuid';
         case 'searchRank':
         case 'categories':
         case 'tags':
@@ -131,6 +138,7 @@ export type DbMetricsTreeEdge = {
     target_metric_catalog_search_uuid: string;
     created_at: Date;
     created_by_user_uuid: string | null;
+    project_uuid: string;
 };
 
 export type DbMetricsTreeEdgeIn = Pick<
@@ -138,6 +146,7 @@ export type DbMetricsTreeEdgeIn = Pick<
     | 'source_metric_catalog_search_uuid'
     | 'target_metric_catalog_search_uuid'
     | 'created_by_user_uuid'
+    | 'project_uuid'
 >;
 
 export type DbMetricsTreeEdgeDelete = Pick<

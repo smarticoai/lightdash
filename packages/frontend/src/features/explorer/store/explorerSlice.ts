@@ -1,6 +1,13 @@
 import {
+    ChartType,
+    convertFieldRefToFieldId,
+    getFieldRef,
     getItemId,
+    isSqlTableCalculation,
+    lightdashVariablePattern,
+    maybeReplaceFieldsInChartVersion,
     toggleArrayValue,
+    updateFieldIdInFilters,
     type AdditionalMetric,
     type ChartConfig,
     type CustomDimension,
@@ -8,23 +15,53 @@ import {
     type Dimension,
     type FieldId,
     type Item,
+    type ItemsMap,
     type Metric,
     type MetricQuery,
     type MetricType,
     type ParameterValue,
+    type ReplaceCustomFields,
+    type SavedChart,
     type SortField,
     type TableCalculation,
+    type TimeZone,
 } from '@lightdash/common';
-import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
+import {
+    createNextState,
+    createSlice,
+    current,
+    type PayloadAction,
+} from '@reduxjs/toolkit';
 import { type QueryResultsProps } from '../../../hooks/useQueryResults';
 import { defaultState } from '../../../providers/Explorer/defaultState';
 import {
+    type ConfigCacheMap,
     type ExplorerReduceState,
     type ExplorerSection,
+    type MapExtent,
 } from '../../../providers/Explorer/types';
+import {
+    getCachedPivotConfig,
+    getValidChartConfig,
+} from '../../../providers/Explorer/utils';
+
 import { calcColumnOrder } from './utils';
 
 export type ExplorerSliceState = ExplorerReduceState;
+
+// Type-safe helper to save config to cache
+// Ensures that chartType and config match up correctly
+function saveConfigToCache<T extends ChartType>(
+    cache: Partial<ConfigCacheMap>,
+    chartType: T,
+    config: ConfigCacheMap[T]['chartConfig'],
+    pivotConfig?: { columns: string[] },
+): void {
+    cache[chartType] = {
+        chartConfig: config,
+        pivotConfig,
+    } as ConfigCacheMap[T];
+}
 
 const initialState: ExplorerSliceState = defaultState;
 
@@ -45,11 +82,23 @@ const explorerSlice = createSlice({
         setIsMinimal: (state, action: PayloadAction<boolean>) => {
             state.isMinimal = action.payload;
         },
+        setSavedChart: (
+            state,
+            action: PayloadAction<SavedChart | undefined>,
+        ) => {
+            state.savedChart = action.payload;
+        },
         setPreviouslyFetchedState: (
             state,
             action: PayloadAction<MetricQuery>,
         ) => {
             state.previouslyFetchedState = action.payload;
+
+            // Clear table calculation metadata now that query has successfully run
+            // The new query results will have the updated table calculation names
+            if (state.metadata?.tableCalculations) {
+                state.metadata.tableCalculations = [];
+            }
         },
 
         toggleExpandedSection: (
@@ -191,6 +240,10 @@ const explorerSlice = createSlice({
             state.unsavedChartVersion.metricQuery.limit = action.payload;
         },
 
+        setTimeZone: (state, action: PayloadAction<TimeZone>) => {
+            state.unsavedChartVersion.metricQuery.timezone = action.payload;
+        },
+
         setColumnOrder: (state, action: PayloadAction<string[]>) => {
             state.unsavedChartVersion.tableConfig.columnOrder = action.payload;
         },
@@ -277,6 +330,17 @@ const explorerSlice = createSlice({
                 ...(action.payload && { ...action.payload }),
             };
         },
+        togglePeriodOverPeriodComparisonModal: (
+            state,
+            action: PayloadAction<
+                { metric?: Metric; itemsMap?: ItemsMap } | undefined
+            >,
+        ) => {
+            state.modals.periodOverPeriodComparison = {
+                isOpen: !state.modals.periodOverPeriodComparison.isOpen,
+                ...(action.payload && { ...action.payload }),
+            };
+        },
         toggleWriteBackModal: (
             state,
             action: PayloadAction<
@@ -290,7 +354,7 @@ const explorerSlice = createSlice({
         },
         toggleFormatModal: (
             state,
-            action: PayloadAction<{ metric?: Metric } | undefined>,
+            action: PayloadAction<{ item?: Metric | Dimension } | undefined>,
         ) => {
             state.modals.format = {
                 isOpen: !state.modals.format.isOpen,
@@ -310,6 +374,24 @@ const explorerSlice = createSlice({
                 state.unsavedChartVersion.metricQuery.metricOverrides = {};
             }
             state.unsavedChartVersion.metricQuery.metricOverrides[metricId] = {
+                formatOptions,
+            };
+        },
+        updateDimensionFormat: (
+            state,
+            action: PayloadAction<{
+                dimension: Dimension;
+                formatOptions: CustomFormat | undefined;
+            }>,
+        ) => {
+            const { dimension, formatOptions } = action.payload;
+            const dimensionId = getItemId(dimension);
+            if (!state.unsavedChartVersion.metricQuery.dimensionOverrides) {
+                state.unsavedChartVersion.metricQuery.dimensionOverrides = {};
+            }
+            state.unsavedChartVersion.metricQuery.dimensionOverrides[
+                dimensionId
+            ] = {
                 formatOptions,
             };
         },
@@ -340,9 +422,52 @@ const explorerSlice = createSlice({
             };
         },
 
-        // Chart config
-        setChartConfig: (state, action: PayloadAction<ChartConfig>) => {
-            state.unsavedChartVersion.chartConfig = action.payload;
+        setChartType: (
+            state,
+            action: PayloadAction<{ chartType: ChartType }>,
+        ) => {
+            const before = state.unsavedChartVersion.chartConfig;
+            const beforePivotConfig = state.unsavedChartVersion.pivotConfig;
+
+            // save the current config and pivotConfig to the cache
+            saveConfigToCache(
+                state.cachedChartConfigs,
+                before.type,
+                current(before.config),
+                beforePivotConfig
+                    ? (current(beforePivotConfig) as { columns: string[] })
+                    : undefined,
+            );
+
+            // take a plain snapshot of the cache to avoid passing drafts
+            const plainCache = current(
+                state.cachedChartConfigs,
+            ) as Partial<ConfigCacheMap>;
+
+            // restore the chartConfig
+            state.unsavedChartVersion.chartConfig = getValidChartConfig(
+                action.payload.chartType,
+                plainCache,
+            );
+
+            // restore the pivotConfig
+            state.unsavedChartVersion.pivotConfig = getCachedPivotConfig(
+                action.payload.chartType,
+                plainCache,
+            );
+        },
+
+        setChartConfig: (
+            state,
+            action: PayloadAction<{
+                chartConfig: ChartConfig;
+            }>,
+        ) => {
+            state.unsavedChartVersion.chartConfig = getValidChartConfig(
+                action.payload.chartConfig.type,
+                state.cachedChartConfigs,
+                action.payload.chartConfig,
+            );
         },
 
         // Table calculations
@@ -378,6 +503,29 @@ const explorerSlice = createSlice({
             const { oldName, tableCalculation } = action.payload;
             const newName = tableCalculation.name;
 
+            // Update metadata to track the name change, this is used
+            // by consuming visualizations to translate old field names
+            // to new field names until the query re-runs
+            if (!state.metadata) {
+                state.metadata = {};
+            }
+            const tcMetadataIndex =
+                state.metadata.tableCalculations?.findIndex(
+                    (tc) => tc.name === oldName,
+                ) ?? -1;
+
+            if (tcMetadataIndex >= 0 && state.metadata.tableCalculations) {
+                state.metadata.tableCalculations[tcMetadataIndex] = {
+                    name: newName,
+                    oldName,
+                };
+            } else {
+                state.metadata.tableCalculations = [
+                    ...(state.metadata.tableCalculations ?? []),
+                    { name: newName, oldName },
+                ];
+            }
+
             // Update table calculation
             const index =
                 state.unsavedChartVersion.metricQuery.tableCalculations.findIndex(
@@ -404,6 +552,15 @@ const explorerSlice = createSlice({
         },
         deleteTableCalculation: (state, action: PayloadAction<string>) => {
             const nameToRemove = action.payload;
+
+            // Remove from metadata if it exists
+            if (state.metadata?.tableCalculations) {
+                state.metadata.tableCalculations =
+                    state.metadata.tableCalculations.filter(
+                        (tc) => tc.name !== nameToRemove,
+                    );
+            }
+
             state.unsavedChartVersion.metricQuery.tableCalculations =
                 state.unsavedChartVersion.metricQuery.tableCalculations.filter(
                     (tc) => tc.name !== nameToRemove,
@@ -546,14 +703,6 @@ const explorerSlice = createSlice({
             state.unsavedChartVersion.metricQuery.customDimensions =
                 action.payload;
         },
-
-        setAdditionalMetrics: (
-            state,
-            action: PayloadAction<AdditionalMetric[] | undefined>,
-        ) => {
-            state.unsavedChartVersion.metricQuery.additionalMetrics =
-                action.payload;
-        },
         addAdditionalMetric: (
             state,
             action: PayloadAction<AdditionalMetric>,
@@ -593,40 +742,106 @@ const explorerSlice = createSlice({
                 [...dimensionIds, ...metricIds, ...calcIds],
             );
         },
-        updateAdditionalMetric: (
+        // Context-compatible editAdditionalMetric with full logic including filters and table calculations
+        editAdditionalMetric: (
             state,
             action: PayloadAction<{
-                oldId: string;
                 additionalMetric: AdditionalMetric;
+                previousAdditionalMetricName: string;
             }>,
         ) => {
-            const { oldId, additionalMetric } = action.payload;
-            const newId = getItemId(additionalMetric);
+            const { additionalMetric, previousAdditionalMetricName } =
+                action.payload;
+            const additionalMetricFieldId = getItemId(additionalMetric);
 
-            state.unsavedChartVersion.metricQuery.additionalMetrics = (
-                state.unsavedChartVersion.metricQuery.additionalMetrics || []
-            ).map((metric) =>
-                getItemId(metric) === oldId ? additionalMetric : metric,
+            // Update metrics array
+            state.unsavedChartVersion.metricQuery.metrics =
+                state.unsavedChartVersion.metricQuery.metrics.map((metric) =>
+                    metric === previousAdditionalMetricName
+                        ? additionalMetricFieldId
+                        : metric,
+                );
+
+            // Update additionalMetrics array
+            state.unsavedChartVersion.metricQuery.additionalMetrics =
+                state.unsavedChartVersion.metricQuery.additionalMetrics?.map(
+                    (metric) =>
+                        metric.uuid === additionalMetric.uuid
+                            ? additionalMetric
+                            : metric,
+                );
+
+            // Update sorts
+            state.unsavedChartVersion.metricQuery.sorts =
+                state.unsavedChartVersion.metricQuery.sorts.map((sortField) =>
+                    sortField.fieldId === previousAdditionalMetricName
+                        ? {
+                              ...sortField,
+                              fieldId: additionalMetricFieldId,
+                          }
+                        : sortField,
+                );
+
+            // Update filters
+            const newFilters = {
+                ...state.unsavedChartVersion.metricQuery.filters,
+            };
+            if (newFilters.metrics) {
+                updateFieldIdInFilters(
+                    newFilters.metrics,
+                    previousAdditionalMetricName,
+                    additionalMetricFieldId,
+                );
+            }
+            state.unsavedChartVersion.metricQuery.filters = newFilters;
+
+            // Update tableCalculations SQL references
+            const tableCalcNames = new Set(
+                state.unsavedChartVersion.metricQuery.tableCalculations.map(
+                    (tc) => tc.name,
+                ),
             );
 
-            if (oldId !== newId) {
-                state.unsavedChartVersion.metricQuery.metrics =
-                    state.unsavedChartVersion.metricQuery.metrics.map(
-                        (metric) => (metric === oldId ? newId : metric),
-                    );
+            state.unsavedChartVersion.metricQuery.tableCalculations =
+                state.unsavedChartVersion.metricQuery.tableCalculations.map(
+                    (tableCalculation) => {
+                        if (!isSqlTableCalculation(tableCalculation)) {
+                            return tableCalculation;
+                        }
 
-                state.unsavedChartVersion.metricQuery.sorts =
-                    state.unsavedChartVersion.metricQuery.sorts.map((sort) =>
-                        sort.fieldId === oldId
-                            ? { ...sort, fieldId: newId }
-                            : sort,
-                    );
+                        const newSql = tableCalculation.sql.replace(
+                            lightdashVariablePattern,
+                            (_, fieldRef) => {
+                                // Skip table calculation references - they're valid without table prefix
+                                if (tableCalcNames.has(fieldRef)) {
+                                    return `\${${fieldRef}}`;
+                                }
 
-                state.unsavedChartVersion.tableConfig.columnOrder =
-                    state.unsavedChartVersion.tableConfig.columnOrder.map(
-                        (col) => (col === oldId ? newId : col),
-                    );
-            }
+                                const fieldId =
+                                    convertFieldRefToFieldId(fieldRef);
+                                if (fieldId === previousAdditionalMetricName) {
+                                    return `\${${getFieldRef(
+                                        additionalMetric,
+                                    )}}`;
+                                }
+                                return `\${${fieldRef}}`;
+                            },
+                        );
+                        return {
+                            ...tableCalculation,
+                            sql: newSql,
+                        };
+                    },
+                );
+
+            // Update columnOrder
+            state.unsavedChartVersion.tableConfig.columnOrder =
+                state.unsavedChartVersion.tableConfig.columnOrder.map(
+                    (fieldId) =>
+                        fieldId === previousAdditionalMetricName
+                            ? additionalMetricFieldId
+                            : fieldId,
+                );
         },
         removeAdditionalMetric: (state, action: PayloadAction<string>) => {
             const metricIdToRemove = action.payload;
@@ -684,7 +899,63 @@ const explorerSlice = createSlice({
                 unpivotedQueryArgs: null,
                 queryUuidHistory: [],
                 unpivotedQueryUuidHistory: [],
+                pendingFetch: false,
             };
+        },
+
+        // Request a query execution (works regardless of auto-fetch setting)
+        requestQueryExecution: (state) => {
+            state.queryExecution.pendingFetch = true;
+        },
+        clearPendingFetch: (state) => {
+            state.queryExecution.pendingFetch = false;
+        },
+
+        replaceFields: (
+            state,
+            action: PayloadAction<{
+                fieldsToReplace: ReplaceCustomFields[string];
+            }>,
+        ) => {
+            const { hasChanges, chartVersion } =
+                maybeReplaceFieldsInChartVersion({
+                    fieldsToReplace: action.payload.fieldsToReplace,
+                    chartVersion: state.unsavedChartVersion,
+                });
+            if (hasChanges) {
+                state.unsavedChartVersion = chartVersion;
+            }
+        },
+
+        // Convenience action: Clear query but preserve tableName
+        // Note: Components should also handle navigation side effects
+        clearQuery: (
+            _state,
+            {
+                payload: { defaultState: d, tableName },
+            }: PayloadAction<{
+                defaultState: ExplorerSliceState;
+                tableName: string;
+            }>,
+        ) => {
+            return createNextState(d, (draft: ExplorerSliceState) => {
+                draft.unsavedChartVersion.tableName = tableName;
+                draft.unsavedChartVersion.metricQuery.exploreName = tableName;
+            });
+        },
+
+        // Map extent - updated on pan/zoom, read at save time
+        // Stored in cachedChartConfigs[MAP] to keep map-specific state together
+        // This does NOT cause re-renders because nothing subscribes to it during render
+        setMapExtent: (state, action: PayloadAction<MapExtent | null>) => {
+            // Ensure the MAP cache exists
+            if (!state.cachedChartConfigs[ChartType.MAP]) {
+                state.cachedChartConfigs[ChartType.MAP] = {
+                    chartConfig: undefined as any,
+                };
+            }
+            state.cachedChartConfigs[ChartType.MAP].tempMapExtent =
+                action.payload;
         },
     },
 });

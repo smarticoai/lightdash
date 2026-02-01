@@ -1,7 +1,11 @@
 {
     "name": "@lightdash/cli",
-    "version": "0.2128.1",
+    "version": "0.2405.0",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/lightdash/lightdash.git"
+    },
     "bin": {
         "lightdash": "dist/index.js"
     },
@@ -26,7 +30,7 @@
         "execa": "^5",
         "google-auth-library": "^8.5.1",
         "inquirer": "^8.2.4",
-        "js-yaml": "^4.1.0",
+        "js-yaml": "^4.1.1",
         "lodash": "^4.17.21",
         "node-fetch": "^2.7.0",
         "nunjucks": "^3.2.3",
@@ -34,7 +38,8 @@
         "ora": "5.4.1",
         "parse-node-version": "^2.0.0",
         "unique-names-generator": "^4.7.1",
-        "uuid": "^11.0.3"
+        "uuid": "^11.0.3",
+        "yaml": "^2.7.0"
     },
     "description": "Lightdash CLI tool",
     "devDependencies": {
@@ -64,6 +69,6 @@
         "fix-format": "pnpm run formatter ./src --write",
         "preinstall": "bash track.sh started || echo 'skipping preinstall'",
         "postinstall": "bash track.sh completed || echo 'skipping postinstall'",
-        "release": "pnpm publish --no-git-checks"
+        "release": "pnpm publish --no-git-checks --access public"
     }
 }

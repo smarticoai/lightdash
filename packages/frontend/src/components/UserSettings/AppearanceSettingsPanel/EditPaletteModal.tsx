@@ -1,5 +1,5 @@
 import { type OrganizationColorPalette } from '@lightdash/common';
-import { type ModalProps } from '@mantine/core';
+import { type ModalProps } from '@mantine-8/core';
 import { type FC } from 'react';
 import {
     useColorPalettes,
@@ -26,6 +26,7 @@ export const EditPaletteModal: FC<EditPaletteModalProps> = ({
             uuid: palette.colorPaletteUuid,
             name: values.name,
             colors: values.colors,
+            darkColors: values.darkColors,
         });
     };
 
@@ -43,6 +44,7 @@ export const EditPaletteModal: FC<EditPaletteModalProps> = ({
             initialValues={{
                 name: palette.name,
                 colors: palette.colors,
+                darkColors: palette.darkColors || undefined,
             }}
             title={`Edit "${palette.name}" Palette`}
             submitButtonText="Save changes"

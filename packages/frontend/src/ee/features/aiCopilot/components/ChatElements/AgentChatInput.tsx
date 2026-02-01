@@ -1,17 +1,20 @@
+import type { AiModelOption } from '@lightdash/common';
 import {
     ActionIcon,
-    alpha,
     Anchor,
     Box,
+    Button,
+    Divider,
+    Group,
     Paper,
-    rem,
     Text,
     Textarea,
 } from '@mantine-8/core';
-import { IconArrowUp } from '@tabler/icons-react';
+import { IconArrowUp, IconBrain } from '@tabler/icons-react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-
+import MantineIcon from '../../../../../components/common/MantineIcon';
+import { ModelSelector } from '../../../../../components/common/ModelSelector/ModelSelector';
 import styles from './AgentChatInput.module.css';
 
 const MAX_RECOMMENDED_THREAD_MESSAGE_COUNT = 15;
@@ -25,6 +28,11 @@ interface AgentChatInputProps {
     messageCount?: number;
     projectUuid?: string;
     agentUuid?: string;
+    models?: AiModelOption[];
+    selectedModelId?: string | null;
+    onModelChange?: (modelId: string) => void;
+    extendedThinking?: boolean;
+    onExtendedThinkingChange?: (enabled: boolean) => void;
 }
 
 export const AgentChatInput = ({
@@ -32,10 +40,15 @@ export const AgentChatInput = ({
     loading = false,
     disabled = false,
     disabledReason,
-    placeholder = 'Ask anything about your data...',
+    placeholder = 'Ask anything',
     messageCount = 0,
     projectUuid,
     agentUuid,
+    models,
+    selectedModelId,
+    onModelChange,
+    extendedThinking = false,
+    onExtendedThinkingChange,
 }: AgentChatInputProps) => {
     // this is a workaround to prevent the enter key from being pressed when
     // the user is composing a character
@@ -44,6 +57,16 @@ export const AgentChatInput = ({
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const [value, setValue] = useState('');
     const navigate = useNavigate();
+
+    const hasValue = value.trim().length > 0;
+    const showWarningBanner =
+        messageCount > MAX_RECOMMENDED_THREAD_MESSAGE_COUNT;
+    const showDisabledBanner = disabled && disabledReason;
+
+    // Use minimal mode when there's no model selector (existing thread)
+    const showModelSelector =
+        models && models.length > 1 && onModelChange !== undefined;
+    const isMinimalMode = !showModelSelector;
 
     useLayoutEffect(() => {
         if (!inputRef.current) return;
@@ -94,105 +117,203 @@ export const AgentChatInput = ({
         };
     }, []);
 
+    const handleSubmit = () => {
+        const valueToSubmit = value.trim();
+        if (valueToSubmit && !disabled && !loading && !isComposing) {
+            onSubmit(valueToSubmit);
+            setValue('');
+        }
+    };
+
+    // For existing threads
+    if (isMinimalMode) {
+        return (
+            <Box className={styles.minimalContainer}>
+                {showWarningBanner && (
+                    <Paper className={styles.warningBanner}>
+                        <Text size="xs" c="ldGray.7" ta="center">
+                            Agent performance degrades if a thread is too long.
+                            Please start a{' '}
+                            <Anchor
+                                size="xs"
+                                href="#"
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    if (projectUuid && agentUuid) {
+                                        void navigate(
+                                            `/projects/${projectUuid}/ai-agents/${agentUuid}/threads`,
+                                        );
+                                    }
+                                }}
+                            >
+                                new thread
+                            </Anchor>
+                        </Text>
+                    </Paper>
+                )}
+
+                <Box className={styles.minimalInputWrapper} pos="relative">
+                    <Textarea
+                        autoFocus
+                        w="100%"
+                        ref={inputRef}
+                        placeholder={placeholder}
+                        autosize
+                        minRows={1}
+                        maxRows={6}
+                        disabled={disabled}
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        classNames={{
+                            input: styles.minimalTextarea,
+                            wrapper: styles.minimalTextareaWrapper,
+                        }}
+                    />
+
+                    <ActionIcon
+                        style={{ position: 'absolute' }}
+                        right={12}
+                        bottom={10}
+                        variant="filled"
+                        size="md"
+                        className={styles.minimalSubmitButton}
+                        disabled={disabled || isComposing || !hasValue}
+                        loading={loading}
+                        onClick={handleSubmit}
+                        aria-label="Send message"
+                    >
+                        <MantineIcon
+                            icon={IconArrowUp}
+                            color="ldGray.0"
+                            size={18}
+                            stroke={2}
+                        />
+                    </ActionIcon>
+                </Box>
+
+                {showDisabledBanner && (
+                    <Text size="xs" c="dimmed" ta="right" mt="xs" px="sm">
+                        {disabledReason}
+                    </Text>
+                )}
+            </Box>
+        );
+    }
+
+    // New thread mode
     return (
-        <Box pos="relative" pb="lg" className={styles.backdropBackground}>
-            {messageCount > MAX_RECOMMENDED_THREAD_MESSAGE_COUNT && (
-                <Paper
-                    px="sm"
-                    py={rem(4)}
-                    bg={alpha('var(--mantine-color-gray-1)', 0.5)}
-                    mx="md"
-                    style={{
-                        borderTopLeftRadius: rem(12),
-                        borderTopRightRadius: rem(12),
-                        borderBottomLeftRadius: 0,
-                        borderBottomRightRadius: 0,
+        <Box
+            className={`${styles.container} ${
+                showWarningBanner ? styles.warningBannerVisible : ''
+            } ${showDisabledBanner ? styles.disabledBannerVisible : ''}`}
+        >
+            {/* Main input card */}
+            <Box className={styles.inputCard}>
+                {/* Textarea */}
+                <Textarea
+                    autoFocus
+                    ref={inputRef}
+                    placeholder={placeholder}
+                    autosize
+                    minRows={2}
+                    maxRows={8}
+                    disabled={disabled}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    classNames={{
+                        input: styles.textarea,
+                        wrapper: styles.textareaWrapper,
                     }}
-                >
-                    <Text size="xs" c="dimmed" style={{ flex: 1 }} ta="center">
-                        Agent performance degrades if a thread is too long.
-                        Please start a{' '}
-                        <Anchor
-                            size="xs"
-                            href="#"
-                            onClick={(e) => {
-                                e.preventDefault();
-                                if (projectUuid && agentUuid) {
-                                    void navigate(
-                                        `/projects/${projectUuid}/ai-agents/${agentUuid}/threads`,
-                                    );
-                                }
-                            }}
-                        >
-                            new thread
-                        </Anchor>
+                    styles={{
+                        input: {
+                            border: 'none',
+                            '&:focus': {
+                                border: 'none',
+                                outline: 'none',
+                            },
+                        },
+                    }}
+                />
+
+                {/* Dotted divider */}
+                <hr className={styles.divider} />
+
+                {/* Toolbar */}
+                <Box className={styles.toolbar}>
+                    <Box className={styles.toolbarActions}>
+                        {/* Model selector */}
+                        {showModelSelector && (
+                            <ModelSelector
+                                models={models}
+                                value={selectedModelId ?? null}
+                                onChange={onModelChange}
+                            />
+                        )}
+
+                        {/* Extended thinking toggle */}
+                        {onExtendedThinkingChange && (
+                            <Group>
+                                <Divider orientation="vertical" />
+                                <Button
+                                    variant="subtle"
+                                    size="compact-sm"
+                                    leftSection={
+                                        <MantineIcon
+                                            icon={IconBrain}
+                                            color={
+                                                extendedThinking
+                                                    ? 'indigo.5'
+                                                    : 'ldGray.7'
+                                            }
+                                        />
+                                    }
+                                    className={
+                                        styles.thinkingButton +
+                                        ' ' +
+                                        (extendedThinking
+                                            ? styles.thinkingButtonOn
+                                            : '')
+                                    }
+                                    onClick={() =>
+                                        onExtendedThinkingChange(
+                                            !extendedThinking,
+                                        )
+                                    }
+                                >
+                                    Thinking
+                                </Button>
+                            </Group>
+                        )}
+                    </Box>
+
+                    {/* Submit button */}
+                    <ActionIcon
+                        variant="filled"
+                        size="lg"
+                        className={styles.submitButton}
+                        disabled={disabled || isComposing || !hasValue}
+                        loading={loading}
+                        onClick={handleSubmit}
+                        aria-label="Send message"
+                    >
+                        <MantineIcon
+                            icon={IconArrowUp}
+                            color="ldGray.0"
+                            size={20}
+                            stroke={2}
+                        />
+                    </ActionIcon>
+                </Box>
+            </Box>
+
+            {/* Disabled reason banner */}
+            {showDisabledBanner && (
+                <Paper className={styles.disabledBanner} px="md" py="xs">
+                    <Text size="xs" c="dimmed" ta="right">
+                        {disabledReason}
                     </Text>
                 </Paper>
             )}
-            <Textarea
-                autoFocus
-                classNames={{ input: styles.input }}
-                ref={inputRef}
-                placeholder={placeholder}
-                autosize
-                minRows={4}
-                radius="0.75rem"
-                disabled={disabled}
-                size="md"
-                m={-1}
-                onChange={(e) => setValue(e.target.value)}
-                value={value}
-                rightSection={
-                    <ActionIcon
-                        variant="filled"
-                        size="md"
-                        radius="xl"
-                        style={{
-                            position: 'absolute',
-                            bottom: 12,
-                            right: 12,
-                        }}
-                        color="dark.5"
-                        disabled={disabled || isComposing}
-                        loading={loading}
-                        onClick={() => {
-                            const valueToSubmit = value.trim();
-                            if (valueToSubmit) {
-                                onSubmit(valueToSubmit);
-                                setValue('');
-                            }
-                        }}
-                    >
-                        <IconArrowUp size={18} />
-                    </ActionIcon>
-                }
-            />
-
-            {disabled && disabledReason ? (
-                <Paper
-                    px="sm"
-                    py={rem(4)}
-                    bg={alpha('var(--mantine-color-gray-1)', 0.5)}
-                    mx="md"
-                    style={{
-                        borderTopLeftRadius: 0,
-                        borderTopRightRadius: 0,
-                        borderBottomLeftRadius: rem(12),
-                        borderBottomRightRadius: rem(12),
-                    }}
-                >
-                    {disabled && disabledReason && (
-                        <Text
-                            size="xs"
-                            c="dimmed"
-                            style={{ flex: 1 }}
-                            ta="right"
-                        >
-                            {disabledReason}
-                        </Text>
-                    )}
-                </Paper>
-            ) : null}
         </Box>
     );
 };

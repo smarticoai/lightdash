@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { customMetricsSchema } from '../customMetrics';
+import {
+    customMetricsSchema,
+    customMetricsSchemaTransformed,
+} from '../customMetrics';
 import { filtersSchemaTransformed, filtersSchemaV2 } from '../filters';
 import { baseOutputMetadataSchema } from '../outputMetadata';
 import { tableCalcsSchema } from '../tableCalcs/tableCalcs';
@@ -19,7 +22,6 @@ Usage Tips:
 `;
 
 export const toolRunMetricQueryArgsSchema = createToolSchema({
-    type: 'run_metric_query',
     description: TOOL_RUN_METRIC_QUERY_DESCRIPTION,
 })
     .extend({
@@ -34,26 +36,26 @@ export const toolRunMetricQueryArgsSchema = createToolSchema({
     })
     .build();
 
-export type ToolRunMetricQueryArgs = z.infer<
-    typeof toolRunMetricQueryArgsSchema
->;
-
 export const toolRunMetricQueryArgsSchemaTransformed =
     toolRunMetricQueryArgsSchema.transform((data) => ({
         ...data,
-        customMetrics: customMetricsSchema.parse(data.customMetrics ?? []),
+        customMetrics: customMetricsSchemaTransformed.parse(
+            data.customMetrics ?? [],
+        ),
         filters: filtersSchemaTransformed.parse(data.filters ?? null),
     }));
-
-export type ToolRunMetricQueryArgsTransformed = z.infer<
-    typeof toolRunMetricQueryArgsSchemaTransformed
->;
 
 export const toolRunMetricQueryOutputSchema = z.object({
     result: z.string(),
     metadata: baseOutputMetadataSchema,
 });
 
+export type ToolRunMetricQueryArgs = z.infer<
+    typeof toolRunMetricQueryArgsSchema
+>;
+export type ToolRunMetricQueryArgsTransformed = z.infer<
+    typeof toolRunMetricQueryArgsSchemaTransformed
+>;
 export type ToolRunMetricQueryOutput = z.infer<
     typeof toolRunMetricQueryOutputSchema
 >;

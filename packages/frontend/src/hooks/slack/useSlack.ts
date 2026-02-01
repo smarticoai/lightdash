@@ -61,12 +61,14 @@ const getSlackChannels = async ({
     excludeDms,
     excludeGroups,
     forceRefresh,
+    includeChannelIds,
 }: {
     search: string;
     excludeArchived: boolean;
     excludeDms: boolean;
     excludeGroups: boolean;
     forceRefresh: boolean;
+    includeChannelIds?: string[];
 }) => {
     const queryString = new URLSearchParams();
     queryString.set('search', search);
@@ -74,6 +76,9 @@ const getSlackChannels = async ({
     queryString.set('excludeDms', excludeDms.toString());
     queryString.set('excludeGroups', excludeGroups.toString());
     queryString.set('forceRefresh', forceRefresh.toString());
+    if (includeChannelIds && includeChannelIds.length > 0) {
+        queryString.set('includeChannelIds', includeChannelIds.join(','));
+    }
 
     return lightdashApi<SlackChannel[] | undefined>({
         url: `/slack/channels?${queryString.toString()}`,
@@ -84,7 +89,17 @@ const getSlackChannels = async ({
 
 export const useSlackChannels = (
     search: string,
-    { excludeArchived = true, excludeDms = false, excludeGroups = false },
+    {
+        excludeArchived = true,
+        excludeDms = false,
+        excludeGroups = false,
+        includeChannelIds,
+    }: {
+        excludeArchived?: boolean;
+        excludeDms?: boolean;
+        excludeGroups?: boolean;
+        includeChannelIds?: string[];
+    },
     useQueryOptions?: UseQueryOptions<SlackChannel[] | undefined, ApiError>,
 ) => {
     const queryClient = useQueryClient();
@@ -97,6 +112,7 @@ export const useSlackChannels = (
             excludeArchived,
             excludeDms,
             excludeGroups,
+            includeChannelIds,
         ],
         queryFn: () =>
             getSlackChannels({
@@ -105,6 +121,7 @@ export const useSlackChannels = (
                 excludeDms,
                 excludeGroups,
                 forceRefresh: false,
+                includeChannelIds,
             }),
         ...useQueryOptions,
     });
@@ -117,6 +134,7 @@ export const useSlackChannels = (
             excludeDms,
             excludeGroups,
             forceRefresh: true,
+            includeChannelIds,
         });
         queryClient.setQueryData(
             [
@@ -125,17 +143,52 @@ export const useSlackChannels = (
                 excludeArchived,
                 excludeDms,
                 excludeGroups,
+                includeChannelIds,
             ],
             slackChannelsAfterRefresh,
         );
         setIsRefreshing(false);
-    }, [search, excludeArchived, excludeDms, excludeGroups, queryClient]);
+    }, [
+        search,
+        excludeArchived,
+        excludeDms,
+        excludeGroups,
+        includeChannelIds,
+        queryClient,
+    ]);
 
     return {
         ...query,
         isRefreshing: query.isFetching || isRefreshing,
         refresh,
     };
+};
+
+const getSlackChannelById = async (channelId: string) =>
+    lightdashApi<SlackChannel | null>({
+        url: `/slack/channels/${encodeURIComponent(channelId)}`,
+        method: 'GET',
+        body: undefined,
+    });
+
+/**
+ * Hook for on-demand channel lookup when user pastes a channel ID
+ */
+export const useSlackChannelLookup = () => {
+    const queryClient = useQueryClient();
+
+    return useMutation<SlackChannel | null, ApiError, string>({
+        mutationFn: getSlackChannelById,
+        onSuccess: async (channel) => {
+            if (channel) {
+                // Invalidate channels queries to include the new channel
+                await queryClient.invalidateQueries({
+                    queryKey: ['slack_channels'],
+                    refetchType: 'none', // Don't refetch, just mark as stale
+                });
+            }
+        },
+    });
 };
 
 const updateSlackCustomSettings = async (opts: SlackAppCustomSettings) =>

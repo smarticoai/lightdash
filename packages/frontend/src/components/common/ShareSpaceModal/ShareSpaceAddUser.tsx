@@ -157,9 +157,9 @@ export const ShareSpaceAddUser: FC<ShareSpaceAddUserProps> = ({
                 (access) => access.userUuid === user.userUuid,
             );
             const currentSpaceRoleTitle = spaceAccess
-                ? UserAccessOptions.find(
+                ? (UserAccessOptions.find(
                       (option) => option.value === spaceAccess.role,
-                  )?.title ?? 'No access'
+                  )?.title ?? 'No access')
                 : 'No access';
 
             const spaceRoleInheritanceInfo = `Access inherited from their ${spaceAccess?.inheritedFrom} role`;
@@ -198,7 +198,7 @@ export const ShareSpaceAddUser: FC<ShareSpaceAddUserProps> = ({
                         </Group>
                     </Tooltip>
 
-                    <Badge size="xs" color="gray.6" radius="xs">
+                    <Badge size="xs" color="ldGray.6" radius="xs">
                         {currentSpaceRoleTitle}
                     </Badge>
                 </Group>
@@ -301,7 +301,8 @@ export const ShareSpaceAddUser: FC<ShareSpaceAddUserProps> = ({
                                 {(hasUsersNextPage || hasGroupsNextPage) && (
                                     <Button
                                         size="xs"
-                                        variant="white"
+                                        variant="default"
+                                        fullWidth
                                         onClick={async () => {
                                             await Promise.all([
                                                 fetchGroupsNextPage(),
@@ -313,8 +314,14 @@ export const ShareSpaceAddUser: FC<ShareSpaceAddUserProps> = ({
                                             isUsersFetching ||
                                             isGroupsFetching
                                         }
+                                        mt="xs"
+                                        sx={(theme) => ({
+                                            borderRadius: 0,
+                                            border: 0,
+                                            borderTop: `1px solid ${theme.colors.ldGray[2]}`,
+                                        })}
                                     >
-                                        <Text>Load more</Text>
+                                        Load more
                                     </Button>
                                 )}
                             </>

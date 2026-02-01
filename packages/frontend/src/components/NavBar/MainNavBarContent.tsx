@@ -3,6 +3,7 @@ import { type FC } from 'react';
 import { Link } from 'react-router';
 import { useHasMetricsInCatalog } from '../../features/metricsCatalog/hooks/useMetricsCatalog';
 import Omnibar from '../../features/omnibar';
+import useApp from '../../providers/App/useApp';
 import Logo from '../../svgs/logo-icon.svg?react';
 import { AiAgentsButton } from './AiAgentsButton';
 import BrowseMenu from './BrowseMenu';
@@ -13,6 +14,7 @@ import { MetricsLink } from './MetricsLink';
 import { NotificationsMenu } from './NotificationsMenu';
 import ProjectSwitcher from './ProjectSwitcher';
 import SettingsMenu from './SettingsMenu';
+import { ThemeSwitcher } from './ThemeSwitcher';
 import UserCredentialsSwitcher from './UserCredentialsSwitcher';
 import UserMenu from './UserMenu';
 import { smrMode } from '../../utils/smarticoUtils';
@@ -32,6 +34,8 @@ export const MainNavBarContent: FC<Props> = ({
     const { data: hasMetrics } = useHasMetricsInCatalog({
         projectUuid: activeProjectUuid,
     });
+    const { health } = useApp();
+    const headwayEnabled = health.data?.headway?.enabled;
 
     return (
         <>
@@ -40,7 +44,14 @@ export const MainNavBarContent: FC<Props> = ({
                     component={Link}
                     to={homeUrl}
                     title="Home"
-                    size="lg"
+                    sx={{
+                        width: 'auto',
+                        height: 34,
+                        '& svg': {
+                            height: 32,
+                            width: 'auto',
+                        },
+                    }}
                 >
                     <Logo />
                 </ActionIcon>
@@ -64,6 +75,8 @@ export const MainNavBarContent: FC<Props> = ({
 
             <Group sx={{ flexShrink: 0 }}>
                 <Button.Group>
+                    <ThemeSwitcher />
+
                     <SettingsMenu />
 
                     {!isLoadingActiveProject && activeProjectUuid && (
@@ -74,9 +87,12 @@ export const MainNavBarContent: FC<Props> = ({
                         <HelpMenu />
                     }
 
-                    {!isLoadingActiveProject && activeProjectUuid && !smrMode() && (
-                        <HeadwayMenuItem projectUuid={activeProjectUuid} />
-                    )}
+                    {headwayEnabled &&
+                        !isLoadingActiveProject &&
+                        activeProjectUuid &&
+                        !smrMode() && (
+                            <HeadwayMenuItem projectUuid={activeProjectUuid} />
+                        )}
 
                     <ProjectSwitcher />
                 </Button.Group>

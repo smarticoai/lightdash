@@ -114,18 +114,22 @@ export const getLastCommit = async ({
     owner,
     repo,
     branch,
+    installationId,
     token,
 }: {
     owner: string;
     repo: string;
     branch: string;
-    token: string;
+    installationId?: string;
+    token?: string;
 }) => {
-    const { octokit, headers } = getOctokitRestForUser(token);
+    const { octokit, headers } = getOctokit(installationId, token);
+    // GitHub API uses `sha` param to filter by branch
+    // @see https://docs.github.com/en/rest/commits/commits#list-commits
     const response = await octokit.rest.repos.listCommits({
         owner,
         repo,
-        ref: branch,
+        sha: branch,
         headers,
     });
 
@@ -137,6 +141,7 @@ export const getFileContent = async ({
     owner,
     repo,
     branch,
+    installationId,
     token,
     hostDomain,
 }: {
@@ -144,11 +149,14 @@ export const getFileContent = async ({
     owner: string;
     repo: string;
     branch: string;
-    token: string;
+    installationId?: string;
+    token?: string;
     hostDomain?: string;
 }) => {
-    const { octokit, headers } = getOctokitRestForUser(token);
+    const { octokit, headers } = getOctokit(installationId, token);
     try {
+        // GitHub API uses `ref` param for branch/tag/commit
+        // @see https://docs.github.com/en/rest/repos/contents#get-repository-content
         const response = await octokit.rest.repos.getContent({
             owner,
             repo,
@@ -183,6 +191,7 @@ export const createBranch = async ({
     repo,
     sha,
     branch,
+    installationId,
     token,
     hostDomain,
 }: {
@@ -190,12 +199,15 @@ export const createBranch = async ({
     repo: string;
     sha: string;
     branch: string;
-    token: string;
+    installationId?: string;
+    token?: string;
     hostDomain?: string;
 }): Promise<Awaited<ReturnType<OctokitRest['rest']['git']['createRef']>>> => {
-    const { octokit, headers } = getOctokitRestForUser(token);
+    const { octokit, headers } = getOctokit(installationId, token);
 
     try {
+        // GitHub API uses `ref` as fully qualified reference (refs/heads/...)
+        // @see https://docs.github.com/en/rest/git/refs#create-a-reference
         const response = await octokit.rest.git.createRef({
             owner,
             repo,
@@ -230,6 +242,7 @@ export const updateFile = async ({
     fileSha,
     branch,
     message,
+    installationId,
     token,
 }: {
     owner: string;
@@ -239,14 +252,17 @@ export const updateFile = async ({
     fileSha: string;
     branch: string;
     message: string;
-    token: string;
+    installationId?: string;
+    token?: string;
 }): Promise<
     Awaited<
         ReturnType<OctokitRest['rest']['repos']['createOrUpdateFileContents']>
     >
 > => {
-    const { octokit, headers } = getOctokitRestForUser(token);
+    const { octokit, headers } = getOctokit(installationId, token);
     try {
+        // GitHub API uses `branch` param for target branch
+        // @see https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents
         const response = await octokit.rest.repos.createOrUpdateFileContents({
             owner,
             repo,
@@ -278,6 +294,7 @@ export const createFile = async ({
     content,
     branch,
     message,
+    installationId,
     token,
 }: {
     owner: string;
@@ -286,15 +303,18 @@ export const createFile = async ({
     content: string;
     branch: string;
     message: string;
-    token: string;
+    installationId?: string;
+    token?: string;
 }): Promise<
     Awaited<
         ReturnType<OctokitRest['rest']['repos']['createOrUpdateFileContents']>
     >
 > => {
-    const { octokit, headers } = getOctokitRestForUser(token);
+    const { octokit, headers } = getOctokit(installationId, token);
 
     try {
+        // GitHub API uses `branch` param for target branch
+        // @see https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents
         const response = await octokit.rest.repos.createOrUpdateFileContents({
             owner,
             repo,
@@ -352,23 +372,27 @@ export const checkFileDoesNotExist = async ({
     owner,
     repo,
     path,
+    installationId,
     token,
     branch,
 }: {
     owner: string;
     repo: string;
     path: string;
-    token: string;
+    installationId?: string;
+    token?: string;
     branch: string;
 }): Promise<boolean> => {
-    const { octokit, headers } = getOctokitRestForUser(token);
+    const { octokit, headers } = getOctokit(installationId, token);
 
     try {
+        // GitHub API uses `ref` param for branch/tag/commit
+        // @see https://docs.github.com/en/rest/repos/contents#get-repository-content
         await octokit.rest.repos.getContent({
             owner,
             repo,
             path,
-            branch,
+            ref: branch,
             headers,
         });
         throw new AlreadyExistsError(`File "${path}" already exists in Github`);

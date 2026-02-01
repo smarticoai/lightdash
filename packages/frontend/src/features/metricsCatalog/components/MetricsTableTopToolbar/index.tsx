@@ -17,6 +17,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
     DEFAULT_SPOTLIGHT_TABLE_COLUMN_CONFIG,
     SpotlightTableColumns,
+    type CatalogCategoryFilterMode,
     type CatalogField,
 } from '@lightdash/common';
 import {
@@ -46,8 +47,9 @@ import {
 } from '@tabler/icons-react';
 import isEqual from 'lodash/isEqual';
 import { type MRT_TableInstance } from 'mantine-react-table';
-import { memo, useCallback, useMemo, type FC } from 'react';
+import { memo, useCallback, useMemo, useState, type FC } from 'react';
 import { useLocation, useNavigate } from 'react-router';
+import { useDebounce } from 'react-use';
 import MantineIcon from '../../../../components/common/MantineIcon';
 import useTracking from '../../../../providers/Tracking/useTracking';
 import { TotalMetricsDot } from '../../../../svgs/metricsCatalog';
@@ -67,8 +69,9 @@ import {
 } from '../../store/metricsCatalogSlice';
 import { MetricCatalogView } from '../../types';
 import CategoriesFilter from './CategoriesFilter';
+import OwnersFilter from './OwnersFilter';
 import SegmentedControlHoverCard from './SegmentedControlHoverCard';
-
+import TableFilter from './TableFilter';
 type MetricsTableTopToolbarProps = GroupProps & {
     search: string | undefined;
     setSearch: (search: string) => void;
@@ -76,6 +79,12 @@ type MetricsTableTopToolbarProps = GroupProps & {
     setSelectedCategories: (
         categories: CatalogField['categories'][number]['tagUuid'][],
     ) => void;
+    categoryFilterMode: CatalogCategoryFilterMode;
+    setCategoryFilterMode: (mode: CatalogCategoryFilterMode) => void;
+    selectedTables: string[];
+    setSelectedTables: (tables: string[]) => void;
+    selectedOwners: string[];
+    setSelectedOwners: (owners: string[]) => void;
     totalResults: number;
     isValidMetricsNodeCount: boolean;
     isValidMetricsEdgeCount: boolean;
@@ -111,7 +120,7 @@ const SortableColumn: FC<{
                     <Box>
                         <ActionIcon
                             size="xs"
-                            color="gray.5"
+                            color="ldGray.5"
                             {...attributes}
                             {...listeners}
                             disabled={column.frozen}
@@ -125,14 +134,14 @@ const SortableColumn: FC<{
                     fz={13}
                     radius="md"
                     fw={500}
-                    color="dark.5"
+                    color="ldDark.9"
                 >
                     {column.name}
                 </Text>
             </Group>
             <ActionIcon
                 size="xs"
-                color="gray.5"
+                color="ldGray.5"
                 sx={{
                     visibility: column.frozen ? 'hidden' : 'visible',
                 }}
@@ -149,11 +158,17 @@ const SortableColumn: FC<{
 
 export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
     ({
-        search,
-        setSearch,
+        search: _search,
+        setSearch: _setSearch,
         totalResults,
         selectedCategories,
         setSelectedCategories,
+        categoryFilterMode,
+        setCategoryFilterMode,
+        selectedTables,
+        setSelectedTables,
+        selectedOwners,
+        setSelectedOwners,
         showCategoriesFilter,
         isValidMetricsTree,
         isValidMetricsNodeCount,
@@ -162,6 +177,16 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
         table,
         ...props
     }) => {
+        const [search, setSearch] = useState(_search);
+
+        useDebounce(
+            () => {
+                _setSearch(search ?? '');
+            },
+            300,
+            [search],
+        );
+
         const userUuid = useAppSelector(
             (state) => state.metricsCatalog.user?.userUuid,
         );
@@ -329,12 +354,12 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                                 fontSize: theme.fontSizes.sm,
                                 fontWeight: 400,
                                 color: search
-                                    ? theme.colors.gray[8]
-                                    : theme.colors.gray[5],
+                                    ? theme.colors.ldGray[8]
+                                    : theme.colors.ldGray[5],
                                 boxShadow: theme.shadows.subtle,
-                                border: `1px solid ${theme.colors.gray[3]}`,
+                                border: `1px solid ${theme.colors.ldGray[3]}`,
                                 '&:hover': {
-                                    border: `1px solid ${theme.colors.gray[4]}`,
+                                    border: `1px solid ${theme.colors.ldGray[4]}`,
                                 },
                                 '&:focus': {
                                     border: `1px solid ${theme.colors.blue[5]}`,
@@ -348,7 +373,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                         icon={
                             <MantineIcon
                                 size="md"
-                                color="gray.6"
+                                color="ldGray.6"
                                 icon={IconSearch}
                             />
                         }
@@ -359,7 +384,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                                     onClick={clearSearch}
                                     variant="transparent"
                                     size="xs"
-                                    color="gray.5"
+                                    color="ldGray.5"
                                 >
                                     <MantineIcon icon={IconX} />
                                 </ActionIcon>
@@ -375,7 +400,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                             h={20}
                             sx={{
                                 alignSelf: 'center',
-                                borderColor: '#DEE2E6',
+                                borderColor: 'ldGray.3',
                             }}
                         />
                     )}
@@ -383,13 +408,26 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                         <CategoriesFilter
                             selectedCategories={selectedCategories}
                             setSelectedCategories={setSelectedCategories}
+                            categoryFilterMode={categoryFilterMode}
+                            setCategoryFilterMode={setCategoryFilterMode}
                         />
                     )}
+
+                    {/* TODO :: permissions for table filter */}
+                    <TableFilter
+                        selectedTables={selectedTables}
+                        setSelectedTables={setSelectedTables}
+                    />
+
+                    <OwnersFilter
+                        selectedOwners={selectedOwners}
+                        setSelectedOwners={setSelectedOwners}
+                    />
                 </Group>
                 <Group spacing="xs">
                     <Badge
-                        bg="#F8F9FC"
-                        c="#363F72"
+                        bg="ldGray.1"
+                        c="ldGray.8"
                         radius={6}
                         py="sm"
                         px="xs"
@@ -416,7 +454,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                                 <ActionIcon
                                     variant="transparent"
                                     size="xs"
-                                    color="gray.5"
+                                    color="ldGray.5"
                                 >
                                     <MantineIcon icon={IconEye} />
                                 </ActionIcon>
@@ -466,7 +504,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                                     </DndContext>
                                 </Stack>
 
-                                <Divider color="gray.1" />
+                                <Divider color="ldGray.1" />
                                 <Group position="apart" mt={4}>
                                     {canManageSpotlight ? (
                                         <>
@@ -487,7 +525,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                                                     h={28}
                                                     onClick={handleReset}
                                                     sx={(theme) => ({
-                                                        border: `1px solid ${theme.colors.gray[2]}`,
+                                                        border: `1px solid ${theme.colors.ldGray[2]}`,
                                                         boxShadow:
                                                             theme.shadows
                                                                 .subtle,
@@ -531,7 +569,7 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                                                 onClick={handleReset}
                                                 disabled={!hasConfigChanges}
                                                 sx={(theme) => ({
-                                                    border: `1px solid ${theme.colors.gray[2]}`,
+                                                    border: `1px solid ${theme.colors.ldGray[2]}`,
                                                     boxShadow:
                                                         theme.shadows.subtle,
                                                 })}
@@ -564,8 +602,8 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                             },
                             indicator: {
                                 borderRadius: theme.radius.md,
-                                border: `1px solid ${theme.colors.gray[2]}`,
-                                backgroundColor: 'white',
+                                border: `1px solid ${theme.colors.ldGray[2]}`,
+                                backgroundColor: theme.colors.background[0],
                                 boxShadow: theme.shadows.subtle,
                             },
                         })}

@@ -4,7 +4,10 @@ import {
     legacyFollowUpToolsTransform,
 } from '../../followUpTools';
 import { AiResultType } from '../../types';
-import { customMetricsSchema } from '../customMetrics';
+import {
+    customMetricsSchema,
+    customMetricsSchemaTransformed,
+} from '../customMetrics';
 import { filtersSchemaTransformed, filtersSchemaV2 } from '../filters';
 import { baseOutputMetadataSchema } from '../outputMetadata';
 import { tableCalcsSchema } from '../tableCalcs/tableCalcs';
@@ -15,7 +18,6 @@ import { tableVizConfigSchema } from '../visualizations';
 export const TOOL_TABLE_VIZ_DESCRIPTION = `Use this tool to query data to display in a table or summarized if limit is set to 1.`;
 
 export const toolTableVizArgsSchema = createToolSchema({
-    type: AiResultType.TABLE_RESULT,
     description: TOOL_TABLE_VIZ_DESCRIPTION,
 })
     .extend({
@@ -60,6 +62,7 @@ export const toolTableVizArgsSchemaTransformed = toolTableVizArgsSchema
     })
     .transform((data) => ({
         ...data,
+        customMetrics: customMetricsSchemaTransformed.parse(data.customMetrics),
         followUpTools: legacyFollowUpToolsTransform(data.followUpTools),
     }));
 

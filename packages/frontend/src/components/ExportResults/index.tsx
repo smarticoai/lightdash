@@ -91,8 +91,8 @@ const ExportResults: FC<ExportResultsProps> = memo(
                         limit === Limit.CUSTOM
                             ? customLimit
                             : limit === Limit.TABLE
-                            ? totalResults ?? 0
-                            : null,
+                              ? (totalResults ?? 0)
+                              : null,
                         limit,
                     );
 
@@ -151,6 +151,7 @@ const ExportResults: FC<ExportResultsProps> = memo(
                                 }
                             })
                             .catch((error: Error) => {
+                                notifications.hide(TOAST_KEY);
                                 showToastError({
                                     title: `Unable to download results`,
                                     subtitle: error.message,
@@ -285,7 +286,7 @@ const ExportResults: FC<ExportResultsProps> = memo(
                                 (limit === Limit.ALL ||
                                     limit === Limit.CUSTOM) &&
                                 !isPivotTable && (
-                                    <Alert color="gray.9" p="xs">
+                                    <Alert color="ldGray.9" p="xs">
                                         <Text size="xs">
                                             Excel exports are limited to
                                             1,000,000 rows.

@@ -7,25 +7,30 @@ import {
     Anchor,
     Button,
     Flex,
-    Paper,
     PasswordInput,
     Stack,
+    Tabs,
     Text,
     Title,
-} from '@mantine/core';
+} from '@mantine-8/core';
 import { IconAlertCircle, IconKey } from '@tabler/icons-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import React, { useMemo, type FC } from 'react';
+import { useMemo, type FC } from 'react';
 import { lightdashApi } from '../../../../api';
 import { EmptyState } from '../../../../components/common/EmptyState';
 import MantineIcon from '../../../../components/common/MantineIcon';
-import { SettingsGridCard } from '../../../../components/common/Settings/SettingsCard';
+import {
+    SettingsCard,
+    SettingsGridCard,
+} from '../../../../components/common/Settings/SettingsCard';
 import SuboptimalState from '../../../../components/common/SuboptimalState/SuboptimalState';
 import { useDashboards } from '../../../../hooks/dashboard/useDashboards';
 import useToaster from '../../../../hooks/toaster/useToaster';
+import { useCharts } from '../../../../hooks/useCharts';
 import useApp from '../../../../providers/App/useApp';
-import EmbedDashboardsForm from './EmbedDashboardsForm';
-import EmbedUrlForm from './EmbedUrlForm';
+import EmbedAllowListForm from './EmbedAllowListForm';
+import EmbedPreviewChartForm from './EmbedPreviewChartForm';
+import EmbedPreviewDashboardForm from './EmbedPreviewDashboardForm';
 
 const useEmbedConfig = (projectUuid: string) => {
     return useQuery<DecodedEmbed, ApiError>({
@@ -75,13 +80,20 @@ const useEmbedConfigUpdateMutation = (projectUuid: string) => {
     const queryClient = useQueryClient();
     const { showToastSuccess, showToastError } = useToaster();
     return useMutation<null, ApiError, UpdateEmbed>(
-        ({ dashboardUuids, allowAllDashboards }: UpdateEmbed) =>
+        ({
+            dashboardUuids,
+            allowAllDashboards,
+            chartUuids,
+            allowAllCharts,
+        }: UpdateEmbed) =>
             lightdashApi<null>({
-                url: `/embed/${projectUuid}/config/dashboards`,
+                url: `/embed/${projectUuid}/config`,
                 method: 'PATCH',
                 body: JSON.stringify({
                     dashboardUuids,
                     allowAllDashboards,
+                    chartUuids,
+                    allowAllCharts,
                 }),
             }),
         {
@@ -110,6 +122,8 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
         undefined,
         true,
     );
+
+    const { isLoading: isLoadingCharts, data: charts } = useCharts(projectUuid);
     const { mutate: createEmbedConfig, isLoading: isCreating } =
         useEmbedConfigCreateMutation(projectUuid);
     const { mutate: updateEmbedConfig, isLoading: isUpdating } =
@@ -128,7 +142,7 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
         );
     }, [dashboards, embedConfig]);
 
-    if (isLoading || isLoadingDashboards || !health.data) {
+    if (isLoading || isLoadingDashboards || isLoadingCharts || !health.data) {
         return (
             <div style={{ marginTop: '20px' }}>
                 <SuboptimalState title="Loading embed config" loading />
@@ -155,7 +169,7 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
                     icon={
                         <MantineIcon
                             icon={IconKey}
-                            color="gray.6"
+                            color="ldGray.6"
                             stroke={1}
                             size="5xl"
                         />
@@ -179,17 +193,24 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
     return (
         <Stack mb="lg">
             <SettingsGridCard>
-                <Stack spacing="sm">
-                    <Title order={4}>Embed secret</Title>
-                    <Text color="dimmed">
-                        The secret is used to generate embed tokens for
-                        embedding dashboards.
-                    </Text>
-                    <Text color="dimmed" fz="xs">
-                        Read more about using embed secret in our{' '}
-                        <Anchor href="https://docs.lightdash.com/references/embedding">
+                <Stack gap="sm">
+                    <Stack gap="xs">
+                        <Title order={4}>Embed secret</Title>
+                        <Text c="dimmed" fz="sm">
+                            Use this secret to generate embed tokens for
+                            embedding dashboards and charts.
+                        </Text>
+                    </Stack>
+                    <Text c="dimmed" fz="xs">
+                        Learn more on how to use your embed secret in our{' '}
+                        <Anchor
+                            href="https://docs.lightdash.com/references/embedding"
+                            fz="xs"
+                            target="_blank"
+                        >
                             docs guide
                         </Anchor>
+                        .
                     </Text>
                 </Stack>
                 <Stack>
@@ -212,27 +233,53 @@ const SettingsEmbed: FC<{ projectUuid: string }> = ({ projectUuid }) => {
                     </Flex>
                 </Stack>
             </SettingsGridCard>
-            <Paper shadow="sm" withBorder p="md">
-                <Stack spacing="sm" mb="md">
-                    <Title order={4}>Allowed dashboards</Title>
+            <SettingsCard>
+                <Stack gap="xs" mb="md">
+                    <Title order={4}>Allowed content</Title>
+                    <Text c="dimmed" fz="sm">
+                        Select the content you want to allow to be embedded.
+                    </Text>
                 </Stack>
-                <EmbedDashboardsForm
+                <EmbedAllowListForm
                     disabled={isSaving}
                     embedConfig={embedConfig}
                     dashboards={dashboards || []}
+                    charts={charts || []}
                     onSave={updateEmbedConfig}
                 />
-            </Paper>
-            <Paper shadow="sm" withBorder p="md">
-                <Stack spacing="sm" mb="md">
+            </SettingsCard>
+            <SettingsCard>
+                <Stack gap="xs" mb="md">
                     <Title order={4}>Preview & code snippet</Title>
+                    <Text c="dimmed" fz="sm">
+                        Preview your embed URL and copy it to your clipboard.
+                    </Text>
                 </Stack>
-                <EmbedUrlForm
-                    projectUuid={projectUuid}
-                    siteUrl={health.data.siteUrl}
-                    dashboards={allowedDashboards}
-                />
-            </Paper>
+                <Tabs defaultValue="dashboards" keepMounted>
+                    <Tabs.List>
+                        <Tabs.Tab value="dashboards">Dashboards</Tabs.Tab>
+                        <Tabs.Tab value="charts">Charts</Tabs.Tab>
+                    </Tabs.List>
+                    <Tabs.Panel value="dashboards">
+                        <Stack mt="md">
+                            <EmbedPreviewDashboardForm
+                                projectUuid={projectUuid}
+                                siteUrl={health.data.siteUrl}
+                                dashboards={allowedDashboards}
+                            />
+                        </Stack>
+                    </Tabs.Panel>
+                    <Tabs.Panel value="charts">
+                        <Stack mt="md">
+                            <EmbedPreviewChartForm
+                                projectUuid={projectUuid}
+                                siteUrl={health.data.siteUrl}
+                                charts={charts || []}
+                            />
+                        </Stack>
+                    </Tabs.Panel>
+                </Tabs>
+            </SettingsCard>
         </Stack>
     );
 };

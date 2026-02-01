@@ -2,7 +2,7 @@ import {
     SlackService,
     SlackServiceArguments,
 } from '../../../services/SlackService/SlackService';
-import { AiAgentService } from '../AiAgentService';
+import { AiAgentService } from '../AiAgentService/AiAgentService';
 
 type CommercialSlackServiceArguments = SlackServiceArguments & {
     aiAgentService: AiAgentService;
@@ -28,9 +28,14 @@ export class CommercialSlackService extends SlackService {
         slackApp.event('app_mention', (m) =>
             this.aiAgentService.handleAppMention(m),
         );
+        slackApp.event('message', (m) =>
+            this.aiAgentService.handleMultiAgentChannelMessage(m),
+        );
+        this.aiAgentService.handleAgentSelection(slackApp);
         this.aiAgentService.handlePromptUpvote(slackApp);
         this.aiAgentService.handlePromptDownvote(slackApp);
         this.aiAgentService.handleClickExploreButton(slackApp);
+        this.aiAgentService.handleViewArtifact(slackApp);
         this.aiAgentService.handleClickOAuthButton(slackApp);
         this.aiAgentService.handleExecuteFollowUpTool(slackApp);
         this.aiAgentService.handleViewChangesetsButtonClick(slackApp);

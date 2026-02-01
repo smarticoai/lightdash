@@ -26,7 +26,6 @@ import {
     IconFilter,
     IconInfoCircle,
 } from '@tabler/icons-react';
-import { darken, lighten } from 'polished';
 import { memo, useCallback, useMemo, type FC } from 'react';
 import { useToggle } from 'react-use';
 import {
@@ -37,14 +36,17 @@ import {
     useExplorerSelector,
     type ExplorerStoreState,
 } from '../../../../../features/explorer/store';
-import { getItemBgColor } from '../../../../../hooks/useColumns';
+
 import { useAddFilter } from '../../../../../hooks/useFilters';
 import useTracking from '../../../../../providers/Tracking/useTracking';
 import { EventName } from '../../../../../types/Events';
+import {
+    getFieldColor,
+    getFieldColors,
+} from '../../../../../utils/fieldColors';
 import FieldIcon from '../../../../common/Filters/FieldIcon';
 import MantineIcon from '../../../../common/MantineIcon';
 import { ItemDetailPreview } from '../ItemDetailPreview';
-import { getFieldIconColor } from '../utils';
 import TreeSingleNodeActions from './TreeSingleNodeActions';
 import { type Node } from './types';
 import useTableTree from './useTableTree';
@@ -57,9 +59,9 @@ const NavItemIcon = ({
     item: Item | AdditionalMetric;
 }) => {
     return isMissing ? (
-        <MantineIcon icon={IconAlertTriangle} color="gray.7" />
+        <MantineIcon icon={IconAlertTriangle} color="ldGray.7" />
     ) : (
-        <FieldIcon item={item} color={getFieldIconColor(item)} size="md" />
+        <FieldIcon item={item} color={getFieldColor(item)} size="md" />
     );
 };
 
@@ -153,7 +155,7 @@ const TreeSingleNodeComponent: FC<Props> = ({ node }) => {
         return false;
     }, [description, isMissing, item, metricInfo]);
 
-    const bgColor = getItemBgColor(item);
+    const itemColors = getFieldColors(item);
     const alerts = itemsAlerts?.[getItemId(item)];
     const isFiltered = isField(item) && isFieldFiltered;
     const showFilterAction =
@@ -220,14 +222,12 @@ const TreeSingleNodeComponent: FC<Props> = ({ node }) => {
 
     const navLinkSx = useMemo(
         () => ({
-            backgroundColor: isSelected ? bgColor : undefined,
+            backgroundColor: isSelected ? itemColors.bg : undefined,
             '&:hover': {
-                backgroundColor: isSelected
-                    ? darken(0.02, bgColor)
-                    : lighten(0.1, bgColor),
+                backgroundColor: itemColors.bgHover,
             },
         }),
-        [isSelected, bgColor],
+        [isSelected, itemColors],
     );
     const icon = useMemo(
         () => <NavItemIcon isMissing={isMissing} item={item} />,
@@ -349,7 +349,6 @@ const TreeSingleNodeComponent: FC<Props> = ({ node }) => {
                             <ActionIcon onClick={handleFilterClick}>
                                 <MantineIcon
                                     icon={IconFilter}
-                                    color="gray.7"
                                     style={{ flexShrink: 0 }}
                                 />
                             </ActionIcon>

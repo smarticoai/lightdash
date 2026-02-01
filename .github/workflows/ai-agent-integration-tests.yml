@@ -3,8 +3,8 @@ name: AI Agent Integration Tests
 on:
     schedule:
         # Runs on Monday to Friday at 8:00 UTC
-        # Use https://crontab.guru/#0_8_*_*_1-5 for reference
-        - cron: '0 8 * * 1-5'
+        # Use https://crontab.guru/#0_8_*_*_1 for reference
+        - cron: '0 8 * * 1'
     workflow_dispatch: # Allow manual trigger from GitHub Actions UI
     pull_request:
         paths:
@@ -59,7 +59,7 @@ jobs:
             - name: Setup Python and dbt
               uses: actions/setup-python@v4
               with:
-                  python-version: '3.9.x'
+                  python-version: '3.10.x'
 
             - name: Install dbt
               run: pip install dbt-core~=1.7.0 dbt-postgres~=1.7.0
@@ -120,7 +120,7 @@ jobs:
                     - ai_provider: openai
                       model_name: gpt-4.1-2025-04-14
                     - ai_provider: openai
-                      model_name: gpt-5-2025-08-07
+                      model_name: gpt-5.1-2025-11-13
                     - ai_provider: anthropic
                       model_name: claude-sonnet-4-5-20250929
                     - ai_provider: anthropic
@@ -168,7 +168,7 @@ jobs:
             - name: Setup Python and dbt
               uses: actions/setup-python@v4
               with:
-                  python-version: '3.9.x'
+                  python-version: '3.10.x'
 
             - name: Install dbt
               run: pip install dbt-core~=1.7.0 dbt-postgres~=1.7.0
@@ -212,11 +212,15 @@ jobs:
                   PGPORT: 5432
                   PGUSER: postgres
                   PGPASSWORD: password
-                  PGDATABASE: lightdash
+                  # TODO :: improve database name management
+                  # PGCONNECTIONURI will be suffixed with _test and used for the application database
+                  # PGDATABASE will be used for seeding the test database and warehouse credentials (won't be suffixed)
+                  PGDATABASE: lightdash_test
                   AI_COPILOT_ENABLED: true
                   AI_DEFAULT_PROVIDER: ${{ matrix.ai_provider }}
                   OPENAI_MODEL_NAME: ${{ matrix.ai_provider == 'openai' && matrix.model_name || '' }}
                   ANTHROPIC_MODEL_NAME: ${{ matrix.ai_provider == 'anthropic' && matrix.model_name || '' }}
+                  OPENAI_REASONING_ENABLED: ${{ matrix.model_name == 'gpt-5.1-2025-11-13' && 'true' || 'false' }}
                   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
                   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
                   LIGHTDASH_LICENSE_KEY: ${{ secrets.LIGHTDASH_LICENSE_KEY }}
@@ -225,6 +229,9 @@ jobs:
                   DBT_DEMO_DIR: ${{ github.workspace }}/examples/full-jaffle-shop-demo
                   LD_SETUP_DBT_VERSION: v1.7
                   SKIP_TEST_MIGRATIONS: 'true'
+                  # TODO :: Support embeddings (Verifying Answers)
+                  AI_EMBEDDING_ENABLED: false
+                  AI_DEFAULT_EMBEDDING_PROVIDER: 'openai'
 
             - name: Upload test results
               uses: actions/upload-artifact@v4

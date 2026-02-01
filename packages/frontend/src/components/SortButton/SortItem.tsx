@@ -66,7 +66,6 @@ const SortItem = forwardRef<HTMLDivElement, SortItemProps>(
                 {...draggableProps}
                 noWrap
                 position="apart"
-                bg="white"
                 pl="xs"
                 pr="xxs"
                 py="two"
@@ -135,8 +134,8 @@ const SortItem = forwardRef<HTMLDivElement, SortItemProps>(
                                 value === SortNullsFirst.FIRST
                                     ? true
                                     : value === SortNullsFirst.LAST
-                                    ? false
-                                    : undefined,
+                                      ? false
+                                      : undefined,
                             );
                         }}
                     />

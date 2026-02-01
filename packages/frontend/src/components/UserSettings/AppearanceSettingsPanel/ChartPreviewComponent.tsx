@@ -1,9 +1,11 @@
 import { ChartKind } from '@lightdash/common';
 import { Box, Group, SegmentedControl, Stack } from '@mantine/core';
-import EChartsReact from 'echarts-for-react';
 import { useCallback, useMemo, useRef, useState, type FC } from 'react';
 import MantineIcon from '../../common/MantineIcon';
 import { getChartIcon } from '../../common/ResourceIcon/utils';
+import EChartsReactComponent, {
+    type EChartsReact,
+} from '../../EChartsReactWrapper';
 
 interface SingleChartPreviewProps {
     chartType: ChartKind;
@@ -27,7 +29,7 @@ const SingleChartPreview: FC<SingleChartPreviewProps> = ({
                 display: currentChartType === chartType ? 'block' : 'none',
             }}
         >
-            <EChartsReact
+            <EChartsReactComponent
                 ref={chartRef}
                 option={options}
                 style={{ height: '100%', width: '100%' }}
@@ -40,10 +42,12 @@ const SingleChartPreview: FC<SingleChartPreviewProps> = ({
 
 export interface ChartPreviewComponentProps {
     colors: string[];
+    backgroundColor: string;
 }
 
 export const ChartPreviewComponent: FC<ChartPreviewComponentProps> = ({
     colors,
+    backgroundColor,
 }) => {
     const AVAILABLE_VISUALIZATIONS = [
         {
@@ -233,11 +237,8 @@ export const ChartPreviewComponent: FC<ChartPreviewComponentProps> = ({
     return (
         <Stack
             spacing="sm"
-            sx={(theme) => ({
-                backgroundColor: theme.fn.lighten(theme.colors.gray[0], 0.7),
-            })}
             h="100%"
-            style={{ flex: 1 }}
+            style={{ flex: 1, backgroundColor }}
             pt="xs"
         >
             <Group position="center">
@@ -251,7 +252,7 @@ export const ChartPreviewComponent: FC<ChartPreviewComponentProps> = ({
                     size="xs"
                 />
             </Group>
-            <Box h={170} pos="relative">
+            <Box h={170} pos="relative" style={{ marginBottom: '25%' }}>
                 <SingleChartPreview
                     chartType={ChartKind.VERTICAL_BAR}
                     currentChartType={chartType}

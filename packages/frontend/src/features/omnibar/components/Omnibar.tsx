@@ -12,6 +12,7 @@ import {
     rem,
     Stack,
     Transition,
+    useMantineColorScheme,
     useMantineTheme,
 } from '@mantine/core';
 import {
@@ -33,6 +34,7 @@ import MantineIcon from '../../../components/common/MantineIcon';
 import { PAGE_CONTENT_WIDTH } from '../../../components/common/Page/constants';
 import { useProject } from '../../../hooks/useProject';
 import { useValidationUserAbility } from '../../../hooks/validation/useValidation';
+import { getMantineThemeOverride } from '../../../mantineTheme';
 import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 import useSearch, { OMNIBAR_MIN_QUERY_LENGTH } from '../hooks/useSearch';
@@ -59,6 +61,7 @@ const Omnibar: FC<Props> = ({ projectUuid }) => {
     const { data: projectData } = useProject(projectUuid);
     const { track } = useTracking();
     const theme = useMantineTheme();
+    const { colorScheme } = useMantineColorScheme();
     const canUserManageValidation = useValidationUserAbility(projectUuid);
     const [searchFilters, setSearchFilters] = useState<SearchFilters>();
     const [query, setQuery] = useState<string>();
@@ -67,6 +70,11 @@ const Omnibar: FC<Props> = ({ projectUuid }) => {
     const [openPanels, setOpenPanels] =
         useState<SearchItemType[]>(allSearchItemTypes);
 
+    const omnibarTheme = useMemo(() => {
+        const fullTheme = getMantineThemeOverride(colorScheme);
+        const { globalStyles, ...themeWithoutGlobalStyles } = fullTheme;
+        return themeWithoutGlobalStyles;
+    }, [colorScheme]);
     const [focusedItemIndex, setFocusedItemIndex] =
         useState<FocusedItemIndex>();
 
@@ -199,7 +207,7 @@ const Omnibar: FC<Props> = ({ projectUuid }) => {
                 )}
             </Transition>
 
-            <MantineProvider inherit theme={{ colorScheme: 'light' }}>
+            <MantineProvider theme={omnibarTheme}>
                 <Modal
                     withCloseButton={false}
                     size={`calc(${rem(PAGE_CONTENT_WIDTH)} - ${
@@ -231,7 +239,7 @@ const Omnibar: FC<Props> = ({ projectUuid }) => {
                                 query ? (
                                     <ActionIcon
                                         onClick={() => setQuery('')}
-                                        color="gray.5"
+                                        color="ldGray.5"
                                     >
                                         <MantineIcon
                                             icon={IconCircleXFilled}

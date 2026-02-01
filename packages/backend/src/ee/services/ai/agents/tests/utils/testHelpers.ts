@@ -1,15 +1,13 @@
 import { AiAgent } from '@lightdash/common';
 import type { IntegrationTestContext } from '../../../../../../vitest.setup.integration';
-import {
-    getModels,
-    getServices,
-} from '../../../../../../vitest.setup.integration';
+import { getServices } from '../../../../../../vitest.setup.integration';
 import { DbAiAgentToolCall } from '../../../../../database/entities/ai';
 
+export type ToolCallWithResult = DbAiAgentToolCall & { result?: unknown };
 export interface PromptAndGetToolCallsResult {
     response: string;
     threadUuid: string;
-    toolCalls: Array<DbAiAgentToolCall & { result?: unknown }>;
+    toolCalls: ToolCallWithResult[];
 }
 
 export const promptAndGetToolCalls = async (
@@ -19,7 +17,6 @@ export const promptAndGetToolCalls = async (
     threadUuid?: string,
 ): Promise<PromptAndGetToolCallsResult> => {
     const services = getServices(context.app);
-    const models = getModels(context.app);
 
     let threadUuidToUse = threadUuid;
     let messageUuid: string;
@@ -61,7 +58,8 @@ export const promptAndGetToolCalls = async (
             'ai_agent_tool_result.tool_call_id',
         )
         .where('ai_agent_tool_call.ai_prompt_uuid', messageUuid)
-        .select<Array<DbAiAgentToolCall & { result?: unknown }>>('*');
+        .select<ToolCallWithResult[]>('*')
+        .orderBy('ai_agent_tool_call.created_at', 'asc');
 
     return {
         response,

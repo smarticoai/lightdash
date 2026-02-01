@@ -11,6 +11,8 @@ import {
     detectCircularDependencies,
     Explore,
     ExploreCompiler,
+    getItemId,
+    isPeriodOverPeriodAdditionalMetric,
     isPostCalculationMetricType,
     isSqlTableCalculation,
     isTemplateTableCalculation,
@@ -293,7 +295,16 @@ export const compileMetricQuery = ({
     availableParameters,
 }: CompileMetricQueryArgs): CompiledMetricQuery => {
     const fieldQuoteChar = warehouseSqlBuilder.getFieldQuoteChar();
-    const validFieldIds = [...metricQuery.dimensions, ...metricQuery.metrics];
+
+    const popMetricIds = (metricQuery.additionalMetrics ?? [])
+        .filter(isPeriodOverPeriodAdditionalMetric)
+        .map(getItemId);
+
+    const validFieldIds = [
+        ...metricQuery.dimensions,
+        ...metricQuery.metrics,
+        ...popMetricIds,
+    ];
 
     const compiledAdditionalMetrics = (metricQuery.additionalMetrics || []).map(
         (additionalMetric) =>

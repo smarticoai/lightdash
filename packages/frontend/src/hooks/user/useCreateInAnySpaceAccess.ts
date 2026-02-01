@@ -1,15 +1,23 @@
 import { subject } from '@casl/ability';
+import useEmbed from '../../ee/providers/Embed/useEmbed';
 import useApp from '../../providers/App/useApp';
 import { useSpaceSummaries } from '../useSpaces';
 
 const useCreateInAnySpaceAccess = (
     projectUuid: string | undefined,
     subjectName: 'Dashboard' | 'SavedChart',
+    options?: { enabled?: boolean },
 ): boolean => {
     const { user } = useApp();
-    const spaces = useSpaceSummaries(projectUuid, true);
+    const { embedToken } = useEmbed();
 
-    if (!projectUuid) {
+    const isEmbedMode = !!embedToken;
+
+    const spaces = useSpaceSummaries(projectUuid, true, {
+        enabled: !!projectUuid && !isEmbedMode && (options?.enabled ?? true),
+    });
+
+    if (!projectUuid || isEmbedMode) {
         return false;
     }
 

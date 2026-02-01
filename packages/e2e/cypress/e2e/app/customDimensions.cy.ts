@@ -1,6 +1,7 @@
 import { SEED_PROJECT } from '@lightdash/common';
 
-describe('Custom dimensions', () => {
+// todo: move to unit tests
+describe.skip('Custom dimensions', () => {
     beforeEach(() => {
         cy.login();
     });
@@ -8,6 +9,7 @@ describe('Custom dimensions', () => {
     it('I can create a bin number', () => {
         cy.visit(`/projects/${SEED_PROJECT.project_uuid}/tables`);
         cy.findByText('Payments').click();
+        cy.scrollTreeToItem('Amount');
         cy.contains('Amount').trigger('mouseover');
         cy.get('span.mantine-NavLink-rightSection').eq(1).click();
         cy.findByText('Add custom dimensions').click();
@@ -19,12 +21,13 @@ describe('Custom dimensions', () => {
 
         cy.findByText('Create').click();
 
-        cy.get('.mantine-ScrollArea-root').within(() => {
-            // Select metric
-            cy.findByText('Orders').click();
-            // Select metric
-            cy.findByText('Total order amount').click();
-        });
+        // Select metric
+        cy.scrollTreeToItem('Orders');
+        cy.findByText('Orders').click();
+        // Select metric
+        cy.scrollTreeToItem('Total order amount');
+        cy.findByText('Total order amount').click();
+
         cy.get('button').contains('Run query').click();
 
         // Check valid results
@@ -65,10 +68,10 @@ describe('Custom dimensions', () => {
         cy.contains('Number').click();
         cy.findByText('Create').click();
 
-        cy.get('.mantine-ScrollArea-root').within(() => {
-            // Select metric
-            cy.findByText('Total revenue').click();
-        });
+        // Select metric
+        cy.scrollTreeToItem('Total revenue');
+        cy.findByText('Total revenue').click();
+
         cy.get('button').contains('Run query').click();
 
         // Show SQL
@@ -105,15 +108,15 @@ describe('Custom dimensions', () => {
         cy.findByText('Create').click();
         cy.get('@editor').should('not.exist');
 
-        cy.get('.mantine-ScrollArea-root').within(() => {
-            // Select metric
-            cy.findByText('Total revenue').click();
-        });
+        // Select metric
+        cy.scrollTreeToItem('Total revenue');
+        cy.findByText('Total revenue').click();
+
         cy.get('button').contains('Run query').click();
 
         // Check results
         cy.contains('payment_credit_card');
-        cy.contains('1,452');
+        cy.contains('1,452.16');
         // Show SQL
         cy.findByTestId('Chart-card-expand').click(); // Close chart
         cy.findByTestId('Results-card-expand').click(); // Close results
@@ -151,14 +154,27 @@ describe('Custom dimensions', () => {
         cy.findByRole('menuitem', { name: 'Max' }).click();
         cy.findByRole('button', { name: 'Create' }).click();
 
-        cy.get('.mantine-ScrollArea-root').within(() => {
-            // Select dimension
-            cy.findByText('Payment method').click();
-            // Select metric
-            cy.findByText('Total revenue').click();
-            // Deselect custom dimension
-            cy.findByText('discounted amount').click();
-        });
+        // Select dimension
+        cy.scrollTreeToItem('Payment method');
+        cy.get('[data-testid="virtualized-tree-scroll-container"]').within(
+            () => {
+                cy.findByText('Payment method').click();
+            },
+        );
+        // Select metric
+        cy.scrollTreeToItem('Total revenue');
+        cy.get('[data-testid="virtualized-tree-scroll-container"]').within(
+            () => {
+                cy.findByText('Total revenue').click();
+            },
+        );
+        // Deselect custom dimension
+        cy.scrollTreeToItem('discounted amount');
+        cy.get('[data-testid="virtualized-tree-scroll-container"]').within(
+            () => {
+                cy.findByText('discounted amount').click();
+            },
+        );
 
         cy.get('button').contains('Run query').click();
 

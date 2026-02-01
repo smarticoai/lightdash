@@ -27,7 +27,7 @@ const UrlMenuItem: FC<{
     row: Record<string, Record<string, ResultValue>>;
     showError?: boolean;
 }> = ({ urlConfig, itemsMap, itemIdsInRow, value, row, showError = true }) => {
-    const tracking = useTracking(true);
+    const tracking = useTracking({ failSilently: true });
     const [url, renderError] = useMemo(() => {
         let parsedUrl: string | undefined = undefined;
         let errorMessage: string | undefined = undefined;
@@ -123,21 +123,20 @@ const UrlMenuItems: FC<{
         const itemIds: string[] = [];
         const row = cell.row
             .getAllCells()
-            .reduce<Record<string, Record<string, ResultValue>>>(
-                (acc, rowCell) => {
-                    const item = rowCell.column.columnDef.meta?.item;
-                    const rowCellValue = (rowCell.getValue() as ResultRow[0])
-                        ?.value;
-                    if (item && isField(item) && rowCellValue) {
-                        itemIds.push(getItemId(item));
-                        acc[item.table] = acc[item.table] || {};
-                        acc[item.table][item.name] = rowCellValue;
-                        return acc;
-                    }
+            .reduce<
+                Record<string, Record<string, ResultValue>>
+            >((acc, rowCell) => {
+                const item = rowCell.column.columnDef.meta?.item;
+                const rowCellValue = (rowCell.getValue() as ResultRow[0])
+                    ?.value;
+                if (item && isField(item) && rowCellValue) {
+                    itemIds.push(getItemId(item));
+                    acc[item.table] = acc[item.table] || {};
+                    acc[item.table][item.name] = rowCellValue;
                     return acc;
-                },
-                {},
-            );
+                }
+                return acc;
+            }, {});
         return [itemIds, row];
     }, [cell]);
 

@@ -75,15 +75,41 @@ type DbtLightdashFieldTags = {
 
 export type DbtModelMetadata = DbtModelLightdashConfig & {};
 
+/**
+ * Additional dimension definition for explore-scoped dimensions.
+ * These dimensions are only available within a specific explore.
+ * They can reference fields from joined tables using ${table.field} syntax.
+ *
+ * Unlike column-level additional dimensions, explore-scoped dimensions
+ * require `type` and `sql` since there's no underlying column to infer from.
+ */
+export type DbtExploreLightdashAdditionalDimension =
+    DbtColumnLightdashAdditionalDimension & {
+        type: DimensionType; // Required for explore-scoped dimensions
+        sql: string; // Required for explore-scoped dimensions
+    };
+
 type ExploreConfig = {
     label?: string;
     description?: string;
     group_label?: string;
     joins?: DbtModelJoin[];
+    /**
+     * Explore-scoped custom dimensions.
+     * These dimensions are only available within this specific explore
+     * and can reference fields from any joined table.
+     */
+    additional_dimensions?: Record<
+        string,
+        DbtExploreLightdashAdditionalDimension
+    >;
 };
 
-type SharedDbtModelLightdashConfig = {
+export type SharedDbtModelLightdashConfig = {
     default_filters?: RequiredFilter[];
+    /**
+     * @deprecated use default_filters instead
+     */
     required_filters?: RequiredFilter[]; // Alias for default_filters, for backwards compatibility
 };
 
@@ -91,7 +117,7 @@ export type FieldSetDefinition = {
     fields: string[];
 };
 
-type DbtModelLightdashConfig = ExploreConfig &
+export type DbtModelLightdashConfig = ExploreConfig &
     SharedDbtModelLightdashConfig & {
         metrics?: Record<string, DbtModelLightdashMetric>;
         sets?: Record<string, FieldSetDefinition>;
@@ -106,11 +132,13 @@ type DbtModelLightdashConfig = ExploreConfig &
             field: string;
             interval: TimeFrames;
         };
+        default_show_underlying_values?: string[];
         spotlight?: {
             visibility?: NonNullable<
                 LightdashProjectConfig['spotlight']
             >['default_visibility'];
             categories?: string[]; // yaml_reference
+            owner?: string; // model owner email (inherited by metrics)
         };
         explores?: Record<
             string,
@@ -118,6 +146,8 @@ type DbtModelLightdashConfig = ExploreConfig &
         >;
         ai_hint?: string | string[];
         parameters?: LightdashProjectConfig['parameters'];
+        primary_key?: string | string[];
+        owner?: string; // model owner email
     };
 
 export type DbtModelGroup = {
@@ -127,7 +157,7 @@ export type DbtModelGroup = {
 
 export type DbtModelJoinType = 'inner' | 'full' | 'left' | 'right';
 
-type DbtModelJoin = {
+export type DbtModelJoin = {
     join: string;
     sql_on: string;
     alias?: string;
@@ -137,7 +167,6 @@ type DbtModelJoin = {
     fields?: string[];
     always?: boolean;
     relationship?: JoinRelationship;
-    primary_key?: string | string[];
     description?: string;
 };
 export type DbtColumnMetadata = DbtColumnLightdashConfig & {};
@@ -168,6 +197,16 @@ export type DbtColumnLightdashDimension = {
     urls?: FieldUrl[];
     required_attributes?: Record<string, string | string[]>;
     ai_hint?: string | string[];
+    image?: {
+        url: string;
+        width?: number;
+        height?: number;
+        fit?: string;
+    };
+    spotlight?: {
+        filter_by?: boolean;
+        segment_by?: boolean;
+    };
 } & DbtLightdashFieldTags;
 
 export type DbtColumnLightdashAdditionalDimension = Omit<
@@ -198,6 +237,9 @@ export type DbtColumnLightdashMetric = {
             LightdashProjectConfig['spotlight']
         >['default_visibility'];
         categories?: string[]; // yaml_reference
+        filter_by?: string[]; // dimension IDs allowlist
+        segment_by?: string[]; // dimension IDs allowlist
+        owner?: string; // metric owner email
     };
     ai_hint?: string | string[];
 } & DbtLightdashFieldTags;
@@ -492,6 +534,8 @@ type ConvertModelMetricArgs = {
     requiredAttributes?: Record<string, string | string[]>;
     spotlightConfig?: LightdashProjectConfig['spotlight'];
     modelCategories?: string[];
+    modelOwner?: string;
+    defaultShowUnderlyingValues?: string[];
 };
 export const convertModelMetric = ({
     modelName,
@@ -503,6 +547,8 @@ export const convertModelMetric = ({
     requiredAttributes,
     spotlightConfig,
     modelCategories = [],
+    modelOwner,
+    defaultShowUnderlyingValues,
 }: ConvertModelMetricArgs): Metric => {
     const groups = convertToGroups(metric.groups, metric.group_label);
     const spotlightVisibility =
@@ -517,6 +563,9 @@ export const convertModelMetric = ({
         spotlightConfig,
         metricCategories,
     );
+
+    // Metric owner takes precedence over model owner
+    const owner = metric.spotlight?.owner ?? modelOwner;
 
     return {
         fieldType: FieldType.METRIC,
@@ -533,7 +582,8 @@ export const convertModelMetric = ({
         compact: metric.compact,
         format: metric.format,
         groups,
-        showUnderlyingValues: metric.show_underlying_values,
+        showUnderlyingValues:
+            metric.show_underlying_values ?? defaultShowUnderlyingValues,
         filters: parseFilters(metric.filters),
         percentile: metric.percentile,
         dimensionReference,
@@ -554,10 +604,13 @@ export const convertModelMetric = ({
                   },
               }
             : null),
-        ...getSpotlightConfigurationForResource(
-            spotlightVisibility,
-            spotlightCategories,
-        ),
+        ...getSpotlightConfigurationForResource({
+            visibility: spotlightVisibility,
+            categories: spotlightCategories,
+            filterBy: metric.spotlight?.filter_by,
+            segmentBy: metric.spotlight?.segment_by,
+            owner,
+        }),
         ...(metric.ai_hint ? { aiHint: convertToAiHints(metric.ai_hint) } : {}),
     };
 };
@@ -581,6 +634,8 @@ export const convertColumnMetric = ({
     requiredAttributes,
     spotlightConfig,
     modelCategories = [],
+    modelOwner,
+    defaultShowUnderlyingValues,
 }: ConvertColumnMetricArgs): Metric =>
     convertModelMetric({
         modelName,
@@ -612,6 +667,8 @@ export const convertColumnMetric = ({
             : null),
         spotlightConfig,
         modelCategories,
+        modelOwner,
+        defaultShowUnderlyingValues,
     });
 
 export enum DbtManifestVersion {
@@ -621,6 +678,8 @@ export enum DbtManifestVersion {
     V10 = 'v10',
     V11 = 'v11',
     V12 = 'v12',
+    // dbt fusion
+    V20 = 'v20', // dbt manifest is the same, but lightdashV20.json allows meta as null
 }
 
 export const getDbtManifestVersion = (

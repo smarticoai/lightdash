@@ -8,8 +8,8 @@ import {
     type ToolVerticalBarArgs,
 } from '@lightdash/common';
 import {
-    Box,
     Center,
+    Flex,
     Group,
     HoverCard,
     Loader,
@@ -175,6 +175,7 @@ export const AiDashboardVisualizationItem: FC<Props> = memo(
                     <ViewSqlButton sql={compiledSql?.query} />
                     <AiChartQuickOptions
                         projectUuid={projectUuid}
+                        agentUuid={agentUuid}
                         saveChartOptions={{
                             name: visualization.title,
                             description: visualization.description ?? null,
@@ -193,7 +194,7 @@ export const AiDashboardVisualizationItem: FC<Props> = memo(
                     <VisualizationHeaderSimple />
 
                     {/* Loading State */}
-                    <Paper p="md" bg="gray.0">
+                    <Paper p="md" bg="ldGray.0">
                         <Center h={200}>
                             <Stack gap="xs" align="center">
                                 <Loader type="dots" color="gray" />
@@ -212,7 +213,7 @@ export const AiDashboardVisualizationItem: FC<Props> = memo(
                 <Stack gap="sm">
                     <VisualizationHeaderSimple />
                     {/* Error State */}
-                    <Paper p="md" bg="gray.0">
+                    <Paper p="md" bg="ldGray.0">
                         <Center h={100}>
                             <Stack gap="xs" align="center">
                                 <HoverCard withinPortal position="left">
@@ -261,23 +262,18 @@ export const AiDashboardVisualizationItem: FC<Props> = memo(
         }
 
         return (
-            <Stack gap="sm">
-                {/* Actual Visualization */}
-                <Box mih={300}>
-                    <AiVisualizationRenderer
-                        results={queryResults}
-                        queryExecutionHandle={queryExecutionHandle}
-                        chartConfig={visualization}
-                        headerContent={<VisualizationHeaderWithButton />}
-                        onDashboardChartTypeChange={
-                            handleDashboardChartTypeChange
-                        }
-                        onDashboardChartConfigChange={
-                            handleDashboardChartConfigChange
-                        }
-                    />
-                </Box>
-            </Stack>
+            <Flex direction="column" h="100%">
+                <AiVisualizationRenderer
+                    results={queryResults}
+                    queryExecutionHandle={queryExecutionHandle}
+                    chartConfig={visualization}
+                    headerContent={<VisualizationHeaderWithButton />}
+                    onDashboardChartTypeChange={handleDashboardChartTypeChange}
+                    onDashboardChartConfigChange={
+                        handleDashboardChartConfigChange
+                    }
+                />
+            </Flex>
         );
     },
 );

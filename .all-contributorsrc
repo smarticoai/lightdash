@@ -1707,6 +1707,25 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "ongdisheng",
+      "name": "ongdisheng",
+      "avatar_url": "https://avatars.githubusercontent.com/u/63136897?v=4",
+      "profile": "https://github.com/ongdisheng",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "Spissable",
+      "name": "Lukas Spiss",
+      "avatar_url": "https://avatars.githubusercontent.com/u/35728419?v=4",
+      "profile": "http://spiss.dev",
+      "contributions": [
+        "doc",
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

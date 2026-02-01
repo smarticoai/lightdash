@@ -1,10 +1,5 @@
 import {
-    CatalogField,
-    CompiledDimension,
-    CompiledMetric,
-    convertToAiHints,
-    getItemId,
-    toolFindExploresArgsSchemaV2,
+    toolFindExploresArgsSchemaV3,
     toolFindExploresOutputSchema,
 } from '@lightdash/common';
 import { tool } from 'ai';
@@ -22,156 +17,85 @@ type Dependencies = {
     updateProgress: UpdateProgressFn;
 };
 
-function getCatalogChartUsage(
-    catalogFields: { dimensions: CatalogField[]; metrics: CatalogField[] },
-    type: 'dimension',
-    field: CompiledDimension,
-): number;
-function getCatalogChartUsage(
-    catalogFields: { dimensions: CatalogField[]; metrics: CatalogField[] },
-    type: 'metric',
-    field: CompiledMetric,
-): number;
-function getCatalogChartUsage(
-    catalogFields: { dimensions: CatalogField[]; metrics: CatalogField[] },
-    type: 'dimension' | 'metric',
-    field: CompiledDimension | CompiledMetric,
-) {
-    const catalogField = catalogFields[
-        type === 'dimension' ? 'dimensions' : 'metrics'
-    ].find((f) => f.name === field.name);
-    return catalogField?.chartUsage ?? 0;
-}
-
 const generateExploreResponse = ({
-    explore,
-    catalogFields,
-}: Awaited<ReturnType<FindExploresFn>>) => {
-    const baseTable = explore.tables[explore.baseTable];
-    const aiHints = baseTable.aiHint
-        ? convertToAiHints(baseTable.aiHint)
-        : null;
-
-    return (
-        <explore tableName={explore.name}>
-            <label>{explore.label}</label>
-            <basetable alt="ID of the base table">{baseTable.name}</basetable>
-            {aiHints && aiHints.length > 0 && (
-                <aihints>
-                    {aiHints.map((hint: string) => (
-                        <hint>{hint}</hint>
-                    ))}
-                </aihints>
-            )}
-            {baseTable.description && (
-                <description alt="Description of the base table">
-                    {baseTable.description}
-                </description>
-            )}
-            {explore.joinedTables && explore.joinedTables.length > 0 && (
-                <joinedtables
-                    alt="IDs of the joined tables"
-                    totalCount={explore.joinedTables.length}
-                >
-                    {explore.joinedTables.map((joinedTable) => (
-                        <tablename>{joinedTable.table}</tablename>
-                    ))}
-                </joinedtables>
-            )}
-
-            {Object.values(explore.tables).length > 0 &&
-                Object.values(explore.tables).map((table) => (
-                    <table
-                        name={table.name}
-                        isBaseTable={table.name === explore.baseTable}
+    searchQuery,
+    exploreSearchResults,
+    topMatchingFields,
+}: Awaited<ReturnType<FindExploresFn>> & { searchQuery: string }) => {
+    const searchResultsXml =
+        exploreSearchResults && exploreSearchResults.length > 0 ? (
+            <searchResults
+                searchQuery={searchQuery}
+                count={exploreSearchResults.length}
+            >
+                <note>
+                    {exploreSearchResults.length === 1
+                        ? 'One explore matched your search. Call findFields for this explore to get all its dimensions and metrics.'
+                        : 'Multiple explores matched your search. Use topMatchingFields below and apply Rule 2 (ambiguity check) to determine which explore to use, then call findFields for that explore.'}
+                </note>
+                {exploreSearchResults.map((result) => (
+                    <alternative
+                        name={result.name}
+                        label={result.label}
+                        searchRank={result.searchRank?.toFixed(3) ?? 'N/A'}
                     >
-                        <fields alt="dimensions and metrics">
-                            {Object.values(table.dimensions).length > 0 && (
-                                <dimensions alt="dimensions">
-                                    {Object.values(table.dimensions).map(
-                                        (dimension) => (
-                                            <dimension
-                                                usageInCharts={getCatalogChartUsage(
-                                                    catalogFields,
-                                                    'dimension',
-                                                    dimension,
-                                                )}
-                                                name={dimension.name}
-                                                label={dimension.label}
-                                                fieldId={getItemId(dimension)}
-                                            >
-                                                {dimension.aiHint &&
-                                                    (
-                                                        convertToAiHints(
-                                                            dimension.aiHint,
-                                                        ) ?? []
-                                                    ).length > 0 && (
-                                                        <aihints>
-                                                            {dimension.aiHint &&
-                                                                convertToAiHints(
-                                                                    dimension.aiHint,
-                                                                )?.map(
-                                                                    (hint) => (
-                                                                        <hint>
-                                                                            {
-                                                                                hint
-                                                                            }
-                                                                        </hint>
-                                                                    ),
-                                                                )}
-                                                        </aihints>
-                                                    )}
-                                            </dimension>
-                                        ),
-                                    )}
-                                </dimensions>
+                        {result.description && (
+                            <description>{result.description}</description>
+                        )}
+                        {result.aiHints && result.aiHints.length > 0 && (
+                            <aiHints>
+                                {result.aiHints.map((hint) => (
+                                    <hint>{hint}</hint>
+                                ))}
+                            </aiHints>
+                        )}
+                        {result.joinedTables &&
+                            result.joinedTables.length > 0 && (
+                                <joinedTables
+                                    count={result.joinedTables.length}
+                                >
+                                    <note>
+                                        Fields from these joined tables are
+                                        available when querying this explore
+                                    </note>
+                                    {result.joinedTables.map((tableName) => (
+                                        <table>{tableName}</table>
+                                    ))}
+                                </joinedTables>
                             )}
-
-                            {Object.values(table.metrics).length > 0 && (
-                                <metrics alt="metrics">
-                                    {Object.values(table.metrics).map(
-                                        (metric) => (
-                                            <metric
-                                                usageInCharts={getCatalogChartUsage(
-                                                    catalogFields,
-                                                    'metric',
-                                                    metric,
-                                                )}
-                                                name={metric.name}
-                                                label={metric.label}
-                                                fieldId={getItemId(metric)}
-                                            >
-                                                {metric.aiHint &&
-                                                    (
-                                                        convertToAiHints(
-                                                            metric.aiHint,
-                                                        ) ?? []
-                                                    ).length > 0 && (
-                                                        <aihints>
-                                                            {metric.aiHint &&
-                                                                convertToAiHints(
-                                                                    metric.aiHint,
-                                                                )?.map(
-                                                                    (hint) => (
-                                                                        <hint>
-                                                                            {
-                                                                                hint
-                                                                            }
-                                                                        </hint>
-                                                                    ),
-                                                                )}
-                                                        </aihints>
-                                                    )}
-                                            </metric>
-                                        ),
-                                    )}
-                                </metrics>
-                            )}
-                        </fields>
-                    </table>
+                    </alternative>
                 ))}
-        </explore>
-    );
+            </searchResults>
+        ) : null;
+
+    const topFieldsXml =
+        topMatchingFields && topMatchingFields.length > 0 ? (
+            <topMatchingFields count={topMatchingFields.length}>
+                <note>
+                    Here are the top matching fields across all explores. Use
+                    this to determine which explore is most relevant by applying
+                    Rule 2 (ambiguity check).
+                </note>
+                {topMatchingFields.map((field) => (
+                    <field
+                        name={field.name}
+                        label={field.label}
+                        exploreName={field.tableName}
+                        fieldType={field.fieldType}
+                        searchRank={field.searchRank?.toFixed(3) ?? 'N/A'}
+                        usageInCharts={field.chartUsage ?? 0}
+                    >
+                        {field.description && (
+                            <description>{field.description}</description>
+                        )}
+                    </field>
+                ))}
+            </topMatchingFields>
+        ) : null;
+
+    return `${searchResultsXml ? `${searchResultsXml.toString()}\n` : ''}${
+        topFieldsXml ? `${topFieldsXml.toString()}\n` : ''
+    }`;
 };
 export const getFindExplores = ({
     findExplores,
@@ -179,27 +103,50 @@ export const getFindExplores = ({
     fieldSearchSize,
 }: Dependencies) =>
     tool({
-        description: toolFindExploresArgsSchemaV2.description,
-        inputSchema: toolFindExploresArgsSchemaV2,
+        description: toolFindExploresArgsSchemaV3.description,
+        inputSchema: toolFindExploresArgsSchemaV3,
         outputSchema: toolFindExploresOutputSchema,
         execute: async (args) => {
             try {
                 await updateProgress(
-                    `🔍 Searching explore: \`${args.exploreName}\`...`,
+                    `Searching explores matching query: "${args.searchQuery}"...`,
                 );
 
-                const { explore, catalogFields } = await findExplores({
-                    exploreName: args.exploreName,
-                    fieldSearchSize,
-                });
+                const { exploreSearchResults, topMatchingFields } =
+                    await findExplores({
+                        fieldSearchSize,
+                        searchQuery: args.searchQuery,
+                    });
 
                 return {
                     result: generateExploreResponse({
-                        explore,
-                        catalogFields,
-                    }).toString(),
+                        searchQuery: args.searchQuery,
+                        exploreSearchResults,
+                        topMatchingFields,
+                    }),
                     metadata: {
                         status: 'success',
+                        ranking: {
+                            searchQuery: args.searchQuery,
+                            exploreSearchResults: exploreSearchResults?.map(
+                                (result) => ({
+                                    name: result.name,
+                                    label: result.label,
+                                    searchRank: result.searchRank,
+                                    joinedTables: result.joinedTables ?? [],
+                                }),
+                            ),
+                            topMatchingFields: topMatchingFields?.map(
+                                (field) => ({
+                                    name: field.name,
+                                    label: field.label,
+                                    tableName: field.tableName,
+                                    fieldType: field.fieldType,
+                                    searchRank: field.searchRank,
+                                    chartUsage: field.chartUsage,
+                                }),
+                            ),
+                        },
                     },
                 };
             } catch (error) {

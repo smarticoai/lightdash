@@ -17,8 +17,8 @@ export const CartesianChartConfig = ({
         selectedChartType === ChartKind.LINE
             ? lineChartConfigSlice.actions
             : selectedChartType === ChartKind.VERTICAL_BAR
-            ? barChartConfigSlice.actions
-            : null;
+              ? barChartConfigSlice.actions
+              : null;
 
     if (!actions) {
         return null;
@@ -26,7 +26,7 @@ export const CartesianChartConfig = ({
 
     return (
         <Stack spacing="xs" mb="lg">
-            <Tabs color="gray" defaultValue="data" keepMounted>
+            <Tabs defaultValue="data" keepMounted>
                 <Tabs.List>
                     <Tabs.Tab value="data">Data</Tabs.Tab>
                     <Tabs.Tab value="series">Series</Tabs.Tab>

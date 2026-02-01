@@ -4,8 +4,6 @@ import {
     Box,
     Button,
     Group,
-    Modal,
-    Paper,
     SegmentedControl,
     Stack,
     Text,
@@ -27,9 +25,11 @@ import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useLocation, useNavigate } from 'react-router';
 import LinkButton from '../../../../../components/common/LinkButton';
 import MantineIcon from '../../../../../components/common/MantineIcon';
+import MantineModal from '../../../../../components/common/MantineModal';
 import { NAVBAR_HEIGHT } from '../../../../../components/common/Page/constants';
 import SuboptimalState from '../../../../../components/common/SuboptimalState/SuboptimalState';
 import useHealth from '../../../../../hooks/health/useHealth';
+import { useActiveProjectUuid } from '../../../../../hooks/useActiveProject';
 import useApp from '../../../../../providers/App/useApp';
 import { useAiOrganizationSettings } from '../../hooks/useAiOrganizationSettings';
 import AiAgentAdminAgentsTable from './AiAgentAdminAgentsTable';
@@ -45,6 +45,7 @@ export const AiAgentsAdminLayout = () => {
     const theme = useMantineTheme();
     const location = useLocation();
     const navigate = useNavigate();
+    const { activeProjectUuid } = useActiveProjectUuid();
     const { data: settings } = useAiOrganizationSettings();
     const activeTab = location.pathname.endsWith('/agents')
         ? 'agents'
@@ -124,7 +125,7 @@ export const AiAgentsAdminLayout = () => {
                                         </Button>
                                     )}
                             </Group>
-                            <Text c="gray.6" size="sm" fw={400}>
+                            <Text c="ldGray.6" size="sm" fw={400}>
                                 {activeTab === 'threads'
                                     ? 'View and manage AI Agents threads'
                                     : 'View and manage AI Agents'}
@@ -136,23 +137,20 @@ export const AiAgentsAdminLayout = () => {
                     </Group>
 
                     {settings?.aiAgentsVisible === false && (
-                        <Paper my="md">
-                            <Alert
-                                icon={<IconInfoCircle />}
-                                radius="md"
-                                variant="outline"
-                                color="orange.6"
-                                bg="orange.0"
-                                title="AI Features Currently Disabled for All Users"
-                            >
-                                <Text c="gray.7" size="xs">
-                                    AI features on the homepage and navbar are
-                                    turned off. Users cannot interact with AI
-                                    Agents until you re-enable this feature
-                                    using the toggle above.
-                                </Text>
-                            </Alert>
-                        </Paper>
+                        <Alert
+                            icon={<IconInfoCircle />}
+                            radius="md"
+                            color="orange"
+                            variant="light"
+                            title="AI features are currently disabled for all users"
+                        >
+                            <Text c="ldGray.7" size="xs">
+                                AI features on the homepage and navbar are
+                                turned off. Users cannot interact with AI Agents
+                                until you re-enable this feature using the
+                                toggle above.
+                            </Text>
+                        </Alert>
                     )}
 
                     <Group justify="space-between" my="sm">
@@ -201,7 +199,7 @@ export const AiAgentsAdminLayout = () => {
                         )}
                         {activeTab === 'agents' && (
                             <LinkButton
-                                href="/ai-agents/new"
+                                href={`/projects/${activeProjectUuid}/ai-agents/new`}
                                 leftIcon={IconRobotFace}
                                 variant="default"
                                 radius="md"
@@ -228,7 +226,7 @@ export const AiAgentsAdminLayout = () => {
                             className={styles.resizeHandle}
                             style={{
                                 width: 2,
-                                backgroundColor: theme.colors.gray[3],
+                                backgroundColor: theme.colors.ldGray[3],
                                 cursor: 'col-resize',
                                 display: 'flex',
                                 alignItems: 'center',
@@ -255,29 +253,21 @@ export const AiAgentsAdminLayout = () => {
                                     isOpen={isSidebarOpen}
                                     onClose={handleCloseSidebar}
                                     showAddToEvalsButton
-                                    renderArtifactsInline
                                 />
                             )}
                         </Panel>
                     </>
                 )}
             </PanelGroup>
-            <Modal
+            <MantineModal
                 opened={isAnalyticsEmbedOpen}
                 size="xl"
                 onClose={toggleAnalyticsEmbed}
-                title={<Text fw={700}>AI Agents Insights</Text>}
-                padding="0"
-                centered
-                styles={{
-                    header: {
-                        borderBottom: `1px solid ${theme.colors.gray[2]}`,
-                        padding: theme.spacing.md,
-                    },
-                }}
+                title="AI Agents Insights"
+                icon={IconChartDots}
             >
                 <AnalyticsEmbedDashboard />
-            </Modal>
+            </MantineModal>
         </Stack>
     );
 };

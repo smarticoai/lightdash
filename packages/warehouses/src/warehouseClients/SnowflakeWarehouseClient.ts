@@ -183,6 +183,14 @@ export class SnowflakeSqlBuilder extends WarehouseBaseSqlBuilder {
                 .replaceAll('\0', '')
         );
     }
+
+    getTimestampDiffSeconds(
+        startTimestampSql: string,
+        endTimestampSql: string,
+    ): string {
+        // Snowflake uses DATEDIFF function
+        return `DATEDIFF('second', ${startTimestampSql}, ${endTimestampSql})`;
+    }
 }
 
 export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflakeCredentials> {
@@ -223,6 +231,9 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
             credentials.authenticationType ===
             SnowflakeAuthenticationType.EXTERNAL_BROWSER
         ) {
+            // This can only be used on the CLI
+            // The backend does not support this authentication type
+            // See createProgrammaticAccessToken for more details
             authenticationOptions = {
                 authenticator: EXTERNAL_BROWSER_AUTHENTICATOR,
             };
@@ -279,6 +290,9 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
             warehouse: credentials.warehouse,
             ...(credentials.accessUrl?.length
                 ? { accessUrl: credentials.accessUrl }
+                : {}),
+            ...(credentials.clientSessionKeepAlive !== undefined
+                ? { clientSessionKeepAlive: credentials.clientSessionKeepAlive }
                 : {}),
             sfRetryMaxLoginRetries: 3, // Number of retries for the login request.
             retryTimeout: 15000, // according to docs: The max login timeout value. This value is either 0 or over 300.
@@ -352,7 +366,7 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
                 )();
             } catch (e: unknown) {
                 throw new WarehouseConnectionError(
-                    `Snowflake error: ${getErrorMessage(e)}`,
+                    `Snowflake external browser error: ${getErrorMessage(e)}`,
                 );
             }
             return connection;
@@ -384,6 +398,61 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
             );
         }
         return connection;
+    }
+
+    /**
+     * Creates a Programmatic Access Token (PAT) after external browser authentication.
+     * This allows the backend to use the PAT for subsequent queries without requiring
+     * browser-based authentication.
+     *
+     * @param tokenName - Name for the PAT (must be unique per user)
+     * @param daysToExpiry - Number of days until the token expires (default: 1, max: 365)
+     * @param minsToBypassNetworkPolicy - Minutes to bypass network policy requirement (default: 1440 = 1 day, max: 1440)
+     * @returns The PAT secret that can be used as a password for authentication
+     */
+    async createProgrammaticAccessToken(
+        tokenName: string = `lightdash_pat_${Date.now()}`,
+        daysToExpiry: number = 1,
+        minsToBypassNetworkPolicy: number = 1440,
+    ): Promise<{ tokenSecret: string; tokenName: string }> {
+        if (
+            this.connectionOptions.authenticator !==
+            EXTERNAL_BROWSER_AUTHENTICATOR
+        ) {
+            throw new UnexpectedServerError(
+                'PAT creation is only supported with external browser authentication',
+            );
+        }
+
+        const connection = await this.createExternalBrowserConnection();
+
+        try {
+            // MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT allows PAT to work without network policy
+            // This is needed for human users who are not subject to a network policy
+            const sqlText = `ALTER USER ADD PAT ${tokenName} DAYS_TO_EXPIRY = ${daysToExpiry} MINS_TO_BYPASS_NETWORK_POLICY_REQUIREMENT = ${minsToBypassNetworkPolicy} COMMENT = 'Lightdash backend access token'`;
+
+            const result = await this.executeStatements(connection, sqlText);
+
+            // The ALTER USER ADD PAT command returns a row with the token_secret
+            if (!result.rows || result.rows.length === 0) {
+                throw new UnexpectedServerError(
+                    'Failed to create PAT: no result returned',
+                );
+            }
+
+            const tokenSecret = result.rows[0]?.token_secret;
+            if (!tokenSecret) {
+                throw new UnexpectedServerError(
+                    'Failed to create PAT: token_secret not found in result',
+                );
+            }
+
+            return { tokenSecret, tokenName };
+        } catch (e: unknown) {
+            throw new WarehouseConnectionError(
+                `Failed to create Snowflake PAT: ${getErrorMessage(e)}`,
+            );
+        }
     }
 
     private async prepareWarehouse(
@@ -574,10 +643,10 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
 
     async executeAsyncQuery(
         { sql, values, tags, timezone }: WarehouseExecuteAsyncQueryArgs,
-        resultsStreamCallback: (
+        resultsStreamCallback?: (
             rows: WarehouseResults['rows'],
             fields: WarehouseResults['fields'],
-        ) => void,
+        ) => void | Promise<void>,
     ): Promise<WarehouseExecuteAsyncQuery> {
         const connection = await this.getConnection();
         await this.prepareWarehouse(connection, {
@@ -609,17 +678,87 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
         resultsStreamCallback?: (
             rows: WarehouseResults['rows'],
             fields: WarehouseResults['fields'],
-        ) => void,
+        ) => void | Promise<void>,
         options?: {
             values?: AnyType[];
         },
     ) {
         const startTime = performance.now();
-        const { queryId, totalRows, durationMs, fields } = await new Promise<{
+
+        if (resultsStreamCallback) {
+            return new Promise<{
+                queryId: string;
+                queryMetadata: null;
+                totalRows: number;
+                durationMs: number;
+            }>((resolve, reject) => {
+                connection.execute({
+                    sqlText: sql,
+                    binds: options?.values,
+                    streamResult: true,
+                    complete: (err, stmt) => {
+                        if (err) {
+                            reject(this.parseError(err, sql));
+                            return;
+                        }
+
+                        const fields = this.getFieldsFromStatement(stmt);
+                        let rowCount = 0;
+
+                        pipeline(
+                            stmt.streamRows(),
+                            new Transform({
+                                objectMode: true,
+                                highWaterMark: 1,
+                                transform(chunk, encoding, callback) {
+                                    callback(null, parseRow(chunk));
+                                },
+                            }),
+                            new Writable({
+                                objectMode: true,
+                                highWaterMark: 1,
+                                async write(chunk, encoding, callback) {
+                                    try {
+                                        rowCount += 1;
+                                        await resultsStreamCallback(
+                                            [chunk],
+                                            fields,
+                                        );
+                                        callback();
+                                    } catch (writeError) {
+                                        if (writeError instanceof Error) {
+                                            callback(writeError);
+                                        } else {
+                                            callback(
+                                                new Error(String(writeError)),
+                                            );
+                                        }
+                                    }
+                                },
+                            }),
+                            (error) => {
+                                if (error) {
+                                    reject(error);
+                                } else {
+                                    resolve({
+                                        queryId: stmt.getQueryId(),
+                                        queryMetadata: null,
+                                        totalRows: rowCount,
+                                        durationMs:
+                                            performance.now() - startTime,
+                                    });
+                                }
+                            },
+                        );
+                    },
+                });
+            });
+        }
+
+        const { queryId, totalRows, durationMs } = await new Promise<{
             queryId: string;
             totalRows: number;
             durationMs: number;
-            fields: WarehouseResults['fields'];
         }>((resolve, reject) => {
             connection.execute({
                 sqlText: sql,
@@ -646,7 +785,6 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
                                     queryId: stmt.getQueryId(),
                                     totalRows: stmt2.getNumRows(),
                                     durationMs: performance.now() - startTime,
-                                    fields: this.getFieldsFromStatement(stmt2),
                                 });
                             },
                         })
@@ -656,28 +794,6 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
                 },
             });
         });
-
-        // If we have a callback, stream the rows to the callback.
-        // This is used when writing to the results cache.
-        if (resultsStreamCallback) {
-            const completedStatement = await connection.getResultsFromQueryId({
-                sqlText: '',
-                queryId,
-            });
-            await new Promise<void>((resolve, reject) => {
-                completedStatement
-                    .streamRows()
-                    .on('error', (e) => {
-                        reject(e);
-                    })
-                    .on('data', (row) => {
-                        resultsStreamCallback([row], fields);
-                    })
-                    .on('end', () => {
-                        resolve();
-                    });
-            });
-        }
 
         return {
             queryId,
@@ -689,7 +805,7 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
 
     async streamQuery(
         sql: string,
-        streamCallback: (data: WarehouseResults) => void,
+        streamCallback: (data: WarehouseResults) => void | Promise<void>,
         options: {
             values?: AnyType[];
             tags?: Record<string, string>;
@@ -721,7 +837,7 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
     private async executeStreamStatement(
         connection: Connection,
         sqlText: string,
-        streamCallback: (data: WarehouseResults) => void,
+        streamCallback: (data: WarehouseResults) => void | Promise<void>,
         options?: {
             values?: AnyType[];
         },
@@ -748,9 +864,21 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
                         }),
                         new Writable({
                             objectMode: true,
-                            write(chunk, encoding, callback) {
-                                streamCallback({ fields, rows: [chunk] });
-                                callback();
+                            async write(chunk, encoding, callback) {
+                                try {
+                                    await streamCallback({
+                                        fields,
+                                        rows: [chunk],
+                                    });
+                                    callback();
+                                } catch (writeError) {
+                                    // Pass error to pipeline which will reject the promise
+                                    if (writeError instanceof Error) {
+                                        callback(writeError);
+                                    } else {
+                                        callback(new Error(String(writeError)));
+                                    }
+                                }
                             },
                         }),
                         (error) => {
@@ -975,6 +1103,25 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
         return formattedMessage;
     }
 
+    /*
+     * This function is used to format the warehouse error message for the user.
+     * It is used to replace the {warehouseName} with the actual warehouse name.
+     * Sample custom template: You don't have access to warehouse {warehouseName}. Please reach out to your admin.
+     */
+    private formatWarehouseErrorMessage(customTemplate: string): string {
+        let formattedMessage = customTemplate;
+
+        // Replace warehouse name placeholder with the actual warehouse from connection options
+        if (this.connectionOptions.warehouse) {
+            formattedMessage = formattedMessage.replace(
+                /\{warehouseName\}/g,
+                this.connectionOptions.warehouse,
+            );
+        }
+
+        return formattedMessage;
+    }
+
     parseError(error: SnowflakeError, query: string = '') {
         // if the error has no code or data, return a generic error
         if (!error?.code && !error.data) {
@@ -992,6 +1139,21 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
                     originalMessage,
                     customErrorMessage,
                 );
+                return new WarehouseQueryError(formattedMessage);
+            }
+        }
+
+        // Check for warehouse access errors and use custom message if configured
+        if (
+            originalMessage.includes(
+                'No active warehouse selected in the current session',
+            )
+        ) {
+            const customErrorMessage =
+                process.env.SNOWFLAKE_WAREHOUSE_ERROR_MESSAGE;
+            if (customErrorMessage) {
+                const formattedMessage =
+                    this.formatWarehouseErrorMessage(customErrorMessage);
                 return new WarehouseQueryError(formattedMessage);
             }
         }

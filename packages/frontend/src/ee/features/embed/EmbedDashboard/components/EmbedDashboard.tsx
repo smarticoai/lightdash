@@ -3,28 +3,32 @@ import {
     DashboardTileTypes,
     type DashboardTile,
 } from '@lightdash/common';
+import { Group, Tabs } from '@mantine-8/core';
 import { IconUnlink } from '@tabler/icons-react';
 import { useEffect, useMemo, type FC } from 'react';
 import { Responsive, WidthProvider, type Layout } from 'react-grid-layout';
 import { useLocation, useNavigate } from 'react-router';
-import {
-    getReactGridLayoutConfig,
-    getResponsiveGridLayoutProps,
-    type ResponsiveGridLayoutProps,
-} from '../../../../../components/DashboardTabs/gridUtils';
 import LoomTile from '../../../../../components/DashboardTiles/DashboardLoomTile';
 import SqlChartTile from '../../../../../components/DashboardTiles/DashboardSqlChartTile';
 import SuboptimalState from '../../../../../components/common/SuboptimalState/SuboptimalState';
 import { LockedDashboardModal } from '../../../../../components/common/modal/LockedDashboardModal';
+import {
+    getReactGridLayoutConfig,
+    getResponsiveGridLayoutProps,
+    type ResponsiveGridLayoutProps,
+} from '../../../../../features/dashboardTabs/gridUtils';
 import useDashboardContext from '../../../../../providers/Dashboard/useDashboardContext';
 import useEmbed from '../../../../providers/Embed/useEmbed';
 import { useEmbedDashboard } from '../hooks';
 import EmbedDashboardChartTile from './EmbedDashboardChartTile';
 import EmbedDashboardHeader from './EmbedDashboardHeader';
-
-import { Group, Tabs, Title } from '@mantine/core';
-import '../../../../../styles/react-grid.css';
+import { EmbedHeadingTile } from './EmbedHeadingTile';
 import { EmbedMarkdownTile } from './EmbedMarkdownTile';
+
+// eslint-disable-next-line css-modules/no-unused-class
+import { dashboardCSSVars } from '../../../../../components/common/Dashboard/dashboard.constants';
+import tabStyles from '../../../../../features/dashboardTabs/tabs.module.css';
+import '../../../../../styles/react-grid.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -109,6 +113,16 @@ const EmbedDashboardGrid: FC<{
                                 onDelete={() => {}}
                                 onEdit={() => {}}
                             />
+                        ) : tile.type === DashboardTileTypes.HEADING ? (
+                            <EmbedHeadingTile
+                                key={tile.uuid}
+                                tile={tile}
+                                isEditMode={false}
+                                onDelete={() => {}}
+                                onEdit={() => {}}
+                                tileIndex={index}
+                                dashboardSlug={dashboard.slug}
+                            />
                         ) : (
                             assertUnreachable(
                                 tile,
@@ -170,20 +184,12 @@ const EmbedDashboard: FC<{
             [dashboard],
         ) || false;
 
-    // Sort tabs by order
-    const sortedTabs = useMemo(() => {
-        if (!dashboard?.tabs || dashboard.tabs.length === 0) {
-            return [];
-        }
-        return dashboard.tabs.sort((a, b) => a.order - b.order);
-    }, [dashboard?.tabs]);
-
     // Ensure dashboard tabs are set in context
     useEffect(() => {
-        if (!dashboardTabs.length && sortedTabs.length) {
-            setDashboardTabs(sortedTabs);
+        if (!dashboardTabs.length && dashboard && dashboard.tabs.length > 0) {
+            setDashboardTabs(dashboard.tabs);
         }
-    }, [sortedTabs, dashboardTabs, setDashboardTabs]);
+    }, [dashboardTabs, setDashboardTabs, dashboard]);
 
     // Filter tiles by active tab
     const filteredTiles = useMemo(() => {
@@ -192,12 +198,12 @@ const EmbedDashboard: FC<{
         }
 
         // If no tabs or only one tab, show all tiles
-        if (sortedTabs.length <= 1) {
+        if (dashboardTabs.length <= 1) {
             return dashboard.tiles;
         }
 
         // Make sure we have a tab selected
-        const tab = activeTab || sortedTabs[0];
+        const tab = activeTab || dashboardTabs[0];
 
         // If there are tabs, filter tiles by active tab
         if (tab) {
@@ -207,18 +213,17 @@ const EmbedDashboard: FC<{
 
                 // Show tiles that don't belong to any tab (legacy tiles) on the first tab
                 const tileHasNoTab = !tile.tabUuid;
-                const isFirstTab = tab.uuid === sortedTabs[0]?.uuid;
+                const isFirstTab = tab.uuid === dashboardTabs[0]?.uuid;
 
                 return tileBelongsToActiveTab || (tileHasNoTab && isFirstTab);
             });
         }
 
         return [];
-    }, [dashboard?.tiles, sortedTabs, activeTab]);
+    }, [dashboard?.tiles, dashboardTabs, activeTab]);
 
     // Check if tabs should be enabled (more than one tab)
-    const tabsEnabled = sortedTabs.length > 1;
-    const MAGIC_SCROLL_AREA_HEIGHT = 40;
+    const tabsEnabled = dashboardTabs.length > 1;
 
     const gridProps = getResponsiveGridLayoutProps({ enableAnimation: false });
     const layouts = useMemo(
@@ -284,8 +289,9 @@ const EmbedDashboard: FC<{
     // Sync tabs with URL when user changes tab for iframes.
     // SDK mode does not sync URL when user changes tab because
     // the SDK app uses the same URL as the embedding app.
-    const handleTabChange = (tabUuid: string) => {
-        const tab = sortedTabs.find((t) => t.uuid === tabUuid);
+    const handleTabChange = (tabUuid: string | null) => {
+        if (!tabUuid) return;
+        const tab = dashboardTabs.find((t) => t.uuid === tabUuid);
         if (tab) {
             setActiveTab(tab);
 
@@ -310,7 +316,15 @@ const EmbedDashboard: FC<{
     };
 
     return (
-        <div style={containerStyles ?? { height: '100vh', overflowY: 'auto' }}>
+        <div
+            style={
+                containerStyles ?? {
+                    height: '100vh',
+                    overflowY: 'auto',
+                    ...dashboardCSSVars,
+                }
+            }
+        >
             <EmbedDashboardHeader
                 dashboard={dashboard}
                 projectUuid={projectUuid}
@@ -323,38 +337,21 @@ const EmbedDashboard: FC<{
             {tabsEnabled ? (
                 <Tabs
                     value={activeTab?.uuid}
-                    onTabChange={handleTabChange}
+                    onChange={handleTabChange}
                     mt="md"
-                    styles={{
-                        tabsList: {
-                            flexWrap: 'nowrap',
-                            height: MAGIC_SCROLL_AREA_HEIGHT - 1,
-                        },
+                    classNames={{
+                        list: tabStyles.list,
+                        tab: tabStyles.tab,
                     }}
-                    variant="outline"
                 >
-                    <Tabs.List bg="gray.0" px="lg">
-                        {sortedTabs.map((tab) => (
+                    <Tabs.List px="lg">
+                        {dashboardTabs.map((tab) => (
                             <Tabs.Tab
                                 key={tab.uuid}
                                 value={tab.uuid}
-                                bg={
-                                    activeTab?.uuid === tab.uuid
-                                        ? 'white'
-                                        : 'gray.0'
-                                }
+                                maw={`${100 / (dashboardTabs?.length || 1)}vw`}
                             >
-                                <Title
-                                    fw={500}
-                                    order={6}
-                                    color="gray.7"
-                                    truncate
-                                    maw={`calc(${
-                                        100 / (sortedTabs?.length || 1)
-                                    }vw)`}
-                                >
-                                    {tab.name}
-                                </Title>
+                                {tab.name}
                             </Tabs.Tab>
                         ))}
                     </Tabs.List>

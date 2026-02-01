@@ -4,17 +4,22 @@ import {
     ApiChartAsCodeListResponse,
     ApiChartAsCodeUpsertResponse,
     ApiDashboardAsCodeListResponse,
+    ApiSqlChartAsCodeListResponse,
     assertUnreachable,
     AuthorizationError,
     ChartAsCode,
     DashboardAsCode,
+    generateSlug,
     getErrorMessage,
     LightdashError,
+    Project,
     PromotionAction,
     PromotionChanges,
+    SqlChartAsCode,
 } from '@lightdash/common';
-import { promises as fs } from 'fs';
+import { Dirent, promises as fs } from 'fs';
 import * as yaml from 'js-yaml';
+import groupBy from 'lodash/groupBy';
 import * as path from 'path';
 import { LightdashAnalytics } from '../analytics/analytics';
 import { getConfig } from '../config';
@@ -31,8 +36,12 @@ export type DownloadHandlerOptions = {
     project?: string;
     languageMap: boolean;
     skipSpaceCreate: boolean;
+    public: boolean;
     includeCharts: boolean;
+    nested: boolean; // Use nested folder structure (projectName/spaceSlug/charts|dashboards)
 };
+
+type FolderScheme = 'flat' | 'nested';
 
 const getDownloadFolder = (customPath?: string): string => {
     if (customPath) {
@@ -71,23 +80,54 @@ type ContentAsCodeType =
           translationMap: object | undefined;
       }
     | {
+          type: 'sqlChart';
+          content: SqlChartAsCode;
+          translationMap: object | undefined;
+      }
+    | {
           type: 'dashboard';
           content: DashboardAsCode;
           translationMap: object | undefined;
       };
 
 const createDirForContent = async (
-    items: (ChartAsCode | DashboardAsCode)[],
+    projectName: string,
+    spaceSlug: string,
     folder: 'charts' | 'dashboards',
     customPath: string | undefined,
+    folderScheme: FolderScheme,
 ) => {
-    const outputDir = path.join(getDownloadFolder(customPath), folder);
+    const baseDir = getDownloadFolder(customPath);
 
-    GlobalState.debug(`Writing ${items.length} ${folder} into ${outputDir}`);
-    const created = await fs.mkdir(outputDir, { recursive: true });
-    if (created) console.info(`\nCreated new folder: ${outputDir} `);
+    let outputDir: string;
+    if (folderScheme === 'flat') {
+        // Flat scheme: baseDir/folder
+        outputDir = path.join(baseDir, folder);
+    } else {
+        // Nested scheme: baseDir/projectName/spaceSlug/folder
+        outputDir = path.join(baseDir, projectName, spaceSlug, folder);
+    }
+
+    GlobalState.debug(`Creating directory: ${outputDir}`);
+    await fs.mkdir(outputDir, { recursive: true });
 
     return outputDir;
+};
+
+/**
+ * Get file extension for content-as-code files.
+ * SQL charts use '.sql.yml' extension to avoid filename conflicts with regular charts
+ * that may have the same slug, since both chart types share the same output directory.
+ */
+const getFileExtension = (contentType: ContentAsCodeType['type']): string => {
+    switch (contentType) {
+        case 'sqlChart':
+            return '.sql.yml';
+        case 'chart':
+        case 'dashboard':
+        default:
+            return '.yml';
+    }
 };
 
 const writeContent = async (
@@ -95,7 +135,11 @@ const writeContent = async (
     outputDir: string,
     languageMap: boolean,
 ) => {
-    const itemPath = path.join(outputDir, `${contentAsCode.content.slug}.yml`);
+    const extension = getFileExtension(contentAsCode.type);
+    const itemPath = path.join(
+        outputDir,
+        `${contentAsCode.content.slug}${extension}`,
+    );
     const chartYml = yaml.dump(contentAsCode.content, {
         quotingType: '"',
     });
@@ -113,168 +157,313 @@ const writeContent = async (
     }
 };
 
+const isLightdashContentFile = (folder: string, entry: Dirent) =>
+    entry.isFile() &&
+    entry.parentPath.endsWith(path.sep + folder) &&
+    entry.name.endsWith('.yml') &&
+    !entry.name.endsWith('.language.map.yml');
+
+const loadYamlFile = async <T extends ChartAsCode | DashboardAsCode>(
+    file: Dirent,
+) => {
+    const filePath = path.join(file.parentPath, file.name);
+    const [fileContent, stats] = await Promise.all([
+        fs.readFile(filePath, 'utf-8'),
+        fs.stat(filePath),
+    ]);
+
+    const item = yaml.load(fileContent) as T;
+    const downloadedAt = item.downloadedAt
+        ? new Date(item.downloadedAt)
+        : undefined;
+    const needsUpdating =
+        downloadedAt &&
+        Math.abs(stats.mtime.getTime() - downloadedAt.getTime()) > 30000;
+
+    return {
+        ...item,
+        updatedAt: needsUpdating ? stats.mtime : item.updatedAt,
+        needsUpdating: needsUpdating ?? true,
+    };
+};
+
 const readCodeFiles = async <T extends ChartAsCode | DashboardAsCode>(
     folder: 'charts' | 'dashboards',
     customPath?: string,
 ): Promise<(T & { needsUpdating: boolean })[]> => {
-    const inputDir = path.join(getDownloadFolder(customPath), folder);
+    const baseDir = getDownloadFolder(customPath);
 
-    console.info(`Reading ${folder} from ${inputDir}`);
-    const items: (T & { needsUpdating: boolean })[] = [];
+    GlobalState.log(`Reading ${folder} from ${baseDir}`);
+
     try {
-        // Read all files from the lightdash directory
-        // if folder does not exist, this throws an error
-        const files = await fs.readdir(inputDir);
-        const yamlFiles = files
-            .filter((file) => file.endsWith('.yml'))
-            .filter((file) => !file.endsWith('.language.map.yml'));
+        const allEntries = await fs.readdir(baseDir, {
+            recursive: true,
+            withFileTypes: true,
+        });
 
-        // Load each JSON file
-        for (const file of yamlFiles) {
-            const filePath = path.join(inputDir, file);
-            const fileContent = await fs.readFile(filePath, 'utf-8');
-            const item = yaml.load(fileContent) as T;
+        const items = await Promise.all(
+            allEntries
+                .filter((entry) => isLightdashContentFile(folder, entry))
+                .map((file) => loadYamlFile<T>(file)),
+        );
 
-            const fileUpdatedAt = (await fs.stat(filePath)).mtime;
-            // We override the updatedAt to the file's updatedAt
-            // in case there were some changes made locally
-            // do not override if the file was just created
-            const downloadedAt = item.downloadedAt
-                ? new Date(item.downloadedAt)
-                : undefined;
-            const needsUpdating =
-                downloadedAt &&
-                Math.abs(fileUpdatedAt.getTime() - downloadedAt.getTime()) >
-                    30000;
-
-            const locallyUpdatedItem = {
-                ...item,
-                updatedAt: needsUpdating ? fileUpdatedAt : item.updatedAt, // Force the update by changing updatedAt , which is what promotion is going to compare
-                needsUpdating: needsUpdating ?? true, // if downloadAt is not set, we force the update
-            };
-            items.push(locallyUpdatedItem);
+        if (items.length === 0) {
+            console.error(
+                styles.warning(
+                    `Unable to upload ${folder}, no files found in "${baseDir}". Run download command first.`,
+                ),
+            );
         }
+
+        return items;
     } catch (error) {
-        // Folder does not exist
+        // Handle case where base directory doesn't exist
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
             console.error(
                 styles.warning(
-                    `Unable to upload ${folder}, "${inputDir}" folder not found. Run download command first.`,
+                    `Unable to upload ${folder}, "${baseDir}" folder not found. Run download command first.`,
                 ),
             );
             return [];
         }
         // Unknown error
-        console.error(styles.error(`Error reading ${inputDir}: ${error}`));
+        console.error(styles.error(`Error reading ${baseDir}: ${error}`));
         throw error;
     }
-
-    return items;
 };
 
-export const downloadContent = async (
-    ids: string[], // slug, uuid or url
-    type: 'charts' | 'dashboards',
+const groupBySpace = <T extends ChartAsCode | DashboardAsCode | SqlChartAsCode>(
+    items: T[],
+): Record<string, Array<{ item: T; index: number }>> => {
+    const itemsWithIndex = items.map((item, index) => ({ item, index }));
+    return groupBy(itemsWithIndex, (entry) => entry.item.spaceSlug);
+};
+
+const writeSpaceContent = async <
+    T extends ChartAsCode | DashboardAsCode | SqlChartAsCode,
+>({
+    projectName,
+    spaceSlug,
+    folder,
+    contentType,
+    contentInSpace,
+    contentAsCode,
+    customPath,
+    languageMap,
+    folderScheme,
+}: {
+    projectName: string;
+    spaceSlug: string;
+    folder: 'charts' | 'dashboards';
+    contentType: ContentAsCodeType['type'];
+    contentInSpace: Array<{ item: T; index: number }>;
+    contentAsCode:
+        | ApiDashboardAsCodeListResponse['results']
+        | ApiChartAsCodeListResponse['results']
+        | ApiSqlChartAsCodeListResponse['results'];
+    customPath?: string;
+    languageMap: boolean;
+    folderScheme: FolderScheme;
+}) => {
+    const outputDir = await createDirForContent(
+        projectName,
+        spaceSlug,
+        folder,
+        customPath,
+        folderScheme,
+    );
+
+    for (const { item, index } of contentInSpace) {
+        const translationMap =
+            'languageMap' in contentAsCode
+                ? contentAsCode.languageMap?.[index]
+                : undefined;
+        await writeContent(
+            {
+                type: contentType,
+                content: item,
+                translationMap,
+            } as ContentAsCodeType,
+            outputDir,
+            languageMap,
+        );
+    }
+};
+
+type DownloadContentType = 'charts' | 'dashboards' | 'sqlCharts';
+
+type ContentTypeConfig = {
+    endpoint: string;
+    displayName: string;
+    supportsLanguageMap: boolean;
+};
+
+const getContentTypeConfig = (
+    type: DownloadContentType,
     projectId: string,
+): ContentTypeConfig => {
+    switch (type) {
+        case 'charts':
+            return {
+                endpoint: `/api/v1/projects/${projectId}/charts/code`,
+                displayName: 'charts',
+                supportsLanguageMap: true,
+            };
+        case 'dashboards':
+            return {
+                endpoint: `/api/v1/projects/${projectId}/dashboards/code`,
+                displayName: 'dashboards',
+                supportsLanguageMap: true,
+            };
+        case 'sqlCharts':
+            return {
+                endpoint: `/api/v1/projects/${projectId}/sqlCharts/code`,
+                displayName: 'SQL charts',
+                supportsLanguageMap: false,
+            };
+        default:
+            return assertUnreachable(type, `Unknown content type: ${type}`);
+    }
+};
+
+const extractChartSlugsFromDashboards = (
+    dashboards: DashboardAsCode[],
+): string[] =>
+    dashboards.reduce<string[]>((acc, dashboard) => {
+        const slugs = dashboard.tiles
+            .map((tile) =>
+                'chartSlug' in tile.properties
+                    ? (tile.properties.chartSlug as string)
+                    : undefined,
+            )
+            .filter((slug): slug is string => slug !== undefined);
+        return [...acc, ...slugs];
+    }, []);
+
+export const downloadContent = async (
+    ids: string[],
+    type: DownloadContentType,
+    projectId: string,
+    projectName: string,
     customPath?: string,
     languageMap: boolean = false,
+    nested: boolean = false,
 ): Promise<[number, string[]]> => {
     const spinner = GlobalState.getActiveSpinner();
     const contentFilters = parseContentFilters(ids);
-    let contentAsCode:
-        | ApiChartAsCodeListResponse['results']
-        | ApiDashboardAsCodeListResponse['results'];
+    const folderScheme: FolderScheme = nested ? 'nested' : 'flat';
+    const config = getContentTypeConfig(type, projectId);
+
     let offset = 0;
+    let total = 0;
     let chartSlugs: string[] = [];
+
     do {
         GlobalState.debug(
-            `Downloading ${type} with offset "${offset}" and filters "${contentFilters}"`,
+            `Downloading ${config.displayName} with offset "${offset}" and filters "${contentFilters}"`,
         );
 
-        const commonParams = `offset=${offset}&languageMap=${languageMap}`;
-
+        const commonParams = config.supportsLanguageMap
+            ? `offset=${offset}&languageMap=${languageMap}`
+            : `offset=${offset}`;
         const queryParams = contentFilters
             ? `${contentFilters}&${commonParams}`
             : `?${commonParams}`;
-        contentAsCode = await lightdashApi({
+
+        const results = await lightdashApi<
+            | ApiChartAsCodeListResponse['results']
+            | ApiDashboardAsCodeListResponse['results']
+            | ApiSqlChartAsCodeListResponse['results']
+        >({
             method: 'GET',
-            url: `/api/v1/projects/${projectId}/${type}/code${queryParams}`,
+            url: `${config.endpoint}${queryParams}`,
             body: undefined,
         });
+
         spinner?.start(
-            `Downloaded ${contentAsCode.offset} of ${contentAsCode.total} ${type}`,
+            `Downloaded ${results.offset} of ${results.total} ${config.displayName}`,
         );
-        contentAsCode.missingIds.forEach((missingId) => {
-            console.warn(styles.warning(`\nNo ${type} with id "${missingId}"`));
+
+        // For the same chart slug, we run the code for saved charts and sql chart
+        // so we are going to get more false positives here, so we keep it on the debug log
+        results.missingIds.forEach((missingId) => {
+            GlobalState.debug(
+                `\nNo ${config.displayName} with id "${missingId}"`,
+            );
         });
 
-        if ('dashboards' in contentAsCode) {
-            const outputDir = await createDirForContent(
-                contentAsCode.dashboards,
-                'dashboards',
-                customPath,
-            );
-
-            for (const [
-                index,
-                dashboard,
-            ] of contentAsCode.dashboards.entries()) {
-                await writeContent(
-                    {
-                        type: 'dashboard',
-                        content: dashboard,
-                        translationMap: contentAsCode.languageMap?.[index],
-                    },
-                    outputDir,
+        // Write content based on type
+        if ('sqlCharts' in results) {
+            const sqlChartsBySpace = groupBySpace(results.sqlCharts);
+            for (const [spaceSlug, sqlChartsInSpace] of Object.entries(
+                sqlChartsBySpace,
+            )) {
+                await writeSpaceContent({
+                    projectName,
+                    spaceSlug,
+                    folder: 'charts',
+                    contentType: 'sqlChart',
+                    contentInSpace: sqlChartsInSpace,
+                    contentAsCode: results,
+                    customPath,
                     languageMap,
-                );
+                    folderScheme,
+                });
             }
-
-            // Extract chart slugs from dashboards
-            chartSlugs = contentAsCode.dashboards.reduce<string[]>(
-                (acc, dashboard) => {
-                    const slugs = dashboard.tiles.map((chart) =>
-                        'chartSlug' in chart.properties
-                            ? (chart.properties.chartSlug as string)
-                            : undefined,
-                    );
-                    return [
-                        ...acc,
-                        ...slugs.filter(
-                            (slug): slug is string => slug !== undefined,
-                        ),
-                    ];
-                },
-                [],
-            );
-        } else {
-            const outputDir = await createDirForContent(
-                contentAsCode.charts,
-                'charts',
-                customPath,
-            );
-            for (const [index, chart] of contentAsCode.charts.entries()) {
-                await writeContent(
-                    {
-                        type: 'chart',
-                        content: chart,
-                        translationMap: contentAsCode.languageMap?.[index],
-                    },
-                    outputDir,
+        } else if ('dashboards' in results) {
+            const dashboardsBySpace = groupBySpace(results.dashboards);
+            for (const [spaceSlug, dashboardsInSpace] of Object.entries(
+                dashboardsBySpace,
+            )) {
+                await writeSpaceContent({
+                    projectName,
+                    spaceSlug,
+                    folder: 'dashboards',
+                    contentType: 'dashboard',
+                    contentInSpace: dashboardsInSpace,
+                    contentAsCode: results,
+                    customPath,
                     languageMap,
-                );
+                    folderScheme,
+                });
+            }
+            chartSlugs = [
+                ...chartSlugs,
+                ...extractChartSlugsFromDashboards(results.dashboards),
+            ];
+        } else {
+            const chartsBySpace = groupBySpace(results.charts);
+            for (const [spaceSlug, chartsInSpace] of Object.entries(
+                chartsBySpace,
+            )) {
+                await writeSpaceContent({
+                    projectName,
+                    spaceSlug,
+                    folder: 'charts',
+                    contentType: 'chart',
+                    contentInSpace: chartsInSpace,
+                    contentAsCode: results,
+                    customPath,
+                    languageMap,
+                    folderScheme,
+                });
             }
         }
-        offset = contentAsCode.offset;
-    } while (contentAsCode.offset < contentAsCode.total);
 
-    return [contentAsCode.total, [...new Set(chartSlugs)]];
+        offset = results.offset;
+        total = results.total;
+    } while (offset < total);
+
+    return [total, [...new Set(chartSlugs)]];
 };
 
 export const downloadHandler = async (
     options: DownloadHandlerOptions,
 ): Promise<void> => {
     GlobalState.setVerbose(options.verbose);
+    const spinner = GlobalState.startSpinner(`Downloading charts`);
+    spinner.start(`Downloading content from project`);
+
     await checkLightdashVersion();
 
     const config = await getConfig();
@@ -290,6 +479,23 @@ export const downloadHandler = async (
             'No project selected. Run lightdash config set-project',
         );
     }
+
+    // Log current project info
+    if (options.project) {
+        console.error(
+            `\n${styles.success('Downloading from project:')} ${projectId}\n`,
+        );
+    } else {
+        GlobalState.logProjectInfo(config);
+    }
+
+    // Fetch project details to get project name for folder structure
+    const project = await lightdashApi<Project>({
+        method: 'GET',
+        url: `/api/v1/projects/${projectId}`,
+        body: undefined,
+    });
+    const projectName = generateSlug(project.name);
 
     // For analytics
     let chartTotal: number | undefined;
@@ -310,58 +516,91 @@ export const downloadHandler = async (
         const hasFilters =
             options.charts.length > 0 || options.dashboards.length > 0;
 
-        // Download charts
+        // Download regular charts
         if (hasFilters && options.charts.length === 0) {
             console.info(
                 styles.warning(`No charts filters provided, skipping`),
             );
         } else {
-            const spinner = GlobalState.startSpinner(`Downloading charts`);
-            [chartTotal] = await downloadContent(
+            const [regularChartTotal] = await downloadContent(
                 options.charts,
                 'charts',
                 projectId,
+                projectName,
                 options.path,
                 options.languageMap,
+                options.nested,
             );
-            spinner.succeed(`Downloaded ${chartTotal} charts`);
+            spinner.succeed(`Downloaded ${regularChartTotal} charts`);
+
+            // Download SQL charts
+            spinner.start(`Downloading SQL charts`);
+            const [sqlChartTotal] = await downloadContent(
+                options.charts,
+                'sqlCharts',
+                projectId,
+                projectName,
+                options.path,
+                options.languageMap,
+                options.nested,
+            );
+            spinner.succeed(`Downloaded ${sqlChartTotal} SQL charts`);
+
+            chartTotal = regularChartTotal + sqlChartTotal;
         }
+
         // Download dashboards
         if (hasFilters && options.dashboards.length === 0) {
             console.info(
                 styles.warning(`No dashboards filters provided, skipping`),
             );
         } else {
-            const spinner = GlobalState.startSpinner(`Downloading dashboards`);
             let chartSlugs: string[] = [];
 
             [dashboardTotal, chartSlugs] = await downloadContent(
                 options.dashboards,
                 'dashboards',
                 projectId,
+                projectName,
                 options.path,
                 options.languageMap,
+                options.nested,
             );
 
             spinner.succeed(`Downloaded ${dashboardTotal} dashboards`);
 
-            // If any filter is provided, we download all charts for these dashboard
+            // If any filter is provided, we download all charts linked to these dashboards
             // We don't need to do this if we download everything (no filters)
             if (hasFilters && chartSlugs.length > 0) {
                 spinner.start(
                     `Downloading ${chartSlugs.length} charts linked to dashboards`,
                 );
 
-                const [totalCharts] = await downloadContent(
+                // Download both regular charts and SQL charts linked to dashboards
+                const [regularCharts] = await downloadContent(
                     chartSlugs,
                     'charts',
                     projectId,
+                    projectName,
                     options.path,
                     options.languageMap,
+                    options.nested,
+                );
+
+                const [sqlCharts] = await downloadContent(
+                    chartSlugs,
+                    'sqlCharts',
+                    projectId,
+                    projectName,
+                    options.path,
+                    options.languageMap,
+                    options.nested,
                 );
 
                 spinner.succeed(
-                    `Downloaded ${totalCharts} charts linked to dashboards`,
+                    `Downloaded ${
+                        regularCharts + sqlCharts
+                    } charts linked to dashboards`,
                 );
             }
         }
@@ -451,6 +690,11 @@ const logUploadChanges = (changes: Record<string, number>) => {
     });
 };
 
+// SQL charts have 'sql' field instead of 'tableName'/'metricQuery'
+const isSqlChart = (
+    item: ChartAsCode | DashboardAsCode | SqlChartAsCode,
+): item is SqlChartAsCode => 'sql' in item && !('tableName' in item);
+
 /**
  *
  * @param slugs if slugs are provided, we only force upsert the charts/dashboards that match the slugs, if slugs are empty, we upload files that were locally updated
@@ -463,6 +707,7 @@ const upsertResources = async <T extends ChartAsCode | DashboardAsCode>(
     slugs: string[],
     customPath?: string,
     skipSpaceCreate?: boolean,
+    publicSpaceCreate?: boolean,
 ): Promise<{ changes: Record<string, number>; total: number }> => {
     const config = await getConfig();
 
@@ -508,14 +753,22 @@ const upsertResources = async <T extends ChartAsCode | DashboardAsCode>(
                 continue;
             }
             GlobalState.debug(`Upserting ${type} ${item.slug}`);
+
+            // SQL charts use a different endpoint
+            const isSqlChartItem = type === 'charts' && isSqlChart(item);
+            const endpoint = isSqlChartItem
+                ? `/api/v1/projects/${projectId}/sqlCharts/${item.slug}/code`
+                : `/api/v1/projects/${projectId}/${type}/${item.slug}/code`;
+
             const upsertData = await lightdashApi<
                 ApiChartAsCodeUpsertResponse['results']
             >({
                 method: 'POST',
-                url: `/api/v1/projects/${projectId}/${type}/${item.slug}/code`,
+                url: endpoint,
                 body: JSON.stringify({
                     ...item,
                     skipSpaceCreate,
+                    publicSpaceCreate,
                 }),
             });
 
@@ -542,7 +795,9 @@ const upsertResources = async <T extends ChartAsCode | DashboardAsCode>(
                     (changes[`${type} with errors`] ?? 0) + 1;
                 console.error(
                     styles.error(
-                        `Error upserting ${type}: ${getErrorMessage(error)}`,
+                        `Error upserting ${type}:\n\t"${item.name}" (slug: "${
+                            item.slug
+                        }")\n\t${getErrorMessage(error)}`,
                     ),
                 );
 
@@ -613,6 +868,15 @@ export const uploadHandler = async (
         );
     }
 
+    // Log current project info
+    if (options.project) {
+        console.error(
+            `\n${styles.success('Uploading to project:')} ${projectId}\n`,
+        );
+    } else {
+        GlobalState.logProjectInfo(config);
+    }
+
     let changes: Record<string, number> = {};
     // For analytics
     let chartTotal: number | undefined;
@@ -661,6 +925,7 @@ export const uploadHandler = async (
                     chartSlugs,
                     options.path,
                     options.skipSpaceCreate,
+                    options.public,
                 );
             changes = chartChanges;
             chartTotal = total;
@@ -680,6 +945,7 @@ export const uploadHandler = async (
                     options.dashboards,
                     options.path,
                     options.skipSpaceCreate,
+                    options.public,
                 );
             changes = dashboardChanges;
             dashboardTotal = total;

@@ -9,12 +9,12 @@ import {
     useExplorerSelector,
 } from '../features/explorer/store';
 import { useExplorerQueryManager } from './useExplorerQueryManager';
-import { useFeatureFlag } from './useFeatureFlagEnabled';
 import {
     executeQueryAndWaitForResults,
     useCancelQuery,
     type QueryResultsProps,
 } from './useQueryResults';
+import { useServerFeatureFlag } from './useServerOrClientFeatureFlag';
 
 /**
  * Public API for Explorer query management
@@ -41,7 +41,7 @@ export const useExplorerQuery = () => {
     const unpivotedQueryArgs = useExplorerSelector(selectUnpivotedQueryArgs);
     const unpivotedEnabled = !!unpivotedQueryArgs;
 
-    const { data: useSqlPivotResults } = useFeatureFlag(
+    const { data: useSqlPivotResults } = useServerFeatureFlag(
         FeatureFlags.UseSqlPivotResults,
     );
 
@@ -71,20 +71,22 @@ export const useExplorerQuery = () => {
                     : queryResults.queryUuid;
 
             if (limit === null || limit !== queryResults.totalResults) {
+                const shouldPivot =
+                    exportPivotedResults && !!useSqlPivotResults?.enabled;
                 const queryArgsWithLimit: QueryResultsProps | null =
                     validQueryArgs
                         ? {
                               ...validQueryArgs,
                               csvLimit: limit,
                               invalidateCache: minimal,
-                              pivotResults:
-                                  exportPivotedResults &&
-                                  useSqlPivotResults?.enabled,
+                              pivotResults: shouldPivot,
+                              pivotConfiguration: shouldPivot
+                                  ? validQueryArgs.pivotConfiguration
+                                  : undefined,
                           }
                         : null;
-                const downloadQuery = await executeQueryAndWaitForResults(
-                    queryArgsWithLimit,
-                );
+                const downloadQuery =
+                    await executeQueryAndWaitForResults(queryArgsWithLimit);
                 queryUuid = downloadQuery.queryUuid;
             }
             if (!queryUuid) {
@@ -119,6 +121,8 @@ export const useExplorerQuery = () => {
     }, [queryClient, queryResults.queryUuid, cancelQueryMutation]);
 
     return {
+        unpivotedEnabled,
+
         // Spread all state from manager
         ...manager,
 

@@ -9,6 +9,7 @@ import {
     isV9MetricRef,
     type DbtColumnLightdashDimension,
     type DbtColumnMetadata,
+    type DbtExploreLightdashAdditionalDimension,
     type DbtMetric,
     type DbtModelColumn,
     type DbtModelNode,
@@ -118,6 +119,7 @@ const convertDimension = (
     timeInterval?: TimeFrames,
     startOfWeek?: WeekDay | null,
     isAdditionalDimension?: boolean,
+    disableTimestampConversion?: boolean,
 ): Dimension => {
     // Config block takes priority, then meta block
     const meta = merge({}, column.meta, column.config?.meta);
@@ -135,7 +137,7 @@ const convertDimension = (
     let name = meta.dimension?.name || column.name;
     let sql = meta.dimension?.sql || defaultSql(column.name);
     let label = meta.dimension?.label || friendlyName(name);
-    if (type === DimensionType.TIMESTAMP) {
+    if (type === DimensionType.TIMESTAMP && !disableTimestampConversion) {
         sql = convertTimezone(sql, 'UTC', 'UTC', targetWarehouse);
     }
     const isIntervalBase =
@@ -189,6 +191,7 @@ const convertDimension = (
         requiredAttributes: meta.dimension?.required_attributes,
         colors: meta.dimension?.colors,
         ...(meta.dimension?.urls ? { urls: meta.dimension.urls } : {}),
+        ...(meta.dimension?.image ? { image: meta.dimension.image } : {}),
         ...(isAdditionalDimension ? { isAdditionalDimension } : {}),
         groups,
         isIntervalBase,
@@ -202,7 +205,96 @@ const convertDimension = (
         ...(meta.dimension?.ai_hint
             ? { aiHint: convertToAiHints(meta.dimension.ai_hint) }
             : {}),
+        ...(meta.dimension?.spotlight?.filter_by === false ||
+        meta.dimension?.spotlight?.segment_by === false
+            ? {
+                  spotlight: {
+                      ...(meta.dimension?.spotlight?.filter_by === false && {
+                          filterBy: false,
+                      }),
+                      ...(meta.dimension?.spotlight?.segment_by === false && {
+                          segmentBy: false,
+                      }),
+                  },
+              }
+            : {}),
     };
+};
+
+/**
+ * Convert an explore-scoped additional dimension to Dimension(s).
+ * Reuses convertDimension by creating a synthetic column object.
+ * Returns the base dimension plus any time interval dimensions.
+ */
+const convertExploreScopedDimension = (
+    index: number,
+    tableName: string,
+    tableLabel: string,
+    dimensionName: string,
+    dimensionConfig: DbtExploreLightdashAdditionalDimension,
+    targetWarehouse: SupportedDbtAdapter,
+    startOfWeek?: WeekDay | null,
+): Record<string, Dimension> => {
+    // Create a synthetic column to reuse convertDimension
+    const syntheticColumn: DbtModelColumn = {
+        name: dimensionName,
+        data_type: dimensionConfig.type,
+        meta: {
+            dimension: dimensionConfig,
+        },
+    };
+
+    const syntheticModel = {
+        name: tableName,
+        relation_name: tableName,
+    };
+
+    const baseDimension = convertDimension(
+        index,
+        targetWarehouse,
+        syntheticModel,
+        tableLabel,
+        syntheticColumn,
+        undefined,
+        undefined,
+        startOfWeek,
+        true, // isAdditionalDimension
+    );
+
+    const result: Record<string, Dimension> = {
+        [dimensionName]: baseDimension,
+    };
+
+    // Process time intervals if applicable (same logic as column-level additional dimensions)
+    if (baseDimension.isIntervalBase) {
+        let intervals: TimeFrames[] = [];
+
+        if (
+            dimensionConfig.time_intervals &&
+            Array.isArray(dimensionConfig.time_intervals)
+        ) {
+            intervals = validateTimeFrames(dimensionConfig.time_intervals);
+        } else {
+            intervals = getDefaultTimeFrames(dimensionConfig.type);
+        }
+
+        intervals.forEach((interval) => {
+            const intervalDimension = convertDimension(
+                index,
+                targetWarehouse,
+                syntheticModel,
+                tableLabel,
+                syntheticColumn,
+                undefined,
+                interval,
+                startOfWeek,
+                true, // isAdditionalDimension
+            );
+            result[intervalDimension.name] = intervalDimension;
+        });
+    }
+
+    return result;
 };
 
 const generateTableLineage = (
@@ -323,10 +415,11 @@ const convertDbtMetricToLightdashMetric = (
                       : [metric.meta.tags],
               }
             : {}),
-        ...getSpotlightConfigurationForResource(
-            spotlightVisibility,
-            spotlightCategories,
-        ),
+        ...getSpotlightConfigurationForResource({
+            visibility: spotlightVisibility,
+            categories: spotlightCategories,
+            owner: metric.meta?.spotlight?.owner,
+        }),
     };
 };
 
@@ -418,26 +511,40 @@ function validateSets(
                 }
             }
 
-            // Validate one-level nesting: if this set references another set,
-            // the referenced set cannot itself contain set references
+            // Validate nesting level: if this set references another set,
+            // we check up to 3 levels of nesting
+            const checkNesting = (
+                fields: (string | unknown)[],
+                depth: number,
+            ) => {
+                if (depth > 3) {
+                    throw new ParseError(
+                        `Set "${setName}" in model "${model.name}" exceeds the maximum nesting level of 3.`,
+                    );
+                }
+
+                fields.forEach((f) => {
+                    if (
+                        typeof f === 'string' &&
+                        f.endsWith('*') &&
+                        !f.startsWith('-')
+                    ) {
+                        const referencedSetName = f.substring(0, f.length - 1);
+                        const referencedSet = meta.sets?.[referencedSetName];
+
+                        if (referencedSet) {
+                            checkNesting(referencedSet.fields, depth + 1);
+                        }
+                    }
+                });
+            };
+
             if (!isModelFieldName && field.endsWith('*')) {
                 const referencedSetName = field.substring(0, field.length - 1);
                 const referencedSet = meta.sets?.[referencedSetName];
 
                 if (referencedSet) {
-                    // Check if the referenced set contains any set references
-                    const hasNestedSetReferences = referencedSet.fields.some(
-                        (f) =>
-                            typeof f === 'string' &&
-                            f.endsWith('*') &&
-                            !f.startsWith('-'),
-                    );
-
-                    if (hasNestedSetReferences) {
-                        throw new ParseError(
-                            `Set "${setName}" in model "${model.name}" references set "${referencedSetName}", which itself contains set references. Only one level of set nesting is allowed.`,
-                        );
-                    }
+                    checkNesting(referencedSet.fields, 2);
                 }
             }
         });
@@ -450,6 +557,7 @@ export const convertTable = (
     dbtMetrics: DbtMetric[],
     spotlightConfig: LightdashProjectConfig['spotlight'],
     startOfWeek?: WeekDay | null,
+    disableTimestampConversion?: boolean,
 ): Omit<Table, 'lineageGraph'> => {
     // Config block takes priority, then meta block
     const meta = merge({}, model.meta, model.config?.meta);
@@ -469,6 +577,8 @@ export const convertTable = (
                 undefined,
                 undefined,
                 startOfWeek,
+                undefined,
+                disableTimestampConversion,
             );
 
             // Config block takes priority, then meta block
@@ -498,6 +608,16 @@ export const convertTable = (
                         intervals = getDefaultTimeFrames(dim.type);
                     }
 
+                    const dimensionMeta = {
+                        ...columnMeta.dimension,
+                        type: dim.type,
+                        label: dim.label,
+                        groups: dim.groups,
+                        sql: dim.sql,
+                        description: dim.description,
+                        hidden: dim.hidden,
+                    };
+
                     return intervals.reduce(
                         (acc, interval) => ({
                             ...acc,
@@ -514,14 +634,15 @@ export const convertTable = (
                                             ? {
                                                   name: dim.name,
                                                   meta: {
-                                                      dimension: {
-                                                          ...columnMeta.dimension,
-                                                          type: dim.type,
-                                                          label: dim.label,
-                                                          groups: dim.groups,
-                                                          sql: dim.sql,
-                                                          description:
-                                                              dim.description,
+                                                      dimension: dimensionMeta,
+                                                  },
+                                                  // In dbt 1.10+, config.meta takes precedence over meta
+                                                  // so we must set config.meta.dimension to prevent
+                                                  // the base dimension's properties from overwriting
+                                                  config: {
+                                                      meta: {
+                                                          dimension:
+                                                              dimensionMeta,
                                                       },
                                                   },
                                               }
@@ -532,6 +653,7 @@ export const convertTable = (
                                     startOfWeek,
                                     'isAdditionalDimension' in dim &&
                                         dim.isAdditionalDimension,
+                                    disableTimestampConversion,
                                 ),
                         }),
                         {},
@@ -568,6 +690,7 @@ export const convertTable = (
                     undefined,
                     startOfWeek,
                     true,
+                    disableTimestampConversion,
                 );
 
                 return {
@@ -600,6 +723,9 @@ export const convertTable = (
                                     spotlightConfig.default_visibility,
                             },
                             modelCategories: meta.spotlight?.categories,
+                            modelOwner: meta.spotlight?.owner ?? meta.owner,
+                            defaultShowUnderlyingValues:
+                                meta.default_show_underlying_values,
                         }),
                     ],
                 ),
@@ -632,6 +758,9 @@ export const convertTable = (
                         spotlightConfig.default_visibility,
                 },
                 modelCategories: meta.spotlight?.categories,
+                modelOwner: meta.spotlight?.owner ?? meta.owner,
+                defaultShowUnderlyingValues:
+                    meta.default_show_underlying_values,
             }),
         ]),
     );
@@ -677,9 +806,6 @@ export const convertTable = (
         throw new ParseError(`${message} ${duplicatedNames}`);
     }
 
-    if (!model.relation_name) {
-        throw new Error(`Model "${model.name}" has no table relation`);
-    }
     const groupDetails: Record<string, GroupType> = {};
     if (meta.group_details) {
         Object.entries(meta.group_details).forEach(([key, data]) => {
@@ -695,6 +821,9 @@ export const convertTable = (
     }
 
     const sqlTable = meta.sql_from || model.relation_name;
+    if (sqlTable === null || sqlTable === undefined || sqlTable === '') {
+        throw new Error(`Model "${model.name}" is missing a table reference.`);
+    }
     return {
         name: model.name,
         label: tableLabel,
@@ -784,6 +913,8 @@ export const convertExplores = async (
     metrics: DbtMetric[],
     warehouseSqlBuilder: WarehouseSqlBuilder,
     lightdashProjectConfig: LightdashProjectConfig,
+    disableTimestampConversion?: boolean,
+    allowPartialCompilation?: boolean,
 ): Promise<(Explore | ExploreError)[]> => {
     const tableLineage = translateDbtModelsToTableLineage(models);
     const [tables, exploreErrors] = models.reduce(
@@ -814,6 +945,7 @@ export const convertExplores = async (
                     tableMetrics,
                     lightdashProjectConfig.spotlight,
                     warehouseSqlBuilder.getStartOfWeek(),
+                    disableTimestampConversion,
                 );
 
                 // add lineage
@@ -855,7 +987,9 @@ export const convertExplores = async (
         (model) => tableLookup[model.name] !== undefined,
     );
 
-    const exploreCompiler = new ExploreCompiler(warehouseSqlBuilder);
+    const exploreCompiler = new ExploreCompiler(warehouseSqlBuilder, {
+        allowPartialCompilation,
+    });
     const explores: (Explore | ExploreError)[] = validModels.reduce<
         (Explore | ExploreError)[]
     >((acc, model) => {
@@ -881,28 +1015,72 @@ export const convertExplores = async (
             },
             ...(meta.explores
                 ? Object.entries(meta.explores).map(
-                      ([exploreName, exploreConfig]) => ({
-                          name: exploreName,
-                          label:
-                              exploreConfig.label || friendlyName(exploreName),
-                          groupLabel:
-                              exploreConfig.group_label || meta.group_label,
-                          joins: exploreConfig.joins || [],
-                          description: exploreConfig.description,
-                          tables: {
-                              ...tableLookup,
-                              // Override the base table required filters with the explore config required filters
-                              [model.name]: {
-                                  ...tableLookup[model.name],
-                                  requiredFilters: parseModelRequiredFilters({
+                      ([exploreName, exploreConfig]) => {
+                          const baseTable = tableLookup[model.name];
+                          const baseTableLabel =
+                              meta.label || friendlyName(model.name);
+
+                          // Convert explore-scoped additional dimensions
+                          let exploreScopedDimensions: Record<
+                              string,
+                              Dimension
+                          > = {};
+                          if (exploreConfig.additional_dimensions) {
+                              const existingDimensionCount = Object.keys(
+                                  baseTable.dimensions,
+                              ).length;
+
+                              Object.entries(
+                                  exploreConfig.additional_dimensions,
+                              ).forEach(([dimName, dimConfig], dimIndex) => {
+                                  const convertedDims =
+                                      convertExploreScopedDimension(
+                                          existingDimensionCount + dimIndex,
+                                          model.name,
+                                          baseTableLabel,
+                                          dimName,
+                                          dimConfig,
+                                          adapterType,
+                                          warehouseSqlBuilder.getStartOfWeek(),
+                                      );
+                                  exploreScopedDimensions = {
+                                      ...exploreScopedDimensions,
+                                      ...convertedDims,
+                                  };
+                              });
+                          }
+
+                          return {
+                              name: exploreName,
+                              label:
+                                  exploreConfig.label ||
+                                  friendlyName(exploreName),
+                              groupLabel:
+                                  exploreConfig.group_label || meta.group_label,
+                              // Inherit joins from base model if not specified in explore config
+                              joins: exploreConfig.joins || meta?.joins || [],
+                              description: exploreConfig.description,
+                              tables: {
+                                  ...tableLookup,
+                                  // Override the base table with required filters and explore-scoped dimensions
+                                  [model.name]: {
+                                      ...baseTable,
                                       requiredFilters:
-                                          exploreConfig.required_filters,
-                                      defaultFilters:
-                                          exploreConfig.default_filters,
-                                  }),
+                                          parseModelRequiredFilters({
+                                              requiredFilters:
+                                                  exploreConfig.required_filters,
+                                              defaultFilters:
+                                                  exploreConfig.default_filters,
+                                          }),
+                                      // Merge explore-scoped dimensions with existing dimensions
+                                      dimensions: {
+                                          ...baseTable.dimensions,
+                                          ...exploreScopedDimensions,
+                                      },
+                                  },
                               },
-                          },
-                      }),
+                          };
+                      },
                   )
                 : []),
         ];

@@ -4,7 +4,7 @@ import { darken, rgba } from 'polished';
 import { CELL_HEIGHT } from './constants';
 import { CellType, SectionType } from './types';
 
-const getBorderColor = (theme: MantineTheme) => theme.colors.gray[3];
+const getBorderColor = (theme: MantineTheme) => theme.colors.ldGray[3];
 const getShadowColor = (theme: MantineTheme) => rgba(theme.black, 0.075);
 
 export const useTableStyles = createStyles((theme) => {
@@ -15,9 +15,12 @@ export const useTableStyles = createStyles((theme) => {
             borderCollapse: 'initial',
             borderSpacing: 0,
 
+            borderRadius: '4px',
+
             margin: 0,
             padding: 0,
 
+            /* All cells have right and bottom borders (inner borders only) */
             'th, td': {
                 transitionDuration: '200ms',
                 transitionProperty: 'box-shadow, background-color',
@@ -26,21 +29,72 @@ export const useTableStyles = createStyles((theme) => {
                 boxShadow: `inset -1px -1px 0 0 ${borderColor}`,
                 '&:hover': {
                     boxShadow: `inset -1px -1px 0 0 ${borderColor} !important`,
-                    backgroundColor: theme.colors.gray[1],
+                    backgroundColor: theme.colors.ldGray[1],
                     transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
                 },
             },
 
+            /* First row cells: no top border (table border provides it) */
             '> *:first-child > *:first-child > *': {
-                boxShadow: `inset 0 1px 0 0 ${borderColor}, inset -1px -1px 0 0 ${borderColor}`,
+                boxShadow: `inset -1px -1px 0 0 ${borderColor}`,
             },
 
+            /* First row, first cell: no top or left border (table border provides them) */
             '> *:first-child > *:first-child > *:first-child': {
-                boxShadow: `inset 1px 1px 0 0 ${borderColor}, inset -1px -1px 0 0 ${borderColor}`,
+                boxShadow: `inset -1px -1px 0 0 ${borderColor}`,
             },
 
+            /* First row, last cell: no top or right border (table border provides them) */
+            '> *:first-child > *:first-child > *:last-child': {
+                boxShadow: `inset 0 -1px 0 0 ${borderColor}`,
+                '&:hover': {
+                    boxShadow: `inset 0 -1px 0 0 ${borderColor} !important`,
+                },
+            },
+
+            /* First column cells: no left border (container provides it) */
             '> * > tr > *:first-child': {
-                boxShadow: `inset 1px 0 0 0 ${borderColor}, inset -1px -1px 0 0 ${borderColor}`,
+                boxShadow: `inset -1px -1px 0 0 ${borderColor}`,
+            },
+
+            /* Last column cells: no right border (container provides it) */
+            '> * > tr > *:last-child': {
+                boxShadow: `inset 0 -1px 0 0 ${borderColor}`,
+                '&:hover': {
+                    boxShadow: `inset 0 -1px 0 0 ${borderColor} !important`,
+                },
+            },
+
+            /* Body last row cells: no bottom border (container provides it) */
+            '> tbody:last-child > *:last-child > *': {
+                boxShadow: `inset -1px 0 0 0 ${borderColor}`,
+                '&:hover': {
+                    boxShadow: `inset -1px 0 0 0 ${borderColor} !important`,
+                },
+            },
+
+            /* Body last row, last cell: no right or bottom border */
+            '> tbody:last-child > *:last-child > *:last-child': {
+                boxShadow: 'none',
+                '&:hover': {
+                    boxShadow: 'none !important',
+                },
+            },
+
+            /* Footer last row cells: no bottom border (container provides it) */
+            '> tfoot:last-child > *:last-child > *': {
+                boxShadow: `inset -1px 0 0 0 ${borderColor}`,
+                '&:hover': {
+                    boxShadow: `inset -1px 0 0 0 ${borderColor} !important`,
+                },
+            },
+
+            /* Footer last row, last cell: no right or bottom border */
+            '> tfoot:last-child > *:last-child > *:last-child': {
+                boxShadow: 'none',
+                '&:hover': {
+                    boxShadow: 'none !important',
+                },
             },
         },
     };
@@ -137,7 +191,7 @@ export const useTableRowStyles = createStyles<
     string,
     { sectionType: SectionType; index: number }
 >((theme, { sectionType, index }) => {
-    const rowHoverBackground = rgba(theme.colors.gray[0], 0.5);
+    const rowHoverBackground = rgba(theme.colors.ldGray[0], 0.5);
 
     const getStickySectionStyles = () => {
         switch (sectionType) {
@@ -165,7 +219,7 @@ export const useTableRowStyles = createStyles<
 
     return {
         root: {
-            backgroundColor: theme.white,
+            backgroundColor: theme.colors.background[0],
 
             ':hover':
                 sectionType === SectionType.Body
@@ -203,10 +257,19 @@ export const useTableCellStyles = createStyles<
             withBackground = false,
         },
     ) => {
-        const cellHeadBackground = theme.colors.gray[0];
-        const selectedDefaultBackground = theme.colors.blue[2];
-        const selectedDefaultBorder = theme.colors.blue[4];
-        const copyingBackground = theme.colors.blue[3];
+        const cellHeadBackground = theme.colors.ldGray[0];
+        const selectedDefaultBackground =
+            theme.colorScheme === 'dark'
+                ? theme.colors.blue[9]
+                : theme.colors.blue[2];
+        const selectedDefaultBorder =
+            theme.colorScheme === 'dark'
+                ? theme.colors.blue[5]
+                : theme.colors.blue[4];
+        const copyingBackground =
+            theme.colorScheme === 'dark'
+                ? theme.colors.blue[8]
+                : theme.colors.blue[3];
         const withBackgroundSelected = withBackground
             ? darken(0.05, withBackground)
             : undefined;
@@ -251,14 +314,14 @@ export const useTableCellStyles = createStyles<
                 height: CELL_HEIGHT,
 
                 textAlign: 'left',
-                whiteSpace: 'pre-wrap',
+                whiteSpace: 'pre',
 
                 fontFamily: theme.other.tableFont ?? "'Inter', sans-serif",
                 fontFeatureSettings: '"tnum"',
                 fontWeight: cellType === CellType.Head ? 500 : 400,
                 fontSize: 13,
 
-                color: theme.colors.gray[9],
+                color: theme.colors.ldGray[9],
 
                 backgroundColor:
                     cellType === CellType.Head ? cellHeadBackground : undefined,

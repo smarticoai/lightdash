@@ -1,8 +1,8 @@
 import {
     MetricExplorerComparison,
-    applyCustomFormat,
     assertUnreachable,
     capitalize,
+    formatItemValue,
     friendlyName,
     getCustomFormat,
     type MetricExploreDataPointWithDateValue,
@@ -71,18 +71,18 @@ const tickFormatter = (date: Date) => {
         timeSecond(date) < date
             ? DATE_FORMATS.millisecond
             : timeMinute(date) < date
-            ? DATE_FORMATS.second
-            : timeHour(date) < date
-            ? DATE_FORMATS.minute
-            : timeDay(date) < date
-            ? DATE_FORMATS.hour
-            : timeMonth(date) < date
-            ? timeWeek(date) < date
-                ? DATE_FORMATS.day
-                : DATE_FORMATS.week
-            : timeYear(date) < date
-            ? DATE_FORMATS.month
-            : DATE_FORMATS.year
+              ? DATE_FORMATS.second
+              : timeHour(date) < date
+                ? DATE_FORMATS.minute
+                : timeDay(date) < date
+                  ? DATE_FORMATS.hour
+                  : timeMonth(date) < date
+                    ? timeWeek(date) < date
+                        ? DATE_FORMATS.day
+                        : DATE_FORMATS.week
+                    : timeYear(date) < date
+                      ? DATE_FORMATS.month
+                      : DATE_FORMATS.year
     )(date);
 };
 
@@ -357,15 +357,16 @@ const MetricsVisualization: FC<Props> = ({
 
     const formatConfig = useMemo<MetricVisualizationFormatConfig>(() => {
         return {
-            metric: getCustomFormat(results?.metric),
-            compareMetric: getCustomFormat(results?.compareMetric ?? undefined),
+            metric: results?.metric,
+            compareMetric: results?.compareMetric,
         };
     }, [results]);
 
     const shouldSplitYAxis = useMemo(() => {
         return (
             query.comparison === MetricExplorerComparison.DIFFERENT_METRIC &&
-            formatConfig.compareMetric !== formatConfig.metric
+            getCustomFormat(formatConfig.compareMetric ?? undefined) !==
+                getCustomFormat(formatConfig.metric)
         );
     }, [query.comparison, formatConfig]);
 
@@ -666,7 +667,7 @@ const MetricsVisualization: FC<Props> = ({
                             <CartesianGrid
                                 horizontal
                                 vertical={false}
-                                stroke={colors.gray[2]}
+                                stroke={colors.ldGray[2]}
                                 strokeDasharray="4 3"
                             />
 
@@ -687,7 +688,7 @@ const MetricsVisualization: FC<Props> = ({
                                               style: {
                                                   textAnchor: 'middle',
                                                   fontSize: 14,
-                                                  fill: colors.gray[7],
+                                                  fill: colors.ldGray[8],
                                                   fontWeight: 500,
                                                   userSelect: 'none',
                                               },
@@ -695,21 +696,27 @@ const MetricsVisualization: FC<Props> = ({
                                         : undefined
                                 }
                                 tickFormatter={(value) => {
-                                    return applyCustomFormat(
-                                        value,
+                                    return formatItemValue(
                                         formatConfig.metric,
+                                        value,
                                     );
                                 }}
-                                style={{ userSelect: 'none' }}
+                                style={{
+                                    userSelect: 'none',
+                                    fill: colors.ldGray[8],
+                                }}
                             />
 
                             <XAxis
                                 dataKey="dateValue"
                                 {...xAxisConfig}
-                                axisLine={{ stroke: colors.gray[2] }}
+                                axisLine={{ stroke: colors.ldGray[2] }}
                                 tickLine={false}
                                 fontSize={11}
-                                style={{ userSelect: 'none' }}
+                                style={{
+                                    userSelect: 'none',
+                                    fill: colors.ldGray[8],
+                                }}
                                 allowDuplicatedCategory={false}
                             />
 
@@ -780,9 +787,10 @@ const MetricsVisualization: FC<Props> = ({
                                             width={rightYAxisWidth}
                                             {...commonYAxisConfig}
                                             tickFormatter={(value) => {
-                                                return applyCustomFormat(
+                                                return formatItemValue(
+                                                    formatConfig.compareMetric ??
+                                                        undefined,
                                                     value,
-                                                    formatConfig.compareMetric,
                                                 );
                                             }}
                                             style={{ userSelect: 'none' }}
@@ -871,7 +879,7 @@ const MetricsVisualization: FC<Props> = ({
                         label={timeDimensionTooltipLabel}
                         disabled={!timeDimensionTooltipLabel}
                     >
-                        <Text fw={500} c="gray.7" fz={14}>
+                        <Text fw={500} c="ldGray.7" fz={14}>
                             Date ({capitalize(timeDimensionBaseField.interval)})
                         </Text>
                     </Tooltip>

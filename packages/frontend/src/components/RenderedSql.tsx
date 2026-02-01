@@ -1,16 +1,23 @@
-import { Alert, Loader, Stack, Title } from '@mantine/core';
+import {
+    Alert,
+    Box,
+    Loader,
+    Stack,
+    Title,
+    useMantineColorScheme,
+} from '@mantine-8/core';
 import Editor, {
     type BeforeMount,
     type EditorProps,
 } from '@monaco-editor/react';
 import { IconAlertCircle } from '@tabler/icons-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, type FC } from 'react';
 import { useParams } from 'react-router';
 import { format } from 'sql-formatter';
 import { getLanguage } from '../features/sqlRunner/store/sqlRunnerSlice';
 import {
+    getLightdashMonacoTheme,
     getMonacoLanguage,
-    LIGHTDASH_THEME,
     MONACO_DEFAULT_OPTIONS,
     registerMonacoLanguage,
 } from '../features/sqlRunner/utils/monaco';
@@ -22,7 +29,16 @@ const MONACO_READ_ONLY: EditorProps['options'] = {
     readOnly: true,
 };
 
-export const RenderedSql = () => {
+export type SqlViewType = 'query' | 'pivotQuery';
+
+interface RenderedSqlProps {
+    selectedView?: SqlViewType;
+}
+
+export const RenderedSql: FC<RenderedSqlProps> = ({
+    selectedView = 'query',
+}) => {
+    const { colorScheme } = useMantineColorScheme();
     const { projectUuid } = useParams<{ projectUuid: string }>();
     const { data: project } = useProject(projectUuid);
     const language = useMemo(
@@ -34,35 +50,58 @@ export const RenderedSql = () => {
     const beforeMount: BeforeMount = useCallback(
         (monaco) => {
             registerMonacoLanguage(monaco, language);
-            monaco.editor.defineTheme('lightdash', {
+            monaco.editor.defineTheme('lightdash-light', {
                 base: 'vs',
                 inherit: true,
-                ...LIGHTDASH_THEME,
+                ...getLightdashMonacoTheme('light'),
+            });
+            monaco.editor.defineTheme('lightdash-dark', {
+                base: 'vs-dark',
+                inherit: true,
+                ...getLightdashMonacoTheme('dark'),
             });
         },
         [language],
     );
 
+    const formatSql = useCallback(
+        (sql: string | undefined) => {
+            if (!sql) return '';
+            try {
+                return format(sql, {
+                    language: getLanguage(project?.warehouseConnection?.type),
+                });
+            } catch (e) {
+                console.error(
+                    'Error rendering SQL:',
+                    e instanceof Error ? e.message : 'Unknown error occurred',
+                );
+                return sql;
+            }
+        },
+        [project?.warehouseConnection?.type],
+    );
+
+    // Fall back to 'query' if 'pivotQuery' is selected but no pivotQuery is available
+    const effectiveView = useMemo(
+        () =>
+            selectedView === 'pivotQuery' && !data?.pivotQuery
+                ? 'query'
+                : selectedView,
+        [selectedView, data?.pivotQuery],
+    );
+
     const formattedSql = useMemo(() => {
-        if (!data?.query) return '';
-        try {
-            return format(data.query, {
-                language: getLanguage(project?.warehouseConnection?.type),
-            });
-        } catch (e) {
-            console.error(
-                'Error rendering SQL:',
-                e instanceof Error ? e.message : 'Unknown error occurred',
-            );
-            return data.query;
-        }
-    }, [data?.query, project?.warehouseConnection?.type]);
+        const sqlToFormat =
+            effectiveView === 'pivotQuery' ? data?.pivotQuery : data?.query;
+        return formatSql(sqlToFormat);
+    }, [data?.query, data?.pivotQuery, effectiveView, formatSql]);
 
     if (isInitialLoading) {
         return (
             <Stack my="xs" align="center">
                 <Loader size="lg" color="gray" mt="xs" />
-                <Title order={4} fw={500} color="gray.7">
+                <Title order={4} fw={500} c="ldGray.7">
                     Compiling SQL
                 </Title>
             </Stack>
@@ -105,13 +144,37 @@ export const RenderedSql = () => {
     }
 
     return (
-        <Editor
-            loading={<Loader color="gray" size="xs" />}
-            language={language}
-            beforeMount={beforeMount}
-            value={formattedSql}
-            options={MONACO_READ_ONLY}
-            theme="lightdash"
-        />
+        <Stack gap={0} h="100%">
+            {data?.compilationErrors && data.compilationErrors.length > 0 && (
+                <div style={{ margin: 10 }}>
+                    <Alert
+                        icon={<IconAlertCircle size="1rem" />}
+                        title="Compilation error"
+                        color="red"
+                        variant="filled"
+                    >
+                        {data.compilationErrors.map(
+                            (errorMsg: string, index: number) => (
+                                <p key={index}>{errorMsg}</p>
+                            ),
+                        )}
+                    </Alert>
+                </div>
+            )}
+            <Box flex={1}>
+                <Editor
+                    loading={<Loader color="gray" size="xs" />}
+                    language={language}
+                    beforeMount={beforeMount}
+                    value={formattedSql}
+                    options={MONACO_READ_ONLY}
+                    theme={
+                        colorScheme === 'dark'
+                            ? 'lightdash-dark'
+                            : 'lightdash-light'
+                    }
+                />
+            </Box>
+        </Stack>
     );
 };

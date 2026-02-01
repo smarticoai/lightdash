@@ -37,6 +37,24 @@ models:
     visit_analytics:
       +meta:
         group_label: healthcare
+    product_events:
+      +meta:
+        group_label: funnels
+    geo:
+      +meta:
+        group_label: maps
+    global_office_locations:
+      +meta:
+        group_label: maps
+    world_country_metrics:
+      +meta:
+        group_label: maps
+    spain_regional_metrics:
+      +meta:
+        group_label: maps
+    airports:
+      +meta:
+        group_label: maps
 seeds:
   jaffle_shop:
     raw_customers:
@@ -54,3 +72,8 @@ seeds:
     raw_tracks:
       +column_types:
         timestamp: timestamp
+    raw_product_events:
+      +column_types:
+        event_id: integer
+        user_id: integer
+        event_timestamp: timestamp

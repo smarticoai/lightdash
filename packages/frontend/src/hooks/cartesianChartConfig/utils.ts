@@ -181,31 +181,34 @@ export const mergeExistingAndExpectedSeries = ({
             if (existingValidSeriesIds.includes(expectedSeriesId)) {
                 return [...acc];
             }
+
+            let seriesToAdd = expectedSeries;
+
             // Add series to the end of its group
             if (
-                expectedSeries.encode.yRef.pivotValues &&
-                expectedSeries.encode.yRef.pivotValues.length > 0
+                seriesToAdd.encode.yRef.pivotValues &&
+                seriesToAdd.encode.yRef.pivotValues.length > 0
             ) {
                 // Find a series with the same field to inherit properties like yAxisIndex
                 const seriesInSameGroup = acc.find(
                     (series) =>
-                        expectedSeries.encode.yRef.field ===
+                        seriesToAdd.encode.yRef.field ===
                         series.encode.yRef.field,
                 );
 
                 // Inherit yAxisIndex from existing series with same field
                 const seriesWithInheritedProps = seriesInSameGroup
                     ? {
-                          ...expectedSeries,
+                          ...seriesToAdd,
                           yAxisIndex: seriesInSameGroup.yAxisIndex,
                       }
-                    : expectedSeries;
+                    : seriesToAdd;
 
                 const lastSeriesInGroupIndex = acc
                     .reverse()
                     .findIndex(
                         (series) =>
-                            expectedSeries.encode.yRef.field ===
+                            seriesToAdd.encode.yRef.field ===
                             series.encode.yRef.field,
                     );
                 if (lastSeriesInGroupIndex >= 0) {
@@ -221,7 +224,7 @@ export const mergeExistingAndExpectedSeries = ({
                 return [...acc.reverse(), seriesWithInheritedProps];
             }
             // Add series to the end
-            return [...acc, expectedSeries];
+            return [...acc, seriesToAdd];
         },
         existingValidSeries,
     );

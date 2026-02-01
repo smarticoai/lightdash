@@ -2,10 +2,14 @@ import {
     CreateProjectOptionalCredentials,
     CreateProjectTableConfiguration,
     DbtProjectType,
+    getLatestSupportDbtVersion,
+    HealthState,
     ProjectType,
+    SnowflakeAuthenticationType,
     WarehouseTypes,
     type ApiCreateProjectResults,
     type CreateWarehouseCredentials,
+    type DbtVersionOption,
     type OrganizationWarehouseCredentialsSummary,
 } from '@lightdash/common';
 import inquirer from 'inquirer';
@@ -17,8 +21,10 @@ import * as styles from '../styles';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { checkProjectCreationPermission, lightdashApi } from './dbt/apiClient';
 import getDbtProfileTargetName from './dbt/getDbtProfileTargetName';
-import { getDbtVersion } from './dbt/getDbtVersion';
-import getWarehouseClient from './dbt/getWarehouseClient';
+import { tryGetDbtVersion } from './dbt/getDbtVersion';
+import getWarehouseClient, {
+    createProgramaticallySnowflakePat,
+} from './dbt/getWarehouseClient';
 
 const askToRememberAnswer = async (): Promise<void> => {
     const answers = await inquirer.prompt([
@@ -124,6 +130,17 @@ type CreateProjectOptions = {
     copyContent?: boolean;
     warehouseCredentials?: boolean;
     organizationCredentials?: string;
+    targetPath?: string;
+};
+
+const isSnowflakeSsoEnabled = async (): Promise<boolean> => {
+    const response = await lightdashApi<HealthState>({
+        method: 'GET',
+        url: `/api/v1/health`,
+        body: undefined,
+    });
+
+    return response?.auth?.snowflake?.enabled ?? false;
 };
 
 export const createProject = async (
@@ -143,13 +160,12 @@ export const createProject = async (
             );
     }
 
-    const dbtVersion = await getDbtVersion();
-
     const absoluteProjectPath = path.resolve(options.projectDir);
-    const context = await getDbtContext({ projectDir: absoluteProjectPath });
 
     let targetName: string | undefined;
     let credentials: CreateWarehouseCredentials | undefined;
+    let isDbtCloudCLI = false;
+    let dbtVersionOption: DbtVersionOption = getLatestSupportDbtVersion();
 
     // If using organization credentials, don't load warehouse credentials from profiles
     if (organizationWarehouseCredentialsUuid) {
@@ -157,14 +173,25 @@ export const createProject = async (
             `> Using organization warehouse credentials: ${options.organizationCredentials}`,
         );
 
+        const dbtVersionResult = await tryGetDbtVersion();
+        if (!dbtVersionResult.success) {
+            throw dbtVersionResult.error;
+        }
+        isDbtCloudCLI = dbtVersionResult.version.isDbtCloudCLI;
+        dbtVersionOption = dbtVersionResult.version.versionOption;
+
         // Still need to get target name for dbt connection
+        const context = await getDbtContext({
+            projectDir: absoluteProjectPath,
+            targetPath: options.targetPath,
+        });
         GlobalState.debug(
             `> Using profiles dir ${options.profilesDir} and profile ${
                 options.profile || context.profileName
             }`,
         );
         targetName = await getDbtProfileTargetName({
-            isDbtCloudCLI: dbtVersion.isDbtCloudCLI,
+            isDbtCloudCLI,
             profilesDir: options.profilesDir,
             profile: options.profile || context.profileName,
             target: options.target,
@@ -172,14 +199,26 @@ export const createProject = async (
         GlobalState.debug(`> Using target name ${targetName}`);
     } else if (options.warehouseCredentials === false) {
         GlobalState.debug('> Creating project without warehouse credentials');
+        // No dbt needed - use defaults set above
     } else {
+        const dbtVersionResult = await tryGetDbtVersion();
+        if (!dbtVersionResult.success) {
+            throw dbtVersionResult.error;
+        }
+        isDbtCloudCLI = dbtVersionResult.version.isDbtCloudCLI;
+        dbtVersionOption = dbtVersionResult.version.versionOption;
+
+        const context = await getDbtContext({
+            projectDir: absoluteProjectPath,
+            targetPath: options.targetPath,
+        });
         GlobalState.debug(
             `> Using profiles dir ${options.profilesDir} and profile ${
                 options.profile || context.profileName
             }`,
         );
         targetName = await getDbtProfileTargetName({
-            isDbtCloudCLI: dbtVersion.isDbtCloudCLI,
+            isDbtCloudCLI,
             profilesDir: options.profilesDir,
             profile: options.profile || context.profileName,
             target: options.target,
@@ -194,7 +233,7 @@ export const createProject = async (
             return undefined;
         }
         const result = await getWarehouseClient({
-            isDbtCloudCLI: dbtVersion.isDbtCloudCLI,
+            isDbtCloudCLI,
             profilesDir: options.profilesDir,
             profile: options.profile || context.profileName,
             target: options.target,
@@ -230,17 +269,53 @@ export const createProject = async (
         spinner?.start();
     }
 
+    if (
+        credentials?.type === WarehouseTypes.SNOWFLAKE &&
+        credentials?.authenticationType ===
+            SnowflakeAuthenticationType.EXTERNAL_BROWSER
+    ) {
+        const snowflakeSsoEnabled = await isSnowflakeSsoEnabled();
+
+        if (snowflakeSsoEnabled) {
+            console.error(
+                styles.info(
+                    `\nLightdash server has Snowflake OAuth authentication enabled.
+We will ask for user credentials again on the Lightdash UI.\n`,
+                ),
+            );
+            credentials = {
+                ...credentials,
+                requireUserCredentials: true,
+            };
+        } else {
+            console.error(
+                styles.warning(
+                    `\nUser has externalbrowser snowflake authentication. 
+We will generate programatically a temporary PAT to enable access on Lightdash which expires in 1 day.
+For a better user experience, we recommend enabling Snowflake OAuth authentication on the server.\n`,
+                ),
+            );
+            const patToken =
+                await createProgramaticallySnowflakePat(credentials);
+            credentials = {
+                ...credentials,
+                authenticationType: SnowflakeAuthenticationType.PASSWORD,
+                password: patToken,
+            };
+        }
+    }
+
     const project: CreateProjectOptionalCredentials = {
         name: options.name,
         type: options.type,
         warehouseConnection: credentials,
-        copyWarehouseConnectionFromUpstreamProject: dbtVersion.isDbtCloudCLI,
+        copyWarehouseConnectionFromUpstreamProject: isDbtCloudCLI,
         dbtConnection: {
             type: DbtProjectType.NONE,
             target: targetName,
         },
         upstreamProjectUuid: options.upstreamProjectUuid,
-        dbtVersion: dbtVersion.versionOption,
+        dbtVersion: dbtVersionOption,
         tableConfiguration: options.tableConfiguration,
         copyContent: options.copyContent,
         organizationWarehouseCredentialsUuid,

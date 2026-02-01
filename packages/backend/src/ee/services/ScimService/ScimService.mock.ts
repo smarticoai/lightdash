@@ -1,12 +1,16 @@
 import {
     OrganizationMemberProfile,
     OrganizationMemberRole,
+    ProjectType,
+    Role,
 } from '@lightdash/common';
 import { LightdashAnalytics } from '../../../analytics/LightdashAnalytics';
 import { lightdashConfigMock } from '../../../config/lightdashConfig.mock';
 import { EmailModel } from '../../../models/EmailModel';
 import { GroupsModel } from '../../../models/GroupsModel';
+import { OpenIdIdentityModel } from '../../../models/OpenIdIdentitiesModel';
 import { OrganizationMemberProfileModel } from '../../../models/OrganizationMemberProfileModel';
+import { ProjectModel } from '../../../models/ProjectModel/ProjectModel';
 import { RolesModel } from '../../../models/RolesModel';
 import { UserModel } from '../../../models/UserModel';
 import { CommercialFeatureFlagModel } from '../../models/CommercialFeatureFlagModel';
@@ -26,6 +30,52 @@ export const mockUser: OrganizationMemberProfile = {
     userUpdatedAt: new Date(),
     organizationUuid: 'org-uuid',
 };
+
+// Mock projects for testing
+export const mockProjects = [
+    {
+        projectUuid: 'project-1-uuid',
+        name: 'Analytics Project',
+        type: ProjectType.DEFAULT,
+        organizationUuid: 'org-uuid',
+    },
+    {
+        projectUuid: 'project-2-uuid',
+        name: 'Marketing Project',
+        type: ProjectType.DEFAULT,
+        organizationUuid: 'org-uuid',
+    },
+    {
+        projectUuid: 'preview-project-uuid',
+        name: 'Preview Project',
+        type: ProjectType.PREVIEW,
+        organizationUuid: 'org-uuid',
+    },
+];
+
+// Mock custom roles for testing
+export const mockCustomRoles: Role[] = [
+    {
+        roleUuid: 'custom-role-1-uuid',
+        name: 'Data Analyst',
+        description: 'Custom data analyst role',
+        organizationUuid: 'org-uuid',
+        ownerType: 'user',
+        createdBy: 'test-user-uuid',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    },
+    {
+        roleUuid: 'custom-role-2-uuid',
+        name: 'Report Builder',
+        description: 'Custom report builder role',
+        organizationUuid: 'org-uuid',
+        ownerType: 'user',
+        createdBy: 'test-user-uuid',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    },
+];
 
 // Mock organization member profile model
 const organizationMemberProfileModelMock = {
@@ -55,6 +105,7 @@ const userModelMock = {
         organizationUuid: mockUser.organizationUuid,
     }),
     getUserDetailsByUuid: jest.fn().mockResolvedValue(mockUser),
+    getUserProjectRoles: jest.fn().mockResolvedValue([]),
 } as unknown as UserModel;
 
 // Mock analytics
@@ -83,5 +134,23 @@ export const ScimServiceArgumentsMock: ConstructorParameters<
     rolesModel: {
         removeUserProjectAccess: jest.fn().mockResolvedValue(undefined),
         removeUserAccessFromAllProjects: jest.fn().mockResolvedValue(3),
+        getRolesByOrganizationUuid: jest
+            .fn()
+            .mockResolvedValue(mockCustomRoles),
+        upsertSystemRoleProjectAccess: jest.fn().mockResolvedValue(undefined),
+        upsertCustomRoleProjectAccess: jest.fn().mockResolvedValue(undefined),
+        // New unified method used by ScimService to set org and project roles
+        setUserOrgAndProjectRoles: jest.fn().mockResolvedValue(undefined),
+        // Some code paths may still call this directly; keep a mock for safety
+        upsertOrganizationUserRoleAssignment: jest
+            .fn()
+            .mockResolvedValue(undefined),
     } as unknown as RolesModel,
+    projectModel: {
+        getAllByOrganizationUuid: jest.fn().mockResolvedValue(mockProjects),
+    } as unknown as ProjectModel,
+    openIdIdentityModel: {
+        deleteIdentitiesByEmail: jest.fn().mockResolvedValue(0),
+        deleteIdentitiesByUserUuid: jest.fn().mockResolvedValue(0),
+    } as unknown as OpenIdIdentityModel,
 };

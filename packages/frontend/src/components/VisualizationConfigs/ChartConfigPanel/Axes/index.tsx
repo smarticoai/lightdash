@@ -9,6 +9,7 @@ import {
     type ItemsMap,
 } from '@lightdash/common';
 import {
+    Button,
     Checkbox,
     Group,
     NumberInput,
@@ -20,8 +21,10 @@ import {
 } from '@mantine/core';
 import {
     IconChartBar,
+    IconMinus,
     IconSortAscending,
     IconSortDescending,
+    IconSwitchHorizontal,
     type Icon,
 } from '@tabler/icons-react';
 import { forwardRef, type FC } from 'react';
@@ -71,8 +74,12 @@ export const Axes: FC<Props> = ({ itemsMap }) => {
         setShowGridY,
         setShowXAxis,
         setShowYAxis,
+        setShowAxisTicks,
+        setAxisLabelFontSize,
+        setAxisTitleFontSize,
         setXAxisSort,
         setXAxisLabelRotation,
+        setScrollableChart,
         dirtyChartType,
     } = visualizationConfig.chartConfig;
 
@@ -182,6 +189,16 @@ export const Axes: FC<Props> = ({ itemsMap }) => {
                                 itemComponent={XAxisSortSelectItem}
                                 data={[
                                     {
+                                        value: XAxisSort.DEFAULT,
+                                        label: 'Default',
+                                        icon: IconMinus,
+                                    },
+                                    {
+                                        value: XAxisSort.DEFAULT_REVERSED,
+                                        label: 'Default (reversed)',
+                                        icon: IconSwitchHorizontal,
+                                    },
+                                    {
                                         value: XAxisSort.ASCENDING,
                                         label: 'Ascending',
                                         icon: IconSortAscending,
@@ -228,6 +245,19 @@ export const Axes: FC<Props> = ({ itemsMap }) => {
                             </Group>
                         )}
                     </Group>
+
+                    {getAxisTypeFromField(xAxisField) === 'category' && (
+                        <Checkbox
+                            label="Enable scrollable chart"
+                            checked={
+                                dirtyEchartsConfig?.xAxis?.[0]
+                                    ?.enableDataZoom || false
+                            }
+                            onChange={(e) =>
+                                setScrollableChart(e.currentTarget.checked)
+                            }
+                        />
+                    )}
                 </Config.Section>
             </Config>
 
@@ -369,6 +399,84 @@ export const Axes: FC<Props> = ({ itemsMap }) => {
                             }}
                         />
                     </Stack>
+                </Config.Section>
+            </Config>
+            <Config>
+                <Config.Section>
+                    <Config.Heading>Show tick lines</Config.Heading>
+                    <Checkbox
+                        label="Show tick lines on axes"
+                        checked={!!dirtyEchartsConfig?.showAxisTicks}
+                        onChange={(e) => {
+                            setShowAxisTicks(e.currentTarget.checked);
+                        }}
+                    />
+                </Config.Section>
+            </Config>
+            <Config>
+                <Config.Section>
+                    <Config.Heading>Tick label size (px)</Config.Heading>
+                    <Group spacing="xs">
+                        <NumberInput
+                            value={
+                                dirtyEchartsConfig?.axisLabelFontSize ?? 11.5
+                            }
+                            min={8}
+                            max={24}
+                            step={0.5}
+                            precision={1}
+                            maw={60}
+                            onChange={(value) => {
+                                setAxisLabelFontSize(
+                                    typeof value === 'number'
+                                        ? value
+                                        : undefined,
+                                );
+                            }}
+                        />
+                        {dirtyEchartsConfig?.axisLabelFontSize !==
+                            undefined && (
+                            <Button
+                                variant="subtle"
+                                size="xs"
+                                onClick={() => setAxisLabelFontSize(undefined)}
+                            >
+                                Reset
+                            </Button>
+                        )}
+                    </Group>
+                </Config.Section>
+            </Config>
+            <Config>
+                <Config.Section>
+                    <Config.Heading>Axis title size (px)</Config.Heading>
+                    <Group spacing="xs">
+                        <NumberInput
+                            value={dirtyEchartsConfig?.axisTitleFontSize ?? 12}
+                            min={8}
+                            max={24}
+                            step={0.5}
+                            precision={1}
+                            maw={60}
+                            onChange={(value) => {
+                                setAxisTitleFontSize(
+                                    typeof value === 'number'
+                                        ? value
+                                        : undefined,
+                                );
+                            }}
+                        />
+                        {dirtyEchartsConfig?.axisTitleFontSize !==
+                            undefined && (
+                            <Button
+                                variant="subtle"
+                                size="xs"
+                                onClick={() => setAxisTitleFontSize(undefined)}
+                            >
+                                Reset
+                            </Button>
+                        )}
+                    </Group>
                 </Config.Section>
             </Config>
         </Stack>

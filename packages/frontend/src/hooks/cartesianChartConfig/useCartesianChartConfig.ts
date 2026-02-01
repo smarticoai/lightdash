@@ -19,6 +19,7 @@ import {
     type Series,
     type SeriesMetadata,
     type TableCalculationMetadata,
+    type TooltipSortBy,
     type XAxis,
 } from '@lightdash/common';
 import { produce } from 'immer';
@@ -27,8 +28,8 @@ import {
     getMarkLineAxis,
     type ReferenceLineField,
 } from '../../components/common/ReferenceLine';
-import { useFeatureFlag } from '../useFeatureFlagEnabled';
 import type { InfiniteQueryResults } from '../useQueryResults';
+import { useServerFeatureFlag } from '../useServerOrClientFeatureFlag';
 import {
     getExpectedSeriesMap,
     mergeExistingAndExpectedSeries,
@@ -68,10 +69,13 @@ const applyReferenceLines = (
     dirtyLayout: Partial<Partial<CompleteCartesianChartLayout>> | undefined,
     referenceLines: ReferenceLineField[],
 ): Series[] => {
-    let appliedReferenceLines: string[] = []; // Don't apply the same reference line to multiple series
+    // Track which reference lines have been applied to visible series
+    let appliedReferenceLines: string[] = [];
+
     return series.map((serie) => {
-        // Skip if the series is filtered out
-        if (serie.isFilteredOut) {
+        // If series is filtered out or hidden, ensure it has no markLine
+        // but DON'T mark the reference line as applied so another visible series can pick it up
+        if (serie.isFilteredOut || serie.hidden) {
             return { ...serie, markLine: undefined };
         }
 
@@ -89,6 +93,7 @@ const applyReferenceLines = (
 
         if (referenceLinesForSerie.length === 0)
             return { ...serie, markLine: undefined };
+
         const markLineData: MarkLineData[] = referenceLinesForSerie.map(
             (line) => {
                 if (line.fieldId === undefined) return line.data;
@@ -130,15 +135,25 @@ function getXAxisSortConfig(
     sort: XAxisSort,
 ): Pick<XAxis, 'inverse' | 'sortType'> {
     switch (sort) {
-        case XAxisSort.ASCENDING:
+        case XAxisSort.DEFAULT:
             return {
                 inverse: false,
                 sortType: XAxisSortType.DEFAULT,
             };
-        case XAxisSort.DESCENDING:
+        case XAxisSort.DEFAULT_REVERSED:
             return {
                 inverse: true,
                 sortType: XAxisSortType.DEFAULT,
+            };
+        case XAxisSort.ASCENDING:
+            return {
+                inverse: false,
+                sortType: XAxisSortType.CATEGORY,
+            };
+        case XAxisSort.DESCENDING:
+            return {
+                inverse: true,
+                sortType: XAxisSortType.CATEGORY,
             };
         case XAxisSort.BAR_TOTALS_ASCENDING:
             return {
@@ -157,7 +172,9 @@ function getXAxisSortConfig(
 
 export const EMPTY_CARTESIAN_CHART_CONFIG: CartesianChart = {
     layout: {},
-    eChartsConfig: {},
+    eChartsConfig: {
+        showAxisTicks: false, // New charts default to hiding tick lines
+    },
 };
 
 const useCartesianChartConfig = ({
@@ -180,10 +197,27 @@ const useCartesianChartConfig = ({
 
     const [dirtyEchartsConfig, setDirtyEchartsConfig] = useState<
         Partial<CartesianChart['eChartsConfig']> | undefined
-    >(initialChartConfig?.eChartsConfig);
-    const isInitiallyStacked = (dirtyEchartsConfig?.series || []).some(
-        (series: Series) => series.stack !== undefined,
+    >(
+        initialChartConfig?.eChartsConfig
+            ? {
+                  ...EMPTY_CARTESIAN_CHART_CONFIG.eChartsConfig,
+                  ...initialChartConfig.eChartsConfig,
+              }
+            : initialChartConfig?.eChartsConfig,
     );
+
+    const isInitiallyStacked = useMemo(() => {
+        // First check the layout's stack property (persisted setting)
+        const layoutStack = initialChartConfig?.layout?.stack;
+        if (layoutStack !== undefined) {
+            return layoutStack !== StackType.NONE && layoutStack !== false;
+        }
+        // Fall back to checking if any series has stack property
+        return (dirtyEchartsConfig?.series || []).some(
+            (series: Series) => series.stack !== undefined,
+        );
+    }, [dirtyEchartsConfig?.series, initialChartConfig?.layout?.stack]);
+
     const [isStacked, setIsStacked] = useState<boolean>(isInitiallyStacked);
 
     const setLegend = useCallback((legend: EchartsLegend) => {
@@ -372,6 +406,27 @@ const useCartesianChartConfig = ({
             showYAxis: hide,
         }));
     }, []);
+    const setShowAxisTicks = useCallback((show: boolean) => {
+        setDirtyEchartsConfig((prev) => ({
+            ...prev,
+            showAxisTicks: show,
+        }));
+    }, []);
+
+    const setAxisLabelFontSize = useCallback((fontSize: number | undefined) => {
+        setDirtyEchartsConfig((prev) => ({
+            ...prev,
+            axisLabelFontSize: fontSize,
+        }));
+    }, []);
+
+    const setAxisTitleFontSize = useCallback((fontSize: number | undefined) => {
+        setDirtyEchartsConfig((prev) => ({
+            ...prev,
+            axisTitleFontSize: fontSize,
+        }));
+    }, []);
+
     const setXAxisSort = useCallback((sort: XAxisSort) => {
         setDirtyEchartsConfig((prevState) => {
             const [firstAxis, ...axes] = prevState?.xAxis || [];
@@ -388,6 +443,15 @@ const useCartesianChartConfig = ({
             return {
                 ...prevState,
                 xAxis: [{ ...firstAxis, rotate: rotation }, ...axes],
+            };
+        });
+    }, []);
+    const setScrollableChart = useCallback((enableDataZoom: boolean) => {
+        setDirtyEchartsConfig((prevState) => {
+            const [firstAxis, ...axes] = prevState?.xAxis || [];
+            return {
+                ...prevState,
+                xAxis: [{ ...firstAxis, enableDataZoom }, ...axes],
             };
         });
     }, []);
@@ -555,8 +619,8 @@ const useCartesianChartConfig = ({
                     stack === true
                         ? StackType.NORMAL
                         : stack === false
-                        ? StackType.NONE
-                        : stack,
+                          ? StackType.NONE
+                          : stack,
             }));
 
             setDirtyEchartsConfig(
@@ -693,7 +757,7 @@ const useCartesianChartConfig = ({
         [getOldTableCalculationMetadataIndex, tableCalculationsMetadata],
     );
 
-    const { data: useSqlPivotResults } = useFeatureFlag(
+    const { data: useSqlPivotResults } = useServerFeatureFlag(
         FeatureFlags.UseSqlPivotResults,
     );
 
@@ -838,9 +902,26 @@ const useCartesianChartConfig = ({
                     newYFields = [availableDimensions[1]];
                 }
 
-                // don't fallback pivot dimensions if we are using sql pivot results
-                if (itemsMap !== undefined && !useSqlPivotResults?.enabled)
+                // Only add pivot dimensions when:
+                // 1. We have a suggestion (newPivotFields is non-empty)
+                // 2. Not using sql pivot results
+                // 3. No existing pivot is set
+                // 4. We have itemsMap (fields are loaded)
+                if (
+                    newPivotFields.length > 0 &&
+                    itemsMap !== undefined &&
+                    !useSqlPivotResults?.enabled &&
+                    !pivotKeys
+                ) {
                     setPivotDimensions(newPivotFields);
+                }
+
+                // Don't update if we don't have a valid configuration
+                // This prevents infinite loops when insufficient fields are selected
+                if (!newXField || newYFields.length === 0) {
+                    return prev;
+                }
+
                 return {
                     ...prev,
                     xField: newXField,
@@ -852,6 +933,7 @@ const useCartesianChartConfig = ({
         availableDimensions,
         availableFields,
         availableMetrics,
+        pivotKeys,
         getXField,
         getYFields,
         isFieldValidTableCalculation,
@@ -873,8 +955,8 @@ const useCartesianChartConfig = ({
                                     ? serie.encode.yRef
                                     : serie.encode.xRef
                                 : dirtyLayout?.flipAxes
-                                ? serie.encode.xRef
-                                : serie.encode.yRef;
+                                  ? serie.encode.xRef
+                                  : serie.encode.yRef;
                         return {
                             fieldId: axis.field,
                             data: {
@@ -900,6 +982,22 @@ const useCartesianChartConfig = ({
     const [tooltip, setTooltip] = useState<string | undefined>(
         dirtyEchartsConfig?.tooltip,
     );
+
+    const [tooltipSort, setTooltipSort] = useState<TooltipSortBy | undefined>(
+        dirtyEchartsConfig?.tooltipSort,
+    );
+
+    // Track series hidden states to trigger reference line redistribution
+    const seriesHiddenStatesKey = useMemo(() => {
+        const hiddenStates =
+            dirtyEchartsConfig?.series?.map((s) => ({
+                id: getSeriesId(s),
+                hidden: !!s.hidden,
+            })) || [];
+        // Use JSON.stringify for stable comparison
+        return JSON.stringify(hiddenStates);
+    }, [dirtyEchartsConfig?.series]);
+
     // Generate expected series
     useEffect(() => {
         if (isCompleteLayout(dirtyLayout) && resultsData?.hasFetchedAllRows) {
@@ -959,24 +1057,28 @@ const useCartesianChartConfig = ({
         isStacked,
         referenceLines,
         itemsMap,
+        seriesHiddenStatesKey, // Re-run when series hidden states change
     ]);
 
     const validConfig: CartesianChart = useMemo(() => {
-        return isCompleteLayout(dirtyLayout) &&
-            isCompleteEchartsConfig(dirtyEchartsConfig)
-            ? {
-                  layout: dirtyLayout,
-                  eChartsConfig: {
+        // Always use the dirtyLayout and dirtyEchartsConfig when possible, fallback to the empty config if not complete.
+        return {
+            layout: isCompleteLayout(dirtyLayout)
+                ? dirtyLayout
+                : EMPTY_CARTESIAN_CHART_CONFIG.layout,
+            eChartsConfig: isCompleteEchartsConfig(dirtyEchartsConfig)
+                ? {
                       ...dirtyEchartsConfig,
                       series: dirtyEchartsConfig.series.filter(
                           (serie) => !serie.isFilteredOut,
                       ),
                       tooltip,
-                  },
-                  metadata: dirtyMetadata,
-              }
-            : EMPTY_CARTESIAN_CHART_CONFIG;
-    }, [dirtyLayout, dirtyEchartsConfig, dirtyMetadata, tooltip]);
+                      tooltipSort,
+                  }
+                : EMPTY_CARTESIAN_CHART_CONFIG.eChartsConfig,
+            metadata: dirtyMetadata,
+        };
+    }, [dirtyLayout, dirtyEchartsConfig, dirtyMetadata, tooltip, tooltipSort]);
 
     const { dirtyChartType } = useMemo(() => {
         const firstSeriesType =
@@ -1029,13 +1131,19 @@ const useCartesianChartConfig = ({
         setShowGridY,
         setShowXAxis,
         setShowYAxis,
+        setShowAxisTicks,
+        setAxisLabelFontSize,
+        setAxisTitleFontSize,
         setXAxisSort,
         setXAxisLabelRotation,
+        setScrollableChart,
         updateSeries,
         referenceLines,
         setReferenceLines,
         tooltip,
         setTooltip,
+        tooltipSort,
+        setTooltipSort,
         updateMetadata,
     };
 };

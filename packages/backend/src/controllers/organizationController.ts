@@ -10,7 +10,10 @@ import {
     ApiOrganizationMemberProfile,
     ApiOrganizationMemberProfiles,
     ApiOrganizationProjects,
+    ApiReassignUserSchedulersResponse,
     ApiSuccessEmpty,
+    ApiUserSchedulersSummaryResponse,
+    AuthorizationError,
     CreateColorPalette,
     CreateGroup,
     CreateOrganization,
@@ -18,6 +21,7 @@ import {
     KnexPaginateArgs,
     LightdashRequestMethodHeader,
     OrganizationMemberProfileUpdate,
+    ReassignUserSchedulersRequest,
     UpdateAllowedEmailDomains,
     UpdateColorPalette,
     UpdateOrganization,
@@ -56,6 +60,7 @@ import { BaseController } from './baseController';
 export class OrganizationController extends BaseController {
     /**
      * Get the current user's organization
+     * @summary Get current organization
      * @param req express request
      */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
@@ -76,6 +81,7 @@ export class OrganizationController extends BaseController {
     /**
      * Creates a new organization, the current user becomes the Admin of the new organization.
      * This is only available to users that are not already in an organization.
+     * @summary Create organization
      * @param req express request
      * @param body the new organization settings
      */
@@ -109,6 +115,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Update the current user's organization
+     * @summary Update current organization
      * @param req express request
      * @param body the new organization settings
      */
@@ -129,6 +136,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Deletes an organization and all users inside that organization
+     * @summary Delete organization
      * @param req express request
      * @param organizationUuid the uuid of the organization to delete
      */
@@ -159,6 +167,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Gets all projects of the current user's organization
+     * @summary List organization projects
      * @param req express request
      */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
@@ -178,6 +187,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Gets all the members of the current user's organization
+     * @summary List organization members
      * @param req express request
      * @param projectUuid filter users who can view this project
      */
@@ -191,6 +201,7 @@ export class OrganizationController extends BaseController {
         @Query() page?: number,
         @Query() searchQuery?: string,
         @Query() projectUuid?: string,
+        @Query() googleOidcOnly?: boolean,
     ): Promise<ApiOrganizationMemberProfiles> {
         this.setStatus(200);
         let paginateArgs: KnexPaginateArgs | undefined;
@@ -212,12 +223,14 @@ export class OrganizationController extends BaseController {
                     paginateArgs,
                     searchQuery,
                     projectUuid,
+                    googleOidcOnly,
                 ),
         };
     }
 
     /**
      * Get the member profile for a user in the current user's organization by uuid
+     * @summary Get organization member by UUID
      * @param req express request
      * @param userUuid the uuid of the user
      */
@@ -239,6 +252,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Get the member profile for a user in the current user's organization by email
+     * @summary Get organization member by email
      * @param req express request
      * @param email the email of the user
      */
@@ -260,6 +274,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Updates the membership profile for a user in the current user's organization
+     * @summary Update organization member
      * @param req express request
      * @param userUuid the uuid of the user to update
      * @param body the new membership profile
@@ -290,6 +305,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Deletes a user from the current user's organization
+     * @summary Delete organization member
      * @param req express request
      * @param userUuid the uuid of the user to delete
      */
@@ -313,7 +329,70 @@ export class OrganizationController extends BaseController {
     }
 
     /**
+     * Gets a summary of scheduled deliveries owned by a user across all projects
+     * @summary Get user schedulers
+     * @param req express request
+     * @param userUuid the uuid of the user
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @Get('/user/{userUuid}/schedulers-summary')
+    @OperationId('GetUserSchedulersSummary')
+    async getUserSchedulersSummary(
+        @Request() req: express.Request,
+        @Path() userUuid: string,
+    ): Promise<ApiUserSchedulersSummaryResponse> {
+        if (!req.user) {
+            throw new AuthorizationError('User session not found');
+        }
+
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getSchedulerService()
+                .getUserSchedulersSummary(req.user, userUuid),
+        };
+    }
+
+    /**
+     * Reassigns all scheduled deliveries from one user to another
+     * @summary Reassign schedulers
+     * @param req express request
+     * @param userUuid the uuid of the user whose schedulers will be reassigned
+     * @param body the new owner details
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @Patch('/user/{userUuid}/reassign-schedulers')
+    @OperationId('ReassignUserSchedulers')
+    async reassignUserSchedulers(
+        @Request() req: express.Request,
+        @Path() userUuid: string,
+        @Body() body: ReassignUserSchedulersRequest,
+    ): Promise<ApiReassignUserSchedulersResponse> {
+        if (!req.user) {
+            throw new AuthorizationError('User session not found');
+        }
+
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getSchedulerService()
+                .reassignUserSchedulers(
+                    req.user,
+                    userUuid,
+                    body.newOwnerUserUuid,
+                ),
+        };
+    }
+
+    /**
      * Gets the allowed email domains for the current user's organization
+     * @summary List allowed email domains
      * @param req express request
      */
     @Middlewares([isAuthenticated])
@@ -333,6 +412,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Updates the allowed email domains for the current user's organization
+     * @summary Update allowed email domains
      * @param req express request
      * @param body the new allowed email domains
      */
@@ -354,6 +434,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Creates a new group in the current user's organization
+     * @summary Create group
      * @param req express request
      * @param body the new group details
      */
@@ -380,6 +461,7 @@ export class OrganizationController extends BaseController {
 
     /**
      * Gets all the groups in the current user's organization
+     * @summary List organization groups
      * @param req
      * @param includeMembers number of members to include
      */
@@ -419,6 +501,10 @@ export class OrganizationController extends BaseController {
         };
     }
 
+    /**
+     * Create a new color palette
+     * @summary Create color palette
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @Post('/color-palettes')
     @OperationId('CreateColorPalette')
@@ -435,6 +521,10 @@ export class OrganizationController extends BaseController {
         };
     }
 
+    /**
+     * List all color palettes in the organization
+     * @summary List color palettes
+     */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @Get('/color-palettes')
     @OperationId('ListColorPalettes')
@@ -450,6 +540,10 @@ export class OrganizationController extends BaseController {
         };
     }
 
+    /**
+     * Update a color palette
+     * @summary Update color palette
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @Patch('/color-palettes/{colorPaletteUuid}')
     @OperationId('UpdateColorPalette')
@@ -467,6 +561,10 @@ export class OrganizationController extends BaseController {
         };
     }
 
+    /**
+     * Delete a color palette
+     * @summary Delete color palette
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @Delete('/color-palettes/{colorPaletteUuid}')
     @OperationId('DeleteColorPalette')
@@ -484,6 +582,10 @@ export class OrganizationController extends BaseController {
         };
     }
 
+    /**
+     * Set a color palette as the active palette
+     * @summary Set active color palette
+     */
     @Middlewares([isAuthenticated, unauthorisedInDemo])
     @Post('/color-palettes/{colorPaletteUuid}/active')
     @OperationId('SetActiveColorPalette')
@@ -500,6 +602,10 @@ export class OrganizationController extends BaseController {
         };
     }
 
+    /**
+     * Create a new project in the organization
+     * @summary Create project
+     */
     @Middlewares([
         allowApiKeyAuthentication,
         isAuthenticated,

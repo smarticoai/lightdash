@@ -56,7 +56,21 @@ const AiAgentAdminAgentsTable = () => {
         [],
     );
 
-    const { data: slackInstallation } = useGetSlack();
+    const {
+        data: slackInstallation,
+        isInitialLoading: isLoadingSlackInstallation,
+    } = useGetSlack();
+
+    // Include all channel IDs used by agents to ensure they're in the response
+    const includeChannelIds = useMemo(() => {
+        if (!agents) return undefined;
+        const ids = agents.flatMap((agent) =>
+            agent.integrations
+                .filter((i) => i.type === 'slack' && i.channelId)
+                .map((i) => i.channelId),
+        );
+        return ids.length > 0 ? ids : undefined;
+    }, [agents]);
 
     const { data: slackChannels } = useSlackChannels(
         '',
@@ -64,9 +78,13 @@ const AiAgentAdminAgentsTable = () => {
             excludeArchived: true,
             excludeDms: true,
             excludeGroups: true,
+            includeChannelIds,
         },
         {
-            enabled: !!slackInstallation?.organizationUuid && !!agents,
+            enabled:
+                !!slackInstallation?.organizationUuid &&
+                !!agents &&
+                !isLoadingSlackInstallation,
         },
     );
 
@@ -131,7 +149,7 @@ const AiAgentAdminAgentsTable = () => {
                 size: 250,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconRobotFace} color="gray.6" />
+                        <MantineIcon icon={IconRobotFace} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
@@ -145,7 +163,7 @@ const AiAgentAdminAgentsTable = () => {
                                     name={agent.name}
                                     src={agent.imageUrl}
                                 />
-                                <Text fz="sm" fw={600} c="gray.9" truncate>
+                                <Text fz="sm" fw={600} c="ldGray.9" truncate>
                                     {agent.name}
                                 </Text>
                             </Group>
@@ -160,14 +178,14 @@ const AiAgentAdminAgentsTable = () => {
                 size: 200,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconBox} color="gray.6" />
+                        <MantineIcon icon={IconBox} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
                 Cell: ({ row }) => {
                     const project = projectsMap.get(row.original.projectUuid);
                     return (
-                        <Text c="gray.9" fz="sm" fw={400}>
+                        <Text c="ldGray.9" fz="sm" fw={400}>
                             {project?.name ?? 'Unknown Project'}
                         </Text>
                     );
@@ -180,7 +198,7 @@ const AiAgentAdminAgentsTable = () => {
                 size: 150,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconTag} color="gray.6" />
+                        <MantineIcon icon={IconTag} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
@@ -188,7 +206,7 @@ const AiAgentAdminAgentsTable = () => {
                     const agent = row.original;
                     if (!agent.tags || agent.tags.length === 0) {
                         return (
-                            <Text c="gray.5" fz="xs" fs="italic">
+                            <Text c="ldGray.5" fz="xs" fs="italic">
                                 No tags
                             </Text>
                         );
@@ -208,7 +226,7 @@ const AiAgentAdminAgentsTable = () => {
                                 </Badge>
                             ))}
                             {agent.tags.length > 3 && (
-                                <Text c="gray.6" fz="xs">
+                                <Text c="ldGray.6" fz="xs">
                                     +{agent.tags.length - 3} more
                                 </Text>
                             )}
@@ -223,7 +241,7 @@ const AiAgentAdminAgentsTable = () => {
                 size: 150,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconPuzzle} color="gray.6" />
+                        <MantineIcon icon={IconPuzzle} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
@@ -234,60 +252,82 @@ const AiAgentAdminAgentsTable = () => {
 
                     if (agent.integrations.length === 0) {
                         return (
-                            <Text c="gray.5" fz="xs" fs="italic">
+                            <Text c="ldGray.5" fz="xs" fs="italic">
                                 None
                             </Text>
                         );
                     }
                     return (
                         <Group gap="xs">
-                            {agent.integrations.map((integration, idx) => (
-                                <Box key={idx}>
-                                    <Tooltip
-                                        withinPortal
-                                        variant="xs"
-                                        label={
-                                            integration.type ||
-                                            'Untitled Integration'
-                                        }
-                                        disabled={!isTruncated.isTruncated}
-                                        multiline
-                                        maw={300}
-                                    >
-                                        <Paper w="fit-content">
-                                            {integration.type === 'slack' && (
-                                                <Group
-                                                    gap="two"
-                                                    px="xs"
-                                                    wrap="nowrap"
+                            {agent.integrations.map((integration, idx) => {
+                                if (integration.type === 'slack') {
+                                    const resolvedChannel = slackChannels?.find(
+                                        (channel) =>
+                                            channel.id ===
+                                            integration.channelId,
+                                    );
+                                    const channelName =
+                                        resolvedChannel?.name ||
+                                        `#${integration.channelId}`;
+                                    const isResolved = !!resolvedChannel;
+
+                                    return (
+                                        <Box key={idx}>
+                                            <Tooltip
+                                                withinPortal
+                                                variant="xs"
+                                                label={
+                                                    isResolved
+                                                        ? channelName
+                                                        : 'Channel not cached yet. If this is a private channel, add the integration to the channel manually'
+                                                }
+                                                disabled={
+                                                    isResolved &&
+                                                    !isTruncated.isTruncated
+                                                }
+                                                multiline
+                                                maw={300}
+                                            >
+                                                <Paper
+                                                    w="fit-content"
+                                                    style={(t) =>
+                                                        isResolved
+                                                            ? undefined
+                                                            : {
+                                                                  border: `1px dashed ${t.colors.ldGray[4]}`,
+                                                              }
+                                                    }
                                                 >
-                                                    <SlackSvg
-                                                        style={{
-                                                            width: '12px',
-                                                            height: '12px',
-                                                        }}
-                                                    />
-                                                    <Text
-                                                        fz="xs"
-                                                        c="gray.7"
-                                                        fw={500}
-                                                        truncate
-                                                        ref={isTruncated.ref}
+                                                    <Group
+                                                        gap="two"
+                                                        px="xs"
+                                                        wrap="nowrap"
                                                     >
-                                                        {
-                                                            slackChannels?.find(
-                                                                (channel) =>
-                                                                    channel.id ===
-                                                                    integration.channelId,
-                                                            )?.name
-                                                        }
-                                                    </Text>
-                                                </Group>
-                                            )}
-                                        </Paper>
-                                    </Tooltip>
-                                </Box>
-                            ))}
+                                                        <SlackSvg
+                                                            style={{
+                                                                width: '12px',
+                                                                height: '12px',
+                                                            }}
+                                                        />
+                                                        <Text
+                                                            fz="xs"
+                                                            c="ldGray.7"
+                                                            fw={500}
+                                                            truncate
+                                                            ref={
+                                                                isTruncated.ref
+                                                            }
+                                                        >
+                                                            {channelName}
+                                                        </Text>
+                                                    </Group>
+                                                </Paper>
+                                            </Tooltip>
+                                        </Box>
+                                    );
+                                }
+                                return null;
+                            })}
                         </Group>
                     );
                 },
@@ -299,7 +339,7 @@ const AiAgentAdminAgentsTable = () => {
                 size: 120,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconUsers} color="gray.6" />
+                        <MantineIcon icon={IconUsers} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
@@ -311,7 +351,7 @@ const AiAgentAdminAgentsTable = () => {
 
                     if (totalCount === 0) {
                         return (
-                            <Text c="gray.5" fz="xs" fs="italic">
+                            <Text c="ldGray.5" fz="xs" fs="italic">
                                 No restrictions
                             </Text>
                         );
@@ -364,14 +404,14 @@ const AiAgentAdminAgentsTable = () => {
                 size: 150,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconClock} color="gray.6" />
+                        <MantineIcon icon={IconClock} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
                 Cell: ({ row }) => {
                     const agent = row.original;
                     return (
-                        <Text fz="sm" c="gray.7">
+                        <Text fz="sm" c="ldGray.7">
                             {new Date(agent.createdAt).toLocaleDateString()}
                         </Text>
                     );
@@ -453,7 +493,7 @@ const AiAgentAdminAgentsTable = () => {
         mantinePaperProps: {
             shadow: undefined,
             style: {
-                border: `1px solid ${theme.colors.gray[2]}`,
+                border: `1px solid ${theme.colors.ldGray[2]}`,
                 borderRadius: theme.spacing.sm,
                 boxShadow: theme.shadows.subtle,
                 display: 'flex',
@@ -480,7 +520,7 @@ const AiAgentAdminAgentsTable = () => {
                 padding: `${theme.spacing.md} ${theme.spacing.xl}`,
                 borderRight: 'none',
                 borderLeft: 'none',
-                borderBottom: `1px solid ${theme.colors.gray[2]}`,
+                borderBottom: `1px solid ${theme.colors.ldGray[2]}`,
                 borderTop: 'none',
             },
         },
@@ -540,8 +580,8 @@ const AiAgentAdminAgentsTable = () => {
 
                     <Group gap="xs">
                         <Box
-                            bg="#F8F9FC"
-                            c="#363F72"
+                            bg="ldGray.1"
+                            c="ldGray.9"
                             style={{
                                 borderRadius: 6,
                                 padding: `${theme.spacing.sm} ${theme.spacing.xs}`,
@@ -562,7 +602,7 @@ const AiAgentAdminAgentsTable = () => {
                         </Box>
                     </Group>
                 </Group>
-                <Divider color="gray.2" />
+                <Divider color="ldGray.2" />
             </Box>
         ),
         state: {

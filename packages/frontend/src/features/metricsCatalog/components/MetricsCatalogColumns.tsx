@@ -1,7 +1,7 @@
 import { SpotlightTableColumns, type CatalogField } from '@lightdash/common';
 import { Box, Button, Flex, Group, Text } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconUser } from '@tabler/icons-react';
 import { type MRT_ColumnDef } from 'mantine-react-table';
 import { useMemo } from 'react';
 import MantineIcon from '../../../components/common/MantineIcon';
@@ -26,6 +26,7 @@ import { MetricChartUsageButton } from './MetricChartUsageButton';
 import { MetricsCatalogCategoryForm } from './MetricsCatalogCategoryForm';
 import { MetricsCatalogColumnDescription } from './MetricsCatalogColumnDescription';
 import { MetricsCatalogColumnName } from './MetricsCatalogColumnName';
+import { MetricsCatalogColumnOwner } from './MetricsCatalogColumnOwner';
 
 export const MetricsCatalogColumns: MRT_ColumnDef<CatalogField>[] = [
     {
@@ -68,7 +69,7 @@ export const MetricsCatalogColumns: MRT_ColumnDef<CatalogField>[] = [
     {
         accessorKey: SpotlightTableColumns.TABLE,
         header: 'Table',
-        enableSorting: false,
+        enableSorting: true,
         enableEditing: false,
         size: 150,
         Header: ({ column }) => (
@@ -101,11 +102,11 @@ export const MetricsCatalogColumns: MRT_ColumnDef<CatalogField>[] = [
                     target="_blank"
                     size="xs"
                     compact
-                    color="gray.6"
+                    color="ldGray.6"
                     variant="subtle"
                     leftIcon={<TableFilled />}
                     fz="sm"
-                    c="dark.4"
+                    c="ldDark.7"
                     fw={500}
                     sx={{
                         '&[data-disabled]': {
@@ -116,6 +117,14 @@ export const MetricsCatalogColumns: MRT_ColumnDef<CatalogField>[] = [
                     styles={(theme) => ({
                         leftIcon: {
                             marginRight: theme.spacing.xxs,
+                            color:
+                                theme.colorScheme === 'dark'
+                                    ? theme.colors.ldDark[7]
+                                    : theme.colors.ldGray[4],
+                            '--table-icon-stroke':
+                                theme.colorScheme === 'dark'
+                                    ? theme.colors.ldDark[4]
+                                    : 'white',
                         },
                     })}
                 >
@@ -267,11 +276,11 @@ export const MetricsCatalogColumns: MRT_ColumnDef<CatalogField>[] = [
                     {categories.length === 0 && hovered && canManageTags ? (
                         <Group spacing={2}>
                             <MantineIcon
-                                color="dark.1"
+                                color="ldGray.4"
                                 icon={IconPlus}
                                 size={12}
                             />
-                            <Text span fz="sm" color="dark.1">
+                            <Text span fz="sm" color="ldGray.4">
                                 Click to add
                             </Text>
                         </Group>
@@ -320,5 +329,24 @@ export const MetricsCatalogColumns: MRT_ColumnDef<CatalogField>[] = [
             </MetricCatalogColumnHeaderCell>
         ),
         Cell: ({ row }) => <MetricChartUsageButton row={row} />,
+    },
+    {
+        accessorKey: SpotlightTableColumns.OWNER,
+        header: 'Owner',
+        enableSorting: true,
+        enableEditing: false,
+        size: 200,
+        minSize: 100,
+        Header: ({ column }) => (
+            <MetricCatalogColumnHeaderCell
+                Icon={() => (
+                    <MantineIcon icon={IconUser} size={14} color="ldGray.5" />
+                )}
+                tooltipLabel="Metric owner defined in the YAML file"
+            >
+                {column.columnDef.header}
+            </MetricCatalogColumnHeaderCell>
+        ),
+        Cell: ({ row }) => <MetricsCatalogColumnOwner row={row} />,
     },
 ];

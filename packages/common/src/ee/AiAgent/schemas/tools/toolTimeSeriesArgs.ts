@@ -4,7 +4,10 @@ import {
     legacyFollowUpToolsTransform,
 } from '../../followUpTools';
 import { AiResultType } from '../../types';
-import { customMetricsSchema } from '../customMetrics';
+import {
+    customMetricsSchema,
+    customMetricsSchemaTransformed,
+} from '../customMetrics';
 import { filtersSchemaTransformed, filtersSchemaV2 } from '../filters';
 import { baseOutputMetadataSchema } from '../outputMetadata';
 import { tableCalcsSchema } from '../tableCalcs/tableCalcs';
@@ -15,7 +18,6 @@ import { timeSeriesMetricVizConfigSchema } from '../visualizations/timeSeriesViz
 export const TOOL_TIME_SERIES_VIZ_DESCRIPTION = `Use this tool to generate a Time Series Chart.`;
 
 export const toolTimeSeriesArgsSchema = createToolSchema({
-    type: AiResultType.TIME_SERIES_RESULT,
     description: TOOL_TIME_SERIES_VIZ_DESCRIPTION,
 })
     .extend({
@@ -65,6 +67,7 @@ export const toolTimeSeriesArgsSchemaTransformed = toolTimeSeriesArgsSchema
     })
     .transform((data) => ({
         ...data,
+        customMetrics: customMetricsSchemaTransformed.parse(data.customMetrics),
         followUpTools: legacyFollowUpToolsTransform(data.followUpTools),
     }));
 

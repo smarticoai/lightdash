@@ -1,64 +1,38 @@
 import {
     GetObjectCommand,
     HeadObjectCommand,
+    NoSuchKey,
     NotFound,
     PutObjectCommand,
     PutObjectCommandInput,
-    S3,
     S3ServiceException,
-    type S3ClientConfig,
 } from '@aws-sdk/client-s3';
 import {
     getErrorMessage,
     MissingConfigError,
+    ResultsExpiredError,
     S3Error,
 } from '@lightdash/common';
 import * as Sentry from '@sentry/node';
 import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
 import { wrapSentryTransaction } from '../../utils';
+import { S3BaseClient } from './S3BaseClient';
 
 export type S3CacheClientArguments = {
     lightdashConfig: LightdashConfig;
 };
 
-export class S3CacheClient {
+export class S3CacheClient extends S3BaseClient {
     configuration: LightdashConfig['results']['s3'];
 
-    protected readonly s3: S3 | undefined;
-
     constructor({ lightdashConfig }: S3CacheClientArguments) {
+        super(lightdashConfig.results.s3);
         this.configuration = lightdashConfig.results.s3;
 
-        if (!this.configuration) {
-            return;
+        if (this.s3) {
+            Logger.debug('Initialized S3 results cache client');
         }
-
-        const { endpoint, region, accessKey, secretKey, forcePathStyle } =
-            this.configuration;
-
-        const s3Config: S3ClientConfig = {
-            endpoint,
-            region,
-            apiVersion: '2006-03-01',
-            forcePathStyle,
-        };
-
-        if (accessKey && secretKey) {
-            Object.assign(s3Config, {
-                credentials: {
-                    accessKeyId: accessKey,
-                    secretAccessKey: secretKey,
-                },
-            });
-            Logger.debug(
-                'Using results S3 storage with access key credentials',
-            );
-        } else {
-            Logger.debug('Using results S3 storage with IAM role credentials');
-        }
-
-        this.s3 = new S3(s3Config);
     }
 
     async uploadResults(
@@ -184,6 +158,11 @@ export class S3CacheClient {
                 });
                 return await this.s3.send(command);
             } catch (error) {
+                if (error instanceof NoSuchKey || error instanceof NotFound) {
+                    Logger.debug(`S3 key not found: ${key}.${extension}`);
+                    throw new ResultsExpiredError();
+                }
+
                 if (error instanceof S3ServiceException) {
                     Logger.error(
                         `Failed to get results from s3. ${error.name} - ${error.message}`,

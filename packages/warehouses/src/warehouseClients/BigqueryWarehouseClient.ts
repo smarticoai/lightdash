@@ -22,6 +22,7 @@ import {
     PartitionColumn,
     PartitionType,
     SupportedDbtAdapter,
+    TimeIntervalUnit,
     WarehouseConnectionError,
     WarehouseQueryError,
     WarehouseResults,
@@ -178,6 +179,30 @@ export class BigquerySqlBuilder extends WarehouseBaseSqlBuilder {
                 .replaceAll('\0', '')
         );
     }
+
+    castToTimestamp(date: Date): string {
+        // BigQuery uses TIMESTAMP function with ISO 8601 format
+        return `TIMESTAMP('${date.toISOString()}')`;
+    }
+
+    getIntervalSql(value: number, unit: TimeIntervalUnit): string {
+        // BigQuery uses INTERVAL with value and keyword unit (no quotes)
+        const unitStr = BigquerySqlBuilder.intervalUnitsSingular[unit];
+        return `INTERVAL ${value} ${unitStr}`;
+    }
+
+    getTimestampDiffSeconds(
+        startTimestampSql: string,
+        endTimestampSql: string,
+    ): string {
+        // BigQuery uses TIMESTAMP_DIFF function
+        return `TIMESTAMP_DIFF(${endTimestampSql}, ${startTimestampSql}, SECOND)`;
+    }
+
+    getMedianSql(valueSql: string): string {
+        // BigQuery uses APPROX_QUANTILES for median
+        return `APPROX_QUANTILES(${valueSql}, 100)[OFFSET(50)]`;
+    }
 }
 
 export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryCredentials> {
@@ -298,7 +323,9 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
 
     private async streamResults(
         job: Job,
-        streamCallback: (data: WarehouseResults['rows'][number]) => void,
+        streamCallback: (
+            data: WarehouseResults['rows'][number],
+        ) => void | Promise<void>,
         options: QueryResultsOptions = {},
     ) {
         return new Promise<void>((resolve, reject) => {
@@ -306,13 +333,21 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
                 job.getQueryResultsStream(options),
                 new Transform({
                     objectMode: true,
-                    transform(chunk, _encoding, callback) {
-                        const chunkParsed = parseRow(chunk);
-                        streamCallback(chunkParsed);
-                        callback();
+                    async transform(chunk, _encoding, callback) {
+                        try {
+                            const chunkParsed = parseRow(chunk);
+                            await streamCallback(chunkParsed);
+                            callback();
+                        } catch (err) {
+                            if (err instanceof Error) {
+                                callback(err);
+                            } else {
+                                callback(new Error(String(err)));
+                            }
+                        }
                     },
                 }),
-                async (err) => {
+                (err: NodeJS.ErrnoException | null) => {
                     if (err) {
                         reject(err);
                     }
@@ -324,7 +359,7 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
 
     async streamQuery(
         query: string,
-        streamCallback: (data: WarehouseResults) => void,
+        streamCallback: (data: WarehouseResults) => void | Promise<void>,
         options: {
             values?: AnyType[];
             tags?: Record<string, string>;
@@ -604,7 +639,7 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
 
     async executeAsyncQuery(
         { sql, tags }: WarehouseExecuteAsyncQueryArgs,
-        resultsStreamCallback: (
+        resultsStreamCallback?: (
             rows: WarehouseResults['rows'],
             fields: WarehouseResults['fields'],
         ) => void,
@@ -638,9 +673,11 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
                 BigqueryWarehouseClient.getFieldsFromResponse(resultsMetadata);
 
             // If a callback is provided, stream the results to the callback
-            await this.streamResults(job, (row) =>
-                resultsStreamCallback([row], fields),
-            );
+            if (resultsStreamCallback) {
+                await this.streamResults(job, (row) =>
+                    resultsStreamCallback([row], fields),
+                );
+            }
 
             return {
                 queryId: job.id,

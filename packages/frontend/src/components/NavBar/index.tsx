@@ -6,11 +6,12 @@ import {
     MantineProvider,
     type MantineTheme,
 } from '@mantine/core';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router';
 import useDashboardStorage from '../../hooks/dashboard/useDashboardStorage';
 import { useActiveProjectUuid } from '../../hooks/useActiveProject';
-import { useProjects } from '../../hooks/useProjects';
+import { useProject } from '../../hooks/useProject';
+import { getMantineThemeOverride } from '../../mantineTheme';
 import useFullscreen from '../../providers/Fullscreen/useFullscreen';
 import { BANNER_HEIGHT, NAVBAR_HEIGHT } from '../common/Page/constants';
 import { DashboardExplorerBanner } from './DashboardExplorerBanner';
@@ -39,20 +40,32 @@ const useNavBarMode = () => {
     };
 };
 
-const NavBar = memo(() => {
+interface NavBarProps {
+    isFixed?: boolean;
+}
+
+const NavBar = memo(({ isFixed = true }: NavBarProps) => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
-    const { data: projects } = useProjects();
-    const { activeProjectUuid, isLoading: isLoadingActiveProject } =
-        useActiveProjectUuid({ refetchOnMount: true });
     const { isFullscreen } = useFullscreen();
 
     const { navBarMode } = useNavBarMode();
 
-    const isCurrentProjectPreview = !!projects?.find(
-        (project) =>
-            project.projectUuid === activeProjectUuid &&
-            project.type === ProjectType.PREVIEW,
-    );
+    // Force dark theme for navbar (excluding global styles)
+    const darkTheme = useMemo(() => {
+        const fullDarkTheme = getMantineThemeOverride('dark');
+        const { globalStyles, ...themeWithoutGlobalStyles } = fullDarkTheme;
+        return themeWithoutGlobalStyles;
+    }, []);
+    const { activeProjectUuid, isLoading: isLoadingActiveProject } =
+        useActiveProjectUuid({ refetchOnMount: true });
+
+    const { data: project } = useProject(activeProjectUuid);
+
+    const isCurrentProjectPreview = project?.type === ProjectType.PREVIEW;
+
+    // Calculate placeholder height: navbar + banner (if preview project)
+    const headerContainerHeight =
+        NAVBAR_HEIGHT + (isCurrentProjectPreview ? BANNER_HEIGHT : 0);
 
     const getHeaderStyles = useCallback(
         (theme: MantineTheme) => ({
@@ -66,8 +79,6 @@ const NavBar = memo(() => {
         }),
         [navBarMode],
     );
-    const headerContainerHeight =
-        NAVBAR_HEIGHT + (isCurrentProjectPreview ? BANNER_HEIGHT : 0);
 
     const renderNavBarContent = () => {
         switch (navBarMode) {
@@ -93,21 +104,21 @@ const NavBar = memo(() => {
     }
 
     return (
-        <MantineProvider inherit theme={{ colorScheme: 'dark' }}>
+        <MantineProvider theme={darkTheme}>
             {isCurrentProjectPreview && <PreviewBanner />}
-            {/* hack to make navbar fixed and maintain space */}
-            <Box h={!isFullscreen ? headerContainerHeight : 0} />
             <Header
                 height={NAVBAR_HEIGHT}
-                fixed
+                fixed={isFixed}
                 mt={isCurrentProjectPreview ? BANNER_HEIGHT : 0}
                 display={isFullscreen ? 'none' : 'flex'}
                 px="md"
-                zIndex={getDefaultZIndex('app')}
+                zIndex={isFixed ? getDefaultZIndex('app') : undefined}
                 styles={(theme) => ({ root: getHeaderStyles(theme) })}
             >
                 {renderNavBarContent()}
             </Header>
+            {/* Placeholder to reserve space when navbar is fixed */}
+            {isFixed && !isFullscreen && <Box h={headerContainerHeight} />}
         </MantineProvider>
     );
 });

@@ -1,3 +1,4 @@
+import { AuthorizationError } from '@lightdash/common';
 import express, { type Router } from 'express';
 import passport from 'passport';
 import { lightdashConfig } from '../config/lightdashConfig';
@@ -9,6 +10,9 @@ import {
     storeOIDCRedirect,
     storeSlackContext,
 } from '../controllers/authentication';
+import { databricksPassportStrategy } from '../controllers/authentication/strategies/databricksStrategy';
+import { AiAgentService } from '../ee/services/AiAgentService/AiAgentService';
+import Logger from '../logging/logger';
 import { UserModel } from '../models/UserModel';
 import { dashboardRouter } from './dashboardRouter';
 import { headlessBrowserRouter } from './headlessBrowser';
@@ -51,13 +55,18 @@ apiV1Router.get('/flash', (req, res) => {
 });
 
 apiV1Router.post('/login', passport.authenticate('local'), (req, res, next) => {
+    if (!req.user) {
+        next(new AuthorizationError('User session not found'));
+        return;
+    }
+    const { user } = req;
     req.session.save((err) => {
         if (err) {
             next(err);
         } else {
             res.json({
                 status: 'ok',
-                results: UserModel.lightdashUserFromSession(req.user!),
+                results: UserModel.lightdashUserFromSession(user),
             });
         }
     });
@@ -177,7 +186,11 @@ apiV1Router.get(
         if (req.user?.userUuid) {
             return next();
         }
-        return res.redirect('/login?redirect=/api/v1/auth/slack');
+        // Preserve query params (team, channel, message, thread_ts) in redirect
+        const redirectPath = req.originalUrl;
+        return res.redirect(
+            `/login?redirect=${encodeURIComponent(redirectPath)}`,
+        );
     },
     storeSlackContext,
     passport.authenticate('slack'),
@@ -201,6 +214,37 @@ apiV1Router.get(
             params.set('message', slackContext.messageTs);
         if (slackContext?.threadTs)
             params.set('thread_ts', slackContext.threadTs);
+
+        // Process pending Slack message after OAuth (fire and forget)
+        // NOTE: This runs in the web process (not scheduler) because it needs
+        // access to an in-memory cache for updating the ephemeral OAuth message.
+        // The actual AI processing IS scheduled via Graphile worker inside
+        // processPendingSlackMessage. To move this entirely to the scheduler,
+        // the response_url cache would need to move to the database.
+        if (
+            req.user?.userUuid &&
+            slackContext?.teamId &&
+            slackContext?.channelId &&
+            slackContext?.messageTs
+        ) {
+            const aiAgentService =
+                req.services.getAiAgentService<AiAgentService>();
+            aiAgentService
+                .processPendingSlackMessage({
+                    teamId: slackContext.teamId,
+                    channelId: slackContext.channelId,
+                    messageTs: slackContext.messageTs,
+                    threadTs: slackContext.threadTs,
+                    userUuid: req.user.userUuid,
+                })
+                .catch((err: unknown) => {
+                    // Log but don't fail the redirect
+                    Logger.error(
+                        'Failed to process pending Slack message:',
+                        err,
+                    );
+                });
+        }
 
         const redirectUrl = `/auth/slack/success${
             params.toString() ? `?${params.toString()}` : ''
@@ -233,6 +277,36 @@ apiV1Router.get(
         })(req, res, next);
     },
 );
+
+// Databricks OAuth routes - only register if strategy is configured
+// (requires DATABRICKS_OAUTH_CLIENT_ID, DATABRICKS_OAUTH_AUTHORIZATION_ENDPOINT, DATABRICKS_OAUTH_TOKEN_ENDPOINT)
+if (databricksPassportStrategy) {
+    apiV1Router.get(
+        lightdashConfig.auth.databricks.loginPath,
+        storeOIDCRedirect,
+        passport.authenticate('databricks'),
+    );
+
+    apiV1Router.get(
+        lightdashConfig.auth.databricks.callbackPath,
+        (req, res, next) => {
+            passport.authenticate('databricks', {
+                failureRedirect: getOidcRedirectURL(false)(req),
+                successRedirect: getOidcRedirectURL(true)(req),
+            })(req, res, next);
+        },
+    );
+} else {
+    apiV1Router.get(
+        lightdashConfig.auth.databricks.loginPath,
+        (req, res, next) => {
+            res.status(404).json({
+                status: 'error',
+                message: 'Databricks OAuth is not configured',
+            });
+        },
+    );
+}
 
 apiV1Router.get('/logout', (req, res, next) => {
     req.logout((err) => {

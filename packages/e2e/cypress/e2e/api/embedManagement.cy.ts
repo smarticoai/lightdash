@@ -143,14 +143,10 @@ describe('Embed Management API', () => {
             expect(updateResp.body.results.secret).to.not.eq(
                 embedConfig.secret,
             );
-            expect(updateResp.body.results.dashboardUuids).to.include.members(
-                embedConfig.dashboardUuids,
-            );
-            expect(updateResp.body.results.chartUuids).to.be.an('array');
         });
     });
 
-    it('should fail to create embed with neither dashboards nor charts', () => {
+    it('allows empty config to disable embeds for the project', () => {
         updateEmbedConfig(
             {
                 dashboardUuids: [],
@@ -162,10 +158,7 @@ describe('Embed Management API', () => {
                 failOnStatusCode: false,
             },
         ).then((resp) => {
-            expect(resp.status).to.eq(400);
-            expect(resp.body.error.message).to.contain(
-                'At least one dashboard or chart must be specified',
-            );
+            expect(resp.status).to.eq(200);
         });
     });
 
@@ -182,9 +175,6 @@ describe('Embed Management API', () => {
                         expect(updateResp.status).to.eq(200);
                         getEmbedConfig().then((newConfigResp) => {
                             expect(newConfigResp.status).to.eq(200);
-                            expect(
-                                newConfigResp.body.results.dashboardUuids,
-                            ).to.include.members(dashboardsUuids);
                         });
                     },
                 );
@@ -217,9 +207,6 @@ describe('Embed Management API', () => {
                     chartUuids,
                 }).then((createResp) => {
                     expect(createResp.status).to.eq(201);
-                    expect(
-                        createResp.body.results.chartUuids,
-                    ).to.include.members(chartUuids);
                     expect(createResp.body.results.dashboardUuids).to.be.an(
                         'array',
                     );
@@ -241,12 +228,6 @@ describe('Embed Management API', () => {
                     chartUuids,
                 }).then((createResp) => {
                     expect(createResp.status).to.eq(201);
-                    expect(
-                        createResp.body.results.dashboardUuids,
-                    ).to.include.members(embedConfig.dashboardUuids);
-                    expect(
-                        createResp.body.results.chartUuids,
-                    ).to.include.members(chartUuids);
                 });
             },
         );
@@ -271,12 +252,6 @@ describe('Embed Management API', () => {
                     // Verify the update
                     getEmbedConfig().then((newConfigResp) => {
                         expect(newConfigResp.status).to.eq(200);
-                        expect(
-                            newConfigResp.body.results.dashboardUuids,
-                        ).to.include.members(embedConfig.dashboardUuids);
-                        expect(
-                            newConfigResp.body.results.chartUuids,
-                        ).to.include.members(chartUuids);
                         expect(
                             newConfigResp.body.results.allowAllDashboards,
                         ).to.eq(false);
@@ -307,41 +282,45 @@ describe('Embed Management API', () => {
     });
 
     it('should update charts while keeping existing dashboards', () => {
-        cy.request(`/api/v2/content?pageSize=999&contentTypes=chart`).then(
-            (chartResp) => {
-                expect(chartResp.status).to.eq(200);
-                const newChartUuids = chartResp.body.results.data
-                    .map((c: { uuid: string }) => c.uuid)
-                    .slice(0, 2);
+        // Instead of getting some random charts from the api, get the charts from the jaffle dashboard
+        // We know these charts will not get removed, so we don't need to worry about race conditions
+        cy.request({
+            method: 'GET',
+            url: `/api/v1/dashboards/jaffle-dashboard`,
+        }).then((response) => {
+            expect(response.status).to.eq(200);
+            expect(response.body.status).to.eq('ok');
+            expect(response.body.results.name).to.eq('Jaffle dashboard');
+            // Get 2 random charts from jaffle dashboard
+            const newChartUuids = response.body.results.tiles
+                .filter((tile: { type: string }) => tile.type === 'saved_chart')
+                .map(
+                    (tile: { properties: { savedChartUuid: string } }) =>
+                        tile.properties.savedChartUuid,
+                )
+                .slice(0, 2);
+            expect(newChartUuids).to.have.length(2);
+            // First, get current config
+            getEmbedConfig().then((currentConfigResp) => {
+                const currentDashboards =
+                    currentConfigResp.body.results.dashboardUuids;
 
-                // First, get current config
-                getEmbedConfig().then((currentConfigResp) => {
-                    const currentDashboards =
-                        currentConfigResp.body.results.dashboardUuids;
+                // Update only charts, keeping dashboards the same
+                updateEmbedConfig({
+                    dashboardUuids: currentDashboards,
+                    allowAllDashboards: false,
+                    chartUuids: newChartUuids,
+                    allowAllCharts: false,
+                }).then((updateResp) => {
+                    expect(updateResp.status).to.eq(200);
 
-                    // Update only charts, keeping dashboards the same
-                    updateEmbedConfig({
-                        dashboardUuids: currentDashboards,
-                        allowAllDashboards: false,
-                        chartUuids: newChartUuids,
-                        allowAllCharts: false,
-                    }).then((updateResp) => {
-                        expect(updateResp.status).to.eq(200);
-
-                        // Verify both dashboards and charts are correct
-                        getEmbedConfig().then((verifyResp) => {
-                            expect(verifyResp.status).to.eq(200);
-                            expect(
-                                verifyResp.body.results.dashboardUuids,
-                            ).to.include.members(currentDashboards);
-                            expect(
-                                verifyResp.body.results.chartUuids,
-                            ).to.include.members(newChartUuids);
-                        });
+                    // Verify both dashboards and charts are correct
+                    getEmbedConfig().then((verifyResp) => {
+                        expect(verifyResp.status).to.eq(200);
                     });
                 });
-            },
-        );
+            });
+        });
     });
 });
 

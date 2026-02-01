@@ -13,14 +13,16 @@ import {
     explorerActions,
     selectFromDashboard,
     selectIsEditMode,
+    selectIsExploreFromHere,
     selectIsResultsExpanded,
-    selectMetricQuery,
+    selectPendingFetch,
+    selectSavedChart,
+    selectUnsavedChartVersion,
     useExplorerDispatch,
     useExplorerSelector,
 } from '../features/explorer/store';
-import useExplorerContext from '../providers/Explorer/useExplorerContext';
 import { useExplorerQueryManager } from './useExplorerQueryManager';
-import { useFeatureFlag } from './useFeatureFlagEnabled';
+import { useServerFeatureFlag } from './useServerOrClientFeatureFlag';
 
 /**
  * Effects layer for Explorer query orchestration
@@ -51,16 +53,13 @@ export const useExplorerQueryEffects = ({
     const isEditMode = useExplorerSelector(selectIsEditMode);
     const isResultsOpen = useExplorerSelector(selectIsResultsExpanded);
     const fromDashboard = useExplorerSelector(selectFromDashboard);
-    const metricQuery = useExplorerSelector(selectMetricQuery);
+    const isExploreFromHere = useExplorerSelector(selectIsExploreFromHere);
 
-    const { data: useSqlPivotResults } = useFeatureFlag(
+    const { data: useSqlPivotResults } = useServerFeatureFlag(
         FeatureFlags.UseSqlPivotResults,
     );
 
-    // Get merged version with chartConfig and pivotConfig from Context
-    const mergedUnsavedChartVersion = useExplorerContext(
-        (context) => context.state.mergedUnsavedChartVersion,
-    );
+    const unsavedChartVersion = useExplorerSelector(selectUnsavedChartVersion);
 
     // Auto-fetch configuration
     const [autoFetchEnabled] = useLocalStorage({
@@ -68,39 +67,33 @@ export const useExplorerQueryEffects = ({
         defaultValue: AUTO_FETCH_ENABLED_DEFAULT,
     });
 
-    // Check if this is a saved chart or has pivot config from Context
-    const isSavedChart = useExplorerContext(
-        (context) => !!context.state.savedChart,
-    );
+    const savedChart = useExplorerSelector(selectSavedChart);
+    const isSavedChart = !!savedChart;
 
     // Check if we need unpivoted data for results table
     const needsUnpivotedData = useMemo(() => {
         if (!useSqlPivotResults?.enabled || !explore) return false;
 
-        const items = getFieldsFromMetricQuery(metricQuery, explore);
+        const items = getFieldsFromMetricQuery(
+            unsavedChartVersion.metricQuery,
+            explore,
+        );
         const pivotConfiguration = derivePivotConfigurationFromChart(
-            mergedUnsavedChartVersion,
-            metricQuery,
+            unsavedChartVersion,
+            unsavedChartVersion.metricQuery,
             items,
         );
 
         return !!pivotConfiguration;
-    }, [
-        useSqlPivotResults?.enabled,
-        explore,
-        metricQuery,
-        mergedUnsavedChartVersion,
-    ]);
+    }, [useSqlPivotResults?.enabled, explore, unsavedChartVersion]);
 
     // Effect 1: Auto-fetch logic
     // Handles both initial fetch and reactive auto-fetch
     useEffect(() => {
         if (
             autoFetchEnabled ||
-            ((isSavedChart || fromDashboard) &&
-                !isEditMode &&
-                !query.isFetched) ||
-            (isEditMode && !query.isFetched && (isSavedChart || fromDashboard))
+            ((isSavedChart || fromDashboard || isExploreFromHere) &&
+                !query.isFetched)
         ) {
             runQuery();
         }
@@ -111,9 +104,20 @@ export const useExplorerQueryEffects = ({
         runQuery,
         query.isFetched,
         isEditMode,
+        isExploreFromHere,
     ]);
 
-    // Effect 2: Setup unpivoted query args when needed
+    // Effect 2: Handle explicit query execution requests (works regardless of auto-fetch setting)
+    const pendingFetch = useExplorerSelector(selectPendingFetch);
+
+    useEffect(() => {
+        if (pendingFetch) {
+            runQuery();
+            dispatch(explorerActions.clearPendingFetch());
+        }
+    }, [pendingFetch, runQuery, dispatch]);
+
+    // Effect 3: Setup unpivoted query args when needed
     useEffect(() => {
         if (!validQueryArgs) {
             dispatch(explorerActions.setUnpivotedQueryArgs(null));

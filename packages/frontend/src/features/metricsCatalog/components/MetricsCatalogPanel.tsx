@@ -1,5 +1,5 @@
 import { subject } from '@casl/ability';
-import { isCompileJob } from '@lightdash/common';
+import { CatalogCategoryFilterMode, isCompileJob } from '@lightdash/common';
 import {
     ActionIcon,
     Badge,
@@ -31,10 +31,13 @@ import { useAppDispatch, useAppSelector } from '../../sqlRunner/store/hooks';
 import {
     setAbility,
     setActiveMetric,
+    setCategoryFilterMode,
     setCategoryFilters,
     setOrganizationUuid,
+    setOwnerFilters,
     setProjectUuid,
     setSearch,
+    setTableFilters,
     setTableSorting,
     setUser,
     toggleMetricExploreModal,
@@ -82,6 +85,7 @@ const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['style'] }> = ({
             position="bottom-start"
             opened={opened}
             onClose={setLocalStorage}
+            shadow="sm"
         >
             <Popover.Target>
                 <Button
@@ -96,7 +100,7 @@ const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['style'] }> = ({
                 </Button>
             </Popover.Target>
             <Popover.Dropdown
-                bg="dark.6"
+                bg="ldDark.6"
                 c="white"
                 p={16}
                 sx={{
@@ -118,7 +122,7 @@ const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['style'] }> = ({
                         </ActionIcon>
                     </Group>
                     <LearnMoreContent width="100%" height="100%" />
-                    <Text size={13} c="gray.3">
+                    <Text size={13} c="ldGray.3">
                         Explore and curate your key Metrics in the{' '}
                         <Text span fw={600} inherit>
                             Catalog
@@ -133,8 +137,8 @@ const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['style'] }> = ({
                         <Button
                             variant="outline"
                             radius="md"
-                            bg="dark.4"
-                            c="gray.0"
+                            bg="ldDark.4"
+                            c="ldGray.0"
                             hidden={true}
                             disabled={true}
                             sx={(theme) => ({
@@ -142,7 +146,7 @@ const LearnMorePopover: FC<{ buttonStyles?: ButtonProps['style'] }> = ({
                                 border: 'none',
                                 flexGrow: 1,
                                 '&:hover': {
-                                    backgroundColor: theme.colors.dark[5],
+                                    backgroundColor: theme.colors.ldDark[5],
                                 },
                             })}
                         >
@@ -179,16 +183,28 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
     );
     const navigate = useNavigate();
     const categoriesParam = useSearchParams('categories');
+    const categoriesFilterModeParam = useSearchParams('categoriesFilterMode');
+    const tablesParam = useSearchParams('tables');
     const searchParam = useSearchParams('search');
     const sortingParam = useSearchParams('sortBy');
     const sortDirectionParam = useSearchParams('sortDirection');
+    const ownerUserUuidParam = useSearchParams('ownerUserUuid');
 
     const categories = useAppSelector(
         (state) => state.metricsCatalog.categoryFilters,
     );
+    const categoryFilterMode = useAppSelector(
+        (state) => state.metricsCatalog.categoryFilterMode,
+    );
+    const tableFilters = useAppSelector(
+        (state) => state.metricsCatalog.tableFilters,
+    );
     const search = useAppSelector((state) => state.metricsCatalog.search);
     const tableSorting = useAppSelector(
         (state) => state.metricsCatalog.tableSorting,
+    );
+    const ownerFilters = useAppSelector(
+        (state) => state.metricsCatalog.ownerFilters,
     );
 
     const organizationUuid = useAppSelector(
@@ -248,6 +264,11 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
     useEffect(() => {
         const urlCategories =
             categoriesParam?.split(',').map(decodeURIComponent) || [];
+        const urlCategoriesFilterMode =
+            categoriesFilterModeParam === CatalogCategoryFilterMode.AND
+                ? CatalogCategoryFilterMode.AND
+                : CatalogCategoryFilterMode.OR;
+        const urlTables = tablesParam?.split(',').map(decodeURIComponent) || [];
         const urlSearch = searchParam
             ? decodeURIComponent(searchParam)
             : undefined;
@@ -257,8 +278,13 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
         const urlSortDirectionParam = sortDirectionParam
             ? decodeURIComponent(sortDirectionParam)
             : undefined;
+        const urlOwnerUserUuids =
+            ownerUserUuidParam?.split(',').map(decodeURIComponent) || [];
 
         dispatch(setCategoryFilters(urlCategories));
+        dispatch(setCategoryFilterMode(urlCategoriesFilterMode));
+        dispatch(setTableFilters(urlTables));
+        dispatch(setOwnerFilters(urlOwnerUserUuids));
         dispatch(setSearch(urlSearch));
 
         if (urlSortByParam) {
@@ -273,6 +299,9 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
         }
     }, [
         categoriesParam,
+        categoriesFilterModeParam,
+        tablesParam,
+        ownerUserUuidParam,
         dispatch,
         searchParam,
         sortingParam,
@@ -287,8 +316,24 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                 'categories',
                 categories.map(encodeURIComponent).join(','),
             );
+            // Only include mode when categories selected and mode is not default (OR)
+            if (categoryFilterMode === CatalogCategoryFilterMode.AND) {
+                queryParams.set('categoriesFilterMode', categoryFilterMode);
+            } else {
+                queryParams.delete('categoriesFilterMode');
+            }
         } else {
             queryParams.delete('categories');
+            queryParams.delete('categoriesFilterMode');
+        }
+
+        if (tableFilters.length > 0) {
+            queryParams.set(
+                'tables',
+                tableFilters.map(encodeURIComponent).join(','),
+            );
+        } else {
+            queryParams.delete('tables');
         }
 
         if (search) {
@@ -306,8 +351,25 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
             );
         }
 
+        if (ownerFilters.length > 0) {
+            queryParams.set(
+                'ownerUserUuid',
+                ownerFilters.map(encodeURIComponent).join(','),
+            );
+        } else {
+            queryParams.delete('ownerUserUuid');
+        }
+
         void navigate({ search: queryParams.toString() }, { replace: true });
-    }, [categories, search, tableSorting, navigate]);
+    }, [
+        categories,
+        categoryFilterMode,
+        tableFilters,
+        ownerFilters,
+        search,
+        tableSorting,
+        navigate,
+    ]);
 
     useEffect(
         function handleAbilities() {
@@ -380,12 +442,14 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
 
     const headerButtonStyles: ButtonProps['style'] = {
         borderRadius: theme.radius.md,
-        backgroundColor: '#FAFAFA',
-        border: `1px solid ${theme.colors.gray[2]}`,
+        border: `1px solid ${theme.colors.ldGray[2]}`,
         padding: `${theme.spacing.xxs} 10px ${theme.spacing.xxs} ${theme.spacing.xs}`,
         fontSize: theme.fontSizes.sm,
         fontWeight: 500,
-        color: theme.colors.gray[7],
+        color:
+            theme.colorScheme === 'dark'
+                ? theme.colors.ldDark[9]
+                : theme.colors.ldGray[7],
     };
 
     return (
@@ -393,7 +457,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
             <Group position="apart">
                 <Box>
                     <Group spacing="xs">
-                        <Text color="gray.8" weight={600} size="xl">
+                        <Text color="ldGray.8" weight={600} size="xl">
                             Metrics Catalog
                         </Text>
                         {!smrMode() &&
@@ -432,7 +496,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                         </Tooltip>
                         }
                     </Group>
-                    <Text color="gray.6" size="sm" weight={400}>
+                    <Text color="ldGray.6" size="sm" weight={400}>
                         Browse all Metrics & KPIs across this project
                     </Text>
                 </Box>
@@ -444,7 +508,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                             leftIcon={
                                 <MantineIcon
                                     size="sm"
-                                    color="gray.7"
+                                    color="ldGray.7"
                                     icon={IconRefresh}
                                 />
                             }
@@ -458,7 +522,7 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                             leftIcon={
                                 <MantineIcon
                                     size="sm"
-                                    color="gray.7"
+                                    color="ldGray.7"
                                     icon={IconRefresh}
                                 />
                             }

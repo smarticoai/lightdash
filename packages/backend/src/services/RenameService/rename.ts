@@ -338,6 +338,16 @@ export const renameChartConfigType = (
                     ),
                 },
             };
+        case ChartType.GAUGE:
+            return {
+                ...chartConfig,
+                config: {
+                    ...chartConfig.config,
+                    selectedField: replaceOptionalId(
+                        chartConfig.config?.selectedField,
+                    ),
+                },
+            };
 
         case ChartType.TABLE:
             return {
@@ -416,6 +426,25 @@ export const renameChartConfigType = (
                     spec: JSON.parse(
                         replaceString(JSON.stringify(chartConfig.config?.spec)),
                     ) as CustomVis['spec'],
+                },
+            };
+        case ChartType.MAP:
+            return {
+                ...chartConfig,
+                config: {
+                    ...chartConfig.config,
+                    latitudeFieldId: replaceOptionalId(
+                        chartConfig.config?.latitudeFieldId,
+                    ),
+                    longitudeFieldId: replaceOptionalId(
+                        chartConfig.config?.longitudeFieldId,
+                    ),
+                    locationFieldId: replaceOptionalId(
+                        chartConfig.config?.locationFieldId,
+                    ),
+                    valueFieldId: replaceOptionalId(
+                        chartConfig.config?.valueFieldId,
+                    ),
                 },
             };
 

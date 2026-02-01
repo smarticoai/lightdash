@@ -18,7 +18,7 @@ import {
 } from '@mantine-8/core';
 import { useDebouncedValue } from '@mantine-8/hooks';
 import { IconInfoCircle } from '@tabler/icons-react';
-import { isEmpty } from 'lodash';
+import isEmpty from 'lodash/isEmpty';
 import { useCallback, useMemo, useRef, useState, type FC } from 'react';
 import { LightdashUserAvatar } from '../../components/Avatar';
 import MantineIcon from '../../components/common/MantineIcon';
@@ -176,7 +176,7 @@ export const UserAccessMultiSelect: FC<UserAccessMultiSelectProps> = ({
                                 p="2px 4px"
                                 radius="sm"
                                 variant="outline"
-                                color="gray.6"
+                                color="ldGray.6"
                                 fz="8px"
                             >
                                 {user.roleLabel}

@@ -6,31 +6,31 @@ const baseStyles = (theme: MantineTheme) => ({
         fontWeight: 500,
         fontSize: 14,
         height: 32,
-        borderColor: theme.colors.gray[2],
-        color: theme.colors.dark[7],
+        borderColor: theme.colors.ldGray[2],
+        color: theme.colors.ldDark[9],
         '&:hover': {
-            backgroundColor: theme.colors.gray[0],
+            backgroundColor: theme.colors.ldGray[0],
             transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
         },
         '&:focus': {
-            borderColor: theme.colors.gray[2],
+            borderColor: theme.colors.ldGray[2],
         },
         '&:focus-within': {
-            borderColor: theme.colors.gray[2],
+            borderColor: theme.colors.ldGray[2],
         },
     },
     baseItem: {
         fontSize: 14,
         '&[data-selected="true"]': {
-            color: theme.colors.gray[7],
+            color: theme.colors.ldGray[7],
             fontWeight: 500,
-            backgroundColor: theme.colors.gray[0],
+            backgroundColor: theme.colors.ldGray[0],
         },
         '&[data-selected="true"]:hover': {
-            backgroundColor: theme.colors.gray[0],
+            backgroundColor: theme.colors.ldGray[0],
         },
         '&:hover': {
-            backgroundColor: theme.colors.gray[0],
+            backgroundColor: theme.colors.ldGray[0],
             transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
         },
     },
@@ -54,7 +54,7 @@ export const useFilterSelectStyles = createStyles((theme) => {
             maxWidth: '100%',
 
             '&[value=""]': {
-                border: `1px dashed ${theme.colors.gray[4]}`,
+                border: `1px dashed ${theme.colors.ldGray[4]}`,
             },
             '&[data-selected="true"]': {
                 borderBottomRightRadius: 0,
@@ -95,11 +95,14 @@ export const useOperatorSelectStyles = createStyles((theme: MantineTheme) => {
             maxWidth: 100,
             marginLeft: -1,
             borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            borderBottomRightRadius: 0,
-            borderTop: 0,
+            borderBottomLeftRadius: 0,
             paddingRight: 8,
             paddingLeft: 8,
+            // When filter accepts values, remove bottom-right radius (connects to autocomplete below)
+            '&[data-no-values="false"]': {
+                borderBottomRightRadius: 0,
+            },
+
             '&[data-full-width="true"]': {
                 width: '100%',
                 maxWidth: '100%',

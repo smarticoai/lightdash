@@ -84,6 +84,16 @@ export type WarehouseGetAsyncQueryResults<
     rows: TFormattedRow[];
 };
 
+export enum TimeIntervalUnit {
+    SECOND = 'SECOND',
+    MINUTE = 'MINUTE',
+    HOUR = 'HOUR',
+    DAY = 'DAY',
+    WEEK = 'WEEK',
+    MONTH = 'MONTH',
+    YEAR = 'YEAR',
+}
+
 export interface WarehouseSqlBuilder {
     getStartOfWeek: () => WeekDay | null | undefined;
     getAdapterType: () => SupportedDbtAdapter;
@@ -94,6 +104,14 @@ export interface WarehouseSqlBuilder {
     getMetricSql: (sql: string, metric: Metric) => string;
     concatString: (...args: string[]) => string;
     escapeString: (value: string) => string;
+    // Methods for funnel builder and general SQL generation
+    castToTimestamp: (date: Date) => string;
+    getIntervalSql: (value: number, unit: TimeIntervalUnit) => string;
+    getTimestampDiffSeconds: (
+        startTimestampSql: string,
+        endTimestampSql: string,
+    ) => string;
+    getMedianSql: (valueSql: string) => string;
 }
 
 export interface WarehouseClient extends WarehouseSqlBuilder {
@@ -113,7 +131,7 @@ export interface WarehouseClient extends WarehouseSqlBuilder {
 
     streamQuery(
         query: string,
-        streamCallback: (data: WarehouseResults) => void,
+        streamCallback: (data: WarehouseResults) => void | Promise<void>,
         options: {
             values?: AnyType[];
             tags: Record<string, string>;
@@ -126,7 +144,7 @@ export interface WarehouseClient extends WarehouseSqlBuilder {
         resultsStreamCallback?: (
             rows: WarehouseResults['rows'],
             fields: WarehouseResults['fields'],
-        ) => void,
+        ) => void | Promise<void>,
     ): Promise<WarehouseExecuteAsyncQuery>;
 
     /**

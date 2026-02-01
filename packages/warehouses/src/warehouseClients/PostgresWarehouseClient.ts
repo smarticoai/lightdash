@@ -222,7 +222,7 @@ export class PostgresClient<
 
     async streamQuery(
         sql: string,
-        streamCallback: (data: WarehouseResults) => void,
+        streamCallback: (data: WarehouseResults) => void | Promise<void>,
         options: {
             values?: AnyType[];
             tags?: Record<string, string>;
@@ -235,7 +235,7 @@ export class PostgresClient<
         return new Promise<void>((resolve, reject) => {
             pool = new pg.Pool({
                 ...this.config,
-                connectionTimeoutMillis: 5000,
+                connectionTimeoutMillis: 30000,
                 query_timeout: this.credentials.timeoutSeconds
                     ? this.credentials.timeoutSeconds * 1000
                     : 1000 * 60 * 5, // sets the default query timeout to 5 minutes
@@ -294,7 +294,7 @@ export class PostgresClient<
 
                     const writable = new Writable({
                         objectMode: true,
-                        write(
+                        async write(
                             chunk: {
                                 row: AnyType;
                                 fields: QueryResult<AnyType>['fields'];
@@ -302,19 +302,31 @@ export class PostgresClient<
                             encoding,
                             callback,
                         ) {
-                            streamCallback({
-                                fields: PostgresClient.convertQueryResultFields(
-                                    chunk.fields,
-                                ),
-                                rows: [chunk.row],
-                            });
-                            callback();
+                            try {
+                                await streamCallback({
+                                    fields: PostgresClient.convertQueryResultFields(
+                                        chunk.fields,
+                                    ),
+                                    rows: [chunk.row],
+                                });
+                                callback();
+                            } catch (writeError) {
+                                if (writeError instanceof Error) {
+                                    callback(writeError);
+                                } else {
+                                    callback(new Error(String(writeError)));
+                                }
+                            }
                         },
                     });
 
-                    // release the client when the stream is finished
-                    stream.on('end', () => {
+                    // Wait for writable to finish processing all async callbacks
+                    // (not 'end' on readable - async write callbacks may still be in flight)
+                    writable.on('finish', () => {
                         resolve();
+                    });
+                    writable.on('error', (err2) => {
+                        reject(err2);
                     });
                     stream.on('error', (err2) => {
                         reject(err2);

@@ -7,6 +7,7 @@ import {
     CompactOrAlias,
     CustomFormat,
     DBFieldTypes,
+    DimensionOverrides,
     DimensionType,
     MetricFilterRule,
     MetricOverrides,
@@ -89,6 +90,7 @@ export type DbSavedChartVersion = {
     filters: AnyType;
     row_limit: number;
     metric_overrides: MetricOverrides | null; // JSONB
+    dimension_overrides: DimensionOverrides | null; // JSONB
     chart_type: ChartType;
     saved_query_id: number;
     chart_config: ChartConfig['config'] | null;
@@ -110,6 +112,7 @@ export type CreateDbSavedChartVersion = Pick<
     | 'filters'
     | 'row_limit'
     | 'metric_overrides'
+    | 'dimension_overrides'
     | 'chart_type'
     | 'pivot_dimensions'
     | 'chart_config'
@@ -231,6 +234,12 @@ export type DbSavedChartAdditionalMetric = {
     base_dimension_name: string | null;
     uuid: string;
     format_options?: CustomFormat | null; // JSONB
+    // PoP metadata (optional)
+    generation_type?: string | null;
+    base_metric_id?: string | null;
+    time_dimension_id?: string | null;
+    granularity?: string | null;
+    period_offset?: number | null;
 };
 export type DbSavedChartAdditionalMetricInsert = Omit<
     DbSavedChartAdditionalMetric,
@@ -270,6 +279,11 @@ export type DBFilteredAdditionalMetrics = Pick<
             | 'filters'
             | 'base_dimension_name'
             | 'format_options'
+            | 'generation_type'
+            | 'base_metric_id'
+            | 'time_dimension_id'
+            | 'granularity'
+            | 'period_offset'
         >
     >;
 

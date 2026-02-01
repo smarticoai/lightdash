@@ -324,7 +324,7 @@ const TableCalculationModal: FC<Props> = ({
             >
                 <Modal.Header
                     sx={(themeProps) => ({
-                        borderBottom: `1px solid ${themeProps.colors.gray[2]}`,
+                        borderBottom: `1px solid ${themeProps.colors.ldGray[2]}`,
                         padding: themeProps.spacing.sm,
                     })}
                 >
@@ -332,7 +332,7 @@ const TableCalculationModal: FC<Props> = ({
                         <Paper p="xs" withBorder radius="sm">
                             <MantineIcon icon={IconCalculator} size="sm" />
                         </Paper>
-                        <Text color="dark.7" fw={700} fz="md">
+                        <Text fw={700} fz="md">
                             {tableCalculation ? 'Edit' : 'Create'} Table
                             Calculation
                             {tableCalculation ? (
@@ -385,7 +385,7 @@ const TableCalculationModal: FC<Props> = ({
                                     radius="xs"
                                     styles={{
                                         panel: {
-                                            borderColor: colors.gray[2],
+                                            borderColor: colors.ldGray[2],
                                             borderWidth: 1,
                                             borderStyle: 'solid',
                                             borderTop: 'none',
@@ -433,12 +433,12 @@ const TableCalculationModal: FC<Props> = ({
                                     radius="xs"
                                     styles={{
                                         panel: {
-                                            borderColor: colors.gray[2],
+                                            borderColor: colors.ldGray[2],
                                             borderWidth: 1,
                                             borderStyle: 'solid',
                                             borderTop: 'none',
                                             height: isExpanded
-                                                ? 'calc(90vh - 400px)'
+                                                ? 'calc(80vh - 400px)'
                                                 : 'auto',
                                         },
                                     }}
@@ -452,7 +452,14 @@ const TableCalculationModal: FC<Props> = ({
                                         </Tabs.Tab>
                                     </Tabs.List>
 
-                                    <Tabs.Panel value="sqlEditor">
+                                    <Tabs.Panel
+                                        value="sqlEditor"
+                                        style={{
+                                            height: isExpanded
+                                                ? 'calc(85vh - 400px)'
+                                                : 'auto',
+                                        }}
+                                    >
                                         <Suspense
                                             fallback={
                                                 <Box
@@ -523,9 +530,9 @@ const TableCalculationModal: FC<Props> = ({
 
                     <Box
                         sx={(themeProps) => ({
-                            borderTop: `1px solid ${themeProps.colors.gray[2]}`,
+                            borderTop: `1px solid ${themeProps.colors.ldGray[2]}`,
                             padding: themeProps.spacing.sm,
-                            backgroundColor: themeProps.white,
+                            backgroundColor: themeProps.colors.background,
                             position: 'sticky',
                             bottom: 0,
                             width: '100%',
@@ -561,6 +568,10 @@ const TableCalculationModal: FC<Props> = ({
                                     type="submit"
                                     ref={submitButtonRef}
                                     data-testid="table-calculation-save-button"
+                                    disabled={
+                                        editMode === EditMode.SQL &&
+                                        form.values.sql.length === 0
+                                    }
                                 >
                                     {tableCalculation
                                         ? 'Save changes'

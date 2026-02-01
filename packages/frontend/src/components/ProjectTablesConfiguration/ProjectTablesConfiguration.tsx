@@ -187,7 +187,7 @@ const ProjectTablesConfiguration: FC<Props> = ({ projectUuid, onSuccess }) => {
             <SettingsGridCard>
                 <div>
                     <Title order={5}>Table selection</Title>
-                    <Text color="gray.6" my={'xs'}>
+                    <Text color="ldGray.6" my={'xs'}>
                         You have selected <b>{modelsIncluded.length}</b> models{' '}
                         {modelsIncluded.length > 0 && (
                             <Anchor
@@ -206,7 +206,7 @@ const ProjectTablesConfiguration: FC<Props> = ({ projectUuid, onSuccess }) => {
                                     key={name}
                                     title={name}
                                     truncate
-                                    color="gray.6"
+                                    color="ldGray.6"
                                 >
                                     {name}
                                 </Text>
@@ -262,7 +262,10 @@ const ProjectTablesConfiguration: FC<Props> = ({ projectUuid, onSuccess }) => {
                                         clearSearchOnChange={false}
                                         searchValue={search}
                                         onSearchChange={setSearch}
-                                        itemComponent={({ label, ...others }) =>
+                                        itemComponent={({
+                                            label,
+                                            ...others
+                                        }) =>
                                             others.disabled ? (
                                                 <Text
                                                     color="dimmed"
@@ -330,7 +333,10 @@ const ProjectTablesConfiguration: FC<Props> = ({ projectUuid, onSuccess }) => {
                                         clearSearchOnChange={false}
                                         searchValue={search}
                                         onSearchChange={setSearch}
-                                        itemComponent={({ label, ...others }) =>
+                                        itemComponent={({
+                                            label,
+                                            ...others
+                                        }) =>
                                             others.disabled ? (
                                                 <Text
                                                     color="dimmed"

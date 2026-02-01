@@ -22,6 +22,7 @@ import {
     AiAgentUser,
     AiAgentUserPreferences,
     AiArtifact,
+    AiEvalRunResultAssessment,
     AiResultType,
     AiThread,
     AiWebAppPrompt,
@@ -31,19 +32,20 @@ import {
     ApiUpdateAiAgent,
     ApiUpdateEvaluationRequest,
     assertUnreachable,
+    CreateLlmAssessment,
     CreateSlackPrompt,
     CreateSlackThread,
     CreateWebAppPrompt,
     CreateWebAppThread,
+    isThreadPrompt,
     isToolName,
     KnexPaginateArgs,
     KnexPaginatedData,
     NotFoundError,
-    NotImplementedError,
+    ProjectType,
     SlackPrompt,
     ToolName,
     ToolNameSchema,
-    ToolProposeChangeOutput,
     toolProposeChangeOutputSchema,
     UpdateSlackResponse,
     UpdateSlackResponseTs,
@@ -52,11 +54,14 @@ import {
 } from '@lightdash/common';
 import { Knex } from 'knex';
 import moment from 'moment';
+import { LightdashConfig } from '../../config/parseConfig';
 import { AiAgentReasoningTableName } from '../../database/entities/aiAgentReasoning';
 import { DbEmail, EmailTableName } from '../../database/entities/emails';
 import { DbProject, ProjectTableName } from '../../database/entities/projects';
 import { DbUser, UserTableName } from '../../database/entities/users';
 import KnexPaginate from '../../database/pagination';
+import Logger from '../../logging/logger';
+import { wrapSentryTransaction } from '../../utils';
 import {
     AiAgentToolCallTableName,
     AiAgentToolResultTableName,
@@ -79,6 +84,7 @@ import {
     AiAgentInstructionVersionsTableName,
     AiAgentIntegrationTableName,
     AiAgentSlackIntegrationTableName,
+    AiAgentSpaceAccessTableName,
     AiAgentTableName,
     AiAgentUserAccessTableName,
     DbAiAgent,
@@ -91,10 +97,14 @@ import {
     AiArtifactsTableName,
     AiArtifactVersionsTable,
     AiArtifactVersionsTableName,
+    AiPromptArtifactReferencesTable,
+    AiPromptArtifactReferencesTableName,
+    DbAiArtifact,
     DbAiArtifactVersion,
 } from '../database/entities/aiArtifacts';
 import {
     AiEvalPromptTableName,
+    AiEvalRunResultAssessmentTableName,
     AiEvalRunResultTableName,
     AiEvalRunTableName,
     AiEvalTableName,
@@ -102,17 +112,22 @@ import {
     DbAiEvalPrompt,
     DbAiEvalRun,
     DbAiEvalRunResult,
+    DbAiEvalRunResultAssessment,
 } from '../database/entities/aiEvals';
 
 type Dependencies = {
     database: Knex;
+    lightdashConfig: LightdashConfig;
 };
 
 export class AiAgentModel {
     private database: Knex;
 
+    private lightdashConfig: LightdashConfig;
+
     constructor(dependencies: Dependencies) {
         this.database = dependencies.database;
+        this.lightdashConfig = dependencies.lightdashConfig;
     }
 
     static async withTrx<T>(
@@ -123,6 +138,15 @@ export class AiAgentModel {
             return callback(db as Knex.Transaction);
         }
         return db.transaction(callback);
+    }
+
+    async filterExistingProjectUuids(
+        projectUuids: string[],
+    ): Promise<string[]> {
+        const rows = await this.database(ProjectTableName)
+            .select('project_uuid')
+            .whereIn('project_uuid', projectUuids);
+        return rows.map((row) => row.project_uuid);
     }
 
     async getAgent({
@@ -159,6 +183,11 @@ export class AiAgentModel {
             .select('ai_agent_uuid', 'user_uuid')
             .where(`${AiAgentUserAccessTableName}.ai_agent_uuid`, agentUuid);
 
+        const spaceAccess = this.database
+            .from(AiAgentSpaceAccessTableName)
+            .select('ai_agent_uuid', 'space_uuid')
+            .where(`${AiAgentSpaceAccessTableName}.ai_agent_uuid`, agentUuid);
+
         const latestInstruction = this.database
             .from(AiAgentInstructionVersionsTableName)
             .select(
@@ -174,12 +203,14 @@ export class AiAgentModel {
             .with('latest_instruction', latestInstruction)
             .with('group_access', groupAccess)
             .with('user_access', userAccess)
+            .with('space_access', spaceAccess)
             .from(AiAgentTableName)
             .select({
                 uuid: `${AiAgentTableName}.ai_agent_uuid`,
                 organizationUuid: `${AiAgentTableName}.organization_uuid`,
                 projectUuid: `${AiAgentTableName}.project_uuid`,
                 name: `${AiAgentTableName}.name`,
+                description: `${AiAgentTableName}.description`,
                 tags: `${AiAgentTableName}.tags`,
                 integrations: this.database.raw(`
                     COALESCE(
@@ -216,6 +247,14 @@ export class AiAgentModel {
                     COALESCE(
                         (SELECT json_agg(user_uuid)
                          FROM user_access
+                         WHERE ai_agent_uuid = ${AiAgentTableName}.ai_agent_uuid),
+                        '[]'::json
+                    )
+                `),
+                spaceAccess: this.database.raw(`
+                    COALESCE(
+                        (SELECT json_agg(space_uuid)
+                         FROM space_access
                          WHERE ai_agent_uuid = ${AiAgentTableName}.ai_agent_uuid),
                         '[]'::json
                     )
@@ -242,10 +281,15 @@ export class AiAgentModel {
 
     async findAllAgents({
         organizationUuid,
-        projectUuid,
+        filter,
     }: {
         organizationUuid: string;
-        projectUuid?: string;
+        filter?: {
+            projectType?: ProjectType;
+            projectFilter?:
+                | { projectUuid: string }
+                | { projectUuids: string[] };
+        };
     }): Promise<AiAgentSummary[]> {
         const integrations = this.database
             .from(AiAgentIntegrationTableName)
@@ -269,6 +313,10 @@ export class AiAgentModel {
             .from(AiAgentUserAccessTableName)
             .select('ai_agent_uuid', 'user_uuid');
 
+        const spaceAccess = this.database
+            .from(AiAgentSpaceAccessTableName)
+            .select('ai_agent_uuid', 'space_uuid');
+
         const latestInstruction = this.database
             .from(AiAgentInstructionVersionsTableName)
             .select(
@@ -284,12 +332,19 @@ export class AiAgentModel {
             .with('latest_instruction', latestInstruction)
             .with('group_access', groupAccess)
             .with('user_access', userAccess)
+            .with('space_access', spaceAccess)
             .from(AiAgentTableName)
+            .innerJoin(
+                ProjectTableName,
+                `${AiAgentTableName}.project_uuid`,
+                `${ProjectTableName}.project_uuid`,
+            )
             .select({
                 uuid: `${AiAgentTableName}.ai_agent_uuid`,
                 organizationUuid: `${AiAgentTableName}.organization_uuid`,
                 projectUuid: `${AiAgentTableName}.project_uuid`,
                 name: `${AiAgentTableName}.name`,
+                description: `${AiAgentTableName}.description`,
                 tags: `${AiAgentTableName}.tags`,
                 integrations: this.database.raw(`
                     COALESCE(
@@ -330,12 +385,37 @@ export class AiAgentModel {
                         '[]'::json
                     )
                 `),
+                spaceAccess: this.database.raw(`
+                    COALESCE(
+                        (SELECT json_agg(space_uuid)
+                         FROM space_access
+                         WHERE ai_agent_uuid = ${AiAgentTableName}.ai_agent_uuid),
+                        '[]'::json
+                    )
+                `),
             } satisfies Record<keyof AiAgentSummary, unknown>)
             .where(`${AiAgentTableName}.organization_uuid`, organizationUuid)
             .groupBy(`${AiAgentTableName}.ai_agent_uuid`);
 
-        if (projectUuid) {
-            void query.where(`${AiAgentTableName}.project_uuid`, projectUuid);
+        if (filter?.projectType) {
+            void query.where(
+                `${ProjectTableName}.project_type`,
+                filter.projectType,
+            );
+        }
+
+        if (filter?.projectFilter) {
+            if ('projectUuid' in filter.projectFilter) {
+                void query.where(
+                    `${ProjectTableName}.project_uuid`,
+                    filter.projectFilter.projectUuid,
+                );
+            } else if (filter.projectFilter.projectUuids.length > 0) {
+                void query.whereIn(
+                    `${ProjectTableName}.project_uuid`,
+                    filter.projectFilter.projectUuids,
+                );
+            }
         }
 
         const rows = await query;
@@ -387,12 +467,14 @@ export class AiAgentModel {
         args: Pick<
             ApiCreateAiAgent,
             | 'name'
+            | 'description'
             | 'projectUuid'
             | 'tags'
             | 'integrations'
             | 'instruction'
             | 'groupAccess'
             | 'userAccess'
+            | 'spaceAccess'
             | 'enableDataAccess'
             | 'enableSelfImprovement'
             | 'enableReasoning'
@@ -408,7 +490,7 @@ export class AiAgentModel {
                     project_uuid: args.projectUuid,
                     organization_uuid: args.organizationUuid,
                     tags: args.tags,
-                    description: null,
+                    description: args.description ?? null,
                     image_url: null,
                     enable_data_access: args.enableDataAccess,
                     enable_self_improvement: args.enableSelfImprovement,
@@ -470,9 +552,16 @@ export class AiAgentModel {
                 { trx },
             );
 
+            const spaceAccess = await this.setAndGetSpaceAccess(
+                agent.ai_agent_uuid,
+                args.spaceAccess ?? undefined,
+                { trx },
+            );
+
             return {
                 uuid: agent.ai_agent_uuid,
                 name: agent.name,
+                description: agent.description,
                 projectUuid: agent.project_uuid,
                 organizationUuid: agent.organization_uuid,
                 tags: agent.tags,
@@ -483,6 +572,7 @@ export class AiAgentModel {
                 imageUrl: agent.image_url,
                 groupAccess,
                 userAccess,
+                spaceAccess,
                 enableDataAccess: agent.enable_data_access,
                 enableSelfImprovement: agent.enable_self_improvement,
                 enableReasoning: agent.enable_reasoning,
@@ -507,6 +597,9 @@ export class AiAgentModel {
                     updated_at: trx.fn.now(),
                     ...(args.tags !== undefined ? { tags: args.tags } : {}),
                     ...(args.name !== undefined ? { name: args.name } : {}),
+                    ...(args.description !== undefined
+                        ? { description: args.description }
+                        : {}),
                     ...(args.imageUrl !== undefined
                         ? { image_url: args.imageUrl }
                         : {}),
@@ -532,6 +625,24 @@ export class AiAgentModel {
                 .returning('*');
 
             // Reset all integrations
+            // we cannot relay on cascade deletes because might run into race condition
+            // delete child records first to avoid unique constraint violations
+            const integrationUuids = await trx(AiAgentIntegrationTableName)
+                .select('ai_agent_integration_uuid')
+                .where('ai_agent_uuid', args.agentUuid);
+
+            if (integrationUuids.length > 0) {
+                await trx(AiAgentSlackIntegrationTableName)
+                    .whereIn(
+                        'ai_agent_integration_uuid',
+                        integrationUuids.map(
+                            (i) => i.ai_agent_integration_uuid,
+                        ),
+                    )
+                    .delete();
+            }
+
+            // Then delete parent integration records
             await trx(AiAgentIntegrationTableName)
                 .where('ai_agent_uuid', args.agentUuid)
                 .delete();
@@ -599,9 +710,16 @@ export class AiAgentModel {
                 { trx },
             );
 
+            const spaceAccess = await this.setAndGetSpaceAccess(
+                agent.ai_agent_uuid,
+                args.spaceAccess ?? undefined,
+                { trx },
+            );
+
             return {
                 uuid: agent.ai_agent_uuid,
                 name: agent.name,
+                description: agent.description,
                 projectUuid: agent.project_uuid,
                 organizationUuid: agent.organization_uuid,
                 tags: agent.tags,
@@ -612,6 +730,7 @@ export class AiAgentModel {
                 imageUrl: agent.image_url,
                 groupAccess,
                 userAccess,
+                spaceAccess,
                 enableDataAccess: agent.enable_data_access,
                 enableSelfImprovement: agent.enable_self_improvement,
                 enableReasoning: agent.enable_reasoning,
@@ -710,6 +829,52 @@ export class AiAgentModel {
             await this.setUserAccess(agentUuid, userAccess, { trx });
         }
         return this.getUserAccess(agentUuid, { trx });
+    }
+
+    private async getSpaceAccess(
+        agentUuid: AiAgent['uuid'],
+        { trx = this.database }: { trx?: Knex } = {},
+    ): Promise<NonNullable<AiAgent['spaceAccess']>> {
+        const rows = await trx(AiAgentSpaceAccessTableName)
+            .select('space_uuid')
+            .where('ai_agent_uuid', agentUuid);
+
+        return rows.map((row) => row.space_uuid);
+    }
+
+    private async setSpaceAccess(
+        agentUuid: AiAgent['uuid'],
+        spaceAccess: NonNullable<AiAgent['spaceAccess']>,
+        { trx = this.database }: { trx?: Knex } = {},
+    ): Promise<NonNullable<AiAgent['spaceAccess']>> {
+        // Delete existing space access
+        await trx(AiAgentSpaceAccessTableName)
+            .where('ai_agent_uuid', agentUuid)
+            .delete();
+
+        if (spaceAccess.length === 0) {
+            return [];
+        }
+
+        await trx(AiAgentSpaceAccessTableName).insert(
+            spaceAccess.map((spaceUuid) => ({
+                ai_agent_uuid: agentUuid,
+                space_uuid: spaceUuid,
+            })),
+        );
+
+        return spaceAccess;
+    }
+
+    private async setAndGetSpaceAccess(
+        agentUuid: AiAgent['uuid'],
+        spaceAccess: NonNullable<AiAgent['spaceAccess']> | undefined,
+        { trx = this.database }: { trx?: Knex } = {},
+    ): Promise<NonNullable<AiAgent['spaceAccess']>> {
+        if (spaceAccess !== undefined) {
+            await this.setSpaceAccess(agentUuid, spaceAccess, { trx });
+        }
+        return this.getSpaceAccess(agentUuid, { trx });
     }
 
     async getAgentLastInstruction(
@@ -1206,12 +1371,15 @@ export class AiAgentModel {
                     | 'prompt'
                     | 'created_at'
                     | 'response'
+                    | 'error_message'
                     | 'responded_at'
                     | 'filters_output'
                     | 'viz_config_output'
                     | 'metric_query'
                     | 'human_score'
+                    | 'human_feedback'
                     | 'saved_query_uuid'
+                    | 'model_config'
                 > &
                     Pick<DbUser, 'user_uuid'> &
                     Pick<DbAiThread, 'ai_thread_uuid'> &
@@ -1224,12 +1392,15 @@ export class AiAgentModel {
                 `${AiPromptTableName}.prompt`,
                 `${AiPromptTableName}.created_at`,
                 `${AiPromptTableName}.response`,
+                `${AiPromptTableName}.error_message`,
                 `${AiPromptTableName}.responded_at`,
                 `${AiPromptTableName}.filters_output`,
                 `${AiPromptTableName}.viz_config_output`,
                 `${AiPromptTableName}.metric_query`,
                 `${AiPromptTableName}.human_score`,
+                `${AiPromptTableName}.human_feedback`,
                 `${AiPromptTableName}.saved_query_uuid`,
+                `${AiPromptTableName}.model_config`,
                 `${UserTableName}.user_uuid`,
                 `${AiThreadTableName}.ai_thread_uuid`,
                 `${AiSlackPromptTableName}.slack_user_id`,
@@ -1258,6 +1429,9 @@ export class AiAgentModel {
         const promptUuids = promptRows.map((row) => row.ai_prompt_uuid);
 
         const artifactsMap = await this.findThreadArtifacts({ promptUuids });
+        const referencedArtifactsMap = await this.findThreadReferencedArtifacts(
+            { promptUuids },
+        );
 
         const messagesPromises = promptRows.map(async (row) => {
             const messages: AiAgentMessage<{
@@ -1292,22 +1466,30 @@ export class AiAgentModel {
             );
 
             const artifacts = artifactsMap.get(row.ai_prompt_uuid);
+            const referencedArtifacts = referencedArtifactsMap.get(
+                row.ai_prompt_uuid,
+            );
 
             messages.push({
                 role: 'assistant',
                 status: AiAgentModel.getThreadMessageStatus({
                     responded_at: row.responded_at,
                     response: row.response,
+                    error_message: row.error_message,
                     created_at: row.created_at,
                 }),
                 uuid: row.ai_prompt_uuid,
                 threadUuid: row.ai_thread_uuid,
                 message: row.response,
+                errorMessage: row.error_message,
                 createdAt:
                     row.responded_at?.toISOString() ??
                     row.created_at.toISOString(),
                 humanScore: row.human_score,
+                humanFeedback: row.human_feedback,
                 artifacts: artifacts ?? null,
+                referencedArtifacts: referencedArtifacts ?? null,
+                modelConfig: row.model_config,
                 toolCalls: toolCalls
                     .filter(
                         (
@@ -1390,9 +1572,372 @@ export class AiAgentModel {
         return artifactsMap;
     }
 
+    async findThreadReferencedArtifacts({
+        promptUuids,
+    }: {
+        promptUuids: string[];
+    }): Promise<Map<string, AiAgentMessageAssistantArtifact[]>> {
+        const referencedArtifactsMap = new Map<
+            string,
+            AiAgentMessageAssistantArtifact[]
+        >();
+
+        if (promptUuids.length === 0) {
+            return referencedArtifactsMap;
+        }
+
+        const referencedArtifactRows = await this.database(
+            AiPromptArtifactReferencesTableName,
+        )
+            .join(
+                AiArtifactVersionsTableName,
+                `${AiPromptArtifactReferencesTableName}.ai_artifact_version_uuid`,
+                `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+            )
+            .join(
+                AiArtifactsTableName,
+                `${AiArtifactVersionsTableName}.ai_artifact_uuid`,
+                `${AiArtifactsTableName}.ai_artifact_uuid`,
+            )
+            .select(
+                `${AiPromptArtifactReferencesTableName}.ai_prompt_uuid`,
+                `${AiArtifactsTableName}.ai_artifact_uuid`,
+                `${AiArtifactVersionsTableName}.version_number`,
+                `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+                `${AiArtifactVersionsTableName}.title`,
+                `${AiArtifactVersionsTableName}.description`,
+                `${AiArtifactsTableName}.artifact_type`,
+            )
+            .whereIn(
+                `${AiPromptArtifactReferencesTableName}.ai_prompt_uuid`,
+                promptUuids,
+            )
+            .orderBy(
+                `${AiPromptArtifactReferencesTableName}.created_at`,
+                'desc',
+            );
+
+        for (const artifactRow of referencedArtifactRows) {
+            const promptUuid = artifactRow.ai_prompt_uuid;
+            if (!referencedArtifactsMap.has(promptUuid)) {
+                referencedArtifactsMap.set(promptUuid, []);
+            }
+            referencedArtifactsMap.get(promptUuid)!.push({
+                artifactUuid: artifactRow.ai_artifact_uuid,
+                versionNumber: artifactRow.version_number ?? 1,
+                versionUuid: artifactRow.ai_artifact_version_uuid,
+                title: artifactRow.title,
+                description: artifactRow.description,
+                artifactType: artifactRow.artifact_type as
+                    | 'chart'
+                    | 'dashboard',
+            });
+        }
+
+        return referencedArtifactsMap;
+    }
+
+    async searchArtifactsBySimilarity({
+        organizationUuid,
+        projectUuid,
+        agentUuid,
+        queryEmbedding,
+        embeddingModelProvider,
+        embeddingModel,
+        limit = 3,
+    }: {
+        organizationUuid: string;
+        projectUuid: string;
+        agentUuid: string;
+        queryEmbedding: number[];
+        embeddingModelProvider: string;
+        embeddingModel: string;
+        limit?: number;
+    }): Promise<
+        {
+            artifactVersionUuid: string;
+            chartConfig: Record<string, unknown>;
+            artifactType: 'chart' | 'dashboard';
+            similarity: number;
+        }[]
+    > {
+        return wrapSentryTransaction(
+            'searchArtifactsBySimilarity',
+            { organizationUuid, projectUuid, limit },
+            async () => {
+                if (!queryEmbedding || queryEmbedding.length === 0) {
+                    return [];
+                }
+
+                const embeddingJson = JSON.stringify(queryEmbedding);
+                const similarityThreshold =
+                    this.lightdashConfig.ai.copilot
+                        .verifiedAnswerSimilarityThreshold;
+
+                const results = await this.database(AiArtifactVersionsTableName)
+                    .select(
+                        `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+                        `${AiArtifactVersionsTableName}.chart_config`,
+                        `${AiArtifactsTableName}.artifact_type`,
+                        this.database.raw(
+                            `1 - (${AiArtifactVersionsTableName}.embedding_vector <=> ?::vector) AS similarity`,
+                            [embeddingJson],
+                        ),
+                    )
+                    .join(
+                        AiArtifactsTableName,
+                        `${AiArtifactVersionsTableName}.ai_artifact_uuid`,
+                        `${AiArtifactsTableName}.ai_artifact_uuid`,
+                    )
+                    .join(
+                        AiThreadTableName,
+                        `${AiArtifactsTableName}.ai_thread_uuid`,
+                        `${AiThreadTableName}.ai_thread_uuid`,
+                    )
+                    .whereNotNull(
+                        `${AiArtifactVersionsTableName}.verified_by_user_uuid`,
+                    )
+                    .whereNotNull(`${AiArtifactVersionsTableName}.chart_config`)
+                    .whereNotNull(
+                        `${AiArtifactVersionsTableName}.embedding_vector`,
+                    )
+                    .where(
+                        `${AiThreadTableName}.organization_uuid`,
+                        organizationUuid,
+                    )
+                    .where(`${AiThreadTableName}.agent_uuid`, agentUuid)
+                    .where(`${AiThreadTableName}.project_uuid`, projectUuid)
+                    .where(
+                        `${AiArtifactVersionsTableName}.embedding_model_provider`,
+                        embeddingModelProvider,
+                    )
+                    .where(
+                        `${AiArtifactVersionsTableName}.embedding_model`,
+                        embeddingModel,
+                    )
+                    .whereRaw(
+                        `1 - (${AiArtifactVersionsTableName}.embedding_vector <=> ?::vector) > ${similarityThreshold}`,
+                        [embeddingJson],
+                    )
+                    .orderByRaw(
+                        `${AiArtifactVersionsTableName}.embedding_vector <=> ?::vector`,
+                        [embeddingJson],
+                    )
+                    .limit(limit);
+
+                return results.map((row) => ({
+                    artifactVersionUuid: row.ai_artifact_version_uuid,
+                    chartConfig: row.chart_config,
+                    artifactType: row.artifact_type,
+                    similarity: row.similarity,
+                }));
+            },
+        );
+    }
+
+    async recordArtifactReferences({
+        promptUuid,
+        projectUuid,
+        artifactReferences,
+    }: {
+        promptUuid: string;
+        projectUuid: string;
+        artifactReferences: Array<{
+            artifactVersionUuid: string;
+            similarityScore?: number;
+        }>;
+    }): Promise<void> {
+        if (artifactReferences.length === 0) {
+            return;
+        }
+
+        await Promise.all(
+            artifactReferences.map((ref) =>
+                this.database<AiPromptArtifactReferencesTable>(
+                    AiPromptArtifactReferencesTableName,
+                ).insert({
+                    ai_prompt_uuid: promptUuid,
+                    ai_artifact_version_uuid: ref.artifactVersionUuid,
+                    project_uuid: projectUuid,
+                    similarity_score: ref.similarityScore ?? null,
+                }),
+            ),
+        );
+    }
+
+    async getVerifiedArtifactsForAgent({
+        organizationUuid,
+        projectUuid,
+        agentUuid,
+        paginateArgs,
+    }: {
+        organizationUuid: string;
+        projectUuid: string;
+        agentUuid: string;
+        paginateArgs?: KnexPaginateArgs;
+    }): Promise<
+        KnexPaginatedData<
+            Array<{
+                artifactUuid: string;
+                versionUuid: string;
+                artifactType: 'chart' | 'dashboard';
+                title: string | null;
+                description: string | null;
+                verifiedAt: Date;
+                verifiedByUserUuid: string;
+                referenceCount: number;
+                threadUuid: string;
+                promptUuid: string | null;
+            }>
+        >
+    > {
+        return wrapSentryTransaction(
+            'getVerifiedArtifactsForAgent',
+            { organizationUuid, projectUuid, agentUuid },
+            async () => {
+                const query = this.database(AiArtifactVersionsTableName)
+                    .select(
+                        `${AiArtifactsTableName}.ai_artifact_uuid as artifactUuid`,
+                        `${AiArtifactVersionsTableName}.ai_artifact_version_uuid as versionUuid`,
+                        `${AiArtifactsTableName}.artifact_type as artifactType`,
+                        `${AiArtifactVersionsTableName}.title`,
+                        `${AiArtifactVersionsTableName}.description`,
+                        `${AiArtifactVersionsTableName}.verified_at as verifiedAt`,
+                        `${AiArtifactVersionsTableName}.verified_by_user_uuid as verifiedByUserUuid`,
+                        `${AiArtifactsTableName}.ai_thread_uuid as threadUuid`,
+                        `${AiArtifactVersionsTableName}.ai_prompt_uuid as promptUuid`,
+                    )
+                    .countDistinct(
+                        `${AiPromptArtifactReferencesTableName}.ai_prompt_uuid as referenceCount`,
+                    )
+                    .join(
+                        AiArtifactsTableName,
+                        `${AiArtifactVersionsTableName}.ai_artifact_uuid`,
+                        `${AiArtifactsTableName}.ai_artifact_uuid`,
+                    )
+                    .join(
+                        AiThreadTableName,
+                        `${AiArtifactsTableName}.ai_thread_uuid`,
+                        `${AiThreadTableName}.ai_thread_uuid`,
+                    )
+                    .leftJoin(
+                        AiPromptArtifactReferencesTableName,
+                        `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+                        `${AiPromptArtifactReferencesTableName}.ai_artifact_version_uuid`,
+                    )
+                    .whereNotNull(
+                        `${AiArtifactVersionsTableName}.verified_by_user_uuid`,
+                    )
+                    .where(
+                        `${AiThreadTableName}.organization_uuid`,
+                        organizationUuid,
+                    )
+                    .where(`${AiThreadTableName}.agent_uuid`, agentUuid)
+                    .where(`${AiThreadTableName}.project_uuid`, projectUuid)
+                    .groupBy(
+                        `${AiArtifactsTableName}.ai_artifact_uuid`,
+                        `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+                        `${AiArtifactsTableName}.artifact_type`,
+                        `${AiArtifactVersionsTableName}.title`,
+                        `${AiArtifactVersionsTableName}.description`,
+                        `${AiArtifactVersionsTableName}.verified_at`,
+                        `${AiArtifactVersionsTableName}.verified_by_user_uuid`,
+                        `${AiArtifactsTableName}.ai_thread_uuid`,
+                        `${AiArtifactVersionsTableName}.ai_prompt_uuid`,
+                    )
+                    .orderByRaw(
+                        `COUNT(DISTINCT ${AiPromptArtifactReferencesTableName}.ai_prompt_uuid) DESC`,
+                    );
+
+                const { pagination, data } = await KnexPaginate.paginate(
+                    query,
+                    paginateArgs,
+                );
+
+                return {
+                    pagination,
+                    data: (data as Array<Record<string, unknown>>).map(
+                        (row) => ({
+                            artifactUuid: row.artifactUuid as string,
+                            versionUuid: row.versionUuid as string,
+                            artifactType: row.artifactType as
+                                | 'chart'
+                                | 'dashboard',
+                            title: (row.title as string | null) ?? null,
+                            description:
+                                (row.description as string | null) ?? null,
+                            verifiedAt: row.verifiedAt as Date,
+                            verifiedByUserUuid:
+                                row.verifiedByUserUuid as string,
+                            referenceCount: Number(row.referenceCount),
+                            threadUuid: row.threadUuid as string,
+                            promptUuid:
+                                (row.promptUuid as string | null) ?? null,
+                        }),
+                    ),
+                };
+            },
+        );
+    }
+
+    async findArtifactReferencesByPromptUuid(
+        promptUuid: string,
+    ): Promise<string[]> {
+        const refs = await this.database(AiPromptArtifactReferencesTableName)
+            .select('ai_artifact_version_uuid')
+            .where('ai_prompt_uuid', promptUuid)
+            .orderBy('created_at', 'asc');
+
+        return refs.map((r) => r.ai_artifact_version_uuid);
+    }
+
+    async getArtifactVersionsByUuids(artifactVersionUuids: string[]): Promise<
+        {
+            artifactVersionUuid: string;
+            chartConfig: Record<string, unknown>;
+            artifactType: 'chart' | 'dashboard';
+        }[]
+    > {
+        if (artifactVersionUuids.length === 0) {
+            return [];
+        }
+
+        const results = await this.database(AiArtifactVersionsTableName)
+            .join(
+                AiArtifactsTableName,
+                `${AiArtifactVersionsTableName}.ai_artifact_uuid`,
+                `${AiArtifactsTableName}.ai_artifact_uuid`,
+            )
+            .select<
+                (Pick<
+                    DbAiArtifactVersion,
+                    'ai_artifact_version_uuid' | 'chart_config'
+                > &
+                    Pick<DbAiArtifact, 'artifact_type'>)[]
+            >(`${AiArtifactVersionsTableName}.ai_artifact_version_uuid`, `${AiArtifactVersionsTableName}.chart_config`, `${AiArtifactsTableName}.artifact_type`)
+            .whereIn(
+                `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+                artifactVersionUuids,
+            )
+            .whereNotNull(`${AiArtifactVersionsTableName}.chart_config`);
+
+        return results.map((row) => ({
+            artifactVersionUuid: row.ai_artifact_version_uuid,
+            chartConfig: row.chart_config!,
+            artifactType: row.artifact_type,
+        }));
+    }
+
     static getThreadMessageStatus(
-        row: Pick<DbAiPrompt, 'responded_at' | 'response' | 'created_at'>,
+        row: Pick<
+            DbAiPrompt,
+            'responded_at' | 'response' | 'error_message' | 'created_at'
+        >,
     ): 'idle' | 'pending' | 'error' {
+        if (row.error_message != null) {
+            return 'error';
+        }
+
         if (row.responded_at == null || row.response == null) {
             // if the message was created more than 5 minutes ago, return error
             if (moment(row.created_at).add(5, 'minutes').isBefore(moment())) {
@@ -1446,13 +1991,16 @@ export class AiAgentModel {
                     | 'ai_prompt_uuid'
                     | 'prompt'
                     | 'response'
+                    | 'error_message'
                     | 'created_at'
                     | 'responded_at'
                     | 'filters_output'
                     | 'viz_config_output'
                     | 'metric_query'
                     | 'human_score'
+                    | 'human_feedback'
                     | 'saved_query_uuid'
+                    | 'model_config'
                 > &
                     Pick<DbUser, 'user_uuid'> &
                     Pick<DbAiThread, 'ai_thread_uuid'> &
@@ -1464,13 +2012,16 @@ export class AiAgentModel {
                 `${AiPromptTableName}.ai_prompt_uuid`,
                 `${AiPromptTableName}.prompt`,
                 `${AiPromptTableName}.response`,
+                `${AiPromptTableName}.error_message`,
                 `${AiPromptTableName}.created_at`,
                 `${AiPromptTableName}.responded_at`,
                 `${AiPromptTableName}.filters_output`,
                 `${AiPromptTableName}.viz_config_output`,
                 `${AiPromptTableName}.metric_query`,
                 `${AiPromptTableName}.human_score`,
+                `${AiPromptTableName}.human_feedback`,
                 `${AiPromptTableName}.saved_query_uuid`,
+                `${AiPromptTableName}.model_config`,
                 `${UserTableName}.user_uuid`,
                 `${AiThreadTableName}.ai_thread_uuid`,
                 `${AiSlackPromptTableName}.slack_user_id`,
@@ -1544,6 +2095,14 @@ export class AiAgentModel {
             artifactType: artifactRow.artifact_type as 'chart' | 'dashboard',
         }));
 
+        const referencedArtifactsMap = await this.findThreadReferencedArtifacts(
+            {
+                promptUuids: [row.ai_prompt_uuid],
+            },
+        );
+        const referencedArtifacts =
+            referencedArtifactsMap.get(row.ai_prompt_uuid) ?? null;
+
         switch (role) {
             case 'user':
                 return {
@@ -1572,14 +2131,19 @@ export class AiAgentModel {
                     status: AiAgentModel.getThreadMessageStatus({
                         responded_at: row.responded_at,
                         response: row.response,
+                        error_message: row.error_message,
                         created_at: row.created_at,
                     }),
                     uuid: row.ai_prompt_uuid,
                     threadUuid: row.ai_thread_uuid,
                     message: row.response ?? '',
+                    errorMessage: row.error_message,
                     createdAt: row.responded_at?.toString() ?? '',
                     humanScore: row.human_score,
+                    humanFeedback: row.human_feedback,
                     artifacts: artifacts.length > 0 ? artifacts : null,
+                    referencedArtifacts,
+                    modelConfig: row.model_config,
                     toolCalls: toolCalls
                         .filter(
                             (
@@ -1729,11 +2293,13 @@ export class AiAgentModel {
                 'ai_prompt_uuid',
                 'prompt',
                 'response',
+                'error_message',
                 'responded_at',
                 'filters_output',
                 'viz_config_output',
                 'metric_query',
                 'human_score',
+                'human_feedback',
                 'user_uuid',
             )
             .select({
@@ -1780,12 +2346,14 @@ export class AiAgentModel {
                 prompt: `${AiPromptTableName}.prompt`,
                 createdAt: `${AiPromptTableName}.created_at`,
                 response: `${AiPromptTableName}.response`,
+                errorMessage: `${AiPromptTableName}.error_message`,
                 response_slack_ts: `${AiSlackPromptTableName}.response_slack_ts`,
                 slackUserId: `${AiSlackPromptTableName}.slack_user_id`,
                 slackChannelId: `${AiSlackPromptTableName}.slack_channel_id`,
                 promptSlackTs: `${AiSlackPromptTableName}.prompt_slack_ts`,
                 slackThreadTs: `${AiSlackThreadTableName}.slack_thread_ts`,
                 humanScore: `${AiPromptTableName}.human_score`,
+                modelConfig: `${AiPromptTableName}.model_config`,
             })
             .where(`${AiPromptTableName}.ai_prompt_uuid`, promptUuid)
             .first();
@@ -1858,6 +2426,9 @@ export class AiAgentModel {
             .update({
                 responded_at: this.database.fn.now(),
                 ...(data.response ? { response: data.response } : {}),
+                ...(data.errorMessage
+                    ? { error_message: data.errorMessage }
+                    : {}),
                 ...(data.humanScore ? { human_score: data.humanScore } : {}),
             })
             .where({
@@ -1869,10 +2440,15 @@ export class AiAgentModel {
     async updateHumanScore(data: {
         promptUuid: string;
         humanScore: number | null;
+        humanFeedback?: string | null;
     }) {
         await this.database(AiPromptTableName)
             .update({
                 human_score: data.humanScore,
+                human_feedback:
+                    data.humanScore === -1
+                        ? (data.humanFeedback ?? null)
+                        : null,
             })
             .where({
                 ai_prompt_uuid: data.promptUuid,
@@ -1903,6 +2479,132 @@ export class AiAgentModel {
             .where({
                 ai_artifact_version_uuid: artifactVersionUuid,
             });
+    }
+
+    async setArtifactVersionVerified(
+        artifactVersionUuid: string,
+        verified: boolean,
+        userUuid: string,
+    ): Promise<void> {
+        await this.database(AiArtifactVersionsTableName)
+            .update({
+                verified_by_user_uuid: verified ? userUuid : null,
+                verified_at: verified
+                    ? (this.database.fn.now() as unknown as Date)
+                    : null,
+            } satisfies Partial<DbAiArtifactVersion>)
+            .where({
+                ai_artifact_version_uuid: artifactVersionUuid,
+            });
+    }
+
+    async updateArtifactEmbedding(
+        artifactVersionUuid: string,
+        embedding: number[],
+        embeddingModelProvider: string,
+        embeddingModel: string,
+    ): Promise<void> {
+        await this.database(AiArtifactVersionsTableName)
+            .where({ ai_artifact_version_uuid: artifactVersionUuid })
+            .update({
+                embedding_vector: this.database.raw('?::vector', [
+                    JSON.stringify(embedding),
+                ]) as unknown as number[],
+                embedding_model_provider: embeddingModelProvider,
+                embedding_model: embeddingModel,
+            });
+    }
+
+    async getArtifactEmbedding(artifactVersionUuid: string): Promise<{
+        embedding: number[];
+        provider: string;
+        model: string;
+    } | null> {
+        const result = await this.database(AiArtifactVersionsTableName)
+            .select(
+                'embedding_vector',
+                'embedding_model_provider',
+                'embedding_model',
+            )
+            .where({ ai_artifact_version_uuid: artifactVersionUuid })
+            .first();
+
+        if (!result) {
+            throw new NotFoundError(
+                `Artifact version ${artifactVersionUuid} not found`,
+            );
+        }
+
+        // Return null if embedding hasn't been generated yet
+        if (
+            !result.embedding_vector ||
+            !result.embedding_model_provider ||
+            !result.embedding_model
+        ) {
+            return null;
+        }
+
+        return {
+            embedding: result.embedding_vector,
+            provider: result.embedding_model_provider,
+            model: result.embedding_model,
+        };
+    }
+
+    async updateArtifactQuestion(
+        artifactVersionUuid: string,
+        question: string,
+    ): Promise<void> {
+        await this.database(AiArtifactVersionsTableName)
+            .update({ verified_question: question })
+            .where({ ai_artifact_version_uuid: artifactVersionUuid });
+    }
+
+    async getArtifactQuestion(
+        artifactVersionUuid: string,
+    ): Promise<string | null> {
+        const result = await this.database(AiArtifactVersionsTableName)
+            .select('verified_question')
+            .where({ ai_artifact_version_uuid: artifactVersionUuid })
+            .first();
+
+        if (!result) {
+            throw new NotFoundError(
+                `Artifact version ${artifactVersionUuid} not found`,
+            );
+        }
+
+        return result.verified_question;
+    }
+
+    async getVerifiedQuestions(agentUuid: string): Promise<
+        {
+            question: string;
+            uuid: string;
+        }[]
+    > {
+        const rows = await this.database(AiArtifactVersionsTableName)
+            .join(
+                AiArtifactsTableName,
+                `${AiArtifactVersionsTableName}.ai_artifact_uuid`,
+                `${AiArtifactsTableName}.ai_artifact_uuid`,
+            )
+            .join(
+                AiThreadTableName,
+                `${AiArtifactsTableName}.ai_thread_uuid`,
+                `${AiThreadTableName}.ai_thread_uuid`,
+            )
+            .where(`${AiThreadTableName}.agent_uuid`, agentUuid)
+            .whereNotNull(`${AiArtifactVersionsTableName}.verified_at`)
+            .whereNotNull(`${AiArtifactVersionsTableName}.verified_question`)
+            .select(
+                `${AiArtifactVersionsTableName}.verified_question as question`,
+                `${AiArtifactVersionsTableName}.ai_artifact_version_uuid as uuid`,
+            )
+            .orderBy(`${AiArtifactVersionsTableName}.verified_at`, 'desc')
+            .limit(40);
+
+        return rows;
     }
 
     async updateSlackResponseTs(data: UpdateSlackResponseTs) {
@@ -1946,6 +2648,7 @@ export class AiAgentModel {
                 createdAt: `${AiPromptTableName}.created_at`,
                 response: `${AiPromptTableName}.response`,
                 humanScore: `${AiPromptTableName}.human_score`,
+                modelConfig: `${AiPromptTableName}.model_config`,
             })
             .where(`${AiPromptTableName}.ai_prompt_uuid`, promptUuid)
             .first();
@@ -1986,6 +2689,7 @@ export class AiAgentModel {
                     ai_thread_uuid: data.threadUuid,
                     created_by_user_uuid: data.createdByUserUuid,
                     prompt: data.prompt,
+                    ...(data.modelConfig && { model_config: data.modelConfig }),
                 })
                 .returning('ai_prompt_uuid');
 
@@ -2160,11 +2864,6 @@ export class AiAgentModel {
         }
     }
 
-    /**
-     * Gets all tool calls and results for a prompt using a single query
-     * @param promptUuid
-     * @returns Array<{toolCall: AiAgentToolCall, toolResult: AiAgentToolResult}>
-     */
     async getToolCallsAndResultsForPrompt(promptUuid: string): Promise<
         Array<{
             toolCall: AiAgentToolCall;
@@ -2174,11 +2873,12 @@ export class AiAgentModel {
         const rows = await this.database(AiAgentToolCallTableName)
             .select<
                 Array<
-                    DbAiAgentToolCall &
-                        Pick<
-                            DbAiAgentToolResult,
-                            'ai_agent_tool_result_uuid' | 'result' | 'metadata'
-                        > & { result_created_at: Date }
+                    DbAiAgentToolCall & {
+                        ai_agent_tool_result_uuid: string | null;
+                        result: string | null;
+                        metadata: Record<string, unknown> | null;
+                        result_created_at: Date | null;
+                    }
                 >
             >(
                 `${AiAgentToolCallTableName}.*`,
@@ -2187,7 +2887,7 @@ export class AiAgentModel {
                 `${AiAgentToolResultTableName}.metadata`,
                 `${AiAgentToolResultTableName}.created_at as result_created_at`,
             )
-            .innerJoin(
+            .leftJoin(
                 AiAgentToolResultTableName,
                 `${AiAgentToolCallTableName}.tool_call_id`,
                 `${AiAgentToolResultTableName}.tool_call_id`,
@@ -2195,31 +2895,33 @@ export class AiAgentModel {
             .where(`${AiAgentToolCallTableName}.ai_prompt_uuid`, promptUuid)
             .orderBy(`${AiAgentToolCallTableName}.created_at`, 'asc');
 
-        return rows.map((row) => {
-            const toolCall = {
-                uuid: row.ai_agent_tool_call_uuid,
-                promptUuid: row.ai_prompt_uuid,
-                toolCallId: row.tool_call_id,
-                toolName: row.tool_name,
-                toolArgs: row.tool_args,
-                createdAt: row.created_at,
-            } satisfies AiAgentToolCall;
+        return rows
+            .filter((row) => row.result !== null)
+            .map((row) => {
+                const toolCall = {
+                    uuid: row.ai_agent_tool_call_uuid,
+                    promptUuid: row.ai_prompt_uuid,
+                    toolCallId: row.tool_call_id,
+                    toolName: row.tool_name,
+                    toolArgs: row.tool_args,
+                    createdAt: row.created_at,
+                } satisfies AiAgentToolCall;
 
-            const toolResult = this.parseToolResult({
-                ai_agent_tool_result_uuid: row.ai_agent_tool_result_uuid,
-                ai_prompt_uuid: row.ai_prompt_uuid,
-                tool_call_id: row.tool_call_id,
-                tool_name: row.tool_name,
-                result: row.result,
-                metadata: row.metadata,
-                created_at: row.result_created_at,
+                const toolResult = this.parseToolResult({
+                    ai_agent_tool_result_uuid: row.ai_agent_tool_result_uuid!,
+                    ai_prompt_uuid: row.ai_prompt_uuid,
+                    tool_call_id: row.tool_call_id,
+                    tool_name: row.tool_name,
+                    result: row.result!,
+                    metadata: row.metadata!,
+                    created_at: row.result_created_at!,
+                });
+
+                return {
+                    toolCall,
+                    toolResult,
+                };
             });
-
-            return {
-                toolCall,
-                toolResult,
-            };
-        });
     }
 
     async getToolCallsForPrompt(
@@ -2234,15 +2936,9 @@ export class AiAgentModel {
         promptUuid: string,
     ): Promise<AiAgentToolResult[]> {
         const rows = await this.database(AiAgentToolResultTableName)
-            .select<DbAiAgentToolResult[]>(
-                'ai_agent_tool_result_uuid',
-                'ai_prompt_uuid',
-                'tool_call_id',
-                'tool_name',
-                'result',
-                'metadata',
-                'created_at',
-            )
+            .select<
+                DbAiAgentToolResult[]
+            >('ai_agent_tool_result_uuid', 'ai_prompt_uuid', 'tool_call_id', 'tool_name', 'result', 'metadata', 'created_at')
             .where('ai_prompt_uuid', promptUuid)
             .orderBy('created_at', 'asc');
 
@@ -2393,6 +3089,7 @@ export class AiAgentModel {
                 threadUuid: artifact.ai_thread_uuid,
                 artifactType: artifact.artifact_type as 'chart' | 'dashboard',
                 savedQueryUuid: version.saved_query_uuid,
+                savedDashboardUuid: version.saved_dashboard_uuid,
                 createdAt: artifact.created_at,
                 versionNumber: version.version_number,
                 versionUuid: version.ai_artifact_version_uuid,
@@ -2403,6 +3100,8 @@ export class AiAgentModel {
                     version.dashboard_config as AiArtifact['dashboardConfig'],
                 promptUuid: version.ai_prompt_uuid,
                 versionCreatedAt: version.created_at,
+                verifiedByUserUuid: version.verified_by_user_uuid,
+                verifiedAt: version.verified_at,
             } as AiArtifact;
         });
     }
@@ -2474,6 +3173,7 @@ export class AiAgentModel {
                 threadUuid: artifact.ai_thread_uuid,
                 artifactType: artifact.artifact_type,
                 savedQueryUuid: version.saved_query_uuid,
+                savedDashboardUuid: version.saved_dashboard_uuid,
                 createdAt: artifact.created_at,
                 versionNumber: version.version_number,
                 versionUuid: version.ai_artifact_version_uuid,
@@ -2484,6 +3184,8 @@ export class AiAgentModel {
                     version.dashboard_config as AiArtifact['dashboardConfig'],
                 promptUuid: version.ai_prompt_uuid,
                 versionCreatedAt: version.created_at,
+                verifiedByUserUuid: version.verified_by_user_uuid,
+                verifiedAt: version.verified_at,
             } as AiArtifact;
         });
     }
@@ -2555,6 +3257,8 @@ export class AiAgentModel {
                 dashboardConfig: `${AiArtifactVersionsTableName}.dashboard_config`,
                 promptUuid: `${AiArtifactVersionsTableName}.ai_prompt_uuid`,
                 versionCreatedAt: `${AiArtifactVersionsTableName}.created_at`,
+                verifiedByUserUuid: `${AiArtifactVersionsTableName}.verified_by_user_uuid`,
+                verifiedAt: `${AiArtifactVersionsTableName}.verified_at`,
             } satisfies Record<keyof AiArtifact, string>)
             .from(AiArtifactsTableName)
             .join(
@@ -2621,6 +3325,8 @@ export class AiAgentModel {
                     dashboardConfig: `${AiArtifactVersionsTableName}.dashboard_config`,
                     promptUuid: `${AiArtifactVersionsTableName}.ai_prompt_uuid`,
                     versionCreatedAt: `${AiArtifactVersionsTableName}.created_at`,
+                    verifiedByUserUuid: `${AiArtifactVersionsTableName}.verified_by_user_uuid`,
+                    verifiedAt: `${AiArtifactVersionsTableName}.verified_at`,
                 } satisfies Record<keyof AiArtifact, string>)
                 .from(AiArtifactsTableName)
                 .join(
@@ -2705,23 +3411,22 @@ export class AiAgentModel {
                 })
                 .returning('*');
 
-            // Create prompts - handle both string and object format
             const promptInserts = data.prompts.map((promptData) => {
-                if (typeof promptData === 'string') {
-                    // Legacy string format
+                if (isThreadPrompt(promptData)) {
                     return {
                         ai_eval_uuid: evalRecord.ai_eval_uuid,
-                        prompt: promptData,
-                        ai_prompt_uuid: null,
-                        ai_thread_uuid: null,
+                        prompt: null,
+                        ai_prompt_uuid: promptData.promptUuid,
+                        ai_thread_uuid: promptData.threadUuid,
+                        expected_response: promptData.expectedResponse,
                     };
                 }
-                // New object format with referenced prompt/thread
                 return {
                     ai_eval_uuid: evalRecord.ai_eval_uuid,
-                    prompt: null,
-                    ai_prompt_uuid: promptData.promptUuid,
-                    ai_thread_uuid: promptData.threadUuid,
+                    prompt: promptData.prompt,
+                    ai_prompt_uuid: null,
+                    ai_thread_uuid: null,
+                    expected_response: promptData.expectedResponse,
                 };
             });
 
@@ -2743,11 +3448,13 @@ export class AiAgentModel {
                         ? {
                               type: 'string' as const,
                               prompt: p.prompt,
+                              expectedResponse: p.expected_response,
                           }
                         : {
                               type: 'thread' as const,
                               promptUuid: p.ai_prompt_uuid!,
                               threadUuid: p.ai_thread_uuid!,
+                              expectedResponse: p.expected_response,
                           }),
                 })),
             };
@@ -2796,11 +3503,13 @@ export class AiAgentModel {
                     ? {
                           type: 'string' as const,
                           prompt: p.prompt,
+                          expectedResponse: p.expected_response,
                       }
                     : {
                           type: 'thread' as const,
                           promptUuid: p.ai_prompt_uuid!,
                           threadUuid: p.ai_thread_uuid!,
+                          expectedResponse: p.expected_response,
                       }),
             })),
         };
@@ -2848,24 +3557,23 @@ export class AiAgentModel {
                     .where('ai_eval_uuid', evalUuid)
                     .delete();
 
-                // Insert new prompts - handle both string and object format
                 if (data.prompts.length > 0) {
                     const promptRecords = data.prompts.map((promptData) => {
-                        if (typeof promptData === 'string') {
-                            // Legacy string format
+                        if (isThreadPrompt(promptData)) {
                             return {
                                 ai_eval_uuid: evalUuid,
-                                prompt: promptData,
-                                ai_prompt_uuid: null,
-                                ai_thread_uuid: null,
+                                prompt: null,
+                                ai_prompt_uuid: promptData.promptUuid,
+                                ai_thread_uuid: promptData.threadUuid,
+                                expected_response: promptData.expectedResponse,
                             };
                         }
-                        // New object format with referenced prompt/thread
                         return {
                             ai_eval_uuid: evalUuid,
-                            prompt: null,
-                            ai_prompt_uuid: promptData.promptUuid,
-                            ai_thread_uuid: promptData.threadUuid,
+                            prompt: promptData.prompt,
+                            ai_prompt_uuid: null,
+                            ai_thread_uuid: null,
+                            expected_response: promptData.expectedResponse,
                         };
                     });
                     await trx(AiEvalPromptTableName).insert(promptRecords);
@@ -2888,19 +3596,21 @@ export class AiAgentModel {
             });
 
             const promptRecords = data.prompts.map((promptData) => {
-                if (typeof promptData === 'string') {
+                if (isThreadPrompt(promptData)) {
                     return {
                         ai_eval_uuid: evalUuid,
-                        prompt: promptData,
-                        ai_prompt_uuid: null,
-                        ai_thread_uuid: null,
+                        prompt: null,
+                        ai_prompt_uuid: promptData.promptUuid,
+                        ai_thread_uuid: promptData.threadUuid,
+                        expected_response: promptData.expectedResponse,
                     };
                 }
                 return {
                     ai_eval_uuid: evalUuid,
-                    prompt: null,
-                    ai_prompt_uuid: promptData.promptUuid,
-                    ai_thread_uuid: promptData.threadUuid,
+                    prompt: promptData.prompt,
+                    ai_prompt_uuid: null,
+                    ai_thread_uuid: null,
+                    expected_response: promptData.expectedResponse,
                 };
             });
             await trx(AiEvalPromptTableName).insert(promptRecords);
@@ -2928,6 +3638,8 @@ export class AiAgentModel {
             status: runRecord.status,
             completedAt: runRecord.completed_at,
             createdAt: runRecord.created_at,
+            passedAssessments: 0,
+            failedAssessments: 0,
         };
     }
 
@@ -2991,8 +3703,58 @@ export class AiAgentModel {
     async getEvalRunResult(
         resultUuid: string,
     ): Promise<AiAgentEvaluationRunResult> {
+        const firstThreadPromptSubquery = this.buildFirstThreadPromptSubquery();
+
         const result = await this.database(AiEvalRunResultTableName)
-            .where('ai_eval_run_result_uuid', resultUuid)
+            .leftJoin(
+                AiEvalRunResultAssessmentTableName,
+                `${AiEvalRunResultTableName}.ai_eval_run_result_uuid`,
+                `${AiEvalRunResultAssessmentTableName}.ai_eval_run_result_uuid`,
+            )
+            .leftJoin(
+                AiEvalPromptTableName,
+                `${AiEvalRunResultTableName}.ai_eval_prompt_uuid`,
+                `${AiEvalPromptTableName}.ai_eval_prompt_uuid`,
+            )
+            .leftJoin(
+                firstThreadPromptSubquery,
+                `${AiEvalRunResultTableName}.ai_thread_uuid`,
+                'first_prompts.ai_thread_uuid',
+            )
+            .where(
+                `${AiEvalRunResultTableName}.ai_eval_run_result_uuid`,
+                resultUuid,
+            )
+            .select<
+                DbAiEvalRunResult & {
+                    assessment_uuid: string | null;
+                    assessment_type: 'human' | 'llm' | null;
+                    passed: boolean | null;
+                    reason: string | null;
+                    assessed_by_user_uuid: string | null;
+                    llm_judge_provider: string | null;
+                    llm_judge_model: string | null;
+                    assessed_at: Date | null;
+                    assessment_created_at: Date | null;
+                    prompt: string | null;
+                    expected_response: string | null;
+                }
+            >(
+                `${AiEvalRunResultTableName}.*`,
+                `${AiEvalRunResultAssessmentTableName}.ai_eval_run_result_assessment_uuid as assessment_uuid`,
+                `${AiEvalRunResultAssessmentTableName}.assessment_type`,
+                `${AiEvalRunResultAssessmentTableName}.passed`,
+                `${AiEvalRunResultAssessmentTableName}.reason`,
+                `${AiEvalRunResultAssessmentTableName}.assessed_by_user_uuid`,
+                `${AiEvalRunResultAssessmentTableName}.llm_judge_provider`,
+                `${AiEvalRunResultAssessmentTableName}.llm_judge_model`,
+                `${AiEvalRunResultAssessmentTableName}.assessed_at`,
+                `${AiEvalRunResultAssessmentTableName}.created_at as assessment_created_at`,
+                this.database.raw(
+                    `COALESCE(${AiEvalPromptTableName}.prompt, first_prompts.first_prompt) as prompt`,
+                ),
+                `${AiEvalPromptTableName}.expected_response`,
+            )
             .first();
 
         if (!result) {
@@ -3009,6 +3771,78 @@ export class AiAgentModel {
             errorMessage: result.error_message,
             completedAt: result.completed_at,
             createdAt: result.created_at,
+            prompt: result.prompt,
+            expectedResponse: result.expected_response,
+            assessment:
+                result.assessment_uuid &&
+                result.assessment_type &&
+                result.passed !== null &&
+                result.assessed_at &&
+                result.assessment_created_at
+                    ? {
+                          assessmentUuid: result.assessment_uuid,
+                          runResultUuid: result.ai_eval_run_result_uuid,
+                          assessmentType: result.assessment_type,
+                          passed: result.passed,
+                          reason: result.reason,
+                          assessedByUserUuid: result.assessed_by_user_uuid,
+                          llmJudgeProvider: result.llm_judge_provider,
+                          llmJudgeModel: result.llm_judge_model,
+                          assessedAt: result.assessed_at,
+                          createdAt: result.assessment_created_at,
+                      }
+                    : null,
+        };
+    }
+
+    private buildFirstThreadPromptSubquery() {
+        return this.database
+            .from(
+                this.database(AiPromptTableName)
+                    .select('ai_thread_uuid', 'prompt', 'created_at')
+                    .as('ordered_prompts'),
+            )
+            .distinctOn('ai_thread_uuid')
+            .select('ai_thread_uuid', 'prompt as first_prompt')
+            .orderBy('ai_thread_uuid')
+            .orderBy('created_at', 'asc')
+            .as('first_prompts');
+    }
+
+    private buildAssessmentCountsSubquery() {
+        return this.database(AiEvalRunResultAssessmentTableName)
+            .select(
+                `${AiEvalRunResultTableName}.ai_eval_run_uuid`,
+                this.database.raw(
+                    `COUNT(CASE WHEN ${AiEvalRunResultAssessmentTableName}.passed = true THEN 1 END) as passed_count`,
+                ),
+                this.database.raw(
+                    `COUNT(CASE WHEN ${AiEvalRunResultAssessmentTableName}.passed = false THEN 1 END) as failed_count`,
+                ),
+            )
+            .innerJoin(
+                AiEvalRunResultTableName,
+                `${AiEvalRunResultAssessmentTableName}.ai_eval_run_result_uuid`,
+                `${AiEvalRunResultTableName}.ai_eval_run_result_uuid`,
+            )
+            .groupBy(`${AiEvalRunResultTableName}.ai_eval_run_uuid`)
+            .as('assessments_agg');
+    }
+
+    private static mapRunWithAssessmentCounts(
+        row: DbAiEvalRun & {
+            passed_assessments: string | number;
+            failed_assessments: string | number;
+        },
+    ): AiAgentEvaluationRunSummary {
+        return {
+            runUuid: row.ai_eval_run_uuid,
+            evalUuid: row.ai_eval_uuid,
+            status: row.status,
+            completedAt: row.completed_at,
+            createdAt: row.created_at,
+            passedAssessments: Number(row.passed_assessments),
+            failedAssessments: Number(row.failed_assessments),
         };
     }
 
@@ -3016,24 +3850,44 @@ export class AiAgentModel {
         evalUuid: string,
         paginateArgs?: KnexPaginateArgs,
     ): Promise<KnexPaginatedData<{ runs: AiAgentEvaluationRunSummary[] }>> {
+        const assessmentsSubquery = this.buildAssessmentCountsSubquery();
+
         const query = this.database(AiEvalRunTableName)
-            .select<DbAiEvalRun[]>('*')
-            .where('ai_eval_uuid', evalUuid)
-            .orderBy('created_at', 'desc');
+            .select<
+                Array<
+                    DbAiEvalRun & {
+                        passed_assessments: string | number;
+                        failed_assessments: string | number;
+                    }
+                >
+            >(
+                `${AiEvalRunTableName}.ai_eval_run_uuid`,
+                `${AiEvalRunTableName}.ai_eval_uuid`,
+                `${AiEvalRunTableName}.status`,
+                `${AiEvalRunTableName}.completed_at`,
+                `${AiEvalRunTableName}.created_at`,
+                this.database.raw(
+                    `COALESCE(assessments_agg.passed_count, 0) as passed_assessments`,
+                ),
+                this.database.raw(
+                    `COALESCE(assessments_agg.failed_count, 0) as failed_assessments`,
+                ),
+            )
+            .leftJoin(
+                assessmentsSubquery,
+                `${AiEvalRunTableName}.ai_eval_run_uuid`,
+                'assessments_agg.ai_eval_run_uuid',
+            )
+            .where(`${AiEvalRunTableName}.ai_eval_uuid`, evalUuid)
+            .orderBy(`${AiEvalRunTableName}.created_at`, 'desc');
 
         const { pagination, data } = await KnexPaginate.paginate(
             query,
             paginateArgs,
         );
 
-        const runs: AiAgentEvaluationRunSummary[] = data.map(
-            (run: DbAiEvalRun) => ({
-                runUuid: run.ai_eval_run_uuid,
-                evalUuid: run.ai_eval_uuid,
-                status: run.status,
-                completedAt: run.completed_at,
-                createdAt: run.created_at,
-            }),
+        const runs: AiAgentEvaluationRunSummary[] = data.map((row) =>
+            AiAgentModel.mapRunWithAssessmentCounts(row),
         );
 
         return {
@@ -3047,8 +3901,33 @@ export class AiAgentModel {
     async getEvalRunWithResults(
         runUuid: string,
     ): Promise<AiAgentEvaluationRun> {
+        const assessmentsSubquery = this.buildAssessmentCountsSubquery();
+
         const run = await this.database(AiEvalRunTableName)
-            .where('ai_eval_run_uuid', runUuid)
+            .select<
+                DbAiEvalRun & {
+                    passed_assessments: string | number;
+                    failed_assessments: string | number;
+                }
+            >(
+                `${AiEvalRunTableName}.ai_eval_run_uuid`,
+                `${AiEvalRunTableName}.ai_eval_uuid`,
+                `${AiEvalRunTableName}.status`,
+                `${AiEvalRunTableName}.completed_at`,
+                `${AiEvalRunTableName}.created_at`,
+                this.database.raw(
+                    `COALESCE(assessments_agg.passed_count, 0) as passed_assessments`,
+                ),
+                this.database.raw(
+                    `COALESCE(assessments_agg.failed_count, 0) as failed_assessments`,
+                ),
+            )
+            .leftJoin(
+                assessmentsSubquery,
+                `${AiEvalRunTableName}.ai_eval_run_uuid`,
+                'assessments_agg.ai_eval_run_uuid',
+            )
+            .where(`${AiEvalRunTableName}.ai_eval_run_uuid`, runUuid)
             .first();
 
         if (!run)
@@ -3056,11 +3935,23 @@ export class AiAgentModel {
                 `Evaluation run not found for uuid: ${runUuid}`,
             );
 
-        const results = await this.database(AiEvalRunResultTableName)
+        const firstThreadPromptSubquery = this.buildFirstThreadPromptSubquery();
+
+        const resultsQuery = this.database(AiEvalRunResultTableName)
             .leftJoin(
                 AiEvalPromptTableName,
                 `${AiEvalRunResultTableName}.ai_eval_prompt_uuid`,
                 `${AiEvalPromptTableName}.ai_eval_prompt_uuid`,
+            )
+            .leftJoin(
+                AiEvalRunResultAssessmentTableName,
+                `${AiEvalRunResultTableName}.ai_eval_run_result_uuid`,
+                `${AiEvalRunResultAssessmentTableName}.ai_eval_run_result_uuid`,
+            )
+            .leftJoin(
+                firstThreadPromptSubquery,
+                `${AiEvalRunResultTableName}.ai_thread_uuid`,
+                'first_prompts.ai_thread_uuid',
             )
             .where(`${AiEvalRunResultTableName}.ai_eval_run_uuid`, runUuid)
             .select<
@@ -3073,7 +3964,19 @@ export class AiAgentModel {
                     | 'status'
                     | 'ai_thread_uuid'
                 > &
-                    Pick<DbAiEvalPrompt, 'ai_eval_prompt_uuid'>)[]
+                    Pick<DbAiEvalPrompt, 'ai_eval_prompt_uuid'> & {
+                        prompt: string | null;
+                        expected_response: string | null;
+                        assessment_uuid: string | null;
+                        assessment_type: 'human' | 'llm' | null;
+                        passed: boolean | null;
+                        reason: string | null;
+                        assessed_by_user_uuid: string | null;
+                        llm_judge_provider: string | null;
+                        llm_judge_model: string | null;
+                        assessed_at: Date | null;
+                        assessment_created_at: Date | null;
+                    })[]
             >(
                 `${AiEvalRunResultTableName}.ai_eval_run_result_uuid`,
                 `${AiEvalRunResultTableName}.error_message`,
@@ -3082,15 +3985,26 @@ export class AiAgentModel {
                 `${AiEvalRunResultTableName}.status`,
                 `${AiEvalRunResultTableName}.ai_thread_uuid`,
                 `${AiEvalPromptTableName}.ai_eval_prompt_uuid`,
+                this.database.raw(
+                    `COALESCE(${AiEvalPromptTableName}.prompt, first_prompts.first_prompt) as prompt`,
+                ),
+                `${AiEvalPromptTableName}.expected_response`,
+                `${AiEvalRunResultAssessmentTableName}.ai_eval_run_result_assessment_uuid as assessment_uuid`,
+                `${AiEvalRunResultAssessmentTableName}.assessment_type`,
+                `${AiEvalRunResultAssessmentTableName}.passed`,
+                `${AiEvalRunResultAssessmentTableName}.reason`,
+                `${AiEvalRunResultAssessmentTableName}.assessed_by_user_uuid`,
+                `${AiEvalRunResultAssessmentTableName}.llm_judge_provider`,
+                `${AiEvalRunResultAssessmentTableName}.llm_judge_model`,
+                `${AiEvalRunResultAssessmentTableName}.assessed_at`,
+                `${AiEvalRunResultAssessmentTableName}.created_at as assessment_created_at`,
             )
             .orderBy(`${AiEvalRunResultTableName}.created_at`, 'asc');
 
+        const results = await resultsQuery;
+
         return {
-            runUuid: run.ai_eval_run_uuid,
-            evalUuid: run.ai_eval_uuid,
-            status: run.status,
-            completedAt: run.completed_at,
-            createdAt: run.created_at,
+            ...AiAgentModel.mapRunWithAssessmentCounts(run),
             results: results.map((result) => ({
                 resultUuid: result.ai_eval_run_result_uuid,
                 evalPromptUuid: result.ai_eval_prompt_uuid,
@@ -3099,6 +4013,27 @@ export class AiAgentModel {
                 errorMessage: result.error_message,
                 completedAt: result.completed_at,
                 createdAt: result.created_at,
+                prompt: result.prompt,
+                expectedResponse: result.expected_response,
+                assessment:
+                    result.assessment_uuid &&
+                    result.assessment_type &&
+                    result.passed !== null &&
+                    result.assessed_at &&
+                    result.assessment_created_at
+                        ? {
+                              assessmentUuid: result.assessment_uuid,
+                              runResultUuid: result.ai_eval_run_result_uuid,
+                              assessmentType: result.assessment_type,
+                              passed: result.passed,
+                              reason: result.reason,
+                              assessedByUserUuid: result.assessed_by_user_uuid,
+                              llmJudgeProvider: result.llm_judge_provider,
+                              llmJudgeModel: result.llm_judge_model,
+                              assessedAt: result.assessed_at,
+                              createdAt: result.assessment_created_at,
+                          }
+                        : null,
             })),
         };
     }
@@ -3124,6 +4059,147 @@ export class AiAgentModel {
                     });
             }
         });
+    }
+
+    async createLlmAssessment(
+        data: CreateLlmAssessment,
+    ): Promise<AiEvalRunResultAssessment> {
+        const [assessment] = await this.database(
+            AiEvalRunResultAssessmentTableName,
+        )
+            .insert({
+                ai_eval_run_result_uuid: data.runResultUuid,
+                assessment_type: 'llm',
+                passed: data.passed,
+                reason: data.reason,
+                assessed_by_user_uuid: null,
+                llm_judge_provider: data.llmJudgeProvider,
+                llm_judge_model: data.llmJudgeModel,
+            })
+            .returning('*');
+
+        if (!assessment) {
+            throw new Error('Failed to create LLM assessment');
+        }
+
+        return {
+            assessmentUuid: assessment.ai_eval_run_result_assessment_uuid,
+            runResultUuid: assessment.ai_eval_run_result_uuid,
+            assessmentType: assessment.assessment_type,
+            passed: assessment.passed,
+            reason: assessment.reason,
+            assessedByUserUuid: assessment.assessed_by_user_uuid,
+            llmJudgeProvider: assessment.llm_judge_provider,
+            llmJudgeModel: assessment.llm_judge_model,
+            assessedAt: assessment.assessed_at,
+            createdAt: assessment.created_at,
+        };
+    }
+
+    async getEvalResultDataForAssessment(resultUuid: string): Promise<{
+        query: string;
+        response: string;
+        expectedAnswer: string | null;
+        artifact: {
+            artifactType: 'chart' | 'dashboard';
+            chartConfig: Record<string, unknown> | null;
+            dashboardConfig: Record<string, unknown> | null;
+            title: string | null;
+            description: string | null;
+        } | null;
+        toolResults: Pick<AiAgentToolResult, 'toolName' | 'result'>[];
+    }> {
+        const result = await this.database(AiEvalRunResultTableName)
+            .leftJoin(
+                AiEvalPromptTableName,
+                `${AiEvalRunResultTableName}.ai_eval_prompt_uuid`,
+                `${AiEvalPromptTableName}.ai_eval_prompt_uuid`,
+            )
+            .leftJoin(
+                AiPromptTableName,
+                `${AiEvalRunResultTableName}.ai_thread_uuid`,
+                `${AiPromptTableName}.ai_thread_uuid`,
+            )
+            .leftJoin(
+                AiArtifactVersionsTableName,
+                `${AiPromptTableName}.ai_prompt_uuid`,
+                `${AiArtifactVersionsTableName}.ai_prompt_uuid`,
+            )
+            .leftJoin(
+                AiArtifactsTableName,
+                `${AiArtifactVersionsTableName}.ai_artifact_uuid`,
+                `${AiArtifactsTableName}.ai_artifact_uuid`,
+            )
+            .where(
+                `${AiEvalRunResultTableName}.ai_eval_run_result_uuid`,
+                resultUuid,
+            )
+            .orderBy(`${AiPromptTableName}.created_at`, 'asc')
+            .select<{
+                prompt: string | null;
+                response: string | null;
+                expected_response: string | null;
+                artifact_type: 'chart' | 'dashboard' | null;
+                chart_config: Record<string, unknown> | null;
+                dashboard_config: Record<string, unknown> | null;
+                title: string | null;
+                description: string | null;
+                ai_prompt_uuid: string | null;
+            }>(
+                `${AiPromptTableName}.prompt`,
+                `${AiPromptTableName}.response`,
+                `${AiEvalPromptTableName}.expected_response`,
+                `${AiArtifactsTableName}.artifact_type`,
+                `${AiArtifactVersionsTableName}.chart_config`,
+                `${AiArtifactVersionsTableName}.dashboard_config`,
+                `${AiArtifactVersionsTableName}.title`,
+                `${AiArtifactVersionsTableName}.description`,
+                `${AiPromptTableName}.ai_prompt_uuid`,
+            )
+            .first();
+
+        if (!result) {
+            throw new NotFoundError(
+                `Evaluation run result not found for uuid: ${resultUuid}`,
+            );
+        }
+
+        if (!result.prompt) {
+            throw new NotFoundError(
+                `Query is missing for result: ${resultUuid}`,
+            );
+        }
+
+        if (!result.response) {
+            throw new NotFoundError(
+                `Response is missing for result: ${resultUuid}`,
+            );
+        }
+
+        // Fetch tool calls and results if there's a prompt UUID
+        let toolResults: Pick<AiAgentToolResult, 'toolName' | 'result'>[] = [];
+
+        if (result.ai_prompt_uuid) {
+            toolResults = await this.getToolResultsForPrompt(
+                result.ai_prompt_uuid,
+            );
+        }
+
+        return {
+            query: result.prompt,
+            response: result.response,
+            expectedAnswer: result.expected_response,
+            artifact: result.artifact_type
+                ? {
+                      artifactType: result.artifact_type,
+                      chartConfig: result.chart_config,
+                      dashboardConfig: result.dashboard_config,
+                      title: result.title,
+                      description: result.description,
+                  }
+                : null,
+            toolResults,
+        };
     }
 
     private async cloneThreadArtifacts({

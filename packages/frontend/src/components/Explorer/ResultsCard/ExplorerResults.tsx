@@ -3,22 +3,25 @@ import { Box, Text } from '@mantine/core';
 import { memo, useCallback, useMemo, useState, type FC } from 'react';
 
 import {
+    explorerActions,
     selectAdditionalMetrics,
+    selectChartConfig,
     selectColumnOrder,
     selectIsEditMode,
+    selectPivotConfig,
     selectTableCalculations,
     selectTableName,
+    useExplorerDispatch,
     useExplorerSelector,
 } from '../../../features/explorer/store';
 import { useColumns } from '../../../hooks/useColumns';
 import { useExplore } from '../../../hooks/useExplore';
 import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
-import { useFeatureFlag } from '../../../hooks/useFeatureFlagEnabled';
 import type {
     useGetReadyQueryResults,
     useInfiniteQueryResults,
 } from '../../../hooks/useQueryResults';
-import useExplorerContext from '../../../providers/Explorer/useExplorerContext';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
 import Table from '../../common/Table';
@@ -41,11 +44,11 @@ const getQueryStatus = (
     const isFetchingFirstPage = queryResults.isFetchingFirstPage;
 
     // Don't return queryResults.status because we changed from mutation to query so 'loading' has a different meaning
-    if (queryResults.error) {
+    if (queryResults.error || query.error) {
         return 'error';
     } else if (isCreatingQuery || isFetchingFirstPage) {
         return 'loading';
-    } else if (query.status === 'loading' || !query.isFetched) {
+    } else if (!query.data) {
         return 'idle';
     } else if (query.status === 'success') {
         return 'success';
@@ -55,6 +58,7 @@ const getQueryStatus = (
 };
 
 export const ExplorerResults = memo(() => {
+    const dispatch = useExplorerDispatch();
     const columns = useColumns();
     const isEditMode = useExplorerSelector(selectIsEditMode);
     const activeTableName = useExplorerSelector(selectTableName);
@@ -62,9 +66,7 @@ export const ExplorerResults = memo(() => {
     const tableCalculations = useExplorerSelector(selectTableCalculations);
 
     // Get chart config for column properties
-    const chartConfig = useExplorerContext(
-        (context) => context.state.unsavedChartVersion.chartConfig,
-    );
+    const chartConfig = useExplorerSelector(selectChartConfig);
     const columnProperties =
         chartConfig.type === 'table' && chartConfig.config?.columns
             ? chartConfig.config.columns
@@ -76,10 +78,11 @@ export const ExplorerResults = memo(() => {
         queryResults,
         unpivotedQuery,
         unpivotedQueryResults,
+        unpivotedEnabled,
         missingRequiredParameters,
     } = useExplorerQuery();
 
-    const { data: useSqlPivotResults } = useFeatureFlag(
+    const { data: useSqlPivotResults } = useServerFeatureFlag(
         FeatureFlags.UseSqlPivotResults,
     );
 
@@ -87,17 +90,34 @@ export const ExplorerResults = memo(() => {
     const metrics = query.data?.metricQuery?.metrics ?? [];
     const explorerColumnOrder = useExplorerSelector(selectColumnOrder);
 
-    const hasPivotConfig = useExplorerContext(
-        (context) => !!context.state.unsavedChartVersion.pivotConfig,
-    );
+    const pivotConfig = useExplorerSelector(selectPivotConfig);
+    const hasPivotConfig = !!pivotConfig;
 
     const resultsData = useMemo(() => {
         const isSqlPivotEnabled = !!useSqlPivotResults?.enabled;
         const hasUnpivotedQuery = !!unpivotedQuery?.data?.queryUuid;
 
-        // Only use unpivoted data when SQL pivot is enabled
-        const shouldUseUnpivotedData =
-            isSqlPivotEnabled && hasPivotConfig && hasUnpivotedQuery;
+        // Check if we need unpivoted data (regardless of whether it's ready)
+        const needsUnpivotedData =
+            isSqlPivotEnabled && hasPivotConfig && unpivotedEnabled;
+
+        // Only use unpivoted data when it's ready
+        const shouldUseUnpivotedData = needsUnpivotedData && hasUnpivotedQuery;
+
+        // When we need unpivoted data but it's not ready yet,
+        // show loading state instead of falling back to pivoted main query data.
+        // The main query has a different row structure (pivoted) that would cause
+        // the first column to show "-" because the pivot dimension key is missing.
+        if (needsUnpivotedData && !hasUnpivotedQuery) {
+            return {
+                rows: [],
+                totalResults: undefined,
+                isFetchingRows: true,
+                fetchMoreRows: () => {},
+                status: 'loading' as const,
+                apiError: undefined,
+            };
+        }
 
         if (shouldUseUnpivotedData) {
             return {
@@ -125,10 +145,11 @@ export const ExplorerResults = memo(() => {
         return result;
     }, [
         useSqlPivotResults?.enabled,
+        unpivotedQuery,
         hasPivotConfig,
+        unpivotedEnabled,
         query,
         queryResults,
-        unpivotedQuery,
         unpivotedQueryResults,
     ]);
 
@@ -141,9 +162,13 @@ export const ExplorerResults = memo(() => {
         apiError,
     } = resultsData;
 
-    const setColumnOrder = useExplorerContext(
-        (context) => context.actions.setColumnOrder,
+    const handleColumnOrderChange = useCallback(
+        (order: string[]) => {
+            dispatch(explorerActions.setColumnOrder(order));
+        },
+        [dispatch],
     );
+
     const { data: exploreData, isInitialLoading: isExploreLoading } =
         useExplore(activeTableName, {
             refetchOnMount: false,
@@ -255,7 +280,7 @@ export const ExplorerResults = memo(() => {
                     fetchMoreRows={fetchMoreRows}
                     columns={columns}
                     columnOrder={explorerColumnOrder}
-                    onColumnOrderChange={setColumnOrder}
+                    onColumnOrderChange={handleColumnOrderChange}
                     cellContextMenu={cellContextMenu}
                     headerContextMenu={
                         isEditMode ? ColumnHeaderContextMenu : undefined

@@ -152,14 +152,14 @@ const SingleSeriesConfiguration: FC<Props> = ({
                             }}
                         >
                             <MantineIcon
-                                icon={series.hidden ? IconEye : IconEyeOff}
+                                icon={series.hidden ? IconEyeOff : IconEye}
                             />
                         </ActionIcon>
                     )}
                     {isCollapsable && (
                         <ActionIcon onClick={toggleIsOpen}>
                             <MantineIcon
-                                color="gray.7"
+                                color="ldGray.7"
                                 icon={isOpen ? IconChevronUp : IconChevronDown}
                             />
                         </ActionIcon>

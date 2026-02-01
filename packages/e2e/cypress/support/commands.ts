@@ -45,7 +45,6 @@ import {
 } from '@lightdash/common';
 import '@testing-library/cypress/add-commands';
 import 'cypress-file-upload';
-import { ProfilingEntry, summarizeProfiling } from './profilerSummary';
 
 declare global {
     namespace Cypress {
@@ -122,6 +121,7 @@ declare global {
             ): Chainable<string>;
 
             getMonacoEditorText(): Chainable<string>;
+            scrollTreeToItem(itemText: string): Chainable<Element>;
         }
     }
 }
@@ -770,403 +770,63 @@ Cypress.Commands.add('getMonacoEditorText', () => {
     });
 });
 
-/*
- * The following is a set of commands that are used to measure inteaction performance.
- * They make if possible to start a user-flow measurement at a time, add a step,
- * and end the flow when a specific element is visible.
- *
- * Metrics get written to the window object, and there are functions to collect and write out the metrics as a perf artifact.
+/**
+ * Scrolls the virtualized tree to make a specific item visible.
+ * This is needed because virtualized lists only render items in the viewport,
+ * and standard scrollIntoView() doesn't work with absolute positioning.
  */
+Cypress.Commands.add('scrollTreeToItem', (itemText: string) => {
+    cy.get('[data-testid="virtualized-tree-scroll-container"]', {
+        timeout: 10000,
+    }).then(($container) => {
+        const container = $container[0];
+        const maxScroll = container.scrollHeight;
+        const viewportHeight = container.clientHeight;
 
-// --- Performance artifact types ---
-type PerfArtifact = {
-    meta: {
-        runId: string;
-        build: string;
-        url: string;
-        ts: number;
-    };
-    webVitals: AnyType[];
-    profilerSummary: {
-        all: Record<string, ReturnType<typeof summarizeProfiling>>;
-        byFlow: Record<
-            string,
-            Record<string, ReturnType<typeof summarizeProfiling>>
-        >;
-    };
-    userTiming: {
-        measures: { name: string; duration: number; startTime: number }[];
-        marks: { name: string; startTime: number }[];
-    };
-    flows: {
-        [flowId: string]: {
-            total: { duration: number; startTime: number } | null;
-            steps: { name: string; duration: number; startTime: number }[];
-        };
-    };
-    nav: {
-        durationMs: number;
-        transferSize?: number;
-    };
-};
+        container.scrollTop = 0;
 
-// --- Flow timing helpers (Cypress-only, no app instrumentation) ---
-declare global {
-    namespace Cypress {
-        interface Chainable {
-            flowBegin(id: string, firstStep?: string): Chainable<void>;
-            flowStep(id: string, step: string): Chainable<void>;
-            flowStepWhenVisible(
-                id: string,
-                step: string,
-                selector: string,
-                timeoutMs?: number,
-            ): Chainable<void>;
-            flowEnd(id: string, lastStep?: string): Chainable<void>;
-            flowEndWhenVisible(
-                id: string,
-                lastStep: string,
-                selector: string,
-                timeoutMs?: number,
-            ): Chainable<void>;
-            flowCollect(id: string): Chainable<{
-                total: PerformanceMeasure[];
-                steps: PerformanceMeasure[];
-            }>;
-            flowCollectMultiple(ids: string[]): Chainable<{
-                [flowId: string]: {
-                    total: PerformanceMeasure[];
-                    steps: PerformanceMeasure[];
-                };
-            }>;
-            collectAndWritePerfArtifact(options: {
-                flows?: string[];
-                runId?: string;
-                filenamePrefix?: string;
-                expectMedianDuration?: number;
-            }): Chainable<void>;
-        }
-    }
-}
+        const checkAndScroll = (scrollPosition: number): Cypress.Chainable => {
+            container.scrollTop = scrollPosition;
 
-function markAfterPaint(win: Window, cb: () => void) {
-    win.requestAnimationFrame(() => win.requestAnimationFrame(cb));
-}
+            return cy.wait(200).then(() => {
+                const elements = Array.from(container.querySelectorAll('*'));
+                const found = elements.find((el) => {
+                    const text = el.textContent?.trim() || '';
+                    const childTexts = Array.from(el.children)
+                        .map((child) => child.textContent?.trim() || '')
+                        .join('');
+                    const ownText = text.replace(childTexts, '').trim();
 
-Cypress.Commands.add('flowBegin', (id: string, firstStep = 'start') => {
-    cy.window({ log: false }).then((win) => {
-        const flowWindow = win as Window & {
-            flow?: Record<string, { last: string | null }>;
-        };
-        flowWindow.flow = flowWindow.flow || {};
-        flowWindow.flow[id] = { last: null as string | null };
-
-        win.performance.mark(`flow:${id}:start`);
-        win.performance.mark(`flow:${id}:step:${firstStep}`);
-        flowWindow.flow[id].last = firstStep;
-    });
-});
-
-Cypress.Commands.add('flowStep', (id: string, step: string) =>
-    cy.window({ log: false }).then(
-        (win) =>
-            new Cypress.Promise<void>((resolve) => {
-                markAfterPaint(win, () => {
-                    const flowWindow = win as Window & {
-                        flow?: Record<string, { last: string | null }>;
-                    };
-                    const last = flowWindow.flow?.[id]?.last as string | null;
-                    const markName = `flow:${id}:step:${step}`;
-                    win.performance.mark(markName);
-                    if (last) {
-                        try {
-                            win.performance.measure(
-                                `flow:${id}:${last}->${step}`,
-                                `flow:${id}:step:${last}`,
-                                markName,
-                            );
-                        } catch {
-                            // Ignore performance measurement errors
-                        }
-                    }
-                    if (flowWindow.flow) {
-                        flowWindow.flow[id].last = step;
-                    }
-                    resolve();
-                });
-            }),
-    ),
-);
-
-Cypress.Commands.add(
-    'flowStepWhenVisible',
-    (id: string, step: string, selector: string, timeoutMs = 60000) =>
-        cy
-            .get(selector, { timeout: timeoutMs })
-            .should('be.visible')
-            .then(() => cy.flowStep(id, step)),
-);
-
-Cypress.Commands.add('flowEnd', (id: string, lastStep?: string) =>
-    cy.window({ log: false }).then(
-        (win) =>
-            new Cypress.Promise<void>((resolve) => {
-                markAfterPaint(win, () => {
-                    const flowWindow = win as Window & {
-                        flow?: Record<string, { last: string | null }>;
-                    };
-                    const last = flowWindow.flow?.[id]?.last as string | null;
-
-                    if (lastStep) {
-                        const markName = `flow:${id}:step:${lastStep}`;
-                        win.performance.mark(markName);
-                        if (last) {
-                            try {
-                                win.performance.measure(
-                                    `flow:${id}:${last}->${lastStep}`,
-                                    `flow:${id}:step:${last}`,
-                                    markName,
-                                );
-                            } catch {
-                                // Ignore performance measurement errors
-                            }
-                        }
-                    }
-
-                    win.performance.mark(`flow:${id}:end`);
-                    try {
-                        win.performance.measure(
-                            `flow:${id}:total`,
-                            `flow:${id}:start`,
-                            `flow:${id}:end`,
-                        );
-                    } catch {
-                        // Ignore performance measurement errors
-                    }
-
-                    resolve();
-                });
-            }),
-    ),
-);
-
-Cypress.Commands.add(
-    'flowEndWhenVisible',
-    (id: string, lastStep: string, selector: string, timeoutMs = 60000) =>
-        cy
-            .get(selector, { timeout: timeoutMs })
-            .should('be.visible')
-            .then(() => cy.flowEnd(id, lastStep)),
-);
-
-Cypress.Commands.add('flowCollect', (id: string) =>
-    cy.window({ log: false }).then((win) => {
-        const total = win.performance.getEntriesByName(
-            `flow:${id}:total`,
-        ) as PerformanceMeasure[];
-        const steps = (
-            win.performance.getEntriesByType('measure') as PerformanceMeasure[]
-        ).filter(
-            (m) => m.name.startsWith(`flow:${id}:`) && m.name.includes('->'),
-        );
-        return { total, steps };
-    }),
-);
-
-Cypress.Commands.add('flowCollectMultiple', (ids: string[]) =>
-    cy.window({ log: false }).then((win) => {
-        const result: {
-            [flowId: string]: {
-                total: PerformanceMeasure[];
-                steps: PerformanceMeasure[];
-            };
-        } = {};
-
-        ids.forEach((id) => {
-            const total = win.performance.getEntriesByName(
-                `flow:${id}:total`,
-            ) as PerformanceMeasure[];
-            const steps = (
-                win.performance.getEntriesByType(
-                    'measure',
-                ) as PerformanceMeasure[]
-            ).filter(
-                (m) =>
-                    m.name.startsWith(`flow:${id}:`) && m.name.includes('->'),
-            );
-            result[id] = { total, steps };
-        });
-
-        return result;
-    }),
-);
-
-Cypress.Commands.add(
-    'collectAndWritePerfArtifact',
-    (options: {
-        flows?: string[];
-        runId?: string;
-        filenamePrefix?: string;
-        expectMedianDuration?: number;
-    }) => {
-        const {
-            flows = [],
-            runId = Cypress.env('RUN_ID') || `${Date.now()}`,
-            filenamePrefix = 'perf',
-        } = options;
-
-        return cy.window({ log: false }).then((win) => {
-            // eslint-disable-next-line @typescript-eslint/dot-notation
-            const build = (win as AnyType)['__BUILD_SHA'] || 'dev';
-            // eslint-disable-next-line @typescript-eslint/dot-notation
-            const webVitals = (win as AnyType)['__webVitals'] || [];
-            // eslint-disable-next-line @typescript-eslint/dot-notation
-            const profiler = (win as AnyType)['__profiling'] || [];
-
-            const measures = win.performance.getEntriesByType(
-                'measure',
-            ) as PerformanceMeasure[];
-            const marks = win.performance.getEntriesByType(
-                'mark',
-            ) as PerformanceMark[];
-
-            // Basic nav stats (from nav timing v2)
-            const navEntries = win.performance.getEntriesByType(
-                'navigation',
-            ) as PerformanceNavigationTiming[];
-            const nav = navEntries[0]
-                ? {
-                      durationMs: navEntries[0].duration,
-                      transferSize: (navEntries[0] as AnyType).transferSize,
-                  }
-                : { durationMs: NaN };
-
-            // Collect flow timing data if flows are specified
-            const collectFlows =
-                flows.length > 0 ? cy.flowCollectMultiple(flows) : cy.wrap({});
-
-            return collectFlows.then((allFlowData) => {
-                const flowsData: {
-                    [flowId: string]: {
-                        total: { duration: number; startTime: number } | null;
-                        steps: {
-                            name: string;
-                            duration: number;
-                            startTime: number;
-                        }[];
-                    };
-                } = {};
-
-                // Process each flow's data
-                Object.entries(
-                    allFlowData as Record<
-                        string,
-                        {
-                            total: PerformanceMeasure[];
-                            steps: PerformanceMeasure[];
-                        }
-                    >,
-                ).forEach(([flowId, flowData]) => {
-                    flowsData[flowId] = {
-                        total: flowData.total[0]
-                            ? {
-                                  duration: flowData.total[0].duration,
-                                  startTime: flowData.total[0].startTime,
-                              }
-                            : null,
-                        steps: flowData.steps.map((s: PerformanceMeasure) => ({
-                            name: s.name,
-                            duration: s.duration,
-                            startTime: s.startTime,
-                        })),
-                    };
-                });
-
-                // Profiler IDs
-                const profilerEntries = (profiler as ProfilingEntry[]) || [];
-                const profilerIds = Array.from(
-                    new Set(profilerEntries.map((p) => p.id)),
-                );
-
-                // Build a "whole-spec" summary per profiler id
-                const profilerSummaryAll: Record<
-                    string,
-                    ReturnType<typeof summarizeProfiling>
-                > = {};
-                profilerIds.forEach((pid) => {
-                    profilerSummaryAll[pid] = summarizeProfiling(
-                        profilerEntries,
-                        {
-                            id: pid,
-                            excludeNestedFromStats: true,
-                            excludeZero: true,
-                            longCommitThresholdsMs: [16, 32, 50, 100, 500],
-                        },
+                    return (
+                        text === itemText ||
+                        ownText === itemText ||
+                        (text.includes(itemText) && el.children.length === 0)
                     );
                 });
 
-                // Build a per-flow window summary per profiler id
-                type ProfByFlow = Record<
-                    string,
-                    Record<string, ReturnType<typeof summarizeProfiling>>
-                >;
-                const profilerSummaryByFlow: ProfByFlow = {};
+                if (found) {
+                    return cy.wrap(found);
+                }
 
-                flows.forEach((flowId) => {
-                    const start = marks.find(
-                        (m) => m.name === `flow:${flowId}:start`,
-                    )?.startTime;
-                    const end = marks.find(
-                        (m) => m.name === `flow:${flowId}:end`,
-                    )?.startTime;
-                    if (start == null || end == null) return;
+                const nextScroll = scrollPosition + viewportHeight * 0.5;
 
-                    profilerSummaryByFlow[flowId] = {};
-                    profilerIds.forEach((pid) => {
-                        profilerSummaryByFlow[flowId][pid] = summarizeProfiling(
-                            profilerEntries,
-                            {
-                                id: pid,
-                                window: { start, end },
-                                excludeNestedFromStats: true,
-                                excludeZero: true,
-                                longCommitThresholdsMs: [16, 32, 50, 100, 500],
-                            },
+                if (nextScroll >= maxScroll - viewportHeight) {
+                    container.scrollTop = maxScroll;
+                    return cy
+                        .wait(200)
+                        .then(() =>
+                            cy
+                                .get(
+                                    '[data-testid="virtualized-tree-scroll-container"]',
+                                )
+                                .within(() => cy.findByText(itemText)),
                         );
-                    });
-                });
+                }
 
-                const artifact: PerfArtifact = {
-                    meta: {
-                        runId,
-                        build,
-                        url: win.location.pathname + win.location.search,
-                        ts: win.performance.now(),
-                    },
-                    webVitals,
-                    profilerSummary: {
-                        all: profilerSummaryAll,
-                        byFlow: profilerSummaryByFlow,
-                    },
-                    userTiming: {
-                        measures: measures.map((m) => ({
-                            name: m.name,
-                            duration: m.duration,
-                            startTime: m.startTime,
-                        })),
-                        marks: marks.map((m) => ({
-                            name: m.name,
-                            startTime: m.startTime,
-                        })),
-                    },
-                    flows: flowsData,
-                    nav,
-                };
-
-                // Persist JSON
-                const filename = `${filenamePrefix}-${artifact.meta.build}-${artifact.meta.runId}.json`;
-                return cy.task('writeArtifact', { filename, data: artifact });
+                return checkAndScroll(nextScroll);
             });
-        });
-    },
-);
+        };
+
+        return checkAndScroll(0);
+    });
+});

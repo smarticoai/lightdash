@@ -8,6 +8,7 @@ import {
     type CustomDimension,
     type Explore,
 } from '@lightdash/common';
+import { LD_FIELD_COLORS } from '../../../../../mantineTheme';
 import { sortNodes } from '../Tree/sortNodes';
 import {
     isGroupNode,
@@ -44,6 +45,7 @@ function flattenNodeRecursive(
     searchResults: string[],
     isSearching: boolean,
     depth: number = 0,
+    parentPath: string = '',
 ): TreeNodeItem[] {
     const items: TreeNodeItem[] = [];
 
@@ -73,7 +75,12 @@ function flattenNodeRecursive(
         }
 
         // Add the group node itself
-        const groupKey = buildGroupKey(tableName, sectionType, node.key);
+        const groupKey = buildGroupKey(
+            tableName,
+            sectionType,
+            node.key,
+            parentPath,
+        );
         const isExpanded = expandedGroups.has(groupKey) || isSearching;
 
         items.push({
@@ -91,6 +98,11 @@ function flattenNodeRecursive(
 
         // Add children if expanded
         if (isExpanded) {
+            // Build the parent path for children: append current node's key
+            const childParentPath = parentPath
+                ? `${parentPath}-${node.key}`
+                : node.key;
+
             Object.values(groupNode.children).forEach((child) => {
                 items.push(
                     ...flattenNodeRecursive(
@@ -102,6 +114,7 @@ function flattenNodeRecursive(
                         searchResults,
                         isSearching,
                         depth + 1,
+                        childParentPath,
                     ),
                 );
             });
@@ -243,9 +256,9 @@ function flattenTable(
             estimatedHeight: ITEM_HEIGHTS.SECTION_HEADER,
             data: {
                 tableName,
-                treeSection: TreeSection.Dimensions, // Arbitrary, missing fields aren't tied to a section
+                treeSection: TreeSection.MissingFields, // Arbitrary, missing fields aren't tied to a section
                 label: 'Missing fields',
-                color: 'gray.6',
+                color: 'ldGray.6',
                 depth: baseDepth,
             },
         } satisfies SectionHeaderItem);
@@ -258,7 +271,7 @@ function flattenTable(
                 data: {
                     fieldId,
                     tableName,
-                    isDimension: true, // Will be determined by the component
+                    isDimension: options.selectedDimensions.includes(fieldId),
                 },
             } satisfies MissingFieldItem);
         });
@@ -289,7 +302,7 @@ function flattenTable(
                 tableName,
                 treeSection: TreeSection.Dimensions,
                 label: 'Dimensions',
-                color: 'blue.9',
+                color: LD_FIELD_COLORS.dimension.color,
                 depth: baseDepth,
             },
         } satisfies SectionHeaderItem);
@@ -300,7 +313,7 @@ function flattenTable(
             {
                 type: TreeSection.Dimensions,
                 label: 'Dimensions',
-                color: 'blue.9',
+                color: LD_FIELD_COLORS.dimension.color,
                 itemsMap: dimensionsMap,
                 orderFieldsBy: table.orderFieldsBy,
             },
@@ -349,8 +362,15 @@ function flattenTable(
                 tableName,
                 treeSection: TreeSection.Metrics,
                 label: 'Metrics',
-                color: 'yellow.9',
+                color: LD_FIELD_COLORS.metric.color,
                 depth: baseDepth,
+                helpButton: !hasMetrics
+                    ? {
+                          href: 'https://docs.lightdash.com/guides/how-to-create-metrics',
+                          tooltipText:
+                              'No metrics defined in your dbt project. Click to view docs and learn how to add a metric to your project.',
+                      }
+                    : undefined,
             },
         } satisfies SectionHeaderItem);
     }
@@ -360,7 +380,7 @@ function flattenTable(
             {
                 type: TreeSection.Metrics,
                 label: 'Metrics',
-                color: 'yellow.9',
+                color: LD_FIELD_COLORS.metric.color,
                 itemsMap: metricsMap,
                 orderFieldsBy: table.orderFieldsBy,
             },
@@ -396,8 +416,13 @@ function flattenTable(
                 tableName,
                 treeSection: TreeSection.CustomMetrics,
                 label: 'Custom metrics',
-                color: 'yellow.9',
+                color: LD_FIELD_COLORS.metric.color,
                 depth: baseDepth,
+                helpButton: {
+                    href: 'https://docs.lightdash.com/guides/how-to-create-metrics#-adding-custom-metrics-in-the-explore-view',
+                    tooltipText:
+                        'Add custom metrics by hovering over the dimension of your choice & selecting the three-dot Action Menu. Click to view docs.',
+                },
             },
         } satisfies SectionHeaderItem);
 
@@ -428,7 +453,7 @@ function flattenTable(
             {
                 type: TreeSection.CustomMetrics,
                 label: 'Custom metrics',
-                color: 'yellow.9',
+                color: LD_FIELD_COLORS.metric.color,
                 itemsMap: customMetricsMap,
                 missingItems: options.missingCustomMetrics.filter(
                     (m) => m.table === tableName,
@@ -466,7 +491,7 @@ function flattenTable(
                 tableName,
                 treeSection: TreeSection.CustomDimensions,
                 label: 'Custom dimensions',
-                color: 'blue.9',
+                color: LD_FIELD_COLORS.dimension.color,
                 depth: baseDepth,
             },
         } satisfies SectionHeaderItem);
@@ -475,7 +500,7 @@ function flattenTable(
             {
                 type: TreeSection.CustomDimensions,
                 label: 'Custom dimensions',
-                color: 'blue.9',
+                color: LD_FIELD_COLORS.dimension.color,
                 itemsMap: customDimensionsMap,
                 missingItems: options.missingCustomDimensions.filter(
                     (d) => d.table === tableName,
@@ -541,7 +566,11 @@ export function getNodeMapsForVirtualization(
         if (Object.keys(dimensionsMap).length > 0) {
             maps.set(
                 `${tableName}-dimensions`,
-                getNodeMapFromItemsMap(dimensionsMap, table.groupDetails),
+                getNodeMapFromItemsMap(
+                    dimensionsMap,
+                    table.groupDetails,
+                    table.orderFieldsBy,
+                ),
             );
         }
 
@@ -552,7 +581,11 @@ export function getNodeMapsForVirtualization(
         if (Object.keys(metricsMap).length > 0) {
             maps.set(
                 `${tableName}-metrics`,
-                getNodeMapFromItemsMap(metricsMap, table.groupDetails),
+                getNodeMapFromItemsMap(
+                    metricsMap,
+                    table.groupDetails,
+                    table.orderFieldsBy,
+                ),
             );
         }
 
@@ -566,7 +599,11 @@ export function getNodeMapsForVirtualization(
             );
             maps.set(
                 `${tableName}-custom-metrics`,
-                getNodeMapFromItemsMap(customMetricsMap, table.groupDetails),
+                getNodeMapFromItemsMap(
+                    customMetricsMap,
+                    table.groupDetails,
+                    table.orderFieldsBy,
+                ),
             );
         }
 
@@ -579,7 +616,11 @@ export function getNodeMapsForVirtualization(
             );
             maps.set(
                 `${tableName}-custom-dimensions`,
-                getNodeMapFromItemsMap(customDimensionsMap, table.groupDetails),
+                getNodeMapFromItemsMap(
+                    customDimensionsMap,
+                    table.groupDetails,
+                    table.orderFieldsBy,
+                ),
             );
         }
     });

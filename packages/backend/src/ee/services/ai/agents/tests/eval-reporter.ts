@@ -7,8 +7,10 @@ import {
     ContextRelevancyResponse,
     FactualityResponse,
     LlmJudgeResult,
-} from './utils/llmAsAJudge';
-import { ToolJudgeResult } from './utils/llmAsJudgeForTools';
+    RunQueryEfficiencyResponse,
+} from '../../utils/llmAsAJudge';
+import { ToolJudgeResult } from '../../utils/llmAsJudgeForTools';
+import { ToolCallWithResult } from './utils/testHelpers';
 
 interface EvalResult {
     testCase: string;
@@ -24,13 +26,15 @@ interface EvalResult {
         message: string;
         type: string;
     }>;
-    toolCalls?: TaskMeta['toolCalls'];
+    toolCalls?: ToolCallWithResult[];
     llmJudgeResults?: TaskMeta['llmJudgeResults'];
     llmToolJudgeResults?: TaskMeta['llmToolJudgeResults'];
     prompts?: TaskMeta['prompts'];
     responses?: TaskMeta['responses'];
     agentProvider?: TaskMeta['agentProvider'];
     agentModel?: TaskMeta['agentModel'];
+    agentType?: TaskMeta['agentType'];
+    agentTags?: TaskMeta['agentTags'];
 }
 
 export default class EvalHtmlReporter implements Reporter {
@@ -68,7 +72,21 @@ export default class EvalHtmlReporter implements Reporter {
 
         // Only generate report if we have results
         if (this.results.length > 0) {
-            this.generateReport();
+            // Group results by agent type and generate separate reports
+            const specializedResults = this.results.filter(
+                (r) => r.agentType === 'specialized',
+            );
+            const genericResults = this.results.filter(
+                (r) => r.agentType === 'generic',
+            );
+
+            if (specializedResults.length > 0) {
+                this.generateReport(specializedResults, 'specialized');
+            }
+
+            if (genericResults.length > 0) {
+                this.generateReport(genericResults, 'generic');
+            }
         }
     }
 
@@ -116,6 +134,8 @@ export default class EvalHtmlReporter implements Reporter {
                     responses: taskMeta.responses || [],
                     agentProvider: taskMeta.agentProvider,
                     agentModel: taskMeta.agentModel,
+                    agentType: taskMeta.agentType,
+                    agentTags: taskMeta.agentTags,
                 };
                 this.results.push(result);
             } else if (task.type === 'suite' && task.tasks) {
@@ -125,33 +145,33 @@ export default class EvalHtmlReporter implements Reporter {
         }
     }
 
-    private generateReport() {
+    private generateReport(
+        results: EvalResult[],
+        agentType: 'specialized' | 'generic',
+    ) {
         const now = new Date();
         const day = now.getDate();
         const month = now.getMonth() + 1;
         const year = now.getFullYear();
         const hour = now.getHours();
         const minute = now.getMinutes();
-        const filename = `eval-report-${day}-${month}-${year}-at-H${hour}-M${minute}.html`;
+        const filename = `eval-report-${agentType}-${day}-${month}-${year}-at-H${hour}-M${minute}.html`;
         const filepath = path.join(this.outputDir, filename);
 
-        const html = this.generateHtml();
+        const html = EvalHtmlReporter.generateHtml(results, agentType);
         fs.writeFileSync(filepath, html);
 
         console.log(`\n📊 Eval report generated: ${filepath}`);
     }
 
-    private generateHtml(): string {
-        const passCount = this.results.filter(
-            (r) => r.result === 'pass',
-        ).length;
-        const failCount = this.results.filter(
-            (r) => r.result === 'fail',
-        ).length;
-        const skipCount = this.results.filter(
-            (r) => r.result === 'skip',
-        ).length;
-        const totalCount = this.results.length;
+    private static generateHtml(
+        results: EvalResult[],
+        agentType: 'specialized' | 'generic',
+    ): string {
+        const passCount = results.filter((r) => r.result === 'pass').length;
+        const failCount = results.filter((r) => r.result === 'fail').length;
+        const skipCount = results.filter((r) => r.result === 'skip').length;
+        const totalCount = results.length;
         const passRate =
             totalCount > 0 ? ((passCount / totalCount) * 100).toFixed(1) : '0';
 
@@ -162,17 +182,21 @@ export default class EvalHtmlReporter implements Reporter {
 
         // Get agent provider/model from first test result that has it
         const agentProvider =
-            this.results.find((r) => r.agentProvider)?.agentProvider ||
-            'unknown';
+            results.find((r) => r.agentProvider)?.agentProvider || 'unknown';
         const agentModel =
-            this.results.find((r) => r.agentModel)?.agentModel || 'unknown';
+            results.find((r) => r.agentModel)?.agentModel || 'unknown';
+        const agentTags =
+            results.find((r) => r.agentTags && r.agentTags.length > 0)
+                ?.agentTags || [];
+        const tagsDisplay =
+            agentTags.length > 0 ? ` (tags: ${agentTags.join(', ')})` : '';
 
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Agent Evaluation Report</title>
+    <title>AI Agent Evaluation Report - ${agentType}</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -272,15 +296,15 @@ export default class EvalHtmlReporter implements Reporter {
             font-size: 18px;
             margin-right: 6px;
         }
-        .pass { 
+        .pass {
             color: #28a745;
             font-weight: 600;
         }
-        .fail { 
+        .fail {
             color: #dc3545;
             font-weight: 600;
         }
-        .skip { 
+        .skip {
             color: #ffc107;
             font-weight: 600;
         }
@@ -336,7 +360,7 @@ export default class EvalHtmlReporter implements Reporter {
         function toggleExpand(testId) {
             const expandRow = document.getElementById('expand-' + testId);
             const toggleBtn = document.getElementById('toggle-' + testId);
-            
+
             if (expandRow.style.display === 'none' || expandRow.style.display === '') {
                 expandRow.style.display = 'table-row';
                 toggleBtn.textContent = '▼';
@@ -349,11 +373,11 @@ export default class EvalHtmlReporter implements Reporter {
 </head>
 <body>
     <div class="title">
-        <h1>AI Agent Evaluation Report</h1>
+        <h1>AI Agent Evaluation Report - ${agentType}</h1>
         <div class="date">${formattedDate}</div>
-        <div class="model-info">Agent: ${agentProvider} / ${agentModel}</div>
+        <div class="model-info">Agent: ${agentProvider} / ${agentModel}${tagsDisplay}</div>
     </div>
-    
+
     <div class="summary">
         <div class="summary-item pass">
             <h3>Passed</h3>
@@ -385,7 +409,7 @@ export default class EvalHtmlReporter implements Reporter {
             </tr>
         </thead>
         <tbody>
-                ${this.results
+                ${results
                     .map(
                         (result, index) => `
                 <tr>
@@ -402,10 +426,8 @@ export default class EvalHtmlReporter implements Reporter {
                         ${
                             result.error
                                 ? `<div style="margin-top: 4px; font-size: 10px; color: #dc3545;">${EvalHtmlReporter.escapeHtml(
-                                      result.error.substring(0, 50),
-                                  )}${
-                                      result.error.length > 50 ? '...' : ''
-                                  }</div>`
+                                      result.error,
+                                  )}</div>`
                                 : ''
                         }
                     </td>
@@ -449,7 +471,7 @@ export default class EvalHtmlReporter implements Reporter {
                                       .map(
                                           (tc) =>
                                               `<span style="display: inline-block; background: #e7f3ff; padding: 1px 4px; margin: 1px; border-radius: 2px; font-size: 10px;">${EvalHtmlReporter.escapeHtml(
-                                                  tc,
+                                                  tc.tool_name,
                                               )}</span>`,
                                       )
                                       .join('')}</div>`
@@ -472,7 +494,11 @@ export default class EvalHtmlReporter implements Reporter {
 </html>`;
     }
 
-    private static escapeHtml(text: string): string {
+    private static escapeHtml(text: string | null): string {
+        if (!text) {
+            return 'null';
+        }
+
         const map: Record<string, string> = {
             '&': '&amp;',
             '<': '&lt;',
@@ -549,6 +575,17 @@ export default class EvalHtmlReporter implements Reporter {
                             )}%`;
                             scoreClass = judgeResult.passed ? 'pass' : 'fail';
                             break;
+                        case 'runQueryEfficiency':
+                            // actual test only fails if the score is less than 0.49
+                            const runQueryResult =
+                                judgeData as RunQueryEfficiencyResponse;
+                            scoreText = `${(runQueryResult.score * 100).toFixed(
+                                1,
+                            )}% (${runQueryResult.runQueryCount} call${
+                                runQueryResult.runQueryCount !== 1 ? 's' : ''
+                            })`;
+                            scoreClass = judgeResult.passed ? 'pass' : 'fail';
+                            break;
                         default:
                             scoreText = 'N/A';
                             scoreClass = 'fail';
@@ -587,9 +624,69 @@ export default class EvalHtmlReporter implements Reporter {
             (!result.llmToolJudgeResults ||
                 result.llmToolJudgeResults.length === 0) &&
             (!result.prompts || result.prompts.length === 0) &&
-            (!result.responses || result.responses.length === 0)
+            (!result.responses || result.responses.length === 0) &&
+            (!result.toolCalls || result.toolCalls.length === 0)
         ) {
             return '';
+        }
+
+        // Generate tool calls section
+        let toolCallsHtml = '';
+        if (result.toolCalls && result.toolCalls.length > 0) {
+            toolCallsHtml = `
+            <div class="llm-judge-item">
+                <div class="llm-judge-header">TOOL CALLS</div>
+                <details style="margin-top: 8px;" open>
+                    <summary style="cursor: pointer; color: #007bff;">View Tool Calls (${
+                        result.toolCalls.length
+                    })</summary>
+                    <div style="margin-top: 8px;">
+                        ${result.toolCalls
+                            .map((tc, idx) => {
+                                const argsJson = JSON.stringify(
+                                    tc.tool_args,
+                                    null,
+                                    2,
+                                );
+                                const resultJson =
+                                    tc.result !== undefined
+                                        ? JSON.stringify(tc.result, null, 2)
+                                        : null;
+                                return `
+                                <details style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;">
+                                    <summary style="cursor: pointer; color: #495057; font-weight: 600;">${
+                                        idx + 1
+                                    }. ${EvalHtmlReporter.escapeHtml(
+                                        tc.tool_name,
+                                    )}</summary>
+                                    <div style="margin-top: 8px; padding: 8px; background: white; border-radius: 4px;">
+                                        <div style="margin-bottom: 8px;">
+                                            <strong>Arguments:</strong>
+                                            <pre style="margin-top: 4px; padding: 8px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6; overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto; max-width: 1200px;">${EvalHtmlReporter.escapeHtml(
+                                                argsJson,
+                                            )}</pre>
+                                        </div>
+                                        ${
+                                            resultJson
+                                                ? `
+                                        <div>
+                                            <strong>Result:</strong>
+                                            <pre style="margin-top: 4px; padding: 8px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6; overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto; max-width: 1200px;">${EvalHtmlReporter.escapeHtml(
+                                                resultJson,
+                                            )}</pre>
+                                        </div>
+                                        `
+                                                : ''
+                                        }
+                                    </div>
+                                </details>
+                            `;
+                            })
+                            .join('')}
+                    </div>
+                </details>
+            </div>
+        `;
         }
 
         // Generate prompts and responses section
@@ -613,9 +710,7 @@ export default class EvalHtmlReporter implements Reporter {
                                 <div style="margin-bottom: 8px;">
                                     <strong>Prompt ${idx + 1}:</strong>
                                     <div style="margin-top: 4px; font-family: monospace; background: white; padding: 8px; border-radius: 4px; border: 1px solid #dee2e6;">
-                                        ${EvalHtmlReporter.escapeHtml(
-                                            prompt.substring(0, 300),
-                                        )}${prompt.length > 300 ? '...' : ''}
+                                        ${EvalHtmlReporter.escapeHtml(prompt)}
                                     </div>
                                 </div>
                             `,
@@ -640,9 +735,7 @@ export default class EvalHtmlReporter implements Reporter {
                                 <div style="margin-bottom: 8px;">
                                     <strong>Response ${idx + 1}:</strong>
                                     <div style="margin-top: 4px; font-family: monospace; background: white; padding: 8px; border-radius: 4px; border: 1px solid #dee2e6;">
-                                        ${EvalHtmlReporter.escapeHtml(
-                                            response.substring(0, 300),
-                                        )}${response.length > 300 ? '...' : ''}
+                                        ${EvalHtmlReporter.escapeHtml(response)}
                                     </div>
                                 </div>
                             `,
@@ -687,7 +780,7 @@ export default class EvalHtmlReporter implements Reporter {
                         <div><strong>Score:</strong> ${(
                             (jsonResult.score ?? 0) * 100
                         ).toFixed(1)}%</div>
-                        
+
                     `;
                         break;
                     case 'contextRelevancy':
@@ -700,6 +793,27 @@ export default class EvalHtmlReporter implements Reporter {
                         <div><strong>Reason:</strong> ${EvalHtmlReporter.escapeHtml(
                             contextResult.reason,
                         )}</div>
+                    `;
+                        break;
+                    case 'runQueryEfficiency':
+                        const runQueryResult =
+                            judgeData as RunQueryEfficiencyResponse;
+                        scoreDetails = `
+                        <div><strong>Score:</strong> ${(
+                            runQueryResult.score * 100
+                        ).toFixed(2)}%</div>
+                        <div><strong>RunQuery Calls:</strong> ${
+                            runQueryResult.runQueryCount
+                        }</div>
+                        <div><strong>Efficiency:</strong> ${(() => {
+                            if (runQueryResult.runQueryCount === 1) {
+                                return 'Optimal (1 call)';
+                            }
+                            if (runQueryResult.runQueryCount === 2) {
+                                return 'Okay (2 calls)';
+                            }
+                            return `Poor (${runQueryResult.runQueryCount} calls)`;
+                        })()}</div>
                     `;
                         break;
                     default:
@@ -723,17 +837,13 @@ export default class EvalHtmlReporter implements Reporter {
                                 query,
                             )}</div>
                             <div style="margin-top: 4px;"><strong>Response:</strong> ${EvalHtmlReporter.escapeHtml(
-                                response.substring(0, 200),
-                            )}${response.length > 200 ? '...' : ''}</div>
+                                response,
+                            )}</div>
                             ${
                                 expectedAnswer
                                     ? `<div style="margin-top: 4px;"><strong>Expected:</strong> ${EvalHtmlReporter.escapeHtml(
-                                          expectedAnswer.substring(0, 200),
-                                      )}${
-                                          expectedAnswer.length > 200
-                                              ? '...'
-                                              : ''
-                                      }</div>`
+                                          expectedAnswer,
+                                      )}</div>`
                                     : ''
                             }
                             ${
@@ -831,8 +941,11 @@ export default class EvalHtmlReporter implements Reporter {
                                 : ''
                         }
                         ${
-                            toolDetailsHtml && toolDetailsHtml.length > 0
-                                ? `<h4 style="color: #495057; margin-top: 16px;">Tool Evaluation Details</h4>${toolDetailsHtml}`
+                            (toolDetailsHtml && toolDetailsHtml.length > 0) ||
+                            toolCallsHtml
+                                ? `<h4 style="color: #495057; margin-top: 16px;">Tool Evaluation Details</h4>${
+                                      toolCallsHtml || ''
+                                  }${toolDetailsHtml || ''}`
                                 : ''
                         }
                     </div>
@@ -844,12 +957,14 @@ export default class EvalHtmlReporter implements Reporter {
 
 declare module 'vitest' {
     interface TaskMeta {
-        toolCalls: string[];
+        toolCalls: ToolCallWithResult[];
         prompts: string[];
         responses: string[];
         llmJudgeResults: LlmJudgeResult[];
         llmToolJudgeResults: ToolJudgeResult[];
         agentProvider: string;
         agentModel: string;
+        agentType?: 'specialized' | 'generic';
+        agentTags?: string[];
     }
 }

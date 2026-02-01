@@ -2,8 +2,12 @@ import {
     ApiErrorPayload,
     ApiPromoteDashboardResponse,
     ApiPromotionChangesResponse,
+    AuthorizationError,
+    type ApiCreateDashboardSchedulerResponse,
+    type ApiDashboardSchedulersResponse,
 } from '@lightdash/common';
 import {
+    Deprecated,
     Get,
     Middlewares,
     OperationId,
@@ -29,6 +33,7 @@ import { BaseController } from './baseController';
 export class DashboardController extends BaseController {
     /**
      * Promote dashboard to its upstream project
+     * @summary Promote dashboard
      * @param dashboardUuid dashboardUuid for the dashboard to run
      * @param req express request
      */
@@ -55,6 +60,7 @@ export class DashboardController extends BaseController {
 
     /**
      * Get diff from dashboard to promote
+     * @summary Get dashboard promotion diff
      * @param dashboardUuid dashboardUuid for the dashboard to check diff
      * @param req express request
      */
@@ -72,6 +78,60 @@ export class DashboardController extends BaseController {
             results: await this.services
                 .getPromoteService()
                 .getPromoteDashboardDiff(req.user!, dashboardUuid),
+        };
+    }
+
+    /**
+     * Get schedulers for a dashboard
+     * @summary List dashboard schedulers
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/schedulers')
+    @OperationId('getDashboardSchedulers')
+    @Deprecated()
+    async getDashboardSchedulers(
+        @Path() dashboardUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiDashboardSchedulersResponse> {
+        if (!req.user) {
+            throw new AuthorizationError('User session not found');
+        }
+
+        const schedulers = await this.services
+            .getDashboardService()
+            .getSchedulers(req.user, dashboardUuid);
+
+        this.setStatus(200);
+
+        return {
+            status: 'ok',
+            results: schedulers.data,
+        };
+    }
+
+    /**
+     * Create a scheduler for a dashboard
+     * @summary Create dashboard scheduler
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('/schedulers')
+    @OperationId('createDashboardScheduler')
+    async createDashboardScheduler(
+        @Path() dashboardUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiCreateDashboardSchedulerResponse> {
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getDashboardService()
+                .createScheduler(req.user!, dashboardUuid, req.body),
         };
     }
 }

@@ -13,7 +13,15 @@ export function getFullTextSearchQuery(
         .map((word) => word.trim())
         .filter((word) => word.length > 0)
         .filter((word, index, self) => self.indexOf(word) === index)
-        .map((word) => `'${word.replace(/'/g, "''")}':*`) // wrap the word in quotes and escape existing quotes, this so that we can search with special charcters in the search query
+        .map((word) => {
+            // Remove or escape characters that cause issues with PostgreSQL text search
+            const sanitized = word
+                .replace(/'/g, "''") // escape single quotes
+                .replace(/[?&|!()]/g, '') // remove problematic tsquery operators
+                .replace(/:/g, ''); // remove colon which has special meaning in tsquery
+            return sanitized ? `'${sanitized}':*` : '';
+        })
+        .filter((word) => word.length > 0) // remove empty results after sanitization
         .join(operator);
 }
 
@@ -44,6 +52,86 @@ export function getFullTextSearchRankCalcSql({
             6
         )::float`,
         updatedVariables,
+    );
+}
+
+/**
+ * Returns a raw SQL condition that uses the GIN index on search_vector.
+ * This should be used in a WHERE clause BEFORE computing ts_rank_cd to
+ * filter rows using the index, dramatically reducing the number of rows
+ * that need rank computation.
+ */
+export function getFullTextSearchFilterSql({
+    database,
+    searchVectorColumn,
+    searchQuery,
+    fullTextSearchOperator = 'AND',
+}: {
+    database: Knex;
+    searchVectorColumn: string;
+    searchQuery: string;
+    fullTextSearchOperator?: 'OR' | 'AND';
+}) {
+    const formattedQuery = getFullTextSearchQuery(
+        searchQuery,
+        fullTextSearchOperator,
+    );
+
+    return database.raw(
+        `:searchVectorColumn: @@ to_tsquery('lightdash_english_config', :searchQuery)`,
+        {
+            searchVectorColumn,
+            searchQuery: formattedQuery,
+        },
+    );
+}
+
+/**
+ * Converts a natural language query to OR-based websearch query.
+ * For example: "average cost" becomes "average OR cost"
+ * This makes searches more permissive for better recall.
+ */
+function getWebSearchQuery(searchQuery: string): string {
+    // Split on spaces and join with OR for more permissive matching
+    return searchQuery
+        .split(' ')
+        .filter((word) => word.trim())
+        .join(' OR ');
+}
+
+/**
+ * Web search variant that uses websearch_to_tsquery for natural language queries.
+ * This is better suited for user-provided queries because:
+ * - No special formatting required
+ * - Handles phrases naturally with quotes
+ * - Supports OR and NOT operators naturally
+ * - Never raises syntax errors
+ * - Uses OR by default for better recall (multiple words = any word matches)
+ *
+ * Use this for AI agent queries and user-facing search inputs.
+ */
+export function getWebSearchRankCalcSql({
+    database,
+    variables,
+}: {
+    database: Knex;
+    variables: Record<string, string>;
+}) {
+    const webSearchQuery = getWebSearchQuery(variables.searchQuery);
+
+    return database.raw(
+        `ROUND(
+            ts_rank_cd(
+                :searchVectorColumn:,
+                websearch_to_tsquery('lightdash_english_config', :searchQuery),
+                32
+            )::numeric,
+            6
+        )::float`,
+        {
+            ...variables,
+            searchQuery: webSearchQuery,
+        },
     );
 }
 

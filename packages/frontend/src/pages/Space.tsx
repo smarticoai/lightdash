@@ -16,7 +16,6 @@ import {
 } from '@tabler/icons-react';
 import { useCallback, useState, type FC } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import AddResourceToSpaceModal from '../components/Explorer/SpaceBrowser/AddResourceToSpaceModal';
 import CreateResourceToSpace from '../components/Explorer/SpaceBrowser/CreateResourceToSpace';
 import { SpaceBrowserMenu } from '../components/Explorer/SpaceBrowser/SpaceBrowserMenu';
 import { AddToSpaceResources } from '../components/Explorer/SpaceBrowser/types';
@@ -36,7 +35,7 @@ import TransferItemsModal from '../components/common/TransferItemsModal/Transfer
 import DashboardCreateModal from '../components/common/modal/DashboardCreateModal';
 import { useSpacePinningMutation } from '../hooks/pinning/useSpaceMutation';
 import { useContentAction } from '../hooks/useContent';
-import { useSpace, useSpaceSummaries } from '../hooks/useSpaces';
+import { useSpace } from '../hooks/useSpaces';
 import { Can } from '../providers/Ability';
 import useApp from '../providers/App/useApp';
 import useTracking from '../providers/Tracking/useTracking';
@@ -82,10 +81,8 @@ const Space: FC = () => {
         useState<boolean>(false);
     const [isCreateNestedSpaceOpen, setIsCreateNestedSpaceOpen] =
         useState<boolean>(false);
-    const [addToSpace, setAddToSpace] = useState<AddToSpaceResources>();
     const [createToSpace, setCreateToSpace] = useState<AddToSpaceResources>();
 
-    const { data: spaces } = useSpaceSummaries(projectUuid, true, {});
     const { mutateAsync: contentAction, isLoading: isContentActionLoading } =
         useContentAction(projectUuid);
 
@@ -356,13 +353,6 @@ const Space: FC = () => {
                     }
                 />
 
-                {addToSpace && (
-                    <AddResourceToSpaceModal
-                        resourceType={addToSpace}
-                        onClose={() => setAddToSpace(undefined)}
-                    />
-                )}
-
                 {createToSpace && (
                     <CreateResourceToSpace resourceType={createToSpace} />
                 )}
@@ -413,7 +403,6 @@ const Space: FC = () => {
                                 type: ResourceViewItemType.SPACE,
                             } satisfies ResourceViewSpaceItem,
                         ]}
-                        spaces={spaces ?? []}
                         isLoading={isContentActionLoading}
                         onClose={closeTransferToSpace}
                         onConfirm={async (newSpaceUuid) => {

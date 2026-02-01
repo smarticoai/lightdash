@@ -9,19 +9,18 @@ import {
     Loader,
     Paper,
     Stack,
-    Table,
     Text,
     Title,
     Tooltip,
+    useMantineTheme,
 } from '@mantine-8/core';
-import {
-    IconCheck,
-    IconClock,
-    IconPlayerPlay,
-    IconTarget,
-    IconX,
-} from '@tabler/icons-react';
+import { IconPoint, IconPointFilled, IconTarget } from '@tabler/icons-react';
 import dayjs from 'dayjs';
+import {
+    MantineReactTable,
+    useMantineReactTable,
+    type MRT_ColumnDef,
+} from 'mantine-react-table';
 import { useMemo, type FC } from 'react';
 import { useNavigate } from 'react-router';
 import MantineIcon from '../../../../../components/common/MantineIcon';
@@ -30,120 +29,13 @@ import {
     useEvaluationRunPolling,
 } from '../../hooks/useAiAgentEvaluations';
 import { useEvalSectionContext } from '../../hooks/useEvalSectionContext';
-import { useAiAgentThread } from '../../hooks/useProjectAiAgents';
+import { getAssessmentConfig, isRunning, statusConfig } from './utils';
 
 type Props = {
     projectUuid: string;
     agentUuid: string;
     evalUuid: string;
     runUuid: string;
-};
-
-type StatusConfig = {
-    icon: typeof IconCheck;
-    color: string;
-};
-
-const STATUS_CONFIG: Record<string, StatusConfig> = {
-    completed: { icon: IconCheck, color: 'green' },
-    failed: { icon: IconX, color: 'red' },
-    running: { icon: IconPlayerPlay, color: 'yellow' },
-    pending: { icon: IconClock, color: 'gray' },
-};
-
-const getStatusConfig = (status: string): StatusConfig =>
-    STATUS_CONFIG[status] || STATUS_CONFIG.pending;
-
-type PromptRowProps = {
-    projectUuid: string;
-    agentUuid: string;
-    result: AiAgentEvaluationRunResult;
-    index: number;
-    onViewThread: (result: AiAgentEvaluationRunResult) => void;
-};
-
-const PromptRow: FC<PromptRowProps> = ({
-    projectUuid,
-    agentUuid,
-    result,
-    index,
-    onViewThread,
-}) => {
-    const statusConfig = getStatusConfig(result.status);
-
-    // Fetch the thread to get the actual prompt text
-    const { data: thread } = useAiAgentThread(
-        projectUuid,
-        agentUuid,
-        result.threadUuid,
-        {
-            enabled: !!result.threadUuid,
-        },
-    );
-
-    // Get the latest user message from the thread
-    const promptText = useMemo(() => {
-        if (!thread?.messages) return `Prompt ${index + 1}`;
-
-        // Find the last user message in the thread
-        const userMessages = thread.messages.filter(
-            (msg) => msg.role === 'user',
-        );
-        const lastUserMessage = userMessages[userMessages.length - 1];
-
-        return lastUserMessage?.message || `Prompt ${index + 1}`;
-    }, [thread?.messages, index]);
-
-    const handleRowClick = () => {
-        if (
-            (result.status === 'completed' || result.status === 'failed') &&
-            result.threadUuid
-        ) {
-            onViewThread(result);
-        }
-    };
-
-    const isClickable =
-        (result.status === 'completed' || result.status === 'failed') &&
-        result.threadUuid;
-
-    return (
-        <Table.Tr
-            style={{
-                cursor: isClickable ? 'pointer' : 'default',
-            }}
-            onClick={handleRowClick}
-        >
-            <Table.Td style={{ width: 50 }}>
-                <Text size="sm" fw={500} c="dimmed">
-                    {index + 1}
-                </Text>
-            </Table.Td>
-            <Table.Td maw="300px">
-                <Text size="sm" title={promptText} truncate>
-                    {promptText}
-                </Text>
-            </Table.Td>
-            <Table.Td style={{ width: 120 }}>
-                <Tooltip
-                    label={result.errorMessage}
-                    disabled={result.status !== 'failed'}
-                >
-                    <Badge
-                        variant="light"
-                        radius="sm"
-                        color={statusConfig.color}
-                        p="xxs"
-                    >
-                        <MantineIcon
-                            icon={statusConfig.icon}
-                            color={statusConfig.color}
-                        />
-                    </Badge>
-                </Tooltip>
-            </Table.Td>
-        </Table.Tr>
-    );
 };
 
 export const EvalRunDetails: FC<Props> = ({
@@ -153,7 +45,9 @@ export const EvalRunDetails: FC<Props> = ({
     runUuid,
 }) => {
     const navigate = useNavigate();
-    const { setSelectedThreadUuid } = useEvalSectionContext();
+    const theme = useMantineTheme();
+    const { setSelectedThreadUuid, selectedThreadUuid } =
+        useEvalSectionContext();
 
     const { data: runData, isLoading } = useAiAgentEvaluationRunResults(
         projectUuid,
@@ -212,6 +106,183 @@ export const EvalRunDetails: FC<Props> = ({
         };
     }, [runData?.results]);
 
+    const columns: MRT_ColumnDef<AiAgentEvaluationRunResult>[] = useMemo(
+        () => [
+            {
+                accessorKey: 'index',
+                header: '#',
+                enableSorting: false,
+                size: 60,
+                Cell: ({ row }) => (
+                    <Text fz="sm" fw={500} c="dimmed">
+                        {row.index + 1}
+                    </Text>
+                ),
+            },
+            {
+                accessorKey: 'prompt',
+                header: 'Prompt',
+                enableSorting: false,
+                size: 300,
+                Cell: ({ row }) => {
+                    const promptText =
+                        row.original.prompt || `Prompt ${row.index + 1}`;
+                    return (
+                        <Text fz="sm" title={promptText} truncate maw={300}>
+                            {promptText}
+                        </Text>
+                    );
+                },
+            },
+            {
+                accessorKey: 'status',
+                header: 'Eval Status',
+                enableSorting: false,
+                size: 115,
+                Cell: ({ row }) => {
+                    const result = row.original;
+                    const statusStyle = statusConfig[result.status];
+                    const isEvalRunning = isRunning(result.status);
+                    return (
+                        <Tooltip
+                            label={result.errorMessage}
+                            disabled={result.status !== 'failed'}
+                        >
+                            <Text c={statusStyle.color}>
+                                <MantineIcon
+                                    icon={
+                                        isEvalRunning
+                                            ? IconPoint
+                                            : IconPointFilled
+                                    }
+                                />
+                            </Text>
+                        </Tooltip>
+                    );
+                },
+            },
+            {
+                accessorKey: 'assessment',
+                header: 'Assessment',
+                enableSorting: false,
+                size: 120,
+                Cell: ({ row }) => {
+                    const result = row.original;
+                    const isEvalRunning = isRunning(result.status);
+                    const assessmentConfig = getAssessmentConfig(
+                        result.assessment?.passed,
+                    );
+                    return isEvalRunning ? (
+                        <Badge w={68} variant="transparent" color="gray">
+                            {result.status === 'assessing' ? (
+                                <Loader size={12} color="gray" />
+                            ) : (
+                                <>...</>
+                            )}
+                        </Badge>
+                    ) : (
+                        <Badge
+                            color={assessmentConfig.color}
+                            variant="transparent"
+                        >
+                            {assessmentConfig.label}
+                        </Badge>
+                    );
+                },
+            },
+        ],
+        [],
+    );
+
+    const table = useMantineReactTable({
+        columns,
+        data: runData?.results ?? [],
+        enableSorting: false,
+        enableColumnActions: false,
+        enablePagination: false,
+        enableBottomToolbar: false,
+        enableTopToolbar: false,
+        enableRowSelection: false,
+        enableStickyHeader: true,
+        mantineTableBodyRowProps: ({ row }) => {
+            const result = row.original;
+            const isEvalRunning = isRunning(result.status);
+            const isClickable = !isEvalRunning && result.threadUuid;
+            const selected = result.threadUuid === selectedThreadUuid;
+
+            return {
+                onClick: () => {
+                    if (isClickable) {
+                        handleViewThread(result);
+                    }
+                },
+                style: {
+                    cursor: isClickable ? 'pointer' : 'default',
+                    backgroundColor: selected
+                        ? 'var(--mantine-color-ldGray-1)'
+                        : undefined,
+                },
+            };
+        },
+        state: {
+            isLoading,
+        },
+        mantinePaperProps: {
+            shadow: undefined,
+            style: {
+                border: 'none',
+            },
+        },
+        mantineTableProps: {
+            highlightOnHover: true,
+            withColumnBorders: Boolean(runData?.results?.length),
+        },
+        mantineTableHeadCellProps: (props) => {
+            const isFirstColumn =
+                props.table.getAllColumns().indexOf(props.column) === 0;
+            const isLastColumn =
+                props.table.getAllColumns().indexOf(props.column) ===
+                props.table.getAllColumns().length - 1;
+
+            return {
+                bg: 'ldGray.0',
+                h: '3xl',
+                pos: 'relative',
+                style: {
+                    userSelect: 'none',
+                    padding: `${theme.spacing.xs} ${theme.spacing.xl}`,
+                    borderBottom: `1px solid ${theme.colors.ldGray[2]}`,
+                    borderRight: props.column.getIsResizing()
+                        ? `2px solid ${theme.colors.blue[3]}`
+                        : `1px solid ${
+                              isLastColumn || isFirstColumn
+                                  ? 'transparent'
+                                  : theme.colors.ldGray[2]
+                          }`,
+                    borderTop: 'none',
+                    borderLeft: 'none',
+                },
+            };
+        },
+        mantineTableHeadRowProps: {
+            sx: {
+                boxShadow: 'none',
+            },
+        },
+        mantineTableBodyCellProps: () => {
+            return {
+                h: 48,
+                style: {
+                    padding: `${theme.spacing.xs} ${theme.spacing.md}`,
+                    borderRight: 'none',
+                    borderLeft: 'none',
+                    borderBottom: `1px solid ${theme.colors.ldGray[2]}`,
+                    borderTop: 'none',
+                },
+            };
+        },
+    });
+
     if (isLoading) {
         return (
             <Center p="md">
@@ -241,6 +312,7 @@ export const EvalRunDetails: FC<Props> = ({
         )
         .format('mm[m]ss[s]');
 
+    const evalStatus = statusConfig[runData.status];
     return (
         <Stack gap="sm" pr="sm">
             <Paper>
@@ -255,93 +327,63 @@ export const EvalRunDetails: FC<Props> = ({
                         <Paper p="xxs" withBorder radius="sm">
                             <MantineIcon icon={IconTarget} size="md" />
                         </Paper>
-                        <Title order={5} c="gray.9" fw={700}>
+                        <Title order={5} c="ldGray.9" fw={700}>
                             Run Overview
                         </Title>
                     </Group>
 
                     <Group>
-                        {runData.status === 'completed' ||
-                            (runData.status === 'failed' && (
-                                <Tooltip
-                                    label={
-                                        <Text size="xs" c="dimmed">
-                                            Started{' '}
-                                            {new Date(
-                                                runData.createdAt,
-                                            ).toLocaleString()}
-                                            {runData.completedAt && (
-                                                <>
-                                                    {' '}
-                                                    • Completed{' '}
-                                                    {new Date(
-                                                        runData.completedAt,
-                                                    ).toLocaleString()}
-                                                </>
-                                            )}
-                                        </Text>
-                                    }
-                                >
-                                    <Text size="xs" c="dimmed">
-                                        Duration: {runDuration}
+                        {!isRunning(runData.status) && (
+                            <Tooltip
+                                label={
+                                    <Text size="xs">
+                                        Started{' '}
+                                        {new Date(
+                                            runData.createdAt,
+                                        ).toLocaleString()}
+                                        {runData.completedAt && (
+                                            <>
+                                                {' '}
+                                                • Completed{' '}
+                                                {new Date(
+                                                    runData.completedAt,
+                                                ).toLocaleString()}
+                                            </>
+                                        )}
                                     </Text>
-                                </Tooltip>
-                            ))}
+                                }
+                            >
+                                <Text size="xs" c="dimmed">
+                                    Duration: {runDuration}
+                                </Text>
+                            </Tooltip>
+                        )}
                         <Badge
-                            variant="light"
-                            color={getStatusConfig(runData.status).color}
+                            color={evalStatus.color}
+                            variant="dot"
+                            size="lg"
                             radius="sm"
-                            leftSection={
-                                runData.status === 'pending' ||
-                                runData.status === 'running' ? (
-                                    <Loader size="12px" color="gray" />
-                                ) : (
-                                    <MantineIcon
-                                        icon={
-                                            getStatusConfig(runData.status).icon
-                                        }
-                                    />
-                                )
-                            }
+                            c="ldGray.7"
                         >
-                            {runData.status}
+                            {evalStatus.label}
                         </Badge>
                     </Group>
                 </Group>
 
                 <Divider />
                 <Box>
-                    <Table highlightOnHover>
-                        <Table.Thead>
-                            <Table.Tr>
-                                <Table.Th>#</Table.Th>
-                                <Table.Th>Prompt</Table.Th>
-                                <Table.Th>Status</Table.Th>
-                            </Table.Tr>
-                        </Table.Thead>
-                        <Table.Tbody>
-                            {runData.results.map((result, index) => (
-                                <PromptRow
-                                    key={result.resultUuid}
-                                    projectUuid={projectUuid}
-                                    agentUuid={agentUuid}
-                                    result={result}
-                                    index={index}
-                                    onViewThread={handleViewThread}
-                                />
-                            ))}
-                        </Table.Tbody>
-                    </Table>
-
-                    <Group justify="flex-end" pr="sm" pb="sm">
-                        {summaryStats && (
-                            <Text size="xs" fw={500} fs="italic" c="dimmed">
-                                {summaryStats.completed + summaryStats.failed} /{' '}
-                                {summaryStats.total} completed
-                            </Text>
-                        )}
-                    </Group>
+                    <MantineReactTable table={table} />
                 </Box>
+                <Divider />
+
+                <Group justify="flex-end" pr="sm" py="sm">
+                    {summaryStats && (
+                        <Text size="xs" fw={500} fs="italic" c="dimmed">
+                            {summaryStats.completed + summaryStats.failed} /{' '}
+                            {summaryStats.total} completed
+                        </Text>
+                    )}
+                </Group>
             </Paper>
 
             {(!runData.results || runData.results.length === 0) && (

@@ -8,6 +8,7 @@ import {
     SchedulerFormat,
     SessionUser,
     SmptError,
+    type PartialFailure,
 } from '@lightdash/common';
 import { marked } from 'marked';
 import * as nodemailer from 'nodemailer';
@@ -50,7 +51,12 @@ type EmailTemplate = {
     template: string;
     context: Record<
         string,
-        string | boolean | number | AttachmentUrl[] | undefined
+        | string
+        | boolean
+        | number
+        | AttachmentUrl[]
+        | PartialFailure[]
+        | undefined
     >;
     attachments?: (Mail.Attachment | AttachmentUrl)[] | undefined;
 };
@@ -180,7 +186,12 @@ export default class EmailClient {
                     const isRetryableError =
                         isNodemailerSmtpError(error) &&
                         ((error.code &&
+                            // Check if the error code is in the list of retryable error codes
                             RETRYABLE_ERROR_CODES.includes(error.code)) ||
+                            // Check if the error message contains any of the retryable error codes
+                            RETRYABLE_ERROR_CODES.some((code) =>
+                                error.message.includes(code),
+                            ) ||
                             // It can be either `Connection timeout` or `Timeout`
                             error.message.toLowerCase().includes('timeout'));
 
@@ -203,7 +214,8 @@ export default class EmailClient {
                     if (
                         attempt === maxRetries - 1 &&
                         isNodemailerSmtpError(error) &&
-                        error.code === 'ECONNRESET'
+                        (error.code === 'ECONNRESET' ||
+                            error.message.includes('ECONNRESET'))
                     ) {
                         Logger.warn(
                             'Recreating email transporter due to connection reset',
@@ -272,18 +284,65 @@ export default class EmailClient {
         recipient: string,
         schedulerName: string,
         schedulerUrl: string,
+        errorMessage?: string,
+        disabledSync: boolean = true,
     ) {
+        // Sync failure but not disabled - will be retried
+        if (!this.canSendEmail()) {
+            Logger.error(
+                'Cannot send Google Sheets sync failure email - email transporter not configured',
+                {
+                    recipient: recipient ? '***@***' : undefined,
+                    schedulerName,
+                },
+            );
+
+            throw new Error('Email transporter not configured');
+        }
+
+        // Sync has been disabled
+        if (disabledSync) {
+            return this.sendEmail({
+                to: recipient,
+                subject: `Google Sheets sync: "${schedulerName}" disabled due to error`,
+                template: 'googleSheetsSyncDisabledNotification',
+                context: {
+                    host: this.lightdashConfig.siteUrl,
+                    subject: 'Google Sheets Sync disabled',
+                    description: `There's an error with your Google Sheets "${schedulerName}" sync. We've disabled it to prevent further errors.`,
+                    schedulerUrl,
+                },
+                text: `Your Google Sheets ${schedulerName} sync has been disabled due to an error`,
+            });
+        }
+
+        const message = `
+            <p>Your Google Sheets sync <strong>"${schedulerName}"</strong> failed.</p>
+            <br />
+            <br />
+            <br />
+            ${
+                errorMessage
+                    ? `<p><strong>Error:</strong> ${sanitizeHtml(
+                          errorMessage,
+                      )}</p><br /><br />`
+                    : ''
+            }
+            <p>Please check your <a href="${schedulerUrl}">Google Sheets sync settings</a> and verify your Google Sheets connection and permissions.</p>
+        `;
+
         return this.sendEmail({
             to: recipient,
-            subject: `Google Sheets sync: "${schedulerName}" disabled due to error`,
-            template: 'googleSheetsSyncDisabledNotification',
+            subject: `Failed to sync Google Sheet - "${schedulerName}"`,
+            template: 'genericNotification',
             context: {
                 host: this.lightdashConfig.siteUrl,
-                subject: 'Google Sheets Sync disabled',
-                description: `There's an error with your Google Sheets "${schedulerName}" sync. We've disabled it to prevent further errors.`,
-                schedulerUrl,
+                title: 'Google Sheet sync failure',
+                message,
             },
-            text: `Your Google Sheets ${schedulerName} sync has been disabled due to an error`,
+            text: `Warning: Your Google Sheets sync "${schedulerName}" failed. ${
+                errorMessage ? `Error: ${errorMessage}.` : ''
+            } Please check your settings at ${schedulerUrl}`,
         });
     }
 
@@ -325,6 +384,71 @@ export default class EmailClient {
                 message,
             },
             text: `Warning: Your scheduled delivery "${schedulerName}" failed to send. Error: ${errorMessage}. Please check your settings at ${schedulerUrl}`,
+        });
+    }
+
+    public async sendScheduledDeliveryTargetFailureEmail(
+        recipient: string,
+        schedulerName: string,
+        schedulerUrl: string,
+        deliveryType: 'slack' | 'email' | 'msteams',
+        failedTargets: { target: string; error?: string }[],
+        totalTargets: number,
+    ) {
+        if (!this.canSendEmail()) {
+            Logger.error(
+                'Cannot send delivery target failure email - email transporter not configured',
+                {
+                    recipient: recipient ? '***@***' : undefined,
+                    schedulerName,
+                },
+            );
+            throw new Error('Email transporter not configured');
+        }
+
+        const failedCount = failedTargets.length;
+        const isPartial = failedCount < totalTargets;
+
+        const deliveryTypeLabel =
+            deliveryType === 'msteams' ? 'Microsoft Teams' : deliveryType;
+
+        const targetList = failedTargets
+            .map(
+                (t) =>
+                    `<li>${sanitizeHtml(t.target)}${
+                        t.error ? ` error: ${sanitizeHtml(t.error)}` : ''
+                    }</li>`,
+            )
+            .join('');
+
+        const message = `
+            <p>Your scheduled delivery <strong>"${schedulerName}"</strong> failed to deliver to ${failedCount} of ${totalTargets} ${deliveryTypeLabel} target${
+                totalTargets > 1 ? 's' : ''
+            }.</p>
+            <br />
+            <br />
+            <p><strong>Failed targets:</strong></p> 
+            <ul>${targetList}</ul>
+            <br />
+            <p>Please check your <a href="${schedulerUrl}" target="_blank">scheduled delivery settings</a>.</p>
+        `;
+
+        return this.sendEmail({
+            to: recipient,
+            subject: `${
+                isPartial ? 'Partial delivery failure' : 'Delivery failed'
+            } - "${schedulerName}"`,
+            template: 'genericNotification',
+            context: {
+                host: this.lightdashConfig.siteUrl,
+                title: isPartial
+                    ? 'Partial delivery failure'
+                    : 'Scheduled delivery failure',
+                message,
+            },
+            text: `Warning: Your scheduled delivery "${schedulerName}" failed to deliver to ${failedCount} ${deliveryTypeLabel} target${
+                failedCount > 1 ? 's' : ''
+            }. Check settings at ${schedulerUrl}`,
         });
     }
 
@@ -509,6 +633,7 @@ export default class EmailClient {
         expirationDays?: number,
         asAttachment?: boolean,
         format?: SchedulerFormat,
+        failures?: PartialFailure[],
     ) {
         const csvUrls = attachments.filter(
             (attachment) => !attachment.truncated,
@@ -529,6 +654,9 @@ export default class EmailClient {
                       EmailClient.createFileAttachment(attachment, format),
                   )
             : undefined;
+
+        const allChartsFailed =
+            csvUrls.length === 0 && failures && failures.length > 0;
 
         return this.sendEmail({
             to: recipient,
@@ -552,6 +680,9 @@ export default class EmailClient {
                 includeLinks,
                 hasAttachments: emailAttachments && emailAttachments.length > 0,
                 attachmentCount: emailAttachments?.length || 0,
+                failures,
+                hasFailures: failures && failures.length > 0,
+                allChartsFailed,
             },
             text: title,
             attachments: emailAttachments,

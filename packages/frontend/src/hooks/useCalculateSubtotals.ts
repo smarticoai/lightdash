@@ -3,6 +3,7 @@ import {
     type ApiError,
     type CalculateSubtotalsFromQuery,
     type DashboardFilters,
+    type DateZoom,
     type MetricQuery,
     type ParametersValuesMap,
 } from '@lightdash/common';
@@ -21,6 +22,7 @@ const calculateSubtotalsFromQuery = async (
     columnOrder: string[],
     pivotDimensions?: string[],
     parameters?: ParametersValuesMap,
+    dateZoom?: DateZoom,
 ): Promise<ApiCalculateSubtotalsResponse['results']> => {
     const timezoneFixPayload: CalculateSubtotalsFromQuery = {
         explore: explore,
@@ -31,6 +33,7 @@ const calculateSubtotalsFromQuery = async (
         columnOrder,
         pivotDimensions,
         parameters,
+        dateZoom,
     };
     return lightdashApi<ApiCalculateSubtotalsResponse['results']>({
         url: `/projects/${projectUuid}/calculate-subtotals`,
@@ -47,6 +50,7 @@ const postCalculateSubtotalsForEmbed = async (
     pivotDimensions?: string[],
     dashboardFilters?: DashboardFilters,
     invalidateCache?: boolean,
+    dateZoom?: DateZoom,
 ): Promise<ApiCalculateSubtotalsResponse['results']> => {
     const timezoneFixFilters =
         dashboardFilters && convertDateDashboardFilters(dashboardFilters);
@@ -62,7 +66,39 @@ const postCalculateSubtotalsForEmbed = async (
             columnOrder,
             pivotDimensions,
             invalidateCache,
+            dateZoom,
         }),
+    });
+};
+
+/**
+ * Calculate subtotals from a raw metric query in embed context.
+ * Used when exploring data directly (not from a saved chart).
+ */
+const postCalculateSubtotalsFromQueryForEmbed = async (
+    projectUuid: string,
+    explore: string,
+    metricQuery: MetricQuery,
+    columnOrder: string[],
+    pivotDimensions?: string[],
+    parameters?: ParametersValuesMap,
+    dateZoom?: DateZoom,
+): Promise<ApiCalculateSubtotalsResponse['results']> => {
+    const timezoneFixPayload: CalculateSubtotalsFromQuery = {
+        explore,
+        metricQuery: {
+            ...metricQuery,
+            filters: convertDateFilters(metricQuery.filters),
+        },
+        columnOrder,
+        pivotDimensions,
+        parameters,
+        dateZoom,
+    };
+    return lightdashApi<ApiCalculateSubtotalsResponse['results']>({
+        url: `/embed/${projectUuid}/calculate-subtotals`,
+        method: 'POST',
+        body: JSON.stringify(timezoneFixPayload),
     });
 };
 
@@ -77,6 +113,7 @@ export const useCalculateSubtotals = ({
     invalidateCache,
     embedToken,
     parameters,
+    dateZoom,
 }: {
     metricQuery?: MetricQuery;
     explore?: string;
@@ -88,6 +125,7 @@ export const useCalculateSubtotals = ({
     invalidateCache?: boolean;
     embedToken?: string;
     parameters?: ParametersValuesMap;
+    dateZoom?: DateZoom;
 }) => {
     const projectUuid = useProjectUuid();
 
@@ -104,8 +142,10 @@ export const useCalculateSubtotals = ({
             invalidateCache,
             embedToken,
             parameters,
+            dateZoom,
         ],
         () =>
+            // Embed mode with saved chart
             embedToken && projectUuid && savedChartUuid && columnOrder
                 ? postCalculateSubtotalsForEmbed(
                       embedToken,
@@ -115,23 +155,42 @@ export const useCalculateSubtotals = ({
                       pivotDimensions,
                       dashboardFilters,
                       invalidateCache,
+                      dateZoom,
                   )
-                : projectUuid && metricQuery && explore && columnOrder
-                ? calculateSubtotalsFromQuery(
-                      projectUuid,
-                      explore,
-                      metricQuery,
-                      columnOrder,
-                      pivotDimensions,
-                      parameters,
-                  )
-                : Promise.reject(),
+                : // Embed mode with raw query (Explore)
+                  embedToken &&
+                    projectUuid &&
+                    metricQuery &&
+                    explore &&
+                    columnOrder
+                  ? postCalculateSubtotalsFromQueryForEmbed(
+                        projectUuid,
+                        explore,
+                        metricQuery,
+                        columnOrder,
+                        pivotDimensions,
+                        parameters,
+                        dateZoom,
+                    )
+                  : // Regular mode with raw query
+                    projectUuid && metricQuery && explore && columnOrder
+                    ? calculateSubtotalsFromQuery(
+                          projectUuid,
+                          explore,
+                          metricQuery,
+                          columnOrder,
+                          pivotDimensions,
+                          parameters,
+                          dateZoom,
+                      )
+                    : Promise.reject(),
         {
             retry: false,
             enabled:
                 showSubtotals &&
                 Boolean(columnOrder) &&
                 (Boolean(embedToken && savedChartUuid) ||
+                    Boolean(embedToken && metricQuery && explore) ||
                     Boolean(
                         metricQuery &&
                             explore &&

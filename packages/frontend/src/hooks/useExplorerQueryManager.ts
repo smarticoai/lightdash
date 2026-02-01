@@ -1,9 +1,9 @@
 import { FeatureFlags, type FieldId } from '@lightdash/common';
 import { useCallback, useMemo } from 'react';
 import { useParams } from 'react-router';
+import useEmbed from '../ee/providers/Embed/useEmbed';
 import {
     explorerActions,
-    selectFilters,
     selectIsEditMode,
     selectIsMinimal,
     selectMetricQuery,
@@ -14,16 +14,16 @@ import {
     selectTableName,
     selectUnpivotedQueryArgs,
     selectUnpivotedQueryUuidHistory,
+    selectUnsavedChartVersion,
     selectValidQueryArgs,
     useExplorerDispatch,
     useExplorerSelector,
 } from '../features/explorer/store';
-import useExplorerContext from '../providers/Explorer/useExplorerContext';
 import { useQueryExecutor } from '../providers/Explorer/useQueryExecutor';
 import { buildQueryArgs } from './explorer/buildQueryArgs';
 import { useExplore } from './useExplore';
 import { useDateZoomGranularitySearch } from './useExplorerRoute';
-import { useFeatureFlag } from './useFeatureFlagEnabled';
+import { useServerFeatureFlag } from './useServerOrClientFeatureFlag';
 
 /**
  * Manager hook for Explorer query state
@@ -42,7 +42,6 @@ export const useExplorerQueryManager = () => {
     // Get state from Redux selectors
     const dispatch = useExplorerDispatch();
     const metricQuery = useExplorerSelector(selectMetricQuery);
-    const filters = useExplorerSelector(selectFilters);
     const parameters = useExplorerSelector(selectParameters);
     const tableName = useExplorerSelector(selectTableName);
     const isEditMode = useExplorerSelector(selectIsEditMode);
@@ -60,31 +59,27 @@ export const useExplorerQueryManager = () => {
         selectUnpivotedQueryUuidHistory,
     );
 
-    const { savedQueryUuid, projectUuid } = useParams<{
+    const embed = useEmbed();
+    const params = useParams<{
         savedQueryUuid: string;
         projectUuid: string;
     }>();
+    const savedQueryUuid = embed?.savedQueryUuid || params.savedQueryUuid;
+    const projectUuid = embed?.projectUuid || params.projectUuid!;
     const viewModeQueryArgs = useMemo(() => {
         return savedQueryUuid ? { chartUuid: savedQueryUuid } : undefined;
     }, [savedQueryUuid]);
 
     const dateZoomGranularity = useDateZoomGranularitySearch();
 
-    // Get merged version with chartConfig and pivotConfig from Context
-    // This includes both Redux fields and Context-only fields (chartConfig, pivotConfig)
-    const mergedUnsavedChartVersion = useExplorerContext(
-        (context) => context.state.mergedUnsavedChartVersion,
-    );
+    const unsavedChartVersion = useExplorerSelector(selectUnsavedChartVersion);
 
     const chartConfigForQuery = useMemo(
         () => ({
-            chartConfig: mergedUnsavedChartVersion.chartConfig,
-            pivotConfig: mergedUnsavedChartVersion.pivotConfig,
+            chartConfig: unsavedChartVersion.chartConfig,
+            pivotConfig: unsavedChartVersion.pivotConfig,
         }),
-        [
-            mergedUnsavedChartVersion.chartConfig,
-            mergedUnsavedChartVersion.pivotConfig,
-        ],
+        [unsavedChartVersion.chartConfig, unsavedChartVersion.pivotConfig],
     );
 
     // Get explore data and pivot configuration
@@ -92,17 +87,8 @@ export const useExplorerQueryManager = () => {
         refetchOnMount: false,
         refetchOnWindowFocus: false,
     });
-    const { data: useSqlPivotResults } = useFeatureFlag(
+    const { data: useSqlPivotResults } = useServerFeatureFlag(
         FeatureFlags.UseSqlPivotResults,
-    );
-
-    // Compute the complete metric query (including Redux filters)
-    const computedMetricQuery = useMemo(
-        () => ({
-            ...metricQuery,
-            filters,
-        }),
-        [metricQuery, filters],
     );
 
     // Compute active fields and query validity
@@ -172,7 +158,7 @@ export const useExplorerQueryManager = () => {
             projectUuid,
             explore,
             useSqlPivotResults: useSqlPivotResults?.enabled ?? false,
-            computedMetricQuery,
+            computedMetricQuery: metricQuery,
             parameters,
             isEditMode,
             viewModeQueryArgs,
@@ -190,7 +176,7 @@ export const useExplorerQueryManager = () => {
         projectUuid,
         explore,
         useSqlPivotResults?.enabled,
-        computedMetricQuery,
+        metricQuery,
         parameters,
         isEditMode,
         viewModeQueryArgs,
@@ -232,7 +218,7 @@ export const useExplorerQueryManager = () => {
         tableName,
         projectUuid,
         explore,
-        computedMetricQuery,
+        computedMetricQuery: metricQuery,
         parameters,
 
         // Query execution

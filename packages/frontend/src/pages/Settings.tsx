@@ -1,6 +1,6 @@
 import { subject } from '@casl/ability';
 import { CommercialFeatureFlags, FeatureFlags } from '@lightdash/common';
-import { Box, ScrollArea, Stack, Text, Title } from '@mantine/core';
+import { Box, ScrollArea, Stack, Text, Title } from '@mantine-8/core';
 import {
     IconBrain,
     IconBrowser,
@@ -48,6 +48,7 @@ import { OrganizationWarehouseCredentialsPanel } from '../components/UserSetting
 import PasswordPanel from '../components/UserSettings/PasswordPanel';
 import ProfilePanel from '../components/UserSettings/ProfilePanel';
 import ProjectManagementPanel from '../components/UserSettings/ProjectManagementPanel';
+import UserScheduledDeliveriesPanel from '../components/UserSettings/ScheduledDeliveriesPanel';
 import SlackSettingsPanel from '../components/UserSettings/SlackSettingsPanel';
 import SocialLoginsPanel from '../components/UserSettings/SocialLoginsPanel';
 import UserAttributesPanel from '../components/UserSettings/UserAttributesPanel';
@@ -66,24 +67,25 @@ import { CustomRoleEdit } from '../ee/pages/customRoles/CustomRoleEdit';
 import { CustomRoles } from '../ee/pages/customRoles/CustomRoles';
 import { useOrganization } from '../hooks/organization/useOrganization';
 import { useActiveProjectUuid } from '../hooks/useActiveProject';
-import {
-    useFeatureFlag,
-    useFeatureFlagEnabled,
-} from '../hooks/useFeatureFlagEnabled';
 import { useProject } from '../hooks/useProject';
+import {
+    useClientFeatureFlag,
+    useServerFeatureFlag,
+} from '../hooks/useServerOrClientFeatureFlag';
 import { Can } from '../providers/Ability';
 import useApp from '../providers/App/useApp';
 import { TrackPage } from '../providers/Tracking/TrackingProvider';
 import useTracking from '../providers/Tracking/useTracking';
 import { EventName, PageName } from '../types/Events';
 import ProjectSettings from './ProjectSettings';
+import classes from './Settings.module.css';
 
 const Settings: FC = () => {
-    const { data: embeddingEnabled } = useFeatureFlag(
+    const { data: embeddingEnabled } = useServerFeatureFlag(
         CommercialFeatureFlags.Embedding,
     );
 
-    const { data: isScimTokenManagementEnabled } = useFeatureFlag(
+    const { data: isScimTokenManagementEnabled } = useServerFeatureFlag(
         CommercialFeatureFlags.Scim,
     );
 
@@ -93,7 +95,7 @@ const Settings: FC = () => {
             aiOrganizationSettingsQuery.data?.isCopilotEnabled) ||
         aiOrganizationSettingsQuery.data?.isTrial;
 
-    const isServiceAccountFeatureFlagEnabled = useFeatureFlagEnabled(
+    const isServiceAccountFeatureFlagEnabled = useClientFeatureFlag(
         CommercialFeatureFlags.ServiceAccounts,
     );
 
@@ -108,7 +110,7 @@ const Settings: FC = () => {
 
     const isCustomRolesEnabled = health?.isCustomRolesEnabled;
 
-    const userGroupsFeatureFlagQuery = useFeatureFlag(
+    const userGroupsFeatureFlagQuery = useServerFeatureFlag(
         FeatureFlags.UserGroupsEnabled,
     );
 
@@ -149,7 +151,7 @@ const Settings: FC = () => {
     const isServiceAccountsEnabled =
         health?.isServiceAccountEnabled || isServiceAccountFeatureFlagEnabled;
 
-    const isWarehouseCredentialsFeatureFlagEnabled = useFeatureFlagEnabled(
+    const isWarehouseCredentialsFeatureFlagEnabled = useClientFeatureFlag(
         CommercialFeatureFlags.OrganizationWarehouseCredentials,
     );
 
@@ -183,7 +185,7 @@ const Settings: FC = () => {
             allowedRoutes.push({
                 path: '/password',
                 element: (
-                    <Stack spacing="xl">
+                    <Stack gap="xl">
                         <SettingsGridCard>
                             <Title order={4}>Password settings</Title>
                             <PasswordPanel />
@@ -202,16 +204,32 @@ const Settings: FC = () => {
         allowedRoutes.push({
             path: '/myWarehouseConnections',
             element: (
-                <Stack spacing="xl">
+                <Stack gap="xl">
                     <MyWarehouseConnectionsPanel />
                 </Stack>
             ),
         });
+        if (user?.ability.can('create', 'ScheduledDeliveries')) {
+            // A user might not be able to create scheduled permissions on the org level but on a specific project
+            // level. The check here makes sure that the user has the ability to create a scheduled delivery at least somewhere.
+            // Since the service returns specifically the user's scheduled deliveries, this is completely intended behavior.
+            allowedRoutes.push({
+                path: '/userScheduledDeliveries',
+                element: (
+                    <Stack gap="xl">
+                        <SettingsGridCard>
+                            <Title order={4}>My scheduled deliveries</Title>
+                        </SettingsGridCard>
+                        <UserScheduledDeliveriesPanel />
+                    </Stack>
+                ),
+            });
+        }
         if (user?.ability.can('manage', 'PersonalAccessToken')) {
             allowedRoutes.push({
                 path: '/organization',
                 element: (
-                    <Stack spacing="xl">
+                    <Stack gap="xl">
                         <SettingsGridCard>
                             <Title order={4}>General</Title>
                             <OrganizationPanel />
@@ -220,7 +238,7 @@ const Settings: FC = () => {
                         <SettingsGridCard>
                             <div>
                                 <Title order={4}>Allowed email domains</Title>
-                                <Text c="gray.6" fz="xs">
+                                <Text c="ldGray.6" fz="xs">
                                     Anyone with email addresses at these domains
                                     can automatically join the organization.
                                 </Text>
@@ -231,7 +249,7 @@ const Settings: FC = () => {
                         <SettingsGridCard>
                             <div>
                                 <Title order={4}>Default Project</Title>
-                                <Text c="gray.6" fz="xs">
+                                <Text c="ldGray.6" fz="xs">
                                     This is the project users will see when they
                                     log in for the first time or from a new
                                     device. If a user does not have access, they
@@ -245,7 +263,7 @@ const Settings: FC = () => {
                             <SettingsGridCard>
                                 <div>
                                     <Title order={4}>Danger zone </Title>
-                                    <Text c="gray.6" fz="xs">
+                                    <Text c="ldGray.6" fz="xs">
                                         This action deletes the whole workspace
                                         and all its content, including users.
                                         This action is not reversible.
@@ -425,7 +443,25 @@ const Settings: FC = () => {
             ) &&
             !matchPath(
                 {
+                    path: '/generalSettings/userScheduledDeliveries',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
                     path: '/generalSettings/projectManagement/:projectUuid/compilationHistory',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/customRoles',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/customRoles/:roleId',
                 },
                 location.pathname,
             )
@@ -465,7 +501,7 @@ const Settings: FC = () => {
             withPaddedContent
             title="Settings"
             sidebar={
-                <Stack sx={{ flexGrow: 1, overflow: 'hidden' }}>
+                <Stack className={classes.sidebarStack}>
                     <PageBreadcrumbs
                         items={[{ title: 'Settings', active: true }]}
                     />
@@ -474,19 +510,17 @@ const Settings: FC = () => {
                         offsetScrollbars
                         scrollbarSize={8}
                     >
-                        <Stack spacing="lg">
+                        <Stack gap="lg">
                             <Box>
                                 <Title order={6} fw={600} mb="xs">
                                     Your settings
                                 </Title>
-
                                 <RouterNavLink
                                     exact
                                     to="/generalSettings"
                                     label="Profile"
                                     icon={<MantineIcon icon={IconUserCircle} />}
                                 />
-
                                 {allowPasswordAuthentication && (
                                     <RouterNavLink
                                         label={
@@ -499,7 +533,6 @@ const Settings: FC = () => {
                                         icon={<MantineIcon icon={IconLock} />}
                                     />
                                 )}
-
                                 <RouterNavLink
                                     label="My warehouse connections"
                                     exact
@@ -508,6 +541,29 @@ const Settings: FC = () => {
                                         <MantineIcon icon={IconDatabaseCog} />
                                     }
                                 />
+                                {/*A user might not be able to create scheduled
+                                permissions on the org level but on a specific
+                                project level. The check here makes sure that
+                                the user has the ability to create a scheduled
+                                delivery at least somewhere. Since the
+                                service returns specifically the user's
+                                scheduled deliveries, this is completely
+                                intended behavior.*/}
+                                {user.ability.can(
+                                    'create',
+                                    'ScheduledDeliveries',
+                                ) && (
+                                    <RouterNavLink
+                                        label="My scheduled deliveries"
+                                        exact
+                                        to="/generalSettings/userScheduledDeliveries"
+                                        icon={
+                                            <MantineIcon
+                                                icon={IconCalendarStats}
+                                            />
+                                        }
+                                    />
+                                )}
                                 {user.ability.can(
                                     'manage',
                                     'PersonalAccessToken',
@@ -759,12 +815,23 @@ const Settings: FC = () => {
                                         }
                                     />
 
-                                    <RouterNavLink
-                                        label="Project access"
-                                        exact
-                                        to={`/generalSettings/projectManagement/${project.projectUuid}/projectAccess`}
-                                        icon={<MantineIcon icon={IconUsers} />}
-                                    />
+                                    <Can
+                                        I="manage"
+                                        this={subject('Project', {
+                                            organizationUuid:
+                                                organization.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        })}
+                                    >
+                                        <RouterNavLink
+                                            label="Project access"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/projectAccess`}
+                                            icon={
+                                                <MantineIcon icon={IconUsers} />
+                                            }
+                                        />
+                                    </Can>
 
                                     {user.ability.can(
                                         'view',

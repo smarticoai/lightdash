@@ -10,6 +10,7 @@ import type {
     ApiAiAgentThreadMessageVizQuery,
     ApiAiAgentThreadResponse,
     ApiAiAgentThreadSummaryListResponse,
+    ApiAiAgentVerifiedQuestionsResponse,
     ApiAppendInstructionRequest,
     ApiAppendInstructionResponse,
     ApiCreateAiAgent,
@@ -385,6 +386,7 @@ const createOptimisticMessages = (
             uuid: promptUuid,
             threadUuid,
             message: '',
+            errorMessage: null,
             createdAt: new Date().toISOString(),
             user: {
                 name: agent?.name ?? 'Unknown',
@@ -394,11 +396,14 @@ const createOptimisticMessages = (
             filtersOutput: null,
             metricQuery: null,
             humanScore: null,
+            humanFeedback: null,
             toolCalls: [],
             toolResults: [],
             reasoning: [],
             savedQueryUuid: null,
             artifacts: null,
+            referencedArtifacts: null,
+            modelConfig: null,
         },
     ];
 };
@@ -708,6 +713,49 @@ export const useCreateAgentThreadMessageMutation = (
     });
 };
 
+export const useRetryAiAgentThreadMessageMutation = () => {
+    const { streamMessage } = useAiAgentThreadStreamMutation();
+    const queryClient = useQueryClient();
+
+    return useMutation<
+        void,
+        void,
+        {
+            projectUuid: string;
+            agentUuid: string;
+            threadUuid: string;
+            messageUuid: string;
+        }
+    >({
+        mutationFn: ({ projectUuid, agentUuid, threadUuid, messageUuid }) =>
+            streamMessage({
+                projectUuid,
+                agentUuid: agentUuid,
+                threadUuid: threadUuid,
+                messageUuid: messageUuid,
+                refetchThread: () =>
+                    queryClient.invalidateQueries({
+                        queryKey: [
+                            AI_AGENTS_KEY,
+                            projectUuid,
+                            agentUuid,
+                            'threads',
+                            threadUuid,
+                        ],
+                    }),
+            }),
+        onSettled: (_, __, { projectUuid, agentUuid, threadUuid }) => {
+            void queryClient.invalidateQueries([
+                AI_AGENTS_KEY,
+                projectUuid,
+                agentUuid,
+                'threads',
+                threadUuid,
+            ]);
+        },
+    });
+};
+
 // Feedback and query management functionality
 const updatePromptFeedback = async (
     projectUuid: string,
@@ -715,11 +763,12 @@ const updatePromptFeedback = async (
     threadUuid: string,
     messageUuid: string,
     humanScore: number,
+    humanFeedback?: string | null,
 ) =>
     lightdashApi<ApiSuccessEmpty>({
         url: `/projects/${projectUuid}/aiAgents/${agentUuid}/threads/${threadUuid}/messages/${messageUuid}/feedback`,
         method: 'PATCH',
-        body: JSON.stringify({ humanScore }),
+        body: JSON.stringify({ humanScore, humanFeedback }),
     });
 
 export const useUpdatePromptFeedbackMutation = (
@@ -734,17 +783,22 @@ export const useUpdatePromptFeedbackMutation = (
     return useMutation<
         ApiSuccessEmpty,
         ApiError,
-        { messageUuid: string; humanScore: number }
+        {
+            messageUuid: string;
+            humanScore: number;
+            humanFeedback?: string | null;
+        }
     >({
-        mutationFn: ({ messageUuid, humanScore }) =>
+        mutationFn: ({ messageUuid, humanScore, humanFeedback }) =>
             updatePromptFeedback(
                 projectUuid,
                 agentUuid,
                 threadUuid,
                 messageUuid,
                 humanScore,
+                humanFeedback,
             ),
-        onMutate: ({ messageUuid, humanScore }) => {
+        onMutate: ({ messageUuid, humanScore, humanFeedback }) => {
             queryClient.setQueryData(
                 [AI_AGENTS_KEY, projectUuid, agentUuid, 'threads', threadUuid],
                 (
@@ -756,14 +810,24 @@ export const useUpdatePromptFeedbackMutation = (
 
                     return {
                         ...currentData,
-                        messages: currentData.messages.map((message) =>
-                            message.uuid === messageUuid
-                                ? {
-                                      ...message,
-                                      humanScore,
-                                  }
-                                : message,
-                        ),
+                        messages: currentData.messages.map((message) => {
+                            if (message.uuid !== messageUuid) {
+                                return message;
+                            }
+
+                            if (message.role !== 'assistant') {
+                                return message;
+                            }
+
+                            return {
+                                ...message,
+                                humanScore,
+                                humanFeedback:
+                                    humanScore === -1
+                                        ? (humanFeedback ?? null)
+                                        : null,
+                            };
+                        }),
                     };
                 },
             );
@@ -1195,5 +1259,27 @@ export const useAppendInstructionMutation = (
                 apiError: error,
             });
         },
+    });
+};
+
+const getVerifiedQuestions = async (
+    projectUuid: string,
+    agentUuid: string,
+): Promise<ApiAiAgentVerifiedQuestionsResponse['results']> =>
+    lightdashApi<ApiAiAgentVerifiedQuestionsResponse['results']>({
+        version: 'v1',
+        url: `/projects/${projectUuid}/aiAgents/${agentUuid}/verified-questions`,
+        method: 'GET',
+        body: undefined,
+    });
+
+export const useVerifiedQuestions = (
+    projectUuid: string | undefined,
+    agentUuid: string | undefined,
+) => {
+    return useQuery<ApiAiAgentVerifiedQuestionsResponse['results'], ApiError>({
+        queryKey: [AI_AGENTS_KEY, projectUuid, agentUuid, 'verified-questions'],
+        queryFn: () => getVerifiedQuestions(projectUuid!, agentUuid!),
+        enabled: !!projectUuid && !!agentUuid,
     });
 };

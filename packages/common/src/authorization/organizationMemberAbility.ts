@@ -115,6 +115,10 @@ const applyOrganizationMemberStaticAbilities: Record<
         can('create', 'ScheduledDeliveries', {
             organizationUuid: member.organizationUuid,
         });
+        can('manage', 'ScheduledDeliveries', {
+            organizationUuid: member.organizationUuid,
+            userUuid: member.userUuid,
+        });
         can('manage', 'GoogleSheets', {
             organizationUuid: member.organizationUuid,
         });
@@ -201,9 +205,6 @@ const applyOrganizationMemberStaticAbilities: Record<
         can('manage', 'PinnedItems', {
             organizationUuid: member.organizationUuid,
         });
-        can('manage', 'ScheduledDeliveries', {
-            organizationUuid: member.organizationUuid,
-        });
         can('manage', 'DashboardComments', {
             organizationUuid: member.organizationUuid,
         });
@@ -232,6 +233,12 @@ const applyOrganizationMemberStaticAbilities: Record<
             organizationUuid: member.organizationUuid,
         });
         can('manage', 'Validation', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('view', 'SourceCode', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'SourceCode', {
             organizationUuid: member.organizationUuid,
         });
         can('promote', 'SavedChart', {
@@ -329,6 +336,9 @@ const applyOrganizationMemberStaticAbilities: Record<
             organizationUuid: member.organizationUuid,
         });
         can('manage', 'AiAgentThread', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'ScheduledDeliveries', {
             organizationUuid: member.organizationUuid,
         });
     },

@@ -16,7 +16,7 @@ type Props = {
 const MAX_WIDTH_TITLE_PX = 160;
 
 const SlashDivider = () => (
-    <Text span c="dark.3">
+    <Text span c="ldGray.8">
         /
     </Text>
 );
@@ -55,7 +55,7 @@ export const TitleBreadCrumbs: FC<Props> = ({
                                     to={`/projects/${projectUuid}/dashboards/${dashboardUuid}`}
                                 >
                                     <MantineIcon
-                                        color="dark.2"
+                                        color="ldGray.4"
                                         icon={IconFolder}
                                     />
                                 </ActionIcon>
@@ -63,7 +63,7 @@ export const TitleBreadCrumbs: FC<Props> = ({
                                 <Anchor
                                     fw={500}
                                     fz="md"
-                                    c="dark.2"
+                                    c="ldGray.6"
                                     component={Link}
                                     to={`/projects/${projectUuid}/spaces/${spaceUuid}`}
                                     sx={{
@@ -100,7 +100,7 @@ export const TitleBreadCrumbs: FC<Props> = ({
                     >
                         <Anchor
                             fw={500}
-                            c="dark.2"
+                            c="ldGray.6"
                             fz="md"
                             component={Link}
                             to={`/projects/${projectUuid}/dashboards/${dashboardUuid}`}

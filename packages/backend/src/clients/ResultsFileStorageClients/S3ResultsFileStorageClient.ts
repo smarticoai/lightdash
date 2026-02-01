@@ -1,15 +1,17 @@
-import { GetObjectCommand, NotFound } from '@aws-sdk/client-s3';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
     getErrorMessage,
     MissingConfigError,
+    ResultsExpiredError,
     WarehouseResults,
 } from '@lightdash/common';
 import fs from 'fs';
 import { PassThrough, Readable } from 'stream';
 import Logger from '../../logging/logger';
 import { createContentDispositionHeader } from '../../utils/FileDownloadUtils/FileDownloadUtils';
+import { writeWithBackpressure } from '../../utils/streamUtils';
 import {
     S3CacheClient,
     type S3CacheClientArguments,
@@ -50,7 +52,12 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
             throw new MissingConfigError('S3 configuration is not set');
         }
 
-        const passThrough = new PassThrough();
+        // Use a larger buffer (16MB) to allow the S3 Upload to start consuming
+        // before backpressure kicks in. Without this, the first write() might
+        // return false immediately before Upload starts reading, causing deadlock.
+        const passThrough = new PassThrough({
+            highWaterMark: 16 * 1024 * 1024,
+        });
 
         const contentDisposition = createContentDispositionHeader(
             attachmentDownloadName || fileName,
@@ -71,6 +78,11 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
             },
         });
 
+        // Start the upload immediately so it begins consuming from the PassThrough.
+        // Without this, the Upload won't read until done() is called, causing deadlock
+        // when the PassThrough buffer fills up waiting for drain.
+        const uploadPromise = upload.done();
+
         let isClosed = false;
         const close = async () => {
             if (!this.configuration) {
@@ -81,7 +93,7 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
             isClosed = true;
             try {
                 passThrough.end(); // signal EOF
-                await upload.done(); // wait for upload to finish
+                await uploadPromise; // wait for upload to finish
                 Logger.debug(
                     `Successfully closed upload stream to ${this.configuration.bucket}/${fileName}`,
                 );
@@ -97,11 +109,15 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
         };
 
         // Create a function that can be used as a streamQuery callback
-        const write = (rows: WarehouseResults['rows']) => {
+        // This function handles backpressure by waiting for drain when buffer is full.
+        const write = async (rows: WarehouseResults['rows']): Promise<void> => {
             try {
-                rows.forEach((row) =>
-                    passThrough.push(`${JSON.stringify(row)}\n`),
-                );
+                for await (const row of rows) {
+                    await writeWithBackpressure(
+                        passThrough,
+                        `${JSON.stringify(row)}\n`,
+                    );
+                }
             } catch (error) {
                 Logger.error(
                     `Failed to write rows to fileName ${fileName}: ${getErrorMessage(
@@ -119,21 +135,49 @@ export class S3ResultsFileStorageClient extends S3CacheClient {
         cacheKey: string,
         fileExtension = 'jsonl',
     ): Promise<Readable> {
-        try {
-            const results = await this.getResults(cacheKey, fileExtension);
-            if (!results.Body) {
-                throw new Error('No results found');
-            }
+        const results = await this.getResults(cacheKey, fileExtension);
+        if (!results.Body) {
+            throw new ResultsExpiredError();
+        }
 
-            return results.Body as Readable;
-        } catch (error) {
-            if (error instanceof NotFound) {
-                throw new Error(`Cache key ${cacheKey} not found`);
-            }
-            Logger.error(
-                `Failed to download results from s3. ${getErrorMessage(error)}`,
+        return results.Body as Readable;
+    }
+
+    /**
+     * Get the first line of a JSONL file from S3
+     * Useful for extracting column order from query results
+     */
+    async getFirstLine(
+        cacheKey: string,
+        fileExtension = 'jsonl',
+    ): Promise<string | null> {
+        try {
+            const stream = await this.getDownloadStream(
+                cacheKey,
+                fileExtension,
             );
-            throw error;
+            // eslint-disable-next-line @typescript-eslint/return-await
+            return await new Promise((resolve, reject) => {
+                let buffer = '';
+                const onData = (chunk: Buffer) => {
+                    buffer += chunk.toString();
+                    const newlineIndex = buffer.indexOf('\n');
+                    if (newlineIndex !== -1) {
+                        stream.destroy(); // Stop reading after first line
+                        resolve(buffer.slice(0, newlineIndex));
+                    }
+                };
+                stream.on('data', onData);
+                stream.on('end', () => resolve(buffer || null));
+                stream.on('error', reject);
+            });
+        } catch (error) {
+            Logger.warn(
+                `Failed to get first line from ${cacheKey}: ${getErrorMessage(
+                    error,
+                )}`,
+            );
+            return null;
         }
     }
 

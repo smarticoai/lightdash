@@ -13,6 +13,10 @@ import {
     CreateSchedulerAndTargetsWithoutIds,
     ExploreType,
     ForbiddenError,
+    GoogleSheetsTransientError,
+    KnexPaginateArgs,
+    KnexPaginatedData,
+    MissingConfigError,
     NotFoundError,
     ParameterError,
     SavedChart,
@@ -23,6 +27,7 @@ import {
     SpaceShare,
     SpaceSummary,
     TogglePinnedItemInfo,
+    UnexpectedGoogleSheetsError,
     UpdateMultipleSavedChart,
     UpdateSavedChart,
     UpdatedByUser,
@@ -37,6 +42,7 @@ import {
     isConditionalFormattingConfigWithSingleColor,
     isCustomSqlDimension,
     isJwtUser,
+    isSchedulerGsheetsOptions,
     isUserWithOrg,
     isValidFrequency,
     isValidTimezone,
@@ -52,6 +58,7 @@ import {
     LightdashAnalytics,
     SchedulerUpsertEvent,
 } from '../../analytics/LightdashAnalytics';
+import { GoogleDriveClient } from '../../clients/Google/GoogleDriveClient';
 import { SlackClient } from '../../clients/Slack/SlackClient';
 import { getSchedulerTargetType } from '../../database/entities/scheduler';
 import { AnalyticsModel } from '../../models/AnalyticsModel';
@@ -67,6 +74,7 @@ import { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { BaseService } from '../BaseService';
 import { PermissionsService } from '../PermissionsService/PermissionsService';
 import { hasViewAccessToSpace } from '../SpaceService/SpaceService';
+import { UserService } from '../UserService';
 
 type SavedChartServiceArguments = {
     analytics: LightdashAnalytics;
@@ -81,6 +89,8 @@ type SavedChartServiceArguments = {
     dashboardModel: DashboardModel;
     catalogModel: CatalogModel;
     permissionsService: PermissionsService;
+    googleDriveClient: GoogleDriveClient;
+    userService: UserService;
 };
 
 export class SavedChartService
@@ -111,6 +121,10 @@ export class SavedChartService
 
     private readonly permissionsService: PermissionsService;
 
+    private readonly googleDriveClient: GoogleDriveClient;
+
+    private readonly userService: UserService;
+
     constructor(args: SavedChartServiceArguments) {
         super();
         this.analytics = args.analytics;
@@ -125,6 +139,8 @@ export class SavedChartService
         this.dashboardModel = args.dashboardModel;
         this.catalogModel = args.catalogModel;
         this.permissionsService = args.permissionsService;
+        this.googleDriveClient = args.googleDriveClient;
+        this.userService = args.userService;
     }
 
     private async checkUpdateAccess(
@@ -596,9 +612,8 @@ export class SavedChartService
                 savedChartUuid,
             });
         }
-        const pinnedList = await this.pinnedListModel.getPinnedListAndItems(
-            projectUuid,
-        );
+        const pinnedList =
+            await this.pinnedListModel.getPinnedListAndItems(projectUuid);
 
         this.analytics.track({
             event: 'pinned_list.updated',
@@ -748,9 +763,8 @@ export class SavedChartService
         user: SessionUser,
         savedChartUuid: string,
     ): Promise<ViewStatistics> {
-        const savedChart = await this.savedChartModel.getSummary(
-            savedChartUuid,
-        );
+        const savedChart =
+            await this.savedChartModel.getSummary(savedChartUuid);
         const space = await this.spaceModel.getSpaceSummary(
             savedChart.spaceUuid,
         );
@@ -779,19 +793,26 @@ export class SavedChartService
         account: Account,
         space: Omit<SpaceSummary, 'userAccess'>,
         savedChart: SavedChartDAO,
-    ) {
+    ): Promise<SpaceShare[]> {
+        let access;
         if (isJwtUser(account)) {
             await this.permissionsService.checkEmbedPermissions(
                 account,
                 savedChart.uuid,
             );
-
-            return [];
+            // We pass this access everytime, but we only define the ability
+            // rule for this chart only if the JWT is type: 'chart'.
+            // Dashboards won't have `access` defined in their abilityRules,
+            // so this CASL check will pass for them.
+            // TODO: Get all chartUuids for a given dashboard in the middleware.
+            //       https://linear.app/lightdash/issue/CENG-110/front-load-available-charts-for-dashboard-requests
+            access = [{ chartUuid: savedChart.uuid }];
+        } else {
+            access = await this.spaceModel.getUserSpaceAccess(
+                account.user.id,
+                savedChart.spaceUuid,
+            );
         }
-        const access = await this.spaceModel.getUserSpaceAccess(
-            account.user.id,
-            savedChart.spaceUuid,
-        );
 
         if (
             account.user.ability.cannot(
@@ -808,7 +829,7 @@ export class SavedChartService
             );
         }
 
-        return access;
+        return isJwtUser(account) ? [] : (access as SpaceShare[]);
     }
 
     async get(
@@ -850,9 +871,8 @@ export class SavedChartService
         projectUuid: string,
         savedChart: CreateSavedChart,
     ): Promise<SavedChart> {
-        const { organizationUuid } = await this.projectModel.getSummary(
-            projectUuid,
-        );
+        const { organizationUuid } =
+            await this.projectModel.getSummary(projectUuid);
         let isPrivate = false;
         let access: SpaceShare[] = [];
         if (savedChart.spaceUuid) {
@@ -1063,9 +1083,26 @@ export class SavedChartService
     async getSchedulers(
         user: SessionUser,
         chartUuid: string,
-    ): Promise<SchedulerAndTargets[]> {
-        await this.checkCreateScheduledDeliveryAccess(user, chartUuid);
-        return this.schedulerModel.getChartSchedulers(chartUuid);
+        searchQuery?: string,
+        paginateArgs?: KnexPaginateArgs,
+        filters?: {
+            formats?: string[];
+        },
+    ): Promise<KnexPaginatedData<SchedulerAndTargets[]>> {
+        const chart = await this.checkCreateScheduledDeliveryAccess(
+            user,
+            chartUuid,
+        );
+        return this.schedulerModel.getSchedulers({
+            projectUuid: chart.projectUuid,
+            paginateArgs,
+            searchQuery,
+            filters: {
+                resourceType: 'chart',
+                resourceUuids: [chartUuid],
+                formats: filters?.formats,
+            },
+        });
     }
 
     async createScheduler(
@@ -1085,6 +1122,41 @@ export class SavedChartService
 
         if (!isValidTimezone(newScheduler.timezone)) {
             throw new ParameterError('Timezone string is not valid');
+        }
+
+        if (!newScheduler.targets || !Array.isArray(newScheduler.targets)) {
+            throw new ParameterError(
+                'Targets is required and must be an array',
+            );
+        }
+
+        // Validate Google Sheets file if format is GSHEETS
+        if (newScheduler.format === SchedulerFormat.GSHEETS) {
+            if (!isSchedulerGsheetsOptions(newScheduler.options)) {
+                throw new ParameterError(
+                    'Google Sheets format requires valid gsheets options',
+                );
+            }
+
+            try {
+                const refreshToken = await this.userService.getRefreshToken(
+                    user.userUuid,
+                );
+                await this.googleDriveClient.assertFileIsGoogleSheet(
+                    refreshToken,
+                    newScheduler.options.gdriveId,
+                );
+            } catch (error) {
+                if (error instanceof UnexpectedGoogleSheetsError) {
+                    throw error; // Already has clear user-facing message
+                }
+                if (error instanceof GoogleSheetsTransientError) {
+                    throw error; // Allow transient errors to propagate for retry
+                }
+                throw new MissingConfigError(
+                    'Unable to validate Google Sheets file. Please ensure you have connected your Google account.',
+                );
+            }
         }
 
         const { projectUuid, organizationUuid } =
@@ -1170,9 +1242,8 @@ export class SavedChartService
                 "You don't have access to the space this chart belongs to",
             );
         }
-        const versions = await this.savedChartModel.getLatestVersionSummaries(
-            chartUuid,
-        );
+        const versions =
+            await this.savedChartModel.getLatestVersionSummaries(chartUuid);
         this.analytics.track({
             event: 'saved_chart_history.view',
             userId: user.userUuid,

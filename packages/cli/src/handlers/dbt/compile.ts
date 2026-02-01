@@ -30,6 +30,8 @@ export type DbtCompileOptions = {
     skipWarehouseCatalog: boolean | undefined;
     useDbtList: boolean | undefined;
     defer: boolean | undefined;
+    targetPath: string | undefined;
+    favorState: boolean | undefined;
 };
 
 const dbtCompileArgs = [
@@ -47,6 +49,8 @@ const dbtCompileArgs = [
     'state',
     'fullRefresh',
     'defer',
+    'targetPath',
+    'favorState',
 ];
 
 const camelToSnakeCase = (str: string) =>

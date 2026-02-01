@@ -4,6 +4,7 @@ import { useOutletContext, useParams } from 'react-router';
 import useApp from '../../../providers/App/useApp';
 import { AgentChatDisplay } from '../../features/aiCopilot/components/ChatElements/AgentChatDisplay';
 import { AgentChatInput } from '../../features/aiCopilot/components/ChatElements/AgentChatInput';
+import { useAiAgentPermission } from '../../features/aiCopilot/hooks/useAiAgentPermission';
 import { useAiAgentThreadArtifact } from '../../features/aiCopilot/hooks/useAiAgentThreadArtifact';
 import {
     useProjectAiAgent as useAiAgent,
@@ -36,6 +37,11 @@ const AiAgentThreadPage = ({ debug }: { debug?: boolean }) => {
     const agentQuery = useAiAgent(projectUuid!, agentUuid!);
     const { agent } = useOutletContext<AgentContext>();
 
+    const canManage = useAiAgentPermission({
+        action: 'manage',
+        projectUuid,
+    });
+
     const {
         mutateAsync: createAgentThreadMessage,
         isLoading: isCreatingMessage,
@@ -63,7 +69,13 @@ const AiAgentThreadPage = ({ debug }: { debug?: boolean }) => {
     }, [isPending, refetch, isStreaming]);
 
     const handleSubmit = (prompt: string) => {
-        void createAgentThreadMessage({ prompt });
+        // Use modelConfig from first assistant message for follow-up messages
+        const firstAssistantMessage = thread?.messages?.find(
+            (m) => m.role === 'assistant',
+        );
+        const modelConfig = firstAssistantMessage?.modelConfig ?? undefined;
+
+        void createAgentThreadMessage({ prompt, modelConfig });
     };
 
     if (isLoadingThread || !thread || agentQuery.isLoading) {
@@ -83,6 +95,7 @@ const AiAgentThreadPage = ({ debug }: { debug?: boolean }) => {
             debug={debug}
             projectUuid={projectUuid}
             agentUuid={agentUuid}
+            showAddToEvalsButton={canManage}
         >
             <AgentChatInput
                 disabled={

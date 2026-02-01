@@ -13,7 +13,6 @@ export default defineConfig({
     publicDir: 'public',
     define: {
         __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
-        REACT_SCAN_ENABLED: process.env.REACT_SCAN_ENABLED ?? true,
         REACT_QUERY_DEVTOOLS_ENABLED:
             process.env.REACT_QUERY_DEVTOOLS_ENABLED ?? true,
     },
@@ -26,9 +25,13 @@ export default defineConfig({
         }),
         monacoEditorPlugin({
             forceBuildCDN: true,
-            languageWorkers: ['json'],
+            languageWorkers: ['editorWorkerService', 'json', 'html'],
+            customWorkers: [
+                { label: 'yaml', entry: 'monaco-yaml/yaml.worker.js' },
+            ],
         }),
         sentryVitePlugin({
+            telemetry: false,
             org: 'lightdash',
             project: 'lightdash-frontend',
             authToken: process.env.SENTRY_AUTH_TOKEN,
@@ -42,11 +45,9 @@ export default defineConfig({
             },
         }),
     ],
-    css: {
-        transformer: 'lightningcss',
-    },
     optimizeDeps: {
         exclude: ['@lightdash/common'],
+        include: ['react-vega'],
     },
     resolve: {
         alias:
@@ -77,7 +78,6 @@ export default defineConfig({
                         'react',
                         'react-dom',
                         'react-router',
-                        'react-hook-form',
                         'react-use',
                         // TODO: removed because of PNPM
                         // 'react-draggable',
@@ -125,8 +125,12 @@ export default defineConfig({
         environment: 'jsdom',
         setupFiles: './src/testing/vitest.setup.ts',
         env: {
-            VITE_REACT_SCAN_ENABLED: 'false',
             VITE_REACT_QUERY_DEVTOOLS_ENABLED: 'false',
+        },
+        poolOptions: {
+            forks: {
+                maxForks: '50%',
+            },
         },
     },
     server: {

@@ -1,7 +1,6 @@
 import {
     assertUnreachable,
     friendlyName,
-    getItemColor,
     type Change,
 } from '@lightdash/common';
 import {
@@ -17,9 +16,10 @@ import {
 } from '@mantine-8/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { toPairs } from 'lodash';
+import toPairs from 'lodash/toPairs';
 import FieldIcon from '../../../../../../../components/common/Filters/FieldIcon';
 import MantineIcon from '../../../../../../../components/common/MantineIcon';
+import { getFieldColor } from '../../../../../../../utils/fieldColors';
 import { OperationRenderer } from './OperationRenderer';
 import { FieldBreadcrumb, TableBreadcrumb } from './SupportElements';
 import type {
@@ -77,11 +77,11 @@ const CreateMetricFromChangeData = ({
     }
 
     const metric = changeData.payload.value;
-    const color = getItemColor(metric);
+    const color = getFieldColor(metric);
 
     return (
         <Box mx="xs">
-            <Paper bg="gray.0" component={Group} p="xs" w="100%">
+            <Paper bg="ldGray.0" component={Group} p="xs" w="100%">
                 <UnstyledButton onClick={toggle} w="100%">
                     <Group justify="space-between" w="100%">
                         <Group gap="xs">
@@ -115,14 +115,14 @@ const CreateMetricFromChangeData = ({
                         {metric.description && (
                             <Text size="xs" fw={400} c="dimmed">
                                 Description:{' '}
-                                <Text span c="gray.8">
+                                <Text span c="ldGray.8">
                                     {metric.description}
                                 </Text>
                             </Text>
                         )}
 
                         <Text size="xs" fw={400} c="dimmed">
-                            SQL: <Code c="gray.8">{metric.compiledSql}</Code>
+                            SQL: <Code c="ldGray.8">{metric.compiledSql}</Code>
                         </Text>
                     </Stack>
                 </Collapse>
@@ -150,7 +150,7 @@ const CreateMetricFallback = ({
 
     return (
         <Box mx="xs">
-            <Paper bg="gray.0" p="xs">
+            <Paper bg="ldGray.0" p="xs">
                 <Stack gap="xs">
                     <Group gap="xs">
                         <Badge size="sm" color="blue" variant="dot">

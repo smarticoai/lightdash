@@ -1,9 +1,12 @@
 import {
     AnyType,
+    assertUnreachable,
     friendlyName,
     LightdashPage,
     operatorActionValue,
+    PartialFailureType,
     ThresholdOptions,
+    type PartialFailure,
 } from '@lightdash/common';
 import {
     KnownBlock,
@@ -12,6 +15,27 @@ import {
     SectionBlockAccessory,
 } from '@slack/bolt';
 import { AttachmentUrl } from '../EmailClient/EmailClient';
+
+// Slack Block Kit text limits
+const SLACK_LIMITS = {
+    HEADER_TEXT: 150,
+    SECTION_TEXT: 3000,
+    SECTION_FIELD_TEXT: 2000,
+    BUTTON_TEXT: 75,
+    ALT_TEXT: 2000,
+} as const;
+
+// Truncate text to fit Slack limits and add ellipsis if needed
+const truncateText = (text: string, maxLength: number): string => {
+    if (!text || text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength - 3)}...`;
+};
+
+// Sanitize text to prevent invalid blocks
+const sanitizeText = (text: string | undefined): string => {
+    if (!text || text.trim() === '') return ' ';
+    return text.trim();
+};
 
 type GetChartAndDashboardBlocksArgs = {
     title: string;
@@ -27,7 +51,7 @@ type GetChartAndDashboardBlocksArgs = {
 const getSectionFields = (
     fields: [string, string | undefined][],
 ): SectionBlock['fields'] => {
-    const availableFields = fields.filter(([, text]) => Boolean(text));
+    const availableFields = fields.filter(([, text]) => Boolean(text?.trim()));
 
     if (availableFields.length === 0) {
         // Return empty field placeholder to avoid `cannot_parse_attachment` error from Slack
@@ -40,7 +64,10 @@ const getSectionFields = (
     }
     return availableFields.map(([title, text]) => ({
         type: 'mrkdwn',
-        text: `*${title}*: \n${text}`,
+        text: truncateText(
+            `*${title}*: \n${sanitizeText(text)}`,
+            SLACK_LIMITS.SECTION_FIELD_TEXT,
+        ),
     }));
 };
 
@@ -75,15 +102,21 @@ export const getChartAndDashboardBlocks = ({
             type: 'header',
             text: {
                 type: 'plain_text',
-                text: title,
+                text: truncateText(
+                    sanitizeText(title),
+                    SLACK_LIMITS.HEADER_TEXT,
+                ),
             },
         },
-        message
+        message?.trim()
             ? {
                   type: 'section',
                   text: {
                       type: 'mrkdwn',
-                      text: message,
+                      text: truncateText(
+                          sanitizeText(message),
+                          SLACK_LIMITS.SECTION_TEXT,
+                      ),
                   },
               }
             : undefined,
@@ -95,20 +128,26 @@ export const getChartAndDashboardBlocks = ({
             ]),
             accessory: lightdashLink,
         },
-        imageUrl
+        imageUrl?.trim()
             ? {
                   type: 'image',
                   image_url: imageUrl,
-                  alt_text: title,
+                  alt_text: truncateText(
+                      sanitizeText(title),
+                      SLACK_LIMITS.ALT_TEXT,
+                  ),
               }
             : undefined,
-        footerMarkdown
+        footerMarkdown?.trim()
             ? {
                   type: 'context',
                   elements: [
                       {
                           type: 'mrkdwn',
-                          text: footerMarkdown,
+                          text: truncateText(
+                              sanitizeText(footerMarkdown),
+                              SLACK_LIMITS.SECTION_TEXT,
+                          ),
                       },
                   ],
               }
@@ -153,15 +192,21 @@ export const getChartCsvResultsBlocks = ({
             type: 'header',
             text: {
                 type: 'plain_text',
-                text: title,
+                text: truncateText(
+                    sanitizeText(title),
+                    SLACK_LIMITS.HEADER_TEXT,
+                ),
             },
         },
-        message
+        message?.trim()
             ? {
                   type: 'section',
                   text: {
                       type: 'mrkdwn',
-                      text: message,
+                      text: truncateText(
+                          sanitizeText(message),
+                          SLACK_LIMITS.SECTION_TEXT,
+                      ),
                   },
               }
             : undefined,
@@ -174,7 +219,7 @@ export const getChartCsvResultsBlocks = ({
             accessory: lightdashLink,
         },
 
-        csvUrl
+        csvUrl?.trim()
             ? {
                   type: 'actions',
                   elements: [
@@ -198,13 +243,16 @@ export const getChartCsvResultsBlocks = ({
                   },
               },
 
-        footerMarkdown
+        footerMarkdown?.trim()
             ? {
                   type: 'context',
                   elements: [
                       {
                           type: 'mrkdwn',
-                          text: footerMarkdown,
+                          text: truncateText(
+                              sanitizeText(footerMarkdown),
+                              SLACK_LIMITS.SECTION_TEXT,
+                          ),
                       },
                   ],
               }
@@ -253,11 +301,14 @@ export const getChartThresholdAlertBlocks = ({
         type: 'section',
         text: {
             type: 'mrkdwn',
-            text: `• *${friendlyName(threshold.fieldId)}* ${operatorActionValue(
-                threshold.operator,
-                threshold.value,
-                '*',
-            )}`,
+            text: truncateText(
+                `• *${friendlyName(threshold.fieldId)}* ${operatorActionValue(
+                    threshold.operator,
+                    threshold.value,
+                    '*',
+                )}`,
+                SLACK_LIMITS.SECTION_TEXT,
+            ),
         },
     }));
     return getBlocks([
@@ -265,15 +316,21 @@ export const getChartThresholdAlertBlocks = ({
             type: 'header',
             text: {
                 type: 'plain_text',
-                text: title,
+                text: truncateText(
+                    sanitizeText(title),
+                    SLACK_LIMITS.HEADER_TEXT,
+                ),
             },
         },
-        message
+        message?.trim()
             ? {
                   type: 'section',
                   text: {
                       type: 'mrkdwn',
-                      text: message,
+                      text: truncateText(
+                          sanitizeText(message),
+                          SLACK_LIMITS.SECTION_TEXT,
+                      ),
                   },
               }
             : undefined,
@@ -282,25 +339,36 @@ export const getChartThresholdAlertBlocks = ({
             type: 'section',
             text: {
                 type: 'mrkdwn',
-                text: `Your results for the chart *${name}* triggered the following alerts:`,
+                text: truncateText(
+                    `Your results for the chart *${sanitizeText(
+                        name,
+                    )}* triggered the following alerts:`,
+                    SLACK_LIMITS.SECTION_TEXT,
+                ),
             },
             accessory: lightdashLink,
         },
         ...thresholdBlocks,
-        imageUrl
+        imageUrl?.trim()
             ? {
                   type: 'image',
                   image_url: imageUrl,
-                  alt_text: title,
+                  alt_text: truncateText(
+                      sanitizeText(title),
+                      SLACK_LIMITS.ALT_TEXT,
+                  ),
               }
             : undefined,
-        footerMarkdown
+        footerMarkdown?.trim()
             ? {
                   type: 'context',
                   elements: [
                       {
                           type: 'mrkdwn',
-                          text: footerMarkdown,
+                          text: truncateText(
+                              sanitizeText(footerMarkdown),
+                              SLACK_LIMITS.SECTION_TEXT,
+                          ),
                       },
                   ],
               }
@@ -315,6 +383,7 @@ type GetDashboardCsvResultsBlocksArgs = {
     ctaUrl: string;
     csvUrls: AttachmentUrl[];
     footerMarkdown?: string;
+    failures?: PartialFailure[];
 };
 export const getDashboardCsvResultsBlocks = ({
     title,
@@ -324,21 +393,97 @@ export const getDashboardCsvResultsBlocks = ({
     csvUrls,
     footerMarkdown,
     ctaUrl,
-}: GetDashboardCsvResultsBlocksArgs): KnownBlock[] =>
-    getBlocks([
+    failures,
+}: GetDashboardCsvResultsBlocksArgs): KnownBlock[] => {
+    const getFailureBlock = ():
+        | { type: 'section'; text: { type: 'mrkdwn'; text: string } }
+        | undefined => {
+        if (!failures || failures.length === 0) {
+            return undefined;
+        }
+
+        const allChartsFailed = csvUrls.length === 0;
+        if (allChartsFailed) {
+            const errorText = failures
+                .map((f) => {
+                    switch (f.type) {
+                        case PartialFailureType.DASHBOARD_CHART:
+                        case PartialFailureType.DASHBOARD_SQL_CHART:
+                            return `\t• *${sanitizeText(
+                                f.chartName,
+                            )}:* ${sanitizeText(f.error)}`;
+                        case PartialFailureType.MISSING_TARGETS:
+                            return `\t• No targets found for this scheduled delivery`;
+                        default:
+                            return assertUnreachable(
+                                f,
+                                'Unknown partial failure type',
+                            );
+                    }
+                })
+                .join('\n');
+            return {
+                type: 'section',
+                text: {
+                    type: 'mrkdwn',
+                    text: truncateText(
+                        `:x: *Error: All charts in this scheduled delivery failed to export*\n\nNo data could be exported from this dashboard. Please check the errors below and verify your data model.\n\n${errorText}`,
+                        SLACK_LIMITS.SECTION_TEXT,
+                    ),
+                },
+            };
+        }
+
+        const errorText = failures
+            .map((f) => {
+                switch (f.type) {
+                    case PartialFailureType.DASHBOARD_CHART:
+                    case PartialFailureType.DASHBOARD_SQL_CHART:
+                        return `\t• ${sanitizeText(
+                            f.chartName,
+                        )}: ${sanitizeText(f.error)}`;
+                    case PartialFailureType.MISSING_TARGETS:
+                        return `\t• No targets found for this scheduled delivery`;
+                    default:
+                        return assertUnreachable(
+                            f,
+                            'Unknown partial failure type',
+                        );
+                }
+            })
+            .join('\n');
+        return {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: truncateText(
+                    `:warning: *Warning:* ${failures.length} chart(s) failed to export:\n${errorText}`,
+                    SLACK_LIMITS.SECTION_TEXT,
+                ),
+            },
+        };
+    };
+
+    return getBlocks([
         {
             type: 'header',
             text: {
                 type: 'plain_text',
-                text: title,
+                text: truncateText(
+                    sanitizeText(title),
+                    SLACK_LIMITS.HEADER_TEXT,
+                ),
             },
         },
-        message
+        message?.trim()
             ? {
                   type: 'section',
                   text: {
                       type: 'mrkdwn',
-                      text: message,
+                      text: truncateText(
+                          sanitizeText(message),
+                          SLACK_LIMITS.SECTION_TEXT,
+                      ),
                   },
               }
             : undefined,
@@ -365,7 +510,12 @@ export const getDashboardCsvResultsBlocks = ({
                       type: 'section',
                       text: {
                           type: 'mrkdwn',
-                          text: `:black_small_square: ${csvUrl.filename}`,
+                          text: truncateText(
+                              `:black_small_square: ${sanitizeText(
+                                  csvUrl.filename,
+                              )}`,
+                              SLACK_LIMITS.SECTION_TEXT,
+                          ),
                       },
                       accessory: {
                           type: 'button',
@@ -386,18 +536,23 @@ export const getDashboardCsvResultsBlocks = ({
                       },
                   },
         ),
-        footerMarkdown
+        getFailureBlock(),
+        footerMarkdown?.trim()
             ? {
                   type: 'context',
                   elements: [
                       {
                           type: 'mrkdwn',
-                          text: footerMarkdown,
+                          text: truncateText(
+                              sanitizeText(footerMarkdown),
+                              SLACK_LIMITS.SECTION_TEXT,
+                          ),
                       },
                   ],
               }
             : undefined,
     ]);
+};
 
 const getExploreBlocks = (
     title: string,
@@ -409,7 +564,10 @@ const getExploreBlocks = (
             type: 'section',
             text: {
                 type: 'mrkdwn',
-                text: title,
+                text: truncateText(
+                    sanitizeText(title),
+                    SLACK_LIMITS.SECTION_TEXT,
+                ),
             },
             accessory: {
                 type: 'button',
@@ -422,11 +580,14 @@ const getExploreBlocks = (
                 action_id: 'button-action',
             },
         },
-        imageUrl
+        imageUrl?.trim()
             ? {
                   type: 'image',
                   image_url: imageUrl,
-                  alt_text: title,
+                  alt_text: truncateText(
+                      sanitizeText(title),
+                      SLACK_LIMITS.ALT_TEXT,
+                  ),
               }
             : undefined,
     ]);
@@ -442,6 +603,7 @@ export type Unfurl = {
     resourceUuid: string | undefined;
     chartTileUuids?: (string | null)[];
     sqlChartTileUuids?: (string | null)[];
+    loomTileUuids?: (string | null)[];
 };
 
 export const getUnfurlBlocks = (
@@ -473,7 +635,12 @@ export const getNotificationChannelErrorBlocks = (
             type: 'header',
             text: {
                 type: 'plain_text',
-                text: `❌ Error sending ${type}: "${schedulerName}"`,
+                text: truncateText(
+                    `❌ Error sending ${type}: "${sanitizeText(
+                        schedulerName,
+                    )}"`,
+                    SLACK_LIMITS.HEADER_TEXT,
+                ),
             },
         },
 
@@ -498,8 +665,10 @@ export const getNotificationChannelErrorBlocks = (
             type: 'section',
             text: {
                 type: 'mrkdwn',
-                // eslint-disable-next-line no-useless-concat
-                text: '```' + `${error}` + '```',
+                text: truncateText(
+                    `\`\`\`${sanitizeText(String(error))}\`\`\``,
+                    SLACK_LIMITS.SECTION_TEXT,
+                ),
             },
         },
         isDisabled
@@ -508,7 +677,10 @@ export const getNotificationChannelErrorBlocks = (
                   elements: [
                       {
                           type: 'mrkdwn',
-                          text: `Due to this error, this scheduler has been automatically disabled.\nYou can re-enable it from the ${type} settings once the issue is resolved.`,
+                          text: truncateText(
+                              `Due to this error, this scheduler has been automatically disabled.\nYou can re-enable it from the ${type} settings once the issue is resolved.`,
+                              SLACK_LIMITS.SECTION_TEXT,
+                          ),
                       },
                   ],
               }

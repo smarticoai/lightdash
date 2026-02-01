@@ -1,38 +1,61 @@
-import { UNCATEGORIZED_TAG_UUID, type CatalogField } from '@lightdash/common';
+import {
+    CatalogCategoryFilterMode,
+    UNCATEGORIZED_TAG_UUID,
+    type CatalogField,
+} from '@lightdash/common';
 import {
     ActionIcon,
     Button,
     Checkbox,
     Group,
     Popover,
+    SegmentedControl,
     Stack,
     Text,
+    TextInput,
     Tooltip,
-} from '@mantine/core';
-import { IconTag, IconX } from '@tabler/icons-react';
-import { useMemo, type FC } from 'react';
+} from '@mantine-8/core';
+import { clsx } from '@mantine/core';
+import { IconSearch, IconTag, IconX } from '@tabler/icons-react';
+import { useMemo, useState, type FC } from 'react';
 import MantineIcon from '../../../../components/common/MantineIcon';
 import { useAppSelector } from '../../../sqlRunner/store/hooks';
 import { useProjectTags } from '../../hooks/useProjectTags';
 import { CatalogCategory } from '../CatalogCategory';
+import styles from './CategoriesFilter.module.css';
 
 type CategoriesFilterProps = {
     selectedCategories: CatalogField['categories'][number]['tagUuid'][];
     setSelectedCategories: (
         categories: CatalogField['categories'][number]['tagUuid'][],
     ) => void;
+    categoryFilterMode: CatalogCategoryFilterMode;
+    setCategoryFilterMode: (mode: CatalogCategoryFilterMode) => void;
 };
 
 const CategoriesFilter: FC<CategoriesFilterProps> = ({
     selectedCategories,
     setSelectedCategories,
+    categoryFilterMode,
+    setCategoryFilterMode,
 }) => {
     const projectUuid = useAppSelector(
         (state) => state.metricsCatalog.projectUuid,
     );
+    const [searchValue, setSearchValue] = useState('');
 
     // Categories are just tags
     const { data: categories, isLoading } = useProjectTags(projectUuid);
+
+    // Filter categories by search
+    const filteredCategories = useMemo(() => {
+        if (!categories) return [];
+        if (!searchValue) return categories;
+        const searchLower = searchValue.toLowerCase();
+        return categories.filter((category) =>
+            category.name.toLowerCase().includes(searchLower),
+        );
+    }, [categories, searchValue]);
 
     const hasSelectedCategories = selectedCategories.length > 0;
 
@@ -55,74 +78,122 @@ const CategoriesFilter: FC<CategoriesFilterProps> = ({
         : 'All categories';
 
     return (
-        <Group spacing="two">
-            <Popover width={300} position="bottom-start">
+        <Group gap={2}>
+            <Popover width={300} position="bottom-start" shadow="sm">
                 <Popover.Target>
                     <Tooltip
                         withinPortal
-                        variant="xs"
                         label="Filter metrics by category"
+                        openDelay={200}
+                        maw={250}
+                        fz="xs"
                     >
                         <Button
                             h={32}
-                            c="gray.7"
+                            c="ldGray.7"
                             fw={500}
                             fz="sm"
                             variant="default"
                             radius="md"
                             py="xs"
                             px="sm"
-                            leftIcon={
+                            leftSection={
                                 <MantineIcon
                                     icon={IconTag}
                                     size="md"
                                     color={
                                         hasSelectedCategories
                                             ? 'indigo.5'
-                                            : 'gray.5'
+                                            : 'ldGray.5'
                                     }
                                 />
                             }
                             loading={isLoading}
-                            styles={(theme) => ({
-                                root: {
-                                    border: hasSelectedCategories
-                                        ? `1px solid ${theme.colors.indigo[2]}`
-                                        : `1px dashed ${theme.colors.gray[3]}`,
-                                    backgroundColor: hasSelectedCategories
-                                        ? theme.colors.indigo[0]
-                                        : undefined,
-                                    textOverflow: 'ellipsis',
-                                    boxShadow: theme.shadows.subtle,
-                                    '&:hover': {
-                                        backgroundColor: theme.colors.gray[0],
-                                        transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
-                                    },
-                                },
-                                label: {
-                                    height: 24,
-                                },
-                            })}
+                            className={clsx(
+                                styles.filterButton,
+                                hasSelectedCategories &&
+                                    styles.filterButtonSelected,
+                            )}
+                            classNames={{
+                                label: styles.filterButtonLabel,
+                            }}
                         >
                             {buttonLabel}
                         </Button>
                     </Tooltip>
                 </Popover.Target>
                 <Popover.Dropdown p="sm">
-                    <Stack spacing={4}>
-                        <Text fz="xs" c="dark.3" fw={600}>
-                            Filter by categories:
-                        </Text>
+                    <Stack gap="sm">
+                        <Group justify="space-between">
+                            <Text fz="xs" c="ldGray.6" fw={600} span>
+                                Filter by categories:
+                            </Text>
+
+                            {selectedCategories.length > 1 &&
+                                !selectedCategories.includes(
+                                    UNCATEGORIZED_TAG_UUID,
+                                ) && (
+                                    <SegmentedControl
+                                        size="xs"
+                                        value={categoryFilterMode}
+                                        onChange={(value) =>
+                                            setCategoryFilterMode(
+                                                value as CatalogCategoryFilterMode,
+                                            )
+                                        }
+                                        data={[
+                                            {
+                                                label: 'Any',
+                                                value: CatalogCategoryFilterMode.OR,
+                                            },
+                                            {
+                                                label: 'All',
+                                                value: CatalogCategoryFilterMode.AND,
+                                            },
+                                        ]}
+                                    />
+                                )}
+                        </Group>
+
+                        {(categories?.length ?? 0) > 5 && (
+                            <TextInput
+                                size="xs"
+                                placeholder="Search categories..."
+                                value={searchValue}
+                                onChange={(e) =>
+                                    setSearchValue(e.currentTarget.value)
+                                }
+                                rightSection={
+                                    searchValue ? (
+                                        <ActionIcon
+                                            size="xs"
+                                            onClick={() => setSearchValue('')}
+                                        >
+                                            <MantineIcon icon={IconX} />
+                                        </ActionIcon>
+                                    ) : (
+                                        <MantineIcon
+                                            icon={IconSearch}
+                                            color="ldGray.5"
+                                        />
+                                    )
+                                }
+                            />
+                        )}
 
                         {categories?.length === 0 && (
-                            <Text fz="xs" fw={500} c="gray.6">
+                            <Text fz="xs" fw={500} c="ldGray.6">
                                 No categories added yet. Click on the category
                                 cells to assign categories to your metrics.
                             </Text>
                         )}
 
-                        <Stack spacing="xs">
-                            {categories?.map((category) => (
+                        <Stack
+                            gap="xs"
+                            mah={300}
+                            className={styles.scrollableList}
+                        >
+                            {filteredCategories.map((category) => (
                                 <Checkbox
                                     key={category.tagUuid}
                                     label={
@@ -132,18 +203,10 @@ const CategoriesFilter: FC<CategoriesFilterProps> = ({
                                         category.tagUuid,
                                     )}
                                     size="xs"
-                                    styles={(theme) => ({
-                                        body: {
-                                            alignItems: 'center',
-                                        },
-                                        input: {
-                                            borderRadius: theme.radius.sm,
-                                            border: `1px solid ${theme.colors.gray[4]}`,
-                                        },
-                                        label: {
-                                            paddingLeft: theme.spacing.xs,
-                                        },
-                                    })}
+                                    classNames={{
+                                        body: styles.checkbox,
+                                        input: styles.checkboxInput,
+                                    }}
                                     onChange={() => {
                                         if (
                                             selectedCategories.includes(
@@ -165,58 +228,56 @@ const CategoriesFilter: FC<CategoriesFilterProps> = ({
                                     }}
                                 />
                             ))}
-                            <Checkbox
-                                label="Uncategorized"
-                                checked={selectedCategories.includes(
-                                    UNCATEGORIZED_TAG_UUID,
+                            {!searchValue && (categories?.length ?? 0) > 0 && (
+                                <Checkbox
+                                    label="Uncategorized"
+                                    checked={selectedCategories.includes(
+                                        UNCATEGORIZED_TAG_UUID,
+                                    )}
+                                    fw={500}
+                                    size="xs"
+                                    classNames={{
+                                        body: styles.checkbox,
+                                        input: styles.checkboxInput,
+                                    }}
+                                    onChange={() => {
+                                        if (
+                                            selectedCategories.includes(
+                                                UNCATEGORIZED_TAG_UUID,
+                                            )
+                                        ) {
+                                            setSelectedCategories(
+                                                selectedCategories.filter(
+                                                    (c) =>
+                                                        c !==
+                                                        UNCATEGORIZED_TAG_UUID,
+                                                ),
+                                            );
+                                        } else {
+                                            setSelectedCategories([
+                                                ...selectedCategories,
+                                                UNCATEGORIZED_TAG_UUID,
+                                            ]);
+                                        }
+                                    }}
+                                />
+                            )}
+                            {filteredCategories.length === 0 &&
+                                (categories?.length ?? 0) > 0 && (
+                                    <Text fz="xs" c="ldGray.5">
+                                        No categories match your search.
+                                    </Text>
                                 )}
-                                fw={500}
-                                size="xs"
-                                display={
-                                    categories?.length === 0 ? 'none' : 'block'
-                                }
-                                styles={(theme) => ({
-                                    body: {
-                                        alignItems: 'center',
-                                    },
-                                    input: {
-                                        borderRadius: theme.radius.sm,
-                                        border: `1px solid ${theme.colors.gray[4]}`,
-                                    },
-                                    label: {
-                                        paddingLeft: theme.spacing.xs,
-                                    },
-                                })}
-                                onChange={() => {
-                                    if (
-                                        selectedCategories.includes(
-                                            UNCATEGORIZED_TAG_UUID,
-                                        )
-                                    ) {
-                                        setSelectedCategories(
-                                            selectedCategories.filter(
-                                                (c) =>
-                                                    c !==
-                                                    UNCATEGORIZED_TAG_UUID,
-                                            ),
-                                        );
-                                    } else {
-                                        setSelectedCategories([
-                                            ...selectedCategories,
-                                            UNCATEGORIZED_TAG_UUID,
-                                        ]);
-                                    }
-                                }}
-                            />
                         </Stack>
                     </Stack>
                 </Popover.Dropdown>
             </Popover>
             {hasSelectedCategories && (
-                <Tooltip variant="xs" label="Clear all categories">
+                <Tooltip label="Clear all category filters">
                     <ActionIcon
                         size="xs"
-                        color="gray.5"
+                        color="ldGray.5"
+                        variant="subtle"
                         onClick={() => {
                             setSelectedCategories([]);
                         }}

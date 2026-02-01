@@ -15,10 +15,12 @@ import type {
     ToolTimeSeriesArgs,
     ToolVerticalBarArgs,
 } from '../..';
+import { type AiEvalRunResultAssessment } from './aiEvalAssessment';
 import { type AgentToolOutput } from './schemas';
 import { type AiMetricQuery, type AiResultType } from './types';
 
 export * from './adminTypes';
+export * from './aiEvalAssessment';
 export * from './chartConfig/slack';
 export * from './chartConfig/web';
 export * from './constants';
@@ -26,6 +28,7 @@ export * from './filterExploreByTags';
 export * from './followUpTools';
 export * from './requestTypes';
 export * from './schemas';
+export * from './schemas/agentReadiness';
 export * from './types';
 export * from './utils';
 export * from './validators';
@@ -36,7 +39,7 @@ export const baseAgentSchema = z.object({
     organizationUuid: z.string(),
 
     name: z.string(),
-    description: z.string(),
+    description: z.string().nullable(),
     imageUrl: z.string().url().nullable(),
 
     tags: z.array(z.string()).nullable(),
@@ -65,6 +68,7 @@ export const baseAgentSchema = z.object({
     model: z.string(),
     groupAccess: z.array(z.string()),
     userAccess: z.array(z.string()),
+    spaceAccess: z.array(z.string()),
     enableDataAccess: z.boolean(),
     enableSelfImprovement: z.boolean(),
     enableReasoning: z.boolean(),
@@ -81,12 +85,14 @@ export type AiAgent = Pick<
     | 'integrations'
     | 'tags'
     | 'name'
+    | 'description'
     | 'createdAt'
     | 'updatedAt'
     | 'instruction'
     | 'imageUrl'
     | 'groupAccess'
     | 'userAccess'
+    | 'spaceAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
     | 'enableReasoning'
@@ -97,6 +103,7 @@ export type AiAgentSummary = Pick<
     AiAgent,
     | 'uuid'
     | 'name'
+    | 'description'
     | 'integrations'
     | 'tags'
     | 'projectUuid'
@@ -107,6 +114,7 @@ export type AiAgentSummary = Pick<
     | 'imageUrl'
     | 'groupAccess'
     | 'userAccess'
+    | 'spaceAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
     | 'enableReasoning'
@@ -146,11 +154,14 @@ export type AiAgentMessageAssistant = {
 
     // ai_prompt.response
     message: string | null;
+    // ai_prompt.error_message
+    errorMessage: string | null;
     // ai_prompt.responded_at but this can not be null because
     // we check for null before creating the agent message
     createdAt: string;
 
     humanScore: number | null;
+    humanFeedback?: string | null;
 
     toolCalls: AiAgentToolCall[];
     toolResults: AiAgentToolResult[];
@@ -158,6 +169,12 @@ export type AiAgentMessageAssistant = {
     savedQueryUuid: string | null;
 
     artifacts: AiAgentMessageAssistantArtifact[] | null;
+    referencedArtifacts: AiAgentMessageAssistantArtifact[] | null;
+    modelConfig: {
+        modelName: string;
+        modelProvider: string;
+        reasoning?: boolean;
+    } | null;
 };
 
 export type AiAgentMessage<TUser extends AiAgentUser = AiAgentUser> =
@@ -199,10 +216,12 @@ export type ApiCreateAiAgent = Pick<
     | 'integrations'
     | 'tags'
     | 'name'
+    | 'description'
     | 'instruction'
     | 'imageUrl'
     | 'groupAccess'
     | 'userAccess'
+    | 'spaceAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
     | 'enableReasoning'
@@ -216,10 +235,12 @@ export type ApiUpdateAiAgent = Partial<
         | 'integrations'
         | 'tags'
         | 'name'
+        | 'description'
         | 'instruction'
         | 'imageUrl'
         | 'groupAccess'
         | 'userAccess'
+        | 'spaceAccess'
         | 'enableDataAccess'
         | 'enableSelfImprovement'
         | 'enableReasoning'
@@ -246,12 +267,22 @@ export type ApiAiAgentThreadResponse = {
 
 export type ApiAiAgentThreadCreateRequest = {
     prompt?: string;
+    modelConfig?: {
+        modelName: string;
+        modelProvider: string;
+        reasoning?: boolean;
+    };
 };
 
 export type ApiAiAgentThreadCreateResponse = ApiSuccess<AiAgentThreadSummary>;
 
 export type ApiAiAgentThreadMessageCreateRequest = {
     prompt: string;
+    modelConfig?: {
+        modelName: string;
+        modelProvider: string;
+        reasoning?: boolean;
+    };
 };
 
 export type ApiAiAgentThreadMessageCreateResponse = ApiSuccess<
@@ -391,6 +422,8 @@ export type AiArtifact = {
         | null;
     dashboardConfig: ToolDashboardArgs | null;
     versionCreatedAt: Date;
+    verifiedByUserUuid: string | null;
+    verifiedAt: Date | null;
 };
 
 export type AiArtifactTSOACompat = Omit<
@@ -405,6 +438,31 @@ export type ApiAiAgentArtifactResponse = ApiSuccess<AiArtifact>;
 export type ApiAiAgentArtifactResponseTSOACompat =
     ApiSuccess<AiArtifactTSOACompat>;
 
+export type AiAgentVerifiedArtifact = {
+    artifactUuid: string;
+    versionUuid: string;
+    artifactType: 'chart' | 'dashboard';
+    title: string | null;
+    description: string | null;
+    verifiedAt: Date;
+    verifiedBy: {
+        userUuid: string;
+        firstName: string;
+        lastName: string;
+    };
+    referenceCount: number;
+    threadUuid: string;
+    promptUuid: string | null;
+};
+
+export type ApiAiAgentVerifiedArtifactsResponse = ApiSuccess<
+    KnexPaginatedData<AiAgentVerifiedArtifact[]>
+>;
+
+export type ApiAiAgentVerifiedQuestionsResponse = ApiSuccess<
+    { question: string; uuid: string }[]
+>;
+
 export type AiAgentEvaluationPrompt = {
     evalPromptUuid: string;
     createdAt: Date;
@@ -412,11 +470,13 @@ export type AiAgentEvaluationPrompt = {
     | {
           type: 'string';
           prompt: string;
+          expectedResponse: string | null;
       }
     | {
           type: 'thread';
           promptUuid: string;
           threadUuid: string;
+          expectedResponse: string | null;
       }
 );
 
@@ -446,6 +506,8 @@ export type AiAgentEvaluationRunSummary = {
     status: 'pending' | 'running' | 'completed' | 'failed';
     completedAt: Date | null;
     createdAt: Date;
+    passedAssessments: number;
+    failedAssessments: number;
 };
 
 export type AiAgentEvaluationRun = AiAgentEvaluationRunSummary & {
@@ -456,23 +518,46 @@ export type AiAgentEvaluationRunResult = {
     resultUuid: string;
     evalPromptUuid: string | null;
     threadUuid: string | null;
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    status: 'pending' | 'running' | 'completed' | 'assessing' | 'failed';
     errorMessage: string | null;
     completedAt: Date | null;
     createdAt: Date;
+    assessment: AiEvalRunResultAssessment | null;
+    prompt: string | null;
+    expectedResponse: string | null;
 };
 
 /**
  * Represents a prompt for evaluation that can be either:
- * - A string containing the prompt text directly
+ * - An object with a prompt string for new prompts
  * - An object referencing an existing prompt and thread by their UUIDs
  */
 export type CreateEvaluationPrompt =
-    | string
+    | { prompt: string; expectedResponse: string | null }
     | {
           promptUuid: string;
           threadUuid: string;
+          expectedResponse: string | null;
       };
+
+/**
+ * Type guard to check if a CreateEvaluationPrompt is a string prompt
+ */
+export const isStringPrompt = (
+    prompt: CreateEvaluationPrompt,
+): prompt is { prompt: string; expectedResponse: string | null } =>
+    'prompt' in prompt;
+
+/**
+ * Type guard to check if a CreateEvaluationPrompt is a thread reference
+ */
+export const isThreadPrompt = (
+    prompt: CreateEvaluationPrompt,
+): prompt is {
+    promptUuid: string;
+    threadUuid: string;
+    expectedResponse: string | null;
+} => 'promptUuid' in prompt && 'threadUuid' in prompt;
 
 export type ApiCreateEvaluationRequest = {
     title: string;
@@ -525,3 +610,28 @@ export type ApiRevertChangeRequest = {
 };
 
 export type ApiRevertChangeResponse = ApiSuccessEmpty;
+
+export type AgentSummaryContext = {
+    uuid: string;
+    projectUuid: string;
+    name: string;
+    description: string | null;
+    explores: string[];
+    verifiedQuestions: string[];
+    instruction: string | null;
+};
+
+export type AiAgentWithContext = AiAgentSummary & {
+    context: AgentSummaryContext;
+};
+
+export type AiModelOption = {
+    name: string;
+    displayName: string;
+    description: string;
+    provider: string;
+    default: boolean;
+    supportsReasoning: boolean;
+};
+
+export type ApiAiAgentModelOptionsResponse = ApiSuccess<AiModelOption[]>;

@@ -1,6 +1,6 @@
-import { Button, Menu, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Menu, Text, Tooltip } from '@mantine-8/core';
 import { useInterval } from '@mantine/hooks';
-import { IconChevronDown, IconRefresh } from '@tabler/icons-react';
+import { IconCheck, IconChevronDown, IconRefresh } from '@tabler/icons-react';
 import {
     memo,
     useCallback,
@@ -114,55 +114,42 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
         }, [interval, refreshInterval]);
 
         return (
-            <Button.Group>
+            <ActionIcon.Group>
+                {interval.active && refreshInterval ? (
+                    <ActionIcon.GroupSection
+                        variant="default"
+                        size="md"
+                        radius="md"
+                    >
+                        <Text span size="xs" c="foreground">
+                            Every{' '}
+                            {
+                                REFRESH_INTERVAL_OPTIONS.find(
+                                    ({ value }) => refreshInterval === +value,
+                                )?.label
+                            }
+                        </Text>
+                    </ActionIcon.GroupSection>
+                ) : null}
                 <Tooltip
                     withinPortal
                     position="bottom"
                     disabled={isOpen}
-                    label={
-                        <Text>
-                            Last refreshed at:{' '}
-                            {lastRefreshTime
-                                ? lastRefreshTime.toLocaleTimeString()
-                                : 'Never'}
-                        </Text>
-                    }
+                    label={`Last refreshed at: ${
+                        lastRefreshTime
+                            ? lastRefreshTime.toLocaleTimeString()
+                            : 'Never'
+                    }`}
                 >
-                    <Button
-                        size="xs"
-                        h={28}
-                        miw="sm"
+                    <ActionIcon
+                        size="md"
+                        radius="md"
                         variant="default"
                         loading={isOneAtLeastFetching}
-                        loaderPosition="center"
                         onClick={() => invalidateAndSetRefreshTime()}
                     >
-                        {interval.active && refreshInterval ? (
-                            <Text
-                                span
-                                mr="xs"
-                                c={
-                                    isOneAtLeastFetching
-                                        ? 'transparent'
-                                        : 'gray.7'
-                                }
-                            >
-                                Every{' '}
-                                {
-                                    REFRESH_INTERVAL_OPTIONS.find(
-                                        ({ value }) =>
-                                            refreshInterval === +value,
-                                    )?.label
-                                }
-                            </Text>
-                        ) : null}
-                        <MantineIcon
-                            icon={IconRefresh}
-                            color={
-                                isOneAtLeastFetching ? 'transparent' : 'black'
-                            }
-                        />
-                    </Button>
+                        <MantineIcon icon={IconRefresh} />
+                    </ActionIcon>
                 </Tooltip>
                 <Menu
                     withinPortal
@@ -173,17 +160,15 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
                     onClose={() => setIsOpen((prev) => !prev)}
                 >
                     <Menu.Target>
-                        <Button
-                            size="xs"
+                        <ActionIcon
+                            size="md"
+                            radius="md"
                             variant="default"
-                            h={28}
-                            w="md"
                             disabled={isOneAtLeastFetching}
-                            p={0}
                             onClick={() => setIsOpen((prev) => !prev)}
                         >
-                            <MantineIcon size="sm" icon={IconChevronDown} />
-                        </Button>
+                            <MantineIcon icon={IconChevronDown} />
+                        </ActionIcon>
                     </Menu.Target>
                     <Menu.Dropdown>
                         <Menu.Label>Auto-refresh while viewing</Menu.Label>
@@ -194,17 +179,11 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
                                 setIsAutoRefresh(false);
                             }}
                             disabled={refreshInterval === undefined}
-                            bg={
-                                refreshInterval === undefined ? 'blue' : 'white'
+                            rightSection={
+                                refreshInterval === undefined ? (
+                                    <MantineIcon icon={IconCheck} size="sm" />
+                                ) : null
                             }
-                            sx={{
-                                '&[disabled]': {
-                                    color:
-                                        refreshInterval === undefined
-                                            ? 'white'
-                                            : 'black',
-                                },
-                            }}
                         >
                             Off
                         </Menu.Item>
@@ -226,27 +205,22 @@ export const DashboardRefreshButton: FC<DashboardRefreshButtonProps> = memo(
                                         }`,
                                     });
                                 }}
-                                bg={
-                                    refreshInterval === +value
-                                        ? 'blue'
-                                        : 'white'
-                                }
                                 disabled={refreshInterval === +value}
-                                sx={{
-                                    '&[disabled]': {
-                                        color:
-                                            refreshInterval === +value
-                                                ? 'white'
-                                                : 'black',
-                                    },
-                                }}
+                                rightSection={
+                                    refreshInterval === +value ? (
+                                        <MantineIcon
+                                            icon={IconCheck}
+                                            size="sm"
+                                        />
+                                    ) : null
+                                }
                             >
                                 {label}
                             </Menu.Item>
                         ))}
                     </Menu.Dropdown>
                 </Menu>
-            </Button.Group>
+            </ActionIcon.Group>
         );
     },
 );

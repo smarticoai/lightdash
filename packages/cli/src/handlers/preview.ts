@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import {
     CreateProjectTableConfiguration,
+    getErrorMessage,
     Project,
     ProjectType,
 } from '@lightdash/common';
@@ -81,8 +82,8 @@ const cleanupProject = async (
         });
         teardownSpinner.succeed(`  Cleaned up`);
     } catch (e) {
-        console.error('Error during cleanup:', e);
-        teardownSpinner.fail(`  Cleanup failed`);
+        // console.error(styles.error(`Error during cleanup: ${getErrorMessage(e)}`));
+        teardownSpinner.fail(`  Cleanup failed: ${getErrorMessage(e)}`);
     }
 };
 
@@ -140,22 +141,68 @@ export const previewHandler = async (
 
     let project: Project | undefined;
     let hasContentCopy = false;
+    let contentCopyError: string | undefined;
+    let contentCopySkipReason: string | undefined;
 
     const config = await getConfig();
 
+    // Validate upstream project before attempting to copy content
+    let upstreamProjectValid = false;
+    if (config.context?.project && !options.skipCopyContent) {
+        try {
+            GlobalState.debug(
+                `> Validating upstream project: ${config.context.project}`,
+            );
+            const upstreamProject = await lightdashApi<Project>({
+                method: 'GET',
+                url: `/api/v1/projects/${config.context.project}`,
+                body: undefined,
+            });
+            upstreamProjectValid =
+                upstreamProject.projectUuid === config.context.project;
+            if (!upstreamProjectValid) {
+                contentCopySkipReason = `Project UUID mismatch. Expected ${config.context.project} but got ${upstreamProject.projectUuid}`;
+                console.error(
+                    styles.warning(
+                        `\n\nWarning: Cannot access upstream project "${
+                            config.context.projectName || config.context.project
+                        }"\n` +
+                            `Content will not be copied. Please run 'lightdash config set-project' to set a valid project.\n`,
+                    ),
+                );
+            }
+        } catch (e) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            contentCopySkipReason = `Failed to validate upstream project: ${errorMessage}`;
+            GlobalState.debug(
+                `> Upstream project validation failed: ${errorMessage}`,
+            );
+            console.error(
+                styles.warning(
+                    `\n\nWarning: Cannot access upstream project "${
+                        config.context.projectName || config.context.project
+                    }"\n` +
+                        `Content will not be copied. Please run 'lightdash config set-project' to set a valid project.\n`,
+                ),
+            );
+        }
+    }
+
     if (!config.context?.project) {
+        contentCopySkipReason = 'No upstream project configured';
         console.error(
             styles.warning(
                 `\n\nDeveloper preview will be deployed without any copied content!\nPlease set a project to copy content from by running 'lightdash config set-project'.\n`,
             ),
         );
     } else if (options.skipCopyContent) {
+        contentCopySkipReason = '--skip-copy-content flag was used';
         console.error(
             styles.warning(
                 `\n\nDeveloper preview will be deployed without any copied content!\n`,
             ),
         );
-    } else {
+    } else if (upstreamProjectValid) {
         console.error(
             `\n${styles.success('✔')}   Copying charts and dashboards from "${
                 config.context?.projectName || 'source project'
@@ -168,12 +215,16 @@ export const previewHandler = async (
             ...options,
             name,
             type: ProjectType.PREVIEW,
-            upstreamProjectUuid: config.context?.project,
-            copyContent: !options.skipCopyContent,
+            upstreamProjectUuid:
+                upstreamProjectValid && config.context?.project
+                    ? config.context.project
+                    : undefined,
+            copyContent: !options.skipCopyContent && upstreamProjectValid,
         });
 
         project = results?.project;
         hasContentCopy = Boolean(results?.hasContentCopy);
+        contentCopyError = results?.contentCopyError;
     } catch (e) {
         GlobalState.debug(`> Unable to create project: ${e}`);
         spinner.fail();
@@ -219,11 +270,14 @@ export const previewHandler = async (
         });
 
         if (!hasContentCopy) {
-            console.error(
-                styles.warning(
-                    `\n\nDeveloper preview deployed without any copied content!\n`,
-                ),
-            );
+            let errorMessage = `\n\nDeveloper preview deployed without any copied content!`;
+            if (contentCopyError) {
+                errorMessage += `\nError: ${contentCopyError}`;
+            } else if (contentCopySkipReason) {
+                errorMessage += `\nReason: ${contentCopySkipReason}`;
+            }
+            errorMessage += '\n';
+            console.error(styles.warning(errorMessage));
         }
 
         spinner.succeed(
@@ -242,6 +296,7 @@ export const previewHandler = async (
         const absoluteProjectPath = path.resolve(options.projectDir);
         const context = await getDbtContext({
             projectDir: absoluteProjectPath,
+            targetPath: options.targetPath,
         });
         const manifestFilePath = path.join(context.targetDir, 'manifest.json');
 
@@ -284,7 +339,7 @@ export const previewHandler = async (
         ]);
         pressToShutdown.clear();
     } catch (e) {
-        spinner.fail('Error creating developer preview');
+        spinner.fail(`Error creating developer preview: ${getErrorMessage(e)}`);
 
         await deletePreviewProject(project.projectUuid);
         await unsetPreviewProject();
@@ -315,9 +370,22 @@ export const startPreviewHandler = async (
     }
 
     const projectName = options.name;
+    const config = await getConfig();
+
+    // Log current source project info if copying content
+    if (!options.skipCopyContent && config.context?.project) {
+        console.error(
+            `\n${styles.success('Source project for content:')} ${styles.bold(
+                config.context.projectName || config.context.project,
+            )}\n`,
+        );
+    }
 
     const previewProject = await getPreviewProject(projectName);
     if (previewProject) {
+        console.error(
+            `\n${styles.success('Updating preview project:')} ${styles.bold(projectName)}\n`,
+        );
         await setPreviewProject(previewProject.projectUuid, projectName);
         await LightdashAnalytics.track({
             event: 'start_preview.update',
@@ -329,7 +397,6 @@ export const startPreviewHandler = async (
         });
 
         // Update
-        console.error(`Updating project preview ${projectName}`);
         const explores = await compile(options);
         await deploy(explores, {
             ...options,
@@ -342,7 +409,9 @@ export const startPreviewHandler = async (
             core.setOutput('project_uuid', previewProject.projectUuid);
         }
     } else {
-        const config = await getConfig();
+        console.error(
+            `\n${styles.success('Creating preview project:')} ${styles.bold(projectName)}\n`,
+        );
 
         if (!config.context?.project) {
             console.error(
@@ -367,7 +436,6 @@ export const startPreviewHandler = async (
         }
 
         // Create
-        console.error(`Creating new project preview ${projectName}`);
         const results = await createProject({
             ...options,
             name: projectName,

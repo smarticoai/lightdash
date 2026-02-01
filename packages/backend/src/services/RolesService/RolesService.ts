@@ -2,10 +2,8 @@ import { subject } from '@casl/ability';
 import {
     Account,
     AddScopesToRole,
-    CreateProjectMember,
     CreateRole,
     ForbiddenError,
-    getSystemRoles,
     isSystemRole,
     NotFoundError,
     OrganizationMemberRole,
@@ -27,6 +25,7 @@ import { OrganizationModel } from '../../models/OrganizationModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { RolesModel } from '../../models/RolesModel';
 import { UserModel } from '../../models/UserModel';
+import { wrapSentryTransaction } from '../../utils';
 import { BaseService } from '../BaseService';
 
 type RolesServiceArguments = {
@@ -78,6 +77,51 @@ export class RolesService extends BaseService {
         this.emailClient = emailClient;
     }
 
+    /**
+     * Validate that org admins or project developers/admins have access to view roles in the organization
+     * @param account
+     * @param organizationUuid
+     * @private
+     */
+    private async validateRolesViewAccess(
+        account: Account,
+        organizationUuid: string,
+    ) {
+        // if user is admin of organization, they can see roles
+        if (
+            account.user.ability.can(
+                'manage',
+                subject('Organization', {
+                    organizationUuid,
+                }),
+            )
+        ) {
+            return;
+        }
+
+        // get all projects in organization
+        const projects = await wrapSentryTransaction(
+            'RolesService.validateRolesViewAccess.getAllByOrganizationUuid',
+            { organizationUuid },
+            async () =>
+                this.projectModel.getAllByOrganizationUuid(organizationUuid),
+        );
+
+        const canManageSomeProjects = projects.some((project) =>
+            account.user.ability.can(
+                'manage',
+                subject('Project', {
+                    organizationUuid,
+                    projectUuid: project.projectUuid,
+                }),
+            ),
+        );
+
+        if (!canManageSomeProjects) {
+            throw new ForbiddenError();
+        }
+    }
+
     private static validateOrganizationAccess(
         account: Account,
         organizationUuid?: string,
@@ -98,7 +142,9 @@ export class RolesService extends BaseService {
                 }),
             )
         ) {
-            throw new ForbiddenError();
+            throw new ForbiddenError(
+                'You do not have permission to manage this organization',
+            );
         }
     }
 
@@ -138,7 +184,9 @@ export class RolesService extends BaseService {
                     }),
                 )
             ) {
-                throw new ForbiddenError();
+                throw new ForbiddenError(
+                    'You do not have permission to manage this project',
+                );
             }
         }
     }
@@ -163,9 +211,10 @@ export class RolesService extends BaseService {
         loadScopes?: boolean,
         roleTypeFilter?: string,
     ): Promise<Role[] | RoleWithScopes[]> {
-        RolesService.validateOrganizationAccess(account, organizationUuid);
+        await this.validateRolesViewAccess(account, organizationUuid);
 
         if (loadScopes) {
+            RolesService.validateOrganizationAccess(account, organizationUuid);
             return this.rolesModel.getRolesWithScopesByOrganizationUuid(
                 organizationUuid,
                 roleTypeFilter,
@@ -277,9 +326,8 @@ export class RolesService extends BaseService {
                 );
             }
         });
-        const updatedRole = await this.rolesModel.getRoleWithScopesByUuid(
-            roleUuid,
-        );
+        const updatedRole =
+            await this.rolesModel.getRoleWithScopesByUuid(roleUuid);
 
         // We track add/remove scope analytics in their respective methods
         this.analytics.track({
@@ -316,7 +364,7 @@ export class RolesService extends BaseService {
         account: Account,
         orgUuid: string,
     ): Promise<RoleAssignment[]> {
-        RolesService.validateOrganizationAccess(account, orgUuid);
+        await this.validateRolesViewAccess(account, orgUuid);
 
         // Get organization role assignments from model
         const userAssignments =
@@ -354,9 +402,8 @@ export class RolesService extends BaseService {
         if (user.role === OrganizationMemberRole.ADMIN) {
             // If user is currently an admin, we need to check if there are more admins
             // because every org should have at least one admin
-            const adminUuids = await this.rolesModel.getOrganizationAdmins(
-                orgUuid,
-            );
+            const adminUuids =
+                await this.rolesModel.getOrganizationAdmins(orgUuid);
             if (adminUuids.length === 1) {
                 throw new ParameterError(
                     'Organization must have at least one admin',
@@ -517,10 +564,7 @@ export class RolesService extends BaseService {
     ): Promise<RoleAssignment> {
         const { roleId } = request;
         const project = await this.projectModel.getSummary(projectUuid);
-        RolesService.validateOrganizationAccess(
-            account,
-            project.organizationUuid,
-        );
+
         await this.validateProjectAccess(account, projectUuid);
         const role = await this.rolesModel.getRoleWithScopesByUuid(roleId);
 
@@ -774,19 +818,13 @@ export class RolesService extends BaseService {
         });
     }
 
-    async getProjectAccess(account: Account, projectUuid: string) {
-        const project = await this.projectModel.getSummary(projectUuid);
-        RolesService.validateOrganizationAccess(
-            account,
-            project.organizationUuid,
-        );
+    private async getProjectAccess(account: Account, projectUuid: string) {
         await this.validateProjectAccess(account, projectUuid);
 
         const userAccess = await this.rolesModel.getProjectAccess(projectUuid);
 
-        const groupAccess = await this.rolesModel.getGroupProjectAccess(
-            projectUuid,
-        );
+        const groupAccess =
+            await this.rolesModel.getGroupProjectAccess(projectUuid);
 
         return {
             users: userAccess,
@@ -916,9 +954,8 @@ export class RolesService extends BaseService {
         const { name, description } = duplicateRoleData;
         RolesService.validateRoleName(name);
 
-        const sourceRole = await this.rolesModel.getRoleWithScopesByUuid(
-            roleUuid,
-        );
+        const sourceRole =
+            await this.rolesModel.getRoleWithScopesByUuid(roleUuid);
         if (!sourceRole) {
             throw new NotFoundError(`Role to duplicate: ${roleUuid} not found`);
         }

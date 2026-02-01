@@ -1,4 +1,9 @@
-import { SchedulerJobStatus } from '@lightdash/common';
+import {
+    SchedulerJobStatus,
+    SchedulerRunStatus,
+    type SchedulerRun,
+    type SchedulerRunLog,
+} from '@lightdash/common';
 import {
     ActionIcon,
     Anchor,
@@ -12,19 +17,16 @@ import {
 } from '@mantine-8/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import {
-    IconChevronDown,
-    IconChevronUp,
+    IconAlertTriangleFilled,
     IconClock,
     IconDots,
     IconSend,
     IconTextCaption,
 } from '@tabler/icons-react';
-import groupBy from 'lodash/groupBy';
 import {
     MantineReactTable,
     useMantineReactTable,
     type MRT_ColumnDef,
-    type MRT_ExpandedState,
     type MRT_Virtualizer,
 } from 'mantine-react-table';
 import {
@@ -38,54 +40,38 @@ import {
 } from 'react';
 import { Link } from 'react-router';
 import ConfirmSendNowModal from '../../features/scheduler/components/ConfirmSendNowModal';
+import { useLogsFilters } from '../../features/scheduler/hooks/useLogsFilters';
 import {
-    useLogsFilters,
-    type DestinationType,
-} from '../../features/scheduler/hooks/useLogsFilters';
-import {
-    useSchedulerLogs,
+    useFetchRunLogs,
+    useSchedulerRuns,
     useSendNowSchedulerByUuid,
 } from '../../features/scheduler/hooks/useScheduler';
-import useHealth from '../../hooks/health/useHealth';
-import { useGetSlack } from '../../hooks/slack/useSlack';
+import LoadingState from '../common/LoadingState';
 import MantineIcon from '../common/MantineIcon';
 import { LogsTopToolbar } from './LogsTopToolbar';
+import RunDetailsModal from './RunDetailsModal';
 import {
-    formatTaskName,
     formatTime,
-    getLogStatusIcon,
+    getLogStatusIconWithoutTooltip,
     getSchedulerIcon,
     getSchedulerLink,
-    type Log,
-    type SchedulerItem,
 } from './SchedulersViewUtils';
 
 type LogsTableProps = {
-    projectUuid: string;
+    projectUuid?: string;
+    getSlackChannelName: (channelId: string) => string | null;
 };
 
-type LogGroup = {
-    type: 'group';
-    jobGroup: string;
-    scheduler: SchedulerItem;
-    logs: Log[];
-    subRows: LogRow[];
+type TableRow = {
+    run: SchedulerRun;
 };
-
-type LogRow = {
-    type: 'log';
-    log: Log;
-    scheduler: SchedulerItem;
-};
-
-type TableRow = LogGroup | LogRow;
-
-const isLogGroup = (row: TableRow): row is LogGroup => row.type === 'group';
-const isLogRow = (row: TableRow): row is LogRow => row.type === 'log';
 
 const fetchSize = 50;
 
-const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
+const LogsTable: FC<LogsTableProps> = ({
+    projectUuid,
+    getSlackChannelName,
+}) => {
     const tableContainerRef = useRef<HTMLDivElement>(null);
     const rowVirtualizerInstanceRef =
         useRef<MRT_Virtualizer<HTMLDivElement, HTMLTableRowElement>>(null);
@@ -98,6 +84,8 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
         setSelectedCreatedByUserUuids,
         selectedDestinations,
         setSelectedDestinations,
+        selectedSchedulerUuid,
+        setSelectedSchedulerUuid,
         hasActiveFilters,
         resetFilters,
     } = useLogsFilters();
@@ -107,6 +95,7 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
         return {
             search,
             filters: {
+                schedulerUuid: selectedSchedulerUuid,
                 statuses: selectedStatuses,
                 createdByUserUuids: selectedCreatedByUserUuids,
                 destinations: selectedDestinations,
@@ -114,6 +103,7 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
         };
     }, [
         search,
+        selectedSchedulerUuid,
         selectedStatuses,
         selectedCreatedByUserUuids,
         selectedDestinations,
@@ -125,31 +115,32 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
     );
 
     const { data, fetchNextPage, isError, isFetching, isLoading } =
-        useSchedulerLogs({
-            projectUuid,
+        useSchedulerRuns({
+            projectUuid: projectUuid!,
             paginateArgs: { page: 1, pageSize: fetchSize },
             searchQuery: debouncedSearchAndFilters.search,
-            filters: debouncedSearchAndFilters.filters,
+            sortBy: 'scheduledTime',
+            sortDirection: 'desc',
+            filters: {
+                schedulerUuid: debouncedSearchAndFilters.filters.schedulerUuid,
+                statuses: debouncedSearchAndFilters.filters.statuses,
+                createdByUserUuids:
+                    debouncedSearchAndFilters.filters.createdByUserUuids,
+                destinations: debouncedSearchAndFilters.filters.destinations,
+            },
         });
 
     // Flatten paginated data
-    const schedulerLogsData = useMemo(() => {
+    const schedulerRunsData = useMemo(() => {
         if (!data?.pages) return undefined;
 
-        const allLogs = data.pages.flatMap((page) => page.data.logs);
-        const firstPage = data.pages[0];
+        const allRuns = data.pages.flatMap((page) => page.data);
 
-        return {
-            schedulers: firstPage?.data.schedulers || [],
-            users: firstPage?.data.users || [],
-            charts: firstPage?.data.charts || [],
-            dashboards: firstPage?.data.dashboards || [],
-            logs: allLogs,
-        };
+        return allRuns;
     }, [data]);
 
     const totalDBRowCount = data?.pages?.[0]?.pagination?.totalResults ?? 0;
-    const totalFetched = schedulerLogsData?.logs.length ?? 0;
+    const totalFetched = schedulerRunsData?.length ?? 0;
 
     // Callback to fetch more data when scrolling
     const fetchMoreOnBottomReached = useCallback(
@@ -172,12 +163,8 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
 
     // Scroll to top when filters change
     useEffect(() => {
-        if (rowVirtualizerInstanceRef.current) {
-            try {
-                rowVirtualizerInstanceRef.current.scrollToIndex(0);
-            } catch (e) {
-                console.error(e);
-            }
+        if (tableContainerRef.current) {
+            tableContainerRef.current.scrollTop = 0;
         }
     }, [debouncedSearchAndFilters]);
 
@@ -186,100 +173,94 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
         fetchMoreOnBottomReached(tableContainerRef.current);
     }, [fetchMoreOnBottomReached]);
 
+    // Re-measure virtualizer when container becomes visible (fixes virtualization when switching tabs)
+    // Note: depends on isLoading because the table container only exists after loading completes
+    useEffect(() => {
+        const container = tableContainerRef.current;
+        if (!container) return;
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.contentRect.height > 0) {
+                    rowVirtualizerInstanceRef.current?.measure?.();
+                }
+            }
+        });
+
+        resizeObserver.observe(container);
+        return () => resizeObserver.disconnect();
+    }, [isLoading]);
+
     const theme = useMantineTheme();
     const [isConfirmOpen, setIsConfirmOpen] = useState(false);
     const [selectedScheduler, setSelectedScheduler] = useState<{
         uuid: string;
         name: string;
     } | null>(null);
-    const [expanded, setExpanded] = useState<MRT_ExpandedState>({});
+    const [selectedRun, setSelectedRun] = useState<SchedulerRun | null>(null);
+    const [childLogsMap, setChildLogsMap] = useState<
+        Map<string, SchedulerRunLog[]>
+    >(new Map());
 
     const sendNowMutation = useSendNowSchedulerByUuid(
         selectedScheduler?.uuid ?? '',
     );
 
-    const health = useHealth();
-    const slack = useGetSlack();
-    const organizationHasSlack = !!slack.data?.organizationUuid;
+    const fetchRunLogsMutation = useFetchRunLogs();
 
-    // Compute available destinations based on integrations
-    const availableDestinations = useMemo<DestinationType[]>(() => {
-        const destinations: DestinationType[] = [];
-        if (health.data?.hasEmailClient) {
-            destinations.push('email');
-        }
-        if (organizationHasSlack) {
-            destinations.push('slack');
-        }
-        if (health.data?.hasMicrosoftTeams) {
-            destinations.push('msteams');
-        }
-        return destinations;
-    }, [health.data, organizationHasSlack]);
+    // Handle row click to open modal and fetch child logs
+    const handleRowClick = useCallback(
+        (run: SchedulerRun) => {
+            setSelectedRun(run);
 
-    // Compute available users from schedulers (only users who created schedulers)
-    const availableUsers = useMemo(() => {
-        const userMap = new Map<
+            // Fetch logs if not already in cache
+            if (!childLogsMap.has(run.runId)) {
+                void fetchRunLogsMutation
+                    .mutateAsync(run.runId)
+                    .then((childLogs) => {
+                        setChildLogsMap((prev) => {
+                            const newMap = new Map(prev);
+                            newMap.set(run.runId, childLogs);
+                            return newMap;
+                        });
+                    })
+                    .catch((error) => {
+                        console.error('Error fetching child logs:', error);
+                    });
+            }
+        },
+        [childLogsMap, fetchRunLogsMutation],
+    );
+
+    // Compute available schedulers from runs (unique schedulers)
+    const availableSchedulers = useMemo(() => {
+        const schedulerMap = new Map<
             string,
-            { userUuid: string; firstName: string; lastName: string }
+            { schedulerUuid: string; name: string }
         >();
-        schedulerLogsData?.schedulers.forEach((scheduler) => {
-            const user = schedulerLogsData?.users.find(
-                (u) => u.userUuid === scheduler.createdBy,
-            );
-            if (user) {
-                userMap.set(user.userUuid, {
-                    userUuid: user.userUuid,
-                    firstName: user.firstName,
-                    lastName: user.lastName,
+        schedulerRunsData?.forEach((run) => {
+            if (!schedulerMap.has(run.schedulerUuid)) {
+                schedulerMap.set(run.schedulerUuid, {
+                    schedulerUuid: run.schedulerUuid,
+                    name: run.schedulerName,
                 });
             }
         });
-        return Array.from(userMap.values()).sort((a, b) =>
-            `${a.firstName} ${a.lastName}`.localeCompare(
-                `${b.firstName} ${b.lastName}`,
-            ),
+        return Array.from(schedulerMap.values()).sort((a, b) =>
+            a.name.localeCompare(b.name),
         );
-    }, [schedulerLogsData]);
+    }, [schedulerRunsData]);
 
-    const groupedLogData = useMemo<LogGroup[]>(() => {
-        // Logs are already filtered by the backend
-        const logs = schedulerLogsData?.logs ?? [];
+    const tableData = useMemo<TableRow[]>(() => {
+        // Runs are already filtered and sorted by the backend
+        const runs = schedulerRunsData ?? [];
 
-        const grouped = Object.entries(groupBy(logs, 'jobGroup'));
-        return grouped
-            .map(([jobGroup, schedulerLogs]): LogGroup | null => {
-                const schedulerItem = schedulerLogsData?.schedulers.find(
-                    (item) =>
-                        item.schedulerUuid === schedulerLogs[0].schedulerUuid,
-                );
-                if (!schedulerItem) return null;
-
-                // Create sub-rows for each log
-                const subRows: LogRow[] = schedulerLogs.map((log) => ({
-                    type: 'log',
-                    log,
-                    scheduler: schedulerItem,
-                }));
-
-                return {
-                    type: 'group',
-                    jobGroup,
-                    scheduler: schedulerItem,
-                    logs: schedulerLogs,
-                    subRows,
-                };
-            })
-            .filter((item): item is LogGroup => item !== null);
-    }, [schedulerLogsData]);
-
-    // Temporary workaround to resolve a memoization issue with react-mantine-table.
-    // In certain scenarios, the content fails to render properly even when the data is updated.
-    // This issue may be addressed in a future library update.
-    const [tableData, setTableData] = useState<LogGroup[]>([]);
-    useEffect(() => {
-        setTableData(groupedLogData);
-    }, [groupedLogData]);
+        return runs.map(
+            (run): TableRow => ({
+                run,
+            }),
+        );
+    }, [schedulerRunsData]);
 
     const columns: MRT_ColumnDef<TableRow>[] = useMemo(
         () => [
@@ -290,71 +271,43 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                 size: 250,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconTextCaption} color="gray.6" />
+                        <MantineIcon icon={IconTextCaption} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
                 Cell: ({ row }) => {
-                    const rowData = row.original;
-
-                    // Only show name for parent rows
-                    if (isLogRow(rowData)) {
-                        return null;
-                    }
-
-                    const { scheduler } = rowData;
-                    const user = schedulerLogsData?.users.find(
-                        (u) => u.userUuid === scheduler.createdBy,
-                    );
-                    const chartOrDashboard = scheduler.savedChartUuid
-                        ? schedulerLogsData?.charts.find(
-                              (chart) =>
-                                  chart.savedChartUuid ===
-                                  scheduler.savedChartUuid,
-                          )
-                        : schedulerLogsData?.dashboards.find(
-                              (dashboard) =>
-                                  dashboard.dashboardUuid ===
-                                  scheduler.dashboardUuid,
-                          );
+                    const { run } = row.original;
 
                     return (
                         <Group wrap="nowrap">
-                            {getSchedulerIcon(scheduler)}
+                            {getSchedulerIcon(run)}
                             <Stack gap="two">
                                 <Anchor
                                     component={Link}
-                                    to={getSchedulerLink(
-                                        scheduler,
-                                        projectUuid,
-                                    )}
+                                    to={getSchedulerLink(run, projectUuid!)}
                                     target="_blank"
                                 >
                                     <Tooltip
                                         label={
                                             <Stack gap="two" fz="xs">
-                                                <Text c="gray.5" fz="xs">
-                                                    Schedule type:{' '}
+                                                <Text c="ldGray.5" fz="xs">
+                                                    Scheduler:{' '}
                                                     <Text
                                                         c="white"
                                                         span
                                                         fz="xs"
                                                     >
-                                                        {scheduler.format ===
-                                                        'csv'
-                                                            ? 'CSV'
-                                                            : 'Image'}
+                                                        {run.schedulerName}
                                                     </Text>
                                                 </Text>
-                                                <Text c="gray.5" fz="xs">
+                                                <Text c="ldGray.5" fz="xs">
                                                     Created by:{' '}
                                                     <Text
                                                         c="white"
                                                         span
                                                         fz="xs"
                                                     >
-                                                        {user?.firstName}{' '}
-                                                        {user?.lastName}
+                                                        {run.createdByUserName}
                                                     </Text>
                                                 </Text>
                                             </Stack>
@@ -369,12 +322,12 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                                                 cursor: 'pointer',
                                             }}
                                         >
-                                            {scheduler.name}
+                                            {run.schedulerName}
                                         </Text>
                                     </Tooltip>
                                 </Anchor>
-                                <Text fz="xs" c="gray.6" maw="190px" truncate>
-                                    {chartOrDashboard?.name}
+                                <Text fz="xs" c="ldGray.6" maw="190px" truncate>
+                                    {run.resourceName}
                                 </Text>
                             </Stack>
                         </Group>
@@ -382,28 +335,71 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                 },
             },
             {
-                accessorKey: 'logs',
-                header: 'Job',
+                accessorKey: 'status',
+                header: 'Status',
                 enableSorting: false,
-                size: 140,
+                size: 220,
                 Cell: ({ row }) => {
-                    const rowData = row.original;
-
-                    if (isLogGroup(rowData)) {
-                        // Parent row: show "All jobs"
-                        return (
-                            <Text fz="xs" fw={500} c="gray.7">
-                                All jobs
-                            </Text>
-                        );
-                    } else {
-                        // Child row: show task name
-                        return (
-                            <Text fz="xs" fw={400} c="gray.7">
-                                {formatTaskName(rowData.log.task)}
-                            </Text>
-                        );
-                    }
+                    const { run } = row.original;
+                    return (
+                        <Group gap="xs">
+                            {run.runStatus === SchedulerRunStatus.COMPLETED ? (
+                                <>
+                                    {getLogStatusIconWithoutTooltip(
+                                        SchedulerJobStatus.COMPLETED,
+                                        theme,
+                                    )}
+                                    <Text fz="xs" c="ldGray.7">
+                                        Completed successfully
+                                    </Text>
+                                </>
+                            ) : run.runStatus === SchedulerRunStatus.FAILED ? (
+                                <>
+                                    {getLogStatusIconWithoutTooltip(
+                                        SchedulerJobStatus.ERROR,
+                                        theme,
+                                    )}
+                                    <Text fz="xs" c="ldGray.7">
+                                        Failed
+                                    </Text>
+                                </>
+                            ) : run.runStatus ===
+                                SchedulerRunStatus.PARTIAL_FAILURE ? (
+                                <>
+                                    <MantineIcon
+                                        icon={IconAlertTriangleFilled}
+                                        color="orange.6"
+                                        style={{
+                                            color: theme.colors.orange[6],
+                                        }}
+                                    />
+                                    <Text fz="xs" c="ldGray.7">
+                                        Partial failure
+                                    </Text>
+                                </>
+                            ) : run.runStatus === SchedulerRunStatus.RUNNING ? (
+                                <>
+                                    {getLogStatusIconWithoutTooltip(
+                                        SchedulerJobStatus.STARTED,
+                                        theme,
+                                    )}
+                                    <Text fz="xs" c="ldGray.7">
+                                        Running
+                                    </Text>
+                                </>
+                            ) : (
+                                <>
+                                    {getLogStatusIconWithoutTooltip(
+                                        SchedulerJobStatus.SCHEDULED,
+                                        theme,
+                                    )}
+                                    <Text fz="xs" c="ldGray.7">
+                                        Scheduled
+                                    </Text>
+                                </>
+                            )}
+                        </Group>
+                    );
                 },
             },
             {
@@ -413,29 +409,17 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                 size: 140,
                 Header: ({ column }) => (
                     <Group gap="two" wrap="nowrap">
-                        <MantineIcon icon={IconClock} color="gray.6" />
+                        <MantineIcon icon={IconClock} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
                 Cell: ({ row }) => {
-                    const rowData = row.original;
-
-                    if (isLogGroup(rowData)) {
-                        const firstLog = rowData.logs[0];
-                        return (
-                            <Text fz="xs" c="gray.6">
-                                {firstLog
-                                    ? formatTime(firstLog.scheduledTime)
-                                    : '-'}
-                            </Text>
-                        );
-                    } else {
-                        return (
-                            <Text fz="xs" c="gray.6">
-                                {formatTime(rowData.log.scheduledTime)}
-                            </Text>
-                        );
-                    }
+                    const { run } = row.original;
+                    return (
+                        <Text fz="xs" c="ldGray.6">
+                            {formatTime(run.scheduledTime)}
+                        </Text>
+                    );
                 },
             },
             {
@@ -445,57 +429,33 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                 size: 140,
                 Header: ({ column }) => (
                     <Group gap="two">
-                        <MantineIcon icon={IconClock} color="gray.6" />
+                        <MantineIcon icon={IconClock} color="ldGray.6" />
                         {column.columnDef.header}
                     </Group>
                 ),
                 Cell: ({ row }) => {
-                    const rowData = row.original;
-
-                    if (isLogGroup(rowData)) {
-                        const firstLog = rowData.logs[0];
-                        return (
-                            <Text fz="xs" c="gray.6">
-                                {firstLog
-                                    ? formatTime(firstLog.createdAt)
-                                    : '-'}
-                            </Text>
-                        );
-                    } else {
-                        return (
-                            <Text fz="xs" c="gray.6">
-                                {formatTime(rowData.log.createdAt)}
-                            </Text>
-                        );
-                    }
+                    const { run } = row.original;
+                    return (
+                        <Text fz="xs" c="ldGray.6">
+                            {formatTime(run.createdAt)}
+                        </Text>
+                    );
                 },
             },
             {
-                accessorKey: 'status',
-                header: 'Status',
+                accessorKey: 'actions',
+                header: '',
                 enableSorting: false,
-                size: 90,
+                enableResizing: false,
+                size: 60,
                 Cell: ({ row }) => {
-                    const rowData = row.original;
-                    const { scheduler } = rowData;
+                    const { run } = row.original;
 
                     return (
-                        <Group>
-                            {isLogGroup(rowData) ? (
-                                rowData.logs[0] ? (
-                                    getLogStatusIcon(rowData.logs[0])
-                                ) : (
-                                    <Text fz="xs" c="gray.6">
-                                        -
-                                    </Text>
-                                )
-                            ) : (
-                                getLogStatusIcon(rowData.log)
-                            )}
-
-                            {isLogGroup(rowData) &&
-                                rowData.logs[0]?.status ===
-                                    SchedulerJobStatus.ERROR && (
+                        <Group justify="center">
+                            {(run.runStatus === SchedulerRunStatus.FAILED ||
+                                run.runStatus ===
+                                SchedulerRunStatus.PARTIAL_FAILURE) && (
                                     <Box
                                         component="div"
                                         onClick={(
@@ -538,8 +498,8 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                                                     }
                                                     onClick={() => {
                                                         setSelectedScheduler({
-                                                            uuid: scheduler.schedulerUuid,
-                                                            name: scheduler.name,
+                                                            uuid: run.schedulerUuid,
+                                                            name: run.schedulerName,
                                                         });
                                                         setIsConfirmOpen(true);
                                                     }}
@@ -555,15 +515,13 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                 },
             },
         ],
-        [schedulerLogsData, projectUuid, theme],
+        [projectUuid, theme, setSelectedScheduler, setIsConfirmOpen],
     );
 
     const table = useMantineReactTable({
         columns,
         data: tableData,
-        enableExpanding: true,
-        getSubRows: (row) => (isLogGroup(row) ? row.subRows : undefined),
-        enableColumnResizing: false,
+        enableColumnResizing: true,
         enableRowNumbers: false,
         enablePagination: false,
         enableFilters: false,
@@ -579,6 +537,7 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
         enableBottomToolbar: false,
         renderTopToolbar: () => (
             <LogsTopToolbar
+                projectUuid={projectUuid}
                 search={search}
                 setSearch={setSearch}
                 selectedStatuses={selectedStatuses}
@@ -587,18 +546,19 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                 setSelectedCreatedByUserUuids={setSelectedCreatedByUserUuids}
                 selectedDestinations={selectedDestinations}
                 setSelectedDestinations={setSelectedDestinations}
+                selectedSchedulerUuid={selectedSchedulerUuid}
+                setSelectedSchedulerUuid={setSelectedSchedulerUuid}
                 isFetching={isFetching || isLoading}
                 currentResultsCount={totalFetched}
                 hasActiveFilters={hasActiveFilters}
                 resetFilters={resetFilters}
-                availableUsers={availableUsers}
-                availableDestinations={availableDestinations}
+                availableSchedulers={availableSchedulers}
             />
         ),
         mantinePaperProps: {
             shadow: undefined,
             style: {
-                border: `1px solid ${theme.colors.gray[2]}`,
+                border: `1px solid ${theme.colors.ldGray[2]}`,
                 borderRadius: theme.spacing.sm,
                 boxShadow: theme.shadows.subtle,
                 display: 'flex',
@@ -616,35 +576,55 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
             withColumnBorders: Boolean(tableData.length),
         },
         mantineTableHeadCellProps: (props) => {
-            const isFirstColumn =
-                props.table.getAllColumns().indexOf(props.column) === 0;
             const isLastColumn =
                 props.table.getAllColumns().indexOf(props.column) ===
                 props.table.getAllColumns().length - 1;
 
+            const isAnyColumnResizing = props.table
+                .getAllColumns()
+                .some((c) => c.getIsResizing());
+            const canResize = props.column.getCanResize();
+
             return {
-                bg: 'gray.0',
+                bg: 'ldGray.0',
                 h: '3xl',
                 pos: 'relative',
                 style: {
                     userSelect: 'none',
+                    justifyContent: 'center',
                     padding: `${theme.spacing.xs} ${theme.spacing.xl}`,
-                    borderBottom: `1px solid ${theme.colors.gray[2]}`,
+                    borderTop: `1px solid ${theme.colors.ldGray[2]}`,
+                    borderBottom: `1px solid ${theme.colors.ldGray[2]}`,
                     borderRight: props.column.getIsResizing()
                         ? `2px solid ${theme.colors.blue[3]}`
-                        : `1px solid ${
-                              isLastColumn || isFirstColumn
-                                  ? 'transparent'
-                                  : theme.colors.gray[2]
-                          }`,
-                    borderTop: 'none',
+                        : `1px solid ${isLastColumn
+                            ? 'transparent'
+                            : theme.colors.ldGray[2]
+                        }`,
                     borderLeft: 'none',
+                },
+                sx: {
+                    '&:hover': canResize
+                        ? {
+                            borderRight: !isAnyColumnResizing
+                                ? `2px solid ${theme.colors.blue[3]} !important`
+                                : undefined,
+                            transition: `border-right ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
+                        }
+                        : {},
                 },
             };
         },
         mantineTableHeadRowProps: {
             sx: {
                 boxShadow: 'none',
+                'th > div > div:last-child': {
+                    top: -10,
+                    right: -5,
+                },
+                'th > div > div:last-child > .mantine-Divider-root': {
+                    border: 'none',
+                },
             },
         },
         mantineTableBodyCellProps: () => {
@@ -654,36 +634,29 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                     padding: `${theme.spacing.xs} ${theme.spacing.md}`,
                     borderRight: 'none',
                     borderLeft: 'none',
-                    borderBottom: `1px solid ${theme.colors.gray[2]}`,
+                    borderBottom: `1px solid ${theme.colors.ldGray[2]}`,
                     borderTop: 'none',
                 },
             };
         },
-        mantineExpandButtonProps: ({ row }) => ({
-            children: row.getIsExpanded() ? (
-                <MantineIcon icon={IconChevronUp} size="sm" />
-            ) : (
-                <MantineIcon icon={IconChevronDown} size="sm" />
-            ),
+        mantineTableBodyRowProps: ({ row }) => ({
+            onClick: () => handleRowClick(row.original.run),
             style: {
-                transform: 'none',
+                cursor: 'pointer',
             },
         }),
         rowVirtualizerInstanceRef,
         rowVirtualizerProps: { overscan: 10 },
         state: {
-            expanded,
             isLoading,
             showAlertBanner: isError,
             showProgressBars: isFetching,
         },
-        onExpandedChange: setExpanded,
-        displayColumnDefOptions: {
-            'mrt-row-expand': {
-                size: 40,
-            },
-        },
     });
+
+    if (isLoading) {
+        return <LoadingState title="Loading run history" />;
+    }
 
     return (
         <>
@@ -698,6 +671,24 @@ const LogsTable: FC<LogsTableProps> = ({ projectUuid }) => {
                     setIsConfirmOpen(false);
                 }}
             />
+            {!!selectedRun && (
+                <RunDetailsModal
+                    opened={!!selectedRun}
+                    onClose={() => setSelectedRun(null)}
+                    run={selectedRun}
+                    childLogs={
+                        selectedRun
+                            ? childLogsMap.get(selectedRun.runId)
+                            : undefined
+                    }
+                    isLoading={
+                        !!selectedRun &&
+                        !childLogsMap.has(selectedRun.runId) &&
+                        fetchRunLogsMutation.isLoading
+                    }
+                    getSlackChannelName={getSlackChannelName}
+                />
+            )}
         </>
     );
 };

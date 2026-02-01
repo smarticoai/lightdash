@@ -3,6 +3,7 @@ import {
     Box,
     Text,
     Tooltip,
+    useMantineTheme,
     type BoxProps as BoxPropsBase,
 } from '@mantine/core';
 import { getHotkeyHandler, useClipboard, useId } from '@mantine/hooks';
@@ -38,6 +39,7 @@ type BoxProps = Omit<BoxPropsBase, 'component' | 'children'>;
 
 type TableProps = PolymorphicComponentProps<'table', BoxProps> & {
     containerRef: React.RefObject<HTMLDivElement | null>;
+    isDashboard?: boolean;
 };
 type TableSectionProps = PolymorphicComponentProps<
     'thead' | 'tbody' | 'tfoot',
@@ -150,8 +152,19 @@ const TableProvider: FC<
 };
 
 const TableComponent = forwardRef<HTMLTableElement, TableProps>(
-    ({ children, component = 'table', containerRef, ...rest }, ref) => {
+    (
+        {
+            children,
+            component = 'table',
+            containerRef,
+            isDashboard = false,
+            ...rest
+        },
+        ref,
+    ) => {
         const { cx, classes } = useTableStyles();
+        const theme = useMantineTheme();
+        const shouldRemoveBorders = isDashboard;
 
         const [isContainerInitialized, setIsContainerInitialized] =
             useState(false);
@@ -185,9 +198,17 @@ const TableComponent = forwardRef<HTMLTableElement, TableProps>(
             <Box
                 ref={containerRef}
                 miw="inherit"
-                h="inherit"
+                mah="100%"
                 pos="relative"
-                sx={{ overflow: 'auto' }}
+                sx={{
+                    overflow: 'auto',
+                    border: `1px solid ${theme.colors.ldGray[3]}`,
+                    borderRadius: shouldRemoveBorders ? '0' : '4px',
+                    ...(shouldRemoveBorders && {
+                        borderLeft: 'none',
+                        borderRight: 'none',
+                    }),
+                }}
             >
                 <Box
                     ref={ref}
@@ -452,6 +473,8 @@ const BaseCell = (
                                 maw={400}
                                 multiline
                                 label={withTooltip}
+                                openDelay={500}
+                                variant="xs"
                             >
                                 <Text span>{children}</Text>
                             </Tooltip>

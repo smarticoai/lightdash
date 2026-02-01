@@ -48,9 +48,11 @@ export enum PageName {
     VERIFY_EMAIL = 'verify_email',
     JOIN_ORGANIZATION = 'join_organization',
     EMBED_DASHBOARD = 'embed_dashboard',
+    EMBED_SAVED_CHART = 'embed_saved_chart',
     EMBED_EXPLORE = 'embed_explore',
     CATALOG = 'catalog',
     METRICS_CATALOG = 'metrics_catalog',
+    FUNNEL_BUILDER = 'funnel_builder',
 }
 
 export enum CategoryName {
@@ -92,7 +94,6 @@ export enum EventName {
     ONBOARDING_STEP_CLICKED = 'onboarding_step.click',
     LANDING_RUN_QUERY_CLICKED = 'landing_run_query.click',
     SETUP_STEP_CLICKED = 'setup_step.click',
-    FORM_STATE_CHANGED = 'form-state.changed',
     ADD_FILTER_CLICKED = 'add_filter.click',
     GO_TO_LINK_CLICKED = 'go_to_link.click',
     ADD_CUSTOM_METRIC_CLICKED = 'add_custom_metric.click',
@@ -160,4 +161,10 @@ export enum EventName {
     AI_AGENT_CHART_HOW_ITS_CALCULATED_CLICKED = 'ai_agent_chart_how_its_calculated.clicked',
     AI_AGENT_CHART_CREATED = 'ai_agent_chart.created',
     AI_AGENT_CHART_EXPLORED = 'ai_agent_chart.explored',
+
+    // Theme
+    THEME_TOGGLED = 'theme.toggled',
+
+    // Dashboard UI Version Toggle
+    DASHBOARD_UI_VERSION_TOGGLED = 'dashboard_ui_version.toggled',
 }
