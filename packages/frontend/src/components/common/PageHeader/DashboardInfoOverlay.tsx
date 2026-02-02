@@ -23,6 +23,7 @@ import { useTimeAgo } from '../../../hooks/useTimeAgo';
 import MantineIcon from '../MantineIcon';
 import styles from './DashboardInfoOverlay.module.css';
 import InfoRow from './InfoRow';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 
 type DashboardInfoOverlayProps = {
     dashboard: Dashboard;
@@ -57,7 +58,7 @@ const DashboardInfoOverlay: FC<DashboardInfoOverlayProps> = ({
                     {(dashboard.views ?? 0).toLocaleString()}
                 </InfoRow>
 
-                {dashboard.spaceName && (
+                {dashboard.spaceName && !smrIsEmbeddedMode() && (
                     <InfoRow icon={IconFolder} label="Space">
                         <Anchor
                             component={Link}
