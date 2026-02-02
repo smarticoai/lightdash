@@ -8,6 +8,8 @@ import {
     isEmojiIcon,
     toolFindFieldsArgsSchema,
     toolFindFieldsOutputSchema,
+    type ToolFindFieldsArgs,
+    type ToolFindFieldsOutput,
 } from '@lightdash/common';
 import { tool } from 'ai';
 import { z } from 'zod';
@@ -45,37 +47,32 @@ const getFieldText = (catalogField: CatalogField) => {
     <${fieldTypeLabel} fieldId="${getItemId({
         name: catalogField.name,
         table: catalogField.tableName,
-    })}" fieldType="${
-        catalogField.fieldValueType
-    }" fieldFilterType="${getFilterTypeFromItemType(
-        catalogField.fieldValueType,
-    )}">
+    })}" fieldType="${catalogField.fieldValueType
+        }" fieldFilterType="${getFilterTypeFromItemType(
+            catalogField.fieldValueType,
+        )}">
         <Name>${catalogField.name}</Name>
         <Label>${catalogField.label}</Label>
         <SearchRank>${catalogField.searchRank}</SearchRank>
-        ${
-            aiHints && aiHints.length > 0
-                ? `
+        ${aiHints && aiHints.length > 0
+            ? `
         <AI Hints>
             ${aiHints.map((hint) => `<Hint>${hint}</Hint>`).join('\n')}
         </AI Hints>`.trim()
-                : ''
+            : ''
         }
-        ${
-            catalogField.categories && catalogField.categories.length > 0
-                ? `<Categories>${catalogField.categories
-                      .map((c) => c.name)
-                      .join(', ')}</Categories>`
-                : ''
+        ${catalogField.categories && catalogField.categories.length > 0
+            ? `<Categories>${catalogField.categories
+                .map((c) => c.name)
+                .join(', ')}</Categories>`
+            : ''
         }
-        <Table name="${catalogField.tableName}">${
-        catalogField.tableLabel
-    }</Table>
+        <Table name="${catalogField.tableName}">${catalogField.tableLabel
+        }</Table>
         <UsageInCharts>${catalogField.chartUsage}</UsageInCharts>
-        ${
-            isEmojiIcon(catalogField.icon)
-                ? `<Emoji>${catalogField.icon.unicode}</Emoji>`
-                : ''
+        ${isEmojiIcon(catalogField.icon)
+            ? `<Emoji>${catalogField.icon.unicode}</Emoji>`
+            : ''
         }
         <description>${catalogField.description}</description>
     </${fieldTypeLabel}>
@@ -86,17 +83,15 @@ const getFieldsText = (
     args: Awaited<ReturnType<FindFieldFn>> & { searchQuery: string },
 ) =>
     `
-<SearchResult searchQuery="${args.searchQuery}" page="${
-        args.pagination?.page
-    }" pageSize="${args.pagination?.pageSize}" totalPageCount="${
-        args.pagination?.totalPageCount
-    }" totalResults="${args.pagination?.totalResults}">
+<SearchResult searchQuery="${args.searchQuery}" page="${args.pagination?.page
+        }" pageSize="${args.pagination?.pageSize}" totalPageCount="${args.pagination?.totalPageCount
+        }" totalResults="${args.pagination?.totalResults}">
     ${args.fields.map((field) => getFieldText(field)).join('\n\n')}
 </SearchResult>
 `.trim();
 
 export const getFindFields = ({ findFields, pageSize }: Dependencies) =>
-    tool({
+    tool<ToolFindFieldsArgs, ToolFindFieldsOutput>({
         description: toolFindFieldsArgsSchema.description,
         inputSchema: toolFindFieldsArgsSchema,
         outputSchema: toolFindFieldsOutputSchema,
