@@ -12,6 +12,9 @@ import {
 } from '../database/entities/projectParameters';
 import { CachedExploreTableName } from '../database/entities/projects';
 import KnexPaginate from '../database/pagination';
+// SMR-START
+import { ECacheContext, OCache } from '../services/Smartico/OCache';
+// SMR-END
 
 export class ProjectParametersModel {
     private database: Knex;
@@ -19,6 +22,15 @@ export class ProjectParametersModel {
     constructor({ database }: { database: Knex }) {
         this.database = database;
     }
+
+    // SMR-START
+    async findCached(projectUuid: string, names?: string[]) {
+        return OCache.use({ projectUuid, names }, ECacheContext.projectParametersCached, async () => {
+            const r = await this.find(projectUuid, names);
+            return r;
+        }, 3600);
+    }
+    // SMR-END
 
     async find(projectUuid: string, names?: string[]) {
         const query = this.database(ProjectParametersTableName).where(

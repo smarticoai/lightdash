@@ -680,16 +680,21 @@ export class ProjectService extends BaseService {
             : account.organization.organizationUuid;
         const email = user ? user.email : account.user.email;
 
+        // SMR-START
         const userAttributes =
-            await this.userAttributesModel.getAttributeValuesForOrgMember({
+            await this.userAttributesModel.getAttributeValuesForOrgMemberCached({
                 organizationUuid: organizationUuid || '',
                 userUuid: userId || '',
             });
+        // SMR-END
 
-        const emailStatus = await this.emailModel.getPrimaryEmailStatus(userId);
+        // SMR-START
+        const emailStatus = await this.emailModel.getPrimaryEmailStatusCached(userId);
+        // SMR-END
         const intrinsicUserAttributes = emailStatus.isVerified
             ? getIntrinsicUserAttributes({ email })
             : {};
+
 
         return { userAttributes, intrinsicUserAttributes };
     }
@@ -1111,7 +1116,9 @@ export class ProjectService extends BaseService {
         isRegisteredUser: boolean;
     }) {
         // First, check if project uses organization-level credentials
-        const project = await this.projectModel.get(projectUuid);
+        // SMR-START
+        const project = await this.projectModel.getCached(projectUuid);
+        // SMR-END
         const { organizationWarehouseCredentialsUuid } = project;
 
         // Load base credentials from either organization or project table
@@ -1125,9 +1132,11 @@ export class ProjectService extends BaseService {
             organizationWarehouseCredentialsUuid &&
             !credentials.requireUserCredentials
         ) {
-            this.logger.debug(
-                `Refreshing warehouse credentials from organization credentials`,
-            );
+            // SMR-START
+            // this.logger.debug(
+            //     `Refreshing warehouse credentials from organization credentials`,
+            // );
+            // SMR-END
             credentials = await this.refreshCredentials(
                 credentials, // This credentials are already loaded from organization
                 userId,
@@ -1174,9 +1183,11 @@ export class ProjectService extends BaseService {
                 throw new NotFoundError('User warehouse credentials not found');
             } else if (!organizationWarehouseCredentialsUuid) {
                 // No user credentials, no org credentials, refresh project credentials
-                this.logger.debug(
-                    `Refreshing warehouse credentials for session user ${userId}`,
-                );
+                // SMR-START
+                // this.logger.debug(
+                //     `Refreshing warehouse credentials for session user ${userId}`,
+                // );
+                // SMR-END
                 credentials = await this.refreshCredentials(
                     credentials,
                     userId,
@@ -2401,8 +2412,10 @@ export class ProjectService extends BaseService {
         projectUuid: string,
         explore: Explore,
     ): Promise<ParameterDefinitions> {
+        // SMR-START
         const projectParameters =
-            await this.projectParametersModel.find(projectUuid);
+            await this.projectParametersModel.findCached(projectUuid);
+        // SMR-END
 
         return getAvailableParameterDefinitions(projectParameters, explore);
     }
@@ -4650,7 +4663,9 @@ export class ProjectService extends BaseService {
             async () => {
                 const project = organizationUuid
                     ? { organizationUuid }
-                    : await this.projectModel.getSummary(projectUuid);
+                    // SMR-START
+                    : await this.projectModel.getSummaryCached(projectUuid);
+                // SMR-END
 
                 const isForbidden =
                     account.user.ability.cannot(
@@ -7143,8 +7158,10 @@ export class ProjectService extends BaseService {
         const projectDefaultParameterValues: ParametersValuesMap = {};
 
         // Fetch all parameters
+        // SMR-START
         const parameterConfigs =
-            await this.projectParametersModel.find(projectUuid);
+            await this.projectParametersModel.findCached(projectUuid);
+        // SMR-END
 
         for (const paramConfig of parameterConfigs) {
             if (paramConfig.config.default !== undefined) {

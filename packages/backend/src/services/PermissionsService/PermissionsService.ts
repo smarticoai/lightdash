@@ -27,12 +27,14 @@ export class PermissionsService extends BaseService {
                 `Dashboard ${dashboardUuid} is not embedded`,
             );
         }
+        // SMR-START
         const chartExists =
-            await this.dashboardModel.savedChartExistsInDashboard(
+            await this.dashboardModel.savedChartExistsInDashboardCached(
                 embed.projectUuid,
                 dashboardUuid,
                 savedChartUuid,
             );
+        // SMR-END
 
         if (!chartExists) {
             throw new ForbiddenError(

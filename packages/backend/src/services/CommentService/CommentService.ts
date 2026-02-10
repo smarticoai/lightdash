@@ -225,8 +225,10 @@ export class CommentService extends BaseService {
     ): Promise<Record<string, Comment[]>> {
         await this.isFeatureEnabled(user);
 
+        // SMR-START
         const dashboard =
-            await this.dashboardModel.getByIdOrSlug(dashboardUuidOrSlug);
+            await this.dashboardModel.getByIdOrSlugCached(dashboardUuidOrSlug);
+        // SMR-END
 
         if (
             user.ability.cannot(

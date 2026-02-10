@@ -16,7 +16,29 @@ export const smrDeepClone = (o: any) => {
 export enum ECacheContext {
 	jwtToken,
 	onboardingStatus,
-	mailStatus
+	mailStatus,
+	// SMR-START
+	organizationsForUser,
+	personalAccessToken,
+	hasAuthentication,
+	projectMemberships,
+	groupProjectRoles,
+	organizationNeedsProject,
+	dashboardUuidOrSlug,
+	organizationByUuid,
+	savedChartByUuidOrSlug,
+	userAttributesByOrgMember,
+	primaryEmailStatus,
+	projectSummary,
+	spaceSummary,
+	savedChartExistsInDashboardCached,
+	projectModelCached,
+	userWarehouseCredentialsCached,
+	projectParametersCached,
+	spaceAccessCached,
+	changesetModelCached,
+	queryHistoryModelCachedKey
+	// SMR-END
 }
 
 export class OCache {

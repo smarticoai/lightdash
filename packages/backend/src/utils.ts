@@ -37,10 +37,12 @@ export const wrapSentryTransaction = <T>(
         },
         async (span, end) => {
             if (Sentry.isEnabled()) {
-                Logger.debug(
-                    `Starting sentry transaction ${span?.spanContext().spanId
-                    } "${name}" with context: ${JSON.stringify(context)}`,
-                );
+                // SMR-START
+                // Logger.debug(
+                //     `Starting sentry transaction ${span?.spanContext().spanId
+                //     } "${name}" with context: ${JSON.stringify(context)}`,
+                // );
+                // SMR-END
             }
 
             try {
@@ -56,10 +58,12 @@ export const wrapSentryTransaction = <T>(
                 throw error;
             } finally {
                 if (Sentry.isEnabled()) {
-                    Logger.debug(
-                        `End sentry transaction ${span?.spanContext().spanId
-                        } "${name}", took: ${Date.now() - startTime}ms`,
-                    );
+                    // SMR-START
+                    // Logger.debug(
+                    //     `End sentry transaction ${span?.spanContext().spanId
+                    //     } "${name}", took: ${Date.now() - startTime}ms`,
+                    // );
+                    // SMR-END
                 }
                 end();
             }
@@ -82,11 +86,13 @@ export function wrapSentryTransactionSync<T>(
         },
         (span) => {
             if (Sentry.isEnabled()) {
-                Logger.debug(
-                    `Starting sync sentry transaction "${name}" with context: ${JSON.stringify(
-                        context,
-                    )}`,
-                );
+                // SMR-START
+                // Logger.debug(
+                //     `Starting sync sentry transaction "${name}" with context: ${JSON.stringify(
+                //         context,
+                //     )}`,
+                // );
+                // SMR-END
             }
 
             try {
@@ -103,10 +109,12 @@ export function wrapSentryTransactionSync<T>(
                 throw error;
             } finally {
                 if (Sentry.isEnabled()) {
-                    Logger.debug(
-                        `End sync sentry transaction "${name}", took: ${Date.now() - startTime
-                        }ms`,
-                    );
+                    // SMR-START
+                    // Logger.debug(
+                    //     `End sync sentry transaction "${name}", took: ${Date.now() - startTime
+                    //     }ms`,
+                    // );
+                    // SMR-END
                 }
             }
         },

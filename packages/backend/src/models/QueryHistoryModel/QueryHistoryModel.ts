@@ -13,6 +13,9 @@ import {
     DbQueryHistoryUpdate,
     QueryHistoryTableName,
 } from '../../database/entities/queryHistory';
+// SMR-START
+import { ECacheContext, OCache } from '../../services/Smartico/OCache';
+// SMR-END
 
 function convertDbQueryHistoryToQueryHistory(
     queryHistory: DbQueryHistory,
@@ -209,6 +212,15 @@ export class QueryHistoryModel {
 
         return queryHistory;
     }
+
+    // SMR-START
+    async findMostRecentByCacheKeyCached(cacheKey: string, projectUuid: string) {
+        return OCache.use({ cacheKey, projectUuid }, ECacheContext.queryHistoryModelCachedKey, async () => {
+            const r = await this.findMostRecentByCacheKey(cacheKey, projectUuid);
+            return r;
+        }, 3600);
+    }
+    // SMR-END
 
     async findMostRecentByCacheKey(cacheKey: string, projectUuid: string) {
         const result = await this.database(QueryHistoryTableName)

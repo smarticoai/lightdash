@@ -73,6 +73,9 @@ import {
     generateUniqueSpaceSlug,
 } from '../utils/SlugUtils';
 import type { GetDashboardDetailsQuery } from './DashboardModel/DashboardModel';
+// SMR-START
+import { ECacheContext, OCache } from '../services/Smartico/OCache';
+// SMR-END
 
 type SpaceModelArguments = {
     database: Knex;
@@ -710,6 +713,18 @@ export class SpaceModel {
         );
     }
 
+    // SMR-START
+    private async _getSpaceAccessCached(
+        spaceUuids: string[],
+        filters?: { userUuid?: string },
+    ): Promise<Record<string, SpaceShare[]>> {
+        return OCache.use({ spaceUuids, filters }, ECacheContext.spaceAccessCached, async () => {
+            const r = await this._getSpaceAccess(spaceUuids, filters);
+            return r;
+        }, 3600);
+    }
+    // SMR-END
+
     private async _getSpaceAccess(
         spaceUuids: string[],
         filters?: { userUuid?: string },
@@ -1021,7 +1036,9 @@ export class SpaceModel {
             await this.getSpaceRootFromCacheOrDB(spaceUuid);
         return (
             (
-                await this._getSpaceAccess([spaceOrRootUuid], {
+                // SMR-START
+                await this._getSpaceAccessCached([spaceOrRootUuid], {
+                    // SMR-END
                     userUuid,
                 })
             )[spaceOrRootUuid] ?? []
@@ -1422,6 +1439,15 @@ export class SpaceModel {
             source: ChartSourceType.DBT_EXPLORE,
         }));
     }
+
+    // SMR-START
+    async getSpaceSummaryCached(spaceUuid: string): Promise<Omit<SpaceSummary, 'userAccess'>> {
+        return OCache.use(spaceUuid, ECacheContext.spaceSummary, async () => {
+            const r = await this.getSpaceSummary(spaceUuid);
+            return r;
+        }, 3600);
+    }
+    // SMR-END
 
     async getSpaceSummary(
         spaceUuid: string,
