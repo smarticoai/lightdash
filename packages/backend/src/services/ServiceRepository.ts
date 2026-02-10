@@ -53,6 +53,10 @@ import { UnfurlService } from './UnfurlService/UnfurlService';
 import { UserAttributesService } from './UserAttributesService/UserAttributesService';
 import { UserService } from './UserService';
 import { ValidationService } from './ValidationService/ValidationService';
+// SMR-START
+import { CacheService } from './CacheService/CacheService';
+import type { ICacheService } from './CacheService/ICacheService';
+// SMR-END
 /**
  * Interface outlining all services available under the `ServiceRepository`. Add new services to
  * this list (in alphabetical order, please!) to have typescript help ensure you've updated the
@@ -112,7 +116,9 @@ interface ServiceManifest {
     aiOrganizationSettingsService: unknown;
     scimService: unknown;
     supportService: unknown;
-    cacheService: unknown;
+    // SMR-START
+    cacheService: ICacheService;
+    // SMR-END
     serviceAccountService: unknown;
     instanceConfigurationService: unknown;
     mcpService: unknown;
@@ -254,8 +260,7 @@ abstract class ServiceRepositoryBase {
  */
 export class ServiceRepository
     extends ServiceRepositoryBase
-    implements ServiceFactoryMethod<ServiceManifest>
-{
+    implements ServiceFactoryMethod<ServiceManifest> {
     /**
      * Holds memoized instances of services after their initial instantiation:
      */
@@ -611,6 +616,9 @@ export class ServiceRepository
                     permissionsService: this.getPermissionsService(),
                     projectCompileLogModel:
                         this.models.getProjectCompileLogModel(),
+                    // SMR-START
+                    cacheService: this.getCacheService(),
+                    // SMR-END
                 }),
         );
     }
@@ -1030,9 +1038,18 @@ export class ServiceRepository
         );
     }
 
+    // SMR-START
     public getCacheService<CacheServiceImplT>(): CacheServiceImplT {
-        return this.getService('cacheService');
+        return this.getService(
+            'cacheService',
+            () =>
+                new CacheService({
+                    queryHistoryModel: this.models.getQueryHistoryModel(),
+                    lightdashConfig: this.context.lightdashConfig,
+                }),
+        ) as CacheServiceImplT;
     }
+    // SMR-END
 
     public getServiceAccountService<
         ServiceAccountServiceImplT,
