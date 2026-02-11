@@ -37,7 +37,7 @@ export class CacheService implements ICacheService {
         }
 
         const latestMatchingQuery =
-            await this.queryHistoryModel.findMostRecentByCacheKeyCached(
+            await this.queryHistoryModel.findMostRecentByCacheKey(
                 cacheKey,
                 projectUuid,
             );
