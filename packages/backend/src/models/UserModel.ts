@@ -59,9 +59,6 @@ import {
 import { deprecatedHash, hash } from '../utils/hash';
 import { PersonalAccessTokenModel } from './DashboardModel/PersonalAccessTokenModel';
 import Transaction = Knex.Transaction;
-// SMR-START
-import { ECacheContext, OCache } from '../services/Smartico/OCache';
-// SMR-END
 
 export type DbUserDetails = {
     user_id: number;
@@ -207,14 +204,10 @@ export class UserModel {
     }
 
     private async hasAuthentication(userUuid: string): Promise<boolean> {
-        // SMR-START
-        const usersHaveAuthenticationRows = await OCache.use(userUuid, ECacheContext.hasAuthentication, async () => {
-            const [usersHaveAuthenticationRowsInt] = await UserModel.findIfUsersHaveAuthentication(this.database, {
+        const [usersHaveAuthenticationRows] =
+            await UserModel.findIfUsersHaveAuthentication(this.database, {
                 userUuids: [userUuid],
             });
-            return usersHaveAuthenticationRowsInt;
-        }, 3600);
-        // SMR-END
         if (usersHaveAuthenticationRows === undefined) {
             throw new NotFoundError(`Cannot find user with uuid ${userUuid}`);
         }
@@ -296,32 +289,27 @@ export class UserModel {
             'organizationUuid' | 'organizationCreatedAt' | 'organizationName'
         >[]
     > {
-        // SMR-START
-        return OCache.use(userUuid, ECacheContext.organizationsForUser, async () => {
+        const organizations = await this.database('organization_memberships')
+            .leftJoin(
+                'organizations',
+                'organization_memberships.organization_id',
+                'organizations.organization_id',
+            )
+            .where(
+                'user_id',
+                this.database('users')
+                    .where('user_uuid', userUuid)
+                    .select('user_id'),
+            )
+            .select<
+                DbOrganization[]
+            >('organizations.organization_uuid', 'organizations.created_at', 'organizations.organization_name');
 
-            const organizations = await this.database('organization_memberships')
-                .leftJoin(
-                    'organizations',
-                    'organization_memberships.organization_id',
-                    'organizations.organization_id',
-                )
-                .where(
-                    'user_id',
-                    this.database('users')
-                        .where('user_uuid', userUuid)
-                        .select('user_id'),
-                )
-                .select<
-                    DbOrganization[]
-                >('organizations.organization_uuid', 'organizations.created_at', 'organizations.organization_name');
-
-            return organizations.map((organization) => ({
-                organizationUuid: organization.organization_uuid,
-                organizationCreatedAt: organization.created_at,
-                organizationName: organization.organization_name,
-            }));
-        }, 3600);
-        // SMR-END
+        return organizations.map((organization) => ({
+            organizationUuid: organization.organization_uuid,
+            organizationCreatedAt: organization.created_at,
+            organizationName: organization.organization_name,
+        }));
     }
 
     async hasUsers(): Promise<boolean> {
@@ -504,20 +492,15 @@ export class UserModel {
             'projectUuid' | 'role' | 'userUuid' | 'roleUuid'
         >[]
     > {
-        // SMR-START
-        const projectMemberships = await OCache.use(userUuid, ECacheContext.projectMemberships, async () => {
-            const projectMembershipsInt = await this.database('project_memberships')
-                .leftJoin(
-                    'projects',
-                    'project_memberships.project_id',
-                    'projects.project_id',
-                )
-                .leftJoin('users', 'project_memberships.user_id', 'users.user_id')
-                .select('*')
-                .where('users.user_uuid', userUuid);
-            return projectMembershipsInt;
-        }, 3600);
-        // SMR-END
+        const projectMemberships = await this.database('project_memberships')
+            .leftJoin(
+                'projects',
+                'project_memberships.project_id',
+                'projects.project_id',
+            )
+            .leftJoin('users', 'project_memberships.user_id', 'users.user_id')
+            .select('*')
+            .where('users.user_uuid', userUuid);
 
         return projectMemberships.map((membership) => ({
             projectUuid: membership.project_uuid,
@@ -538,33 +521,25 @@ export class UserModel {
         >[]
     > {
         // Remember: primary key for an organization is organization_id,user_id - not user_id alone
-        // SMR-START
-        const cacheKey = `${userId}::${organizationId}::${userUuid}`;
-        const projectMemberships = await OCache.use(cacheKey, ECacheContext.groupProjectRoles, async () => {
-
-            const query = this.database('group_memberships')
-                .innerJoin(
-                    'project_group_access',
-                    'project_group_access.group_uuid',
-                    'group_memberships.group_uuid',
-                )
-                .innerJoin(
-                    'projects',
-                    'projects.project_uuid',
-                    'project_group_access.project_uuid',
-                )
-                .where('group_memberships.organization_id', organizationId)
-                .andWhere('group_memberships.user_id', userId)
-                .select(
-                    'projects.project_uuid',
-                    'project_group_access.role',
-                    'project_group_access.role_uuid',
-                );
-            const projectMembershipsInt = await query;
-            return projectMembershipsInt;
-        }, 3600);
-        // SMR-END
-
+        const query = this.database('group_memberships')
+            .innerJoin(
+                'project_group_access',
+                'project_group_access.group_uuid',
+                'group_memberships.group_uuid',
+            )
+            .innerJoin(
+                'projects',
+                'projects.project_uuid',
+                'project_group_access.project_uuid',
+            )
+            .where('group_memberships.organization_id', organizationId)
+            .andWhere('group_memberships.user_id', userId)
+            .select(
+                'projects.project_uuid',
+                'project_group_access.role',
+                'project_group_access.role_uuid',
+            );
+        const projectMemberships = await query;
         return projectMemberships.map((membership) => ({
             projectUuid: membership.project_uuid,
             role: membership.role,
@@ -907,23 +882,18 @@ export class UserModel {
         | undefined
     > {
         const tokenHash = noHash ? token : await hash(token);
-        // SMR-START
-        const row = await OCache.use(tokenHash, ECacheContext.personalAccessToken, async () => {
-            const [rowInt] = await userDetailsQueryBuilder(this.database)
-                .innerJoin(
-                    'personal_access_tokens',
-                    'personal_access_tokens.created_by_user_id',
-                    'users.user_id',
-                )
-                .where('token_hash', tokenHash)
-                .orWhere('token_hash', deprecatedHash(token)) // Adding old sha256 hash for backwards compatibility
-                .select<(DbUserDetails & DbPersonalAccessToken)[]>(
-                    '*',
-                    'organizations.created_at as organization_created_at',
-                );
-            return rowInt;
-        }, 3600);
-        // SMR-END
+        const [row] = await userDetailsQueryBuilder(this.database)
+            .innerJoin(
+                'personal_access_tokens',
+                'personal_access_tokens.created_by_user_id',
+                'users.user_id',
+            )
+            .where('token_hash', tokenHash)
+            .orWhere('token_hash', deprecatedHash(token)) // Adding old sha256 hash for backwards compatibility
+            .select<(DbUserDetails & DbPersonalAccessToken)[]>(
+                '*',
+                'organizations.created_at as organization_created_at',
+            );
         if (row === undefined) {
             return undefined;
         }

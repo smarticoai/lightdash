@@ -103,9 +103,6 @@ import { generateUniqueSpaceSlug } from '../../utils/SlugUtils';
 import { ChangesetModel } from '../ChangesetModel';
 import { ExploreCache } from './ExploreCache';
 import Transaction = Knex.Transaction;
-// SMR-START
-import { ECacheContext, OCache } from '../../services/Smartico/OCache';
-// SMR-END
 
 export type ProjectModelArguments = {
     database: Knex;
@@ -767,15 +764,6 @@ export class ProjectModel {
         );
     }
 
-    // SMR-START
-    async getSummaryCached(projectUuid: string): Promise<ProjectSummary> {
-        return OCache.use(projectUuid, ECacheContext.projectSummary, async () => {
-            const r = await this.getSummary(projectUuid);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
-
     async getSummary(projectUuid: string): Promise<ProjectSummary> {
         const project = await this.database(ProjectTableName)
             .leftJoin(
@@ -893,15 +881,6 @@ export class ProjectModel {
             );
         }
     }
-
-    // SMR-START
-    async getCached(projectUuid: string): Promise<Project> {
-        return OCache.use(projectUuid, ECacheContext.projectModelCached, async () => {
-            const r = await this.get(projectUuid);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     async get(projectUuid: string): Promise<Project> {
         const project = await this.getWithSensitiveFields(projectUuid);
@@ -1032,12 +1011,10 @@ export class ProjectModel {
                 exploreNames,
             },
             async (span) => {
-                // SMR-START
                 const changeset =
-                    await this.changesetModel.findActiveChangesetWithChangesByProjectUuidCached(
+                    await this.changesetModel.findActiveChangesetWithChangesByProjectUuid(
                         projectUuid,
                     );
-                // SMR-END
 
                 // Try to get from cache first
                 const cachedExplores = this.exploreCache?.getExplores(

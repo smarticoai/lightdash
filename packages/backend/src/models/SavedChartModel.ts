@@ -78,9 +78,6 @@ import { UserTableName } from '../database/entities/users';
 import { wrapSentryTransaction } from '../utils';
 import { generateUniqueSlug } from '../utils/SlugUtils';
 import { SpaceModel } from './SpaceModel';
-// SMR-START
-import { ECacheContext, OCache } from '../services/Smartico/OCache';
-// SMR-END
 
 type DbSavedChartDetails = {
     project_uuid: string;
@@ -678,9 +675,6 @@ export class SavedChartModel {
         savedChartUuid: string,
         data: UpdateSavedChart,
     ): Promise<SavedChartDAO> {
-        // SMR-START
-        await OCache.clear(ECacheContext.savedChartByUuidOrSlug, savedChartUuid);
-        // SMR-END
         await this.database('saved_queries')
             .update({
                 name: data.name,
@@ -700,9 +694,6 @@ export class SavedChartModel {
     async updateMultiple(
         data: UpdateMultipleSavedChart[],
     ): Promise<SavedChartDAO[]> {
-        // SMR-START
-        await OCache.clearContext(ECacheContext.savedChartByUuidOrSlug);
-        // SMR-END
         await this.database.transaction(async (trx) => {
             const promises = data.map(async (savedChart) =>
                 trx('saved_queries')
@@ -814,18 +805,6 @@ export class SavedChartModel {
             count: Number(count), // Count returns by default as BigInt, so we need to cast to number
         }));
     }
-
-    // SMR-START
-    async getCached(
-        savedChartUuidOrSlug: string,
-        versionUuid?: string,
-    ): Promise<SavedChartDAO> {
-        return OCache.use(savedChartUuidOrSlug, ECacheContext.savedChartByUuidOrSlug, async () => {
-            const r = await this.get(savedChartUuidOrSlug, versionUuid);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     async get(
         savedChartUuidOrSlug: string,

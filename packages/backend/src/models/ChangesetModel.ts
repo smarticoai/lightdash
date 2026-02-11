@@ -17,9 +17,6 @@ import {
     DbChangeSchema,
     EntityType,
 } from '../database/entities/changesets';
-// SMR-START
-import { ECacheContext, OCache } from '../services/Smartico/OCache';
-// SMR-END
 
 type ChangesetModelArguments = {
     database: Knex;
@@ -31,20 +28,6 @@ export class ChangesetModel {
     constructor(args: ChangesetModelArguments) {
         this.database = args.database;
     }
-
-    // SMR-START
-    async findActiveChangesetWithChangesByProjectUuidCached(
-        projectUuid: string,
-        filters?: {
-            tableNames?: string[];
-        },
-    ): Promise<ChangesetWithChanges | undefined> {
-        return OCache.use({ projectUuid, filters }, ECacheContext.changesetModelCached, async () => {
-            const r = await this.findActiveChangesetWithChangesByProjectUuid(projectUuid, filters);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     async findActiveChangesetWithChangesByProjectUuid(
         projectUuid: string,

@@ -17,9 +17,6 @@ import {
     UserAttributesTable,
 } from '../database/entities/userAttributes';
 import { UserTableName } from '../database/entities/users';
-// SMR-START
-import { ECacheContext, OCache } from '../services/Smartico/OCache';
-// SMR-END
 
 type UserAttributesModelArguments = {
     database: Knex;
@@ -31,18 +28,6 @@ export class UserAttributesModel {
     constructor(args: UserAttributesModelArguments) {
         this.database = args.database;
     }
-
-    // SMR-START
-    async getAttributeValuesForOrgMemberCached(filters: {
-        organizationUuid: string;
-        userUuid: string;
-    }): Promise<UserAttributeValueMap> {
-        return OCache.use(filters.organizationUuid + filters.userUuid, ECacheContext.userAttributesByOrgMember, async () => {
-            const r = await this.getAttributeValuesForOrgMember(filters);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     async getAttributeValuesForOrgMember(filters: {
         organizationUuid: string;

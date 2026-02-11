@@ -19,9 +19,7 @@ export const jwtStrategy = ({
         true,
         async (token, done) => {
 
-            // SMR-START
-            const jwtDecoded: JwtPayload = jwt.verify(token, lightdashConfig.lightdashSecret) as JwtPayload;
-            // SMR-END
+            const jwtDecoded: JwtPayload = jwt.verify(token,lightdashConfig.lightdashSecret) as JwtPayload; 
 
             try {
                 const user = await userService.loginWithPersonalAccessToken(

@@ -44,9 +44,6 @@ import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { UserModel } from '../../models/UserModel';
 import { wrapSentryTransaction } from '../../utils';
 import { BaseService } from '../BaseService';
-// SMR-START
-import { ECacheContext, OCache } from '../Smartico/OCache';
-// SMR-END
 
 type OrganizationServiceArguments = {
     lightdashConfig: LightdashConfig;
@@ -106,29 +103,23 @@ export class OrganizationService extends BaseService {
     async get(account: Account): Promise<Organization> {
         assertIsAccountWithOrg(account);
 
-        // SMR-START
-        return OCache.use(account.organization.organizationUuid, ECacheContext.organizationNeedsProject, async () => {
-            const needsProject = !(await this.projectModel.hasProjects(
-                account.organization.organizationUuid,
-            ));
+        const needsProject = !(await this.projectModel.hasProjects(
+            account.organization.organizationUuid,
+        ));
 
-            const organization = await this.organizationModel.getCached(
-                account.organization.organizationUuid,
-            );
-            return {
-                ...organization,
-                needsProject,
-            };
-        }, 3600);
-        // SMR-END
+        const organization = await this.organizationModel.get(
+            account.organization.organizationUuid,
+        );
+        return {
+            ...organization,
+            needsProject,
+        };
     }
 
     async getOrganizationByUuid(
         organizationUuid: string,
     ): Promise<Organization> {
-        // SMR-START
-        return this.organizationModel.getCached(organizationUuid);
-        // SMR-END
+        return this.organizationModel.get(organizationUuid);
     }
 
     async updateOrg(
@@ -427,10 +418,8 @@ export class OrganizationService extends BaseService {
             );
         }
         if (data.role !== undefined) {
-            // SMR-START
             const organization =
-                await this.organizationModel.getCached(organizationUuid);
-            // SMR-END
+                await this.organizationModel.get(organizationUuid);
             this.analytics.track({
                 userId: authenticatedUser.userUuid,
                 event: 'permission.updated',

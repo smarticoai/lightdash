@@ -13,23 +13,11 @@ import { OrganizationModel } from '../../models/OrganizationModel';
 import { VERSION } from '../../version';
 import { BaseService } from '../BaseService';
 
-// SMR-START
-const HEALTH_CACHE_TTL_MS = 180_000;
-// SMR-END
-
 type HealthServiceArguments = {
     lightdashConfig: LightdashConfig;
     organizationModel: OrganizationModel;
     migrationModel: MigrationModel;
 };
-
-// SMR-START
-type HealthCache = {
-    state: HealthState;
-    timestamp: number;
-    isAuthenticated: boolean;
-};
-// SMR-END
 
 export class HealthService extends BaseService {
     private readonly lightdashConfig: LightdashConfig;
@@ -37,10 +25,6 @@ export class HealthService extends BaseService {
     private readonly organizationModel: OrganizationModel;
 
     private readonly migrationModel: MigrationModel;
-
-    // SMR-START
-    private healthCache: HealthCache | undefined;
-    // SMR-END
 
     constructor({
         organizationModel,
@@ -60,36 +44,10 @@ export class HealthService extends BaseService {
     async getHealthState(user: SessionUser | undefined): Promise<HealthState> {
         const isAuthenticated: boolean = !!user?.userUuid;
 
-        // SMR-START
-        if (
-            this.healthCache &&
-            this.healthCache.isAuthenticated === isAuthenticated &&
-            Date.now() - this.healthCache.timestamp < HEALTH_CACHE_TTL_MS
-        ) {
-            this.logger.info('Health check served from cache');
-            return {
-                ...this.healthCache.state,
-                pylon: {
-                    appId: this.lightdashConfig.pylon.appId,
-                    verificationHash: this.getPylonVerificationHash(
-                        user?.email,
-                    ),
-                },
-            };
-        }
-        // SMR-END
-
-        const startTime = performance.now();
-
-        // SMR-START
-        const [migrationResult, hasOrgs] = await Promise.all([
-            this.migrationModel.getMigrationStatus(),
-            this.organizationModel.hasOrgs(),
-        ]);
-        // SMR-END
-
-        const { status: migrationStatus, currentVersion } = migrationResult;
-        const dbExecutionTime = performance.now() - startTime;
+        const migrationStartTime = performance.now();
+        const { status: migrationStatus, currentVersion } =
+            await this.migrationModel.getMigrationStatus();
+        const migrationExecutionTime = performance.now() - migrationStartTime;
 
         if (migrationStatus < 0) {
             throw new UnexpectedDatabaseError(
@@ -100,29 +58,34 @@ export class HealthService extends BaseService {
             console.warn(
                 `There are more DB migrations than defined in the code (you are running old code against a newer DB). Current version: ${currentVersion}`,
             );
-        }
+        } // else migrationStatus === 0 (all migrations are up to date)
 
-        // SMR-START
-        const requiresOrgRegistration = !hasOrgs;
-        // SMR-END
+        const hasOrgsStartTime = performance.now();
+        const requiresOrgRegistration =
+            !(await this.organizationModel.hasOrgs());
+        const hasOrgsExecutionTime = performance.now() - hasOrgsStartTime;
 
         const localDbtEnabled =
             process.env.LIGHTDASH_INSTALL_TYPE !==
                 LightdashInstallType.HEROKU &&
             this.lightdashConfig.mode !== LightdashMode.CLOUD_BETA;
 
+        const getDockerHubVersionStartTime = performance.now();
         const dockerHubVersion = getDockerHubVersion();
+        const getDockerHubVersionExecutionTime =
+            performance.now() - getDockerHubVersionStartTime;
 
-        // SMR-START
         this.logger.info(
-            `Health check execution times: DB queries (parallel) ${dbExecutionTime.toFixed(
+            `Health check execution times: getMigrationStatus ${migrationExecutionTime.toFixed(
+                2,
+            )}ms, hasOrgs ${hasOrgsExecutionTime.toFixed(
+                2,
+            )}ms, getDockerHubVersion ${getDockerHubVersionExecutionTime.toFixed(
                 2,
             )}ms`,
         );
-        // SMR-END
 
-        // SMR-START
-        const state: HealthState = {
+        return {
             healthy: true,
             mode: this.lightdashConfig.mode,
             version: VERSION,
@@ -261,17 +224,6 @@ export class HealthService extends BaseService {
                 enabled: this.lightdashConfig.funnelBuilder.enabled,
             },
         };
-        // SMR-END
-
-        // SMR-START
-        this.healthCache = {
-            state,
-            timestamp: Date.now(),
-            isAuthenticated,
-        };
-        // SMR-END
-
-        return state;
     }
 
     private hasSlackConfig(): boolean {

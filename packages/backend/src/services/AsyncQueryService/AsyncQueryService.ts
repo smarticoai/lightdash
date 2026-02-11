@@ -1718,10 +1718,8 @@ export class AsyncQueryService extends ProjectService {
                 try {
                     assertIsAccountWithOrg(account);
 
-                    // SMR-START
                     const { organizationUuid } =
-                        await this.projectModel.getSummaryCached(projectUuid);
-                    // SMR-END
+                        await this.projectModel.getSummary(projectUuid);
                     const isForbidden =
                         account.user.ability.cannot(
                             'view',
@@ -2358,9 +2356,7 @@ export class AsyncQueryService extends ProjectService {
     }: ExecuteAsyncDashboardChartQueryArgs): Promise<ApiExecuteAsyncDashboardChartQueryResults> {
         assertIsAccountWithOrg(account);
 
-        // SMR-START
-        const savedChart = await this.savedChartModel.getCached(chartUuid);
-        // SMR-END
+        const savedChart = await this.savedChartModel.get(chartUuid);
         const { organizationUuid, projectUuid: savedChartProjectUuid } =
             savedChart;
 
@@ -2369,9 +2365,7 @@ export class AsyncQueryService extends ProjectService {
         }
 
         const [space, explore] = await Promise.all([
-            // SMR-START
-            this.spaceModel.getSpaceSummaryCached(savedChart.spaceUuid),
-            // SMR-END
+            this.spaceModel.getSpaceSummary(savedChart.spaceUuid),
             this.getExplore(
                 account,
                 projectUuid,
@@ -2483,9 +2477,7 @@ export class AsyncQueryService extends ProjectService {
         );
 
         const dashboard =
-            // SMR-START
-            await this.dashboardModel.getByIdOrSlugCached(dashboardUuid);
-        // SMR-END
+            await this.dashboardModel.getByIdOrSlug(dashboardUuid);
         const dashboardParameters = getDashboardParametersValuesMap(dashboard);
 
         // Combine default parameter values, dashboard parameters, and request parameters first

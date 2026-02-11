@@ -22,9 +22,6 @@ import {
     OrganizationTableName,
 } from '../database/entities/organizations';
 import { OrganizationAllowedEmailDomainsTableName } from '../database/entities/organizationsAllowedEmailDomains';
-// SMR-START
-import { ECacheContext, OCache } from '../services/Smartico/OCache';
-// SMR-END
 
 export const PRESET_COLOR_PALETTES = [
     {
@@ -220,15 +217,6 @@ export class OrganizationModel {
         );
         return orgs.map((org) => org.organization_uuid);
     }
-
-    // SMR-START
-    async getCached(organizationUuid: string): Promise<Organization> {
-        return OCache.use(organizationUuid, ECacheContext.organizationByUuid, async () => {
-            const r = await this.get(organizationUuid);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     async get(organizationUuid: string): Promise<Organization> {
         const [org] = await this.database(OrganizationTableName)

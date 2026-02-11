@@ -3,9 +3,6 @@ import bcrypt from 'bcrypt';
 import { Knex } from 'knex';
 import { DbEmailOneTimePasscode } from '../database/entities/emailOneTimePasscodes';
 import { DbEmail, DbEmailIn, DbEmailRemove } from '../database/entities/emails';
-// SMR-START
-import { ECacheContext, OCache } from '../services/Smartico/OCache';
-// SMR-END
 
 type DbEmailStatus = Pick<DbEmail, 'email' | 'is_verified'> &
     Partial<DbEmailOneTimePasscode>;
@@ -56,15 +53,6 @@ export class EmailModel {
             userId: email.user_id,
         };
     }
-
-    // SMR-START
-    async getPrimaryEmailStatusCached(userUuid: string): Promise<EmailStatus> {
-        return OCache.use(userUuid, ECacheContext.primaryEmailStatus, async () => {
-            const r = await this.getPrimaryEmailStatus(userUuid);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     async getPrimaryEmailStatus(userUuid: string): Promise<EmailStatus> {
         const [row] = await this.database('emails')

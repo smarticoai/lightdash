@@ -75,9 +75,6 @@ import { DbValidationTable } from '../../database/entities/validation';
 import { generateUniqueSlug } from '../../utils/SlugUtils';
 import { SpaceModel } from '../SpaceModel';
 import Transaction = Knex.Transaction;
-// SMR-START
-import { ECacheContext, OCache } from '../../services/Smartico/OCache';
-// SMR-END
 
 export type GetDashboardQuery = Pick<
     DashboardTable['base'],
@@ -680,15 +677,6 @@ export class DashboardModel {
         );
     }
 
-    // SMR-START
-    async getByIdOrSlugCached(dashboardUuidOrSlug: string): Promise<DashboardDAO> {
-        return OCache.use(dashboardUuidOrSlug, ECacheContext.dashboardUuidOrSlug, async () => {
-            const dashboard = await this.getByIdOrSlug(dashboardUuidOrSlug);
-            return dashboard;
-        }, 3600);
-    }
-    // SMR-END
-
     async getByIdOrSlug(dashboardUuidOrSlug: string): Promise<DashboardDAO> {
         const query = this.database(DashboardsTableName)
             .leftJoin(
@@ -1267,19 +1255,6 @@ export class DashboardModel {
             uuid: chart.saved_query_uuid,
         }));
     }
-
-    // SMR-START
-    async savedChartExistsInDashboardCached(
-        projectUuid: string,
-        dashboardUuid: string,
-        chartUuid: string,
-    ): Promise<boolean> {
-        return OCache.use({ projectUuid, dashboardUuid, chartUuid }, ECacheContext.savedChartExistsInDashboardCached, async () => {
-            const r = await this.savedChartExistsInDashboard(projectUuid, dashboardUuid, chartUuid);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
 
     /**
      * Check if a specific chart exists in the latest version of a specific dashboard within a project

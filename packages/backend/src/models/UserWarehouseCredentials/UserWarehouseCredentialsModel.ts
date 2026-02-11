@@ -16,9 +16,6 @@ import {
     UserWarehouseCredentialsTableName,
 } from '../../database/entities/userWarehouseCredentials';
 import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
-// SMR-START
-import { ECacheContext, OCache } from '../../services/Smartico/OCache';
-// SMR-END
 
 type UserWarehouseCredentialsModelArguments = {
     database: Knex;
@@ -116,19 +113,6 @@ export class UserWarehouseCredentialsModel {
         return this.convertToUserWarehouseCredentials(result);
     }
 
-    // SMR-START
-    private async _findProjectCredentialsCached(
-        projectUuid: string,
-        userUuid: string,
-        warehouseType: WarehouseTypes,
-    ) {
-        return OCache.use({ projectUuid, userUuid, warehouseType }, ECacheContext.userWarehouseCredentialsCached, async () => {
-            const r = await this._findProjectCredentials(projectUuid, userUuid, warehouseType);
-            return r;
-        }, 3600);
-    }
-    // SMR-END
-
     private async _findProjectCredentials(
         projectUuid: string,
         userUuid: string,
@@ -174,13 +158,11 @@ export class UserWarehouseCredentialsModel {
         userUuid: string,
         warehouseType: WarehouseTypes,
     ): Promise<UserWarehouseCredentials | undefined> {
-        // SMR-START
-        const credentials = await this._findProjectCredentialsCached(
+        const credentials = await this._findProjectCredentials(
             projectUuid,
             userUuid,
             warehouseType,
         );
-        // SMR-END
         if (credentials) {
             return this.convertToUserWarehouseCredentials(credentials);
         }
