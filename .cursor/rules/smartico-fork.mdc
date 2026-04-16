@@ -1,0 +1,104 @@
+---
+description: Smartico fork deltas and upstream rebase playbook
+---
+
+# Smartico Fork Guide
+
+This repository tracks community Lightdash through `upstream/main` and carries Smartico-specific behavior in `main`.
+
+## Custom DDL changes
+
+ALTER TABLE public.dashboard_tabs ADD smartico_enable_ai_analysis boolean NULL;
+ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
+
+## Where Smartico logic lives
+
+- Embedded auth bridge:
+    - `packages/frontend/src/api.ts`
+    - `packages/frontend/src/utils/smarticoUtils.ts`
+    - `packages/backend/src/controllers/authentication/middlewares.ts`
+    - `packages/backend/src/controllers/authentication/strategies/jwtStrategy.ts`
+    - `packages/backend/src/App.ts`
+- Embedded UI behavior:
+    - `packages/frontend/src/components/common/Page/Page.tsx`
+    - `packages/frontend/src/components/NavBar/MainNavBarContent.tsx`
+    - `packages/frontend/src/components/common/Dashboard/ShareLinkButton.tsx`
+    - `packages/frontend/src/components/common/PageHeader/DashboardInfoOverlay.tsx`
+    - `packages/frontend/src/pages/Invite.tsx`
+    - `packages/frontend/src/pages/Register.tsx`
+    - `packages/frontend/src/pages/VerifyEmail.tsx`
+- Multi-project BigQuery override:
+    - `packages/backend/src/services/ProjectService/ProjectService.ts`
+- Query/result caching integration:
+    - `packages/backend/src/services/CacheService/CacheService.ts`
+    - `packages/backend/src/services/Smartico/NodeCache.ts`
+    - `packages/backend/src/services/Smartico/OCache.ts`
+    - `packages/backend/src/services/ServiceRepository.ts`
+- Build/runtime deltas:
+    - `dockerfile`
+    - `.smr`
+    - `.husky/pre-commit`
+
+## Smartico behavior to preserve
+
+- Embedded mode injects JWT into frontend API calls via `_smr_token` and `JWT` header.
+- Backend auth allows Smartico JWT header flow in API middleware.
+- Embedded mode hides some Lightdash UI controls and legal/support elements.
+- Currency placeholder replacement is applied recursively in API responses (`{cur}` -> `_smr_currency`).
+- BigQuery table SQL/database can be rewritten per user using `bq_project_id` and `SMR_BQ_PROJECT`.
+- Async query cache service is wired through `ServiceRepository`.
+- Docker image is optimized for dbt `1.9+` only.
+
+## Review findings (important)
+
+- **Auth strategy collision risk**:
+    - `apiKeyPassportStrategy` and Smartico `jwtStrategy` both use `HeaderAPIKeyStrategy` default name.
+    - Registering both with `passport.use(...)` can make one override the other.
+    - Rebase work must verify both `Authorization: ApiKey ...` and `JWT: token ...` paths.
+- **Secret logging risk**:
+    - `packages/backend/src/config/parseConfig.ts` logs `process.env.LIGHTDASH_SECRET`.
+    - Remove this in production-ready branches.
+- **Guardrail drift**:
+    - `.husky/pre-commit` checks are commented out.
+    - If this is temporary, restore before long-lived release branches.
+
+## Rebase from community (semantic-preserving workflow)
+
+Use this flow when syncing from community Lightdash:
+
+1. Prepare remotes and base branch
+    - `git fetch upstream`
+    - `git checkout -b rebase/upstream-YYYYMMDD upstream/main`
+
+2. Re-apply Smartico changes as a patch stack
+    - Prefer targeted cherry-picks or manual ports by feature area.
+    - Do **not** bulk-merge old "outdated files" commits into fresh upstream snapshots.
+    - Keep each Smartico concern in a separate commit:
+        - embedded auth
+        - embedded UI
+        - BQ per-user override
+        - cache integration
+        - build/runtime customizations
+
+3. Resolve conflicts by meaning, not by side
+    - Keep upstream structure and typing when possible.
+    - Port only Smartico intent into the new upstream code paths.
+    - Avoid taking whole fork files if only 5-20 lines are Smartico-specific.
+
+4. Run semantic checkpoints after each area
+    - Embedded JWT path works end-to-end.
+    - PAT auth still works end-to-end.
+    - Embedded pages hide expected controls.
+    - Currency substitution works where expected.
+    - User `bq_project_id` correctly rewrites compiled table/database.
+    - Async query cache reads/writes still function.
+    - Production Docker build still succeeds.
+
+5. Compare final branch against previous Smartico behavior
+    - `git diff --name-status <old-smartico-branch>..<new-rebase-branch>`
+    - Manually review hotspots listed in this file.
+    - Keep a short "semantic parity checklist" in PR description.
+
+## Practical rule for future updates
+
+When pulling from community Lightdash, prefer **small replayable Smartico patches** over long-running merge branches. This reduces hidden regressions and keeps fork intent understandable for the next rebase cycle.
