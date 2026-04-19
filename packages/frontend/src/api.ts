@@ -225,7 +225,6 @@ export const lightdashApiStream = ({
     const apiPrefix = `${baseUrl ?? BASE_API_URL}api/${version}`;
 
     let sentryTrace: string | undefined;
-    // Manually create a span for the fetch request to be able to trace it in Sentry. This also enables Distributed Tracing.
     startSpan(
         {
             op: 'http.client',
@@ -242,20 +241,19 @@ export const lightdashApiStream = ({
             sentryTrace = spanToTraceHeader(s);
         },
     );
-
-    return fetch(`${apiPrefix}${url}`, {
+// SMR-START
+    const embed = getFromInMemoryStorage<InMemoryEmbed>(EMBED_KEY);
+    return fetch(finalizeUrl(`${apiPrefix}${url}`, embed), {
         method,
-        headers: {
-            ...defaultHeaders,
-            ...headers,
-            ...(sentryTrace ? { 'sentry-trace': sentryTrace } : {}),
-        },
+        headers: finalizeHeaders(headers, embed, sentryTrace),
         body,
         signal,
-    }).then((r) => {
+    }).then(async (r) => {
         if (!r.ok) {
-            throw r;
+            const errJson = await r.json().catch(() => null);
+            throw errJson ?? r;
         }
         return r;
     });
 };
+// SMR-END

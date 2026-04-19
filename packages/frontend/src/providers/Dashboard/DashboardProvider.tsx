@@ -57,9 +57,16 @@ import {
     hasSavedFiltersOverrides,
     useSavedDashboardFiltersOverrides,
 } from '../../hooks/useSavedDashboardFiltersOverrides';
+// SMR-START
+import { getTilesForActiveTab } from '../../utils/smrDashboardActiveTabCapture';
+// SMR-END
 import DashboardContext from './context';
-import { type SqlChartTileMetadata } from './types';
-
+// SMR-START
+import {
+    type DashboardTileCaptureSnapshot,
+    type SqlChartTileMetadata,
+} from './types';
+// SMR-END
 const emptyFilters: DashboardFilters = {
     dimensions: [],
     metrics: [],
@@ -1183,6 +1190,106 @@ const DashboardProvider: React.FC<
         }, {});
     }, [dashboardTiles]);
 
+    // SMR-START
+    const tileCaptureSnapshotsRef = useRef<
+        Map<string, DashboardTileCaptureSnapshot>
+    >(new Map());
+
+    const updateTileCaptureSnapshot = useCallback(
+        (tileUuid: string, snapshot: DashboardTileCaptureSnapshot | null) => {
+            if (snapshot === null) {
+                tileCaptureSnapshotsRef.current.delete(tileUuid);
+            } else {
+                tileCaptureSnapshotsRef.current.set(tileUuid, snapshot);
+            }
+        },
+        [],
+    );
+
+    const getActiveTabCapturePayload = useCallback((): Record<
+        string,
+        unknown
+    > => {
+        const dash = dashboard || embedDashboard;
+        const tabTiles = getTilesForActiveTab(
+            dashboardTiles,
+            activeTab,
+            dashboardTabs,
+        );
+        const tiles = tabTiles.map((tile) => ({
+            tile,
+            runtimeCapture:
+                tileCaptureSnapshotsRef.current.get(tile.uuid) ?? null,
+        }));
+        return {
+            capturedAt: new Date().toISOString(),
+            projectUuid,
+            dashboardUuid: dash?.uuid,
+            dashboardName: dash?.name,
+            activeTab: activeTab
+                ? { uuid: activeTab.uuid, name: activeTab.name }
+                : null,
+            context: {
+                dashboardFilters,
+                dashboardTemporaryFilters,
+                parameterValues,
+                dateZoomGranularity,
+                isDateZoomDisabled,
+            },
+            tiles,
+        };
+    }, [
+        activeTab,
+        dashboard,
+        dashboardFilters,
+        dashboardTabs,
+        dashboardTemporaryFilters,
+        dashboardTiles,
+        dateZoomGranularity,
+        embedDashboard,
+        isDateZoomDisabled,
+        parameterValues,
+        projectUuid,
+    ]);
+
+    const downloadActiveTabViewCapture = useCallback(() => {
+        const payload = getActiveTabCapturePayload();
+        const text = JSON.stringify(payload, null, 2);
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const objectUrl = URL.createObjectURL(blob);
+        const dashboardName =
+            typeof payload.dashboardName === 'string'
+                ? payload.dashboardName
+                : 'dashboard';
+        const safeName = dashboardName
+            .replace(/[^a-zA-Z0-9-_]/g, '_')
+            .slice(0, 80);
+        const filename = `lightdash-ai-tab-capture_${safeName}_${Date.now()}.txt`;
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(objectUrl);
+        const tiles = payload.tiles as
+            | { runtimeCapture: unknown | null }[]
+            | undefined;
+        const tileList = tiles ?? [];
+        console.log(
+            '[Lightdash AI Analysis capture] Browser download started.',
+            {
+                filename,
+                suggestedPathHint:
+                    'Saved to your browser default download folder (often ~/Downloads on macOS).',
+                tileCountInTab: tileList.length,
+                tilesWithRuntimeCapture: tileList.filter((t) => t.runtimeCapture)
+                    .length,
+            },
+        );
+    }, [getActiveTabCapturePayload]);
+    // SMR-END
+
     const value = {
         projectUuid,
         isDashboardLoading,
@@ -1265,6 +1372,11 @@ const DashboardProvider: React.FC<
         screenshotReadyTilesCount: screenshotReadyTiles.size,
         screenshotErroredTilesCount: screenshotErroredTiles.size,
         expectedScreenshotTilesCount: expectedScreenshotTileUuids.length,
+        // SMR-START
+        updateTileCaptureSnapshot,
+        downloadActiveTabViewCapture,
+        getActiveTabCapturePayload,
+        // SMR-END
     };
     return (
         <DashboardContext.Provider value={value}>

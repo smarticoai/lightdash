@@ -228,6 +228,11 @@ export const lightdashConfigMock: LightdashConfig = {
             verifiedAnswerSimilarityThreshold: 0.6,
             defaultEmbeddingModelProvider: 'openai',
         },
+        analyticsProjectUuid: undefined,
+        analyticsDashboardUuid: undefined,
+        // SMR-START
+        geminiDashboardTabAnalysis: undefined,
+        // SMR-END
     },
     embedding: {
         enabled: false,

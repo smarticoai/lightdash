@@ -5,7 +5,15 @@ import {
 import { Menu, Text, useMantineTheme } from '@mantine/core';
 import { IconCopy } from '@tabler/icons-react';
 import MarkdownPreview from '@uiw/react-markdown-preview';
-import React, { useCallback, useMemo, useState, type FC } from 'react';
+// SMR-START
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useState,
+    type FC,
+} from 'react';
+// SMR-END
 import rehypeExternalLinks from 'rehype-external-links';
 import { v4 as uuid4 } from 'uuid';
 import { DashboardTileComments } from '../../features/comments';
@@ -44,7 +52,29 @@ const MarkdownTile: FC<Props> = (props) => {
     const setHaveTilesChanged = useDashboardContext(
         (c) => c.setHaveTilesChanged,
     );
+    // SMR-START
+    const updateTileCaptureSnapshot = useDashboardContext(
+        (c) => c.updateTileCaptureSnapshot,
+    );
     const unsavedDashboardTiles = getUnsavedDashboardTiles();
+
+    useEffect(() => {
+        updateTileCaptureSnapshot(props.tile.uuid, {
+            kind: 'markdown',
+            tileUuid: props.tile.uuid,
+            title,
+            content,
+            hideFrame,
+        });
+        return () => updateTileCaptureSnapshot(props.tile.uuid, null);
+    }, [
+        content,
+        hideFrame,
+        props.tile.uuid,
+        title,
+        updateTileCaptureSnapshot,
+    ]);
+    // SMR-END
 
     const dashboardComments = useMemo(
         () =>

@@ -925,10 +925,16 @@ export class DashboardModel {
                 { column: `${DashboardTilesTableName}.x_offset` },
             ]);
 
+        // SMR-START
         const tabs = await this.database(DashboardTabsTableName)
             .select<
                 DashboardTab[]
-            >(`${DashboardTabsTableName}.name`, `${DashboardTabsTableName}.uuid`, `${DashboardTabsTableName}.order`)
+            >(
+                `${DashboardTabsTableName}.name`,
+                `${DashboardTabsTableName}.uuid`,
+                `${DashboardTabsTableName}.order`,
+                `${DashboardTabsTableName}.smartico_enable_ai_analysis as smarticoEnableAiAnalysis`,
+            )
             .where(
                 `${DashboardTabsTableName}.dashboard_version_id`,
                 dashboard.dashboard_version_id,
@@ -937,6 +943,7 @@ export class DashboardModel {
                 `${DashboardTabsTableName}.dashboard_id`,
                 dashboard.dashboard_id,
             );
+        // SMR-END
 
         const tableCalculationFilters = view?.filters?.tableCalculations;
         view.filters.tableCalculations = tableCalculationFilters || [];
@@ -1427,4 +1434,42 @@ export class DashboardModel {
             throw new Error('Failed to move dashboard to space');
         }
     }
+
+    // SMR-START
+    async getTabAiPrompt(
+        dashboardUuid: string,
+        tabUuid: string,
+    ): Promise<{
+        enableAiAnalysis: boolean | null;
+        aiAnalysisPrompt: string | null;
+    }> {
+        const row = await this.database(DashboardTabsTableName)
+            .select<{
+                smartico_enable_ai_analysis: boolean | null;
+                smartico_ai_analysis_prompt: string | null;
+            }>(
+                `${DashboardTabsTableName}.smartico_enable_ai_analysis`,
+                `${DashboardTabsTableName}.smartico_ai_analysis_prompt`,
+            )
+            .join(
+                DashboardsTableName,
+                `${DashboardTabsTableName}.dashboard_id`,
+                `${DashboardsTableName}.dashboard_id`,
+            )
+            .where(`${DashboardsTableName}.dashboard_uuid`, dashboardUuid)
+            .andWhere(`${DashboardTabsTableName}.uuid`, tabUuid)
+            .first();
+
+        if (!row) {
+            throw new NotFoundError(
+                `Tab ${tabUuid} not found on dashboard ${dashboardUuid}`,
+            );
+        }
+
+        return {
+            enableAiAnalysis: row.smartico_enable_ai_analysis,
+            aiAnalysisPrompt: row.smartico_ai_analysis_prompt,
+        };
+    }
+    // SMR-END
 }

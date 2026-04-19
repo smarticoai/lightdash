@@ -48,5 +48,7 @@ ENV RUDDERSTACK_DATA_PLANE_URL=https://analytics.lightdash.com
 ENV DBT_DEMO_DIR=/workspace/lightdash/examples/full-jaffle-shop-demo
 ENV NODE_ENV=development
 ENV LIGHTDASH_LOG_LEVEL=debug
+ENV GEMINI_API_KEY='something'
+ENV GEMINI_MODEL='gemini-2.5-flash-preview-04-17'
 
 USER gitpod

@@ -27,6 +27,9 @@ import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import { TrackSection } from '../../providers/Tracking/TrackingProvider';
 import '../../styles/droppable.css';
 import { SectionName } from '../../types/Events';
+// SMR-START
+import DashboardAiAnalysisModal from '../../components/common/Dashboard/SMRDashboardAiAnalysisModal';
+// SMR-END
 import { DashboardFiltersBar } from '../dashboardFilters/DashboardFiltersBar';
 import { DashboardFiltersBarSummary } from '../dashboardFilters/DashboardFiltersBarSummary';
 import { doesFilterApplyToTile } from '../dashboardFilters/FilterConfiguration/utils';
@@ -173,6 +176,15 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
     const tileParameterReferences = useDashboardContext(
         (c) => c.tileParameterReferences,
     );
+    // SMR-START
+    const downloadActiveTabViewCapture = useDashboardContext(
+        (c) => c.downloadActiveTabViewCapture,
+    );
+    const getActiveTabCapturePayload = useDashboardContext(
+        (c) => c.getActiveTabCapturePayload,
+    );
+    const [aiAnalysisModalOpen, setAiAnalysisModalOpen] = useState(false);
+    // SMR-END
 
     // filters bar state
     const [isFiltersCollapsed, setIsFiltersCollapsed] =
@@ -345,6 +357,9 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                     uuid: uuid4(),
                     isDefault: true,
                     order: 0,
+                    // SMR-START
+                    smarticoEnableAiAnalysis: null,
+                    // SMR-END
                 };
                 newTabs.push(firstTab);
                 // Move all tiles to the new default tab (immutable update)
@@ -362,6 +377,7 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                 uuid: uuid4(),
                 isDefault: false,
                 order: lastOrd + 1,
+                smarticoEnableAiAnalysis: null, // SMR
             };
             newTabs.push(newTab);
             setDashboardTabs(newTabs);
@@ -461,6 +477,9 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                 uuid: uuid4(),
                 isDefault: false,
                 order: lastOrd + 1,
+                // SMR-START
+                smarticoEnableAiAnalysis: null,
+                // SMR-END
             };
 
             setDashboardTabs((currentTabs) => [...currentTabs, newTab]);
@@ -714,6 +733,17 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                                                             true,
                                                         )
                                                     }
+                                                    // SMR-START
+                                                    showAiAnalysis={
+                                                        activeTab?.smarticoEnableAiAnalysis ===
+                                                        true
+                                                    }
+                                                    onAiAnalysisClick={() =>
+                                                        setAiAnalysisModalOpen(
+                                                            true,
+                                                        )
+                                                    }
+                                                    // SMR-END
                                                 />
                                             )}
                                         </div>
@@ -861,6 +891,17 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
             </Droppable>
 
             <ScrollToTop show={isHeaderStuck} />
+
+            {/* SMR-START */}
+            <DashboardAiAnalysisModal
+                opened={aiAnalysisModalOpen}
+                onClose={() => setAiAnalysisModalOpen(false)}
+                projectUuid={projectUuid}
+                dashboardUuid={dashboardUuid}
+                getActiveTabCapturePayload={getActiveTabCapturePayload}
+                onDownloadJson={() => downloadActiveTabViewCapture()}
+            />
+            {/* SMR-END */}
         </DragDropContext>
     );
 };

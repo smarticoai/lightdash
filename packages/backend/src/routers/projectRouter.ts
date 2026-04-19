@@ -323,3 +323,28 @@ projectRouter.get(
         }
     },
 );
+
+// SMR-START
+projectRouter.post(
+    '/dashboards/:dashboardUuid/active-tab/ai-analysis/stream',
+    allowApiKeyAuthentication,
+    isAuthenticated,
+    async (req, res, next) => {
+        try {
+            const projectUuid = getObjectValue(req.params, 'projectUuid');
+            const dashboardUuid = getObjectValue(req.params, 'dashboardUuid');
+            await req.services
+                .getDashboardTabAnalysisService()
+                .streamActiveTabAnalysis(
+                    req.user!,
+                    projectUuid,
+                    dashboardUuid,
+                    req.body,
+                    res,
+                );
+        } catch (e) {
+            next(e);
+        }
+    },
+);
+// SMR-END

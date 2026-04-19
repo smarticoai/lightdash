@@ -87,6 +87,8 @@ services:
             # these are set in the okteto admin UI - DO NOT SET THESE LOCALLY WHEN DEPLOYING or they will override the values in the okteto admin UI
             RUDDERSTACK_WRITE_KEY: ${RUDDERSTACK_WRITE_KEY}
             RUDDERSTACK_DATA_PLANE_URL: ${RUDDERSTACK_DATA_PLANE_URL}
+            GEMINI_API_KEY: ${GEMINI_API_KEY}
+            GEMINI_MODEL: ${GEMINI_MODEL}
             POSTHOG_FE_API_HOST: ${POSTHOG_FE_API_HOST}
             POSTHOG_BE_API_HOST: ${POSTHOG_BE_API_HOST}
             POSTHOG_PROJECT_API_KEY: ${POSTHOG_PROJECT_API_KEY}

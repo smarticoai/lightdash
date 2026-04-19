@@ -34,6 +34,24 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
     - `packages/backend/src/services/Smartico/NodeCache.ts`
     - `packages/backend/src/services/Smartico/OCache.ts`
     - `packages/backend/src/services/ServiceRepository.ts`
+- Per-tab AI analysis (Gemini streaming):
+    - `packages/common/src/types/dashboard.ts` (DashboardTab type: `smarticoEnableAiAnalysis`)
+    - `packages/backend/src/database/entities/dashboards.ts` (DbDashboardTabs: two new columns)
+    - `packages/backend/src/models/DashboardModel/DashboardModel.ts` (tabs SELECT + `getTabAiPrompt`)
+    - `packages/backend/src/services/DashboardTabAnalysisService/DashboardTabAnalysisService.ts` (new service)
+    - `packages/backend/src/services/ServiceRepository.ts` (registers DashboardTabAnalysisService)
+    - `packages/backend/src/routers/projectRouter.ts` (streaming POST route)
+    - `packages/backend/src/config/parseConfig.ts` (Gemini API key + model config)
+    - `packages/backend/src/config/lightdashConfig.mock.ts` (mock config)
+    - `packages/frontend/src/api.ts` (`lightdashApiStream` helper)
+    - `packages/frontend/src/components/common/Dashboard/DashboardAiAnalysisModal.tsx` (new modal)
+    - `packages/frontend/src/components/common/Dashboard/DashboardAiAnalysisModal.module.css` (new styles)
+    - `packages/frontend/src/components/common/Dashboard/DashboardHeader.tsx` (conditional AI button)
+    - `packages/frontend/src/features/dashboardTabs/index.tsx` (new tab field default)
+    - `packages/frontend/src/providers/Dashboard/DashboardProvider.tsx` (`getActiveTabCapturePayload`)
+    - `packages/frontend/src/providers/Dashboard/types.ts` (context type)
+    - `packages/frontend/src/utils/dashboardActiveTabCapture.ts` (tile filtering helper)
+    - `packages/frontend/src/utils/dashboardAiAnalysisPlain.ts` (markdown sanitizer, unused but present)
 - Build/runtime deltas:
     - `dockerfile`
     - `.smr`
@@ -47,6 +65,7 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
 - Currency placeholder replacement is applied recursively in API responses (`{cur}` -> `_smr_currency`).
 - BigQuery table SQL/database can be rewritten per user using `bq_project_id` and `SMR_BQ_PROJECT`.
 - Async query cache service is wired through `ServiceRepository`.
+- Per-tab AI analysis is driven by `dashboard_tabs.smartico_enable_ai_analysis` + `smartico_ai_analysis_prompt` (managed via SQL). The prompt replaces the LLM system prompt entirely. `GEMINI_API_KEY` env var required.
 - Docker image is optimized for dbt `1.9+` only.
 
 ## Review findings (important)
@@ -92,6 +111,7 @@ Use this flow when syncing from community Lightdash:
     - Currency substitution works where expected.
     - User `bq_project_id` correctly rewrites compiled table/database.
     - Async query cache reads/writes still function.
+    - Per-tab AI analysis: tabs with `smartico_enable_ai_analysis = true` show button; prompt from DB is used.
     - Production Docker build still succeeds.
 
 5. Compare final branch against previous Smartico behavior

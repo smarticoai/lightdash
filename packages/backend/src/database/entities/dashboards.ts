@@ -145,13 +145,19 @@ export type DbDashboardTabs = {
     order: number;
     created_at: Date;
     updated_at: Date;
+    // SMR-START
+    smartico_enable_ai_analysis: boolean | null;
+    smartico_ai_analysis_prompt: string | null;
+    // SMR-END
 };
 
+// SMR-START
 export type CreateDashboardTabs = Omit<
     DbDashboardTabs,
-    'uuid' | 'created_at' | 'updated_at'
+    'uuid' | 'created_at' | 'updated_at' | 'smartico_enable_ai_analysis' | 'smartico_ai_analysis_prompt'
 > & { uuid?: string };
-export type UpdateDashboardTabs = Omit<DbDashboardTabs, 'uuid' | 'created_at'>;
+export type UpdateDashboardTabs = Omit<DbDashboardTabs, 'uuid' | 'created_at' | 'smartico_enable_ai_analysis' | 'smartico_ai_analysis_prompt'>;
+// SMR-END
 
 export type DashboardTabsTable = Knex.CompositeTableType<
     DbDashboardTabs,

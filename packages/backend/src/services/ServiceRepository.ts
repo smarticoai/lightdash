@@ -15,6 +15,9 @@ import { CommentService } from './CommentService/CommentService';
 import { ContentService } from './ContentService/ContentService';
 import { CsvService } from './CsvService/CsvService';
 import { DashboardService } from './DashboardService/DashboardService';
+// SMR-START
+import { DashboardTabAnalysisService } from './DashboardTabAnalysisService/SMRDashboardTabAnalysisService';
+// SMR-END
 import { DownloadFileService } from './DownloadFileService/DownloadFileService';
 import { FeatureFlagService } from './FeatureFlag/FeatureFlagService';
 import { FunnelService } from './FunnelService/FunnelService';
@@ -67,6 +70,9 @@ interface ServiceManifest {
     commentService: CommentService;
     csvService: CsvService;
     dashboardService: DashboardService;
+    // SMR-START
+    dashboardTabAnalysisService: DashboardTabAnalysisService;
+    // SMR-END
     downloadFileService: DownloadFileService;
     gitIntegrationService: GitIntegrationService;
     githubAppService: GithubAppService;
@@ -336,6 +342,20 @@ export class ServiceRepository
                 }),
         );
     }
+
+    // SMR-START
+    public getDashboardTabAnalysisService(): DashboardTabAnalysisService {
+        return this.getService(
+            'dashboardTabAnalysisService',
+            () =>
+                new DashboardTabAnalysisService({
+                    lightdashConfig: this.context.lightdashConfig,
+                    dashboardService: this.getDashboardService(),
+                    dashboardModel: this.models.getDashboardModel(),
+                }),
+        );
+    }
+    // SMR-END
 
     public getDownloadFileService(): DownloadFileService {
         return this.getService(

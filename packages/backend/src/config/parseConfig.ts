@@ -884,6 +884,14 @@ export type LightdashConfig = {
         copilot: AiCopilotConfigSchemaType;
         analyticsProjectUuid?: string;
         analyticsDashboardUuid?: string;
+        // SMR-START
+        geminiDashboardTabAnalysis:
+            | {
+                  apiKey: string;
+                  modelName: string;
+              }
+            | undefined;
+        // SMR-END
     };
     embedding: {
         enabled: boolean;
@@ -1731,6 +1739,19 @@ export const parseConfig = (): LightdashConfig => {
             copilot: copilotConfig,
             analyticsProjectUuid: process.env.AI_ANALYTICS_PROJECT_UUID,
             analyticsDashboardUuid: process.env.AI_ANALYTICS_DASHBOARD_UUID,
+            // SMR-START
+            geminiDashboardTabAnalysis: (() => {
+                const apiKey =
+                    process.env.GEMINI_API_KEY ||
+                    process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+                if (!apiKey) {
+                    return undefined;
+                }
+                const modelName =
+                    process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+                return { apiKey, modelName };
+            })(),
+            // SMR-END
         },
         embedding: {
             enabled: process.env.EMBEDDING_ENABLED === 'true',

@@ -95,6 +95,11 @@ const SqlChartTile: FC<Props> = ({ tile, isEditMode, ...rest }) => {
     const markTileScreenshotErrored = useDashboardContext(
         (c) => c.markTileScreenshotErrored,
     );
+    // SMR-START
+    const updateTileCaptureSnapshot = useDashboardContext(
+        (c) => c.updateTileCaptureSnapshot,
+    );
+    // SMR-END
     const dashboardFilters = useDashboardFiltersForTile(tile.uuid);
 
     const closeDataExportModal = useCallback(
@@ -171,7 +176,97 @@ const SqlChartTile: FC<Props> = ({ tile, isEditMode, ...rest }) => {
         markTileScreenshotReady,
         markTileScreenshotErrored,
     ]);
+    // SMR-START
+    useEffect(() => {
+        const title =
+            tile.properties.title || tile.properties.chartName || '';
+        const savedSqlUuidProp = tile.properties.savedSqlUuid;
 
+        if (!savedSqlUuidProp) {
+            updateTileCaptureSnapshot(tile.uuid, {
+                kind: 'sql_chart',
+                tileUuid: tile.uuid,
+                title,
+                savedSqlUuid: null,
+                status: 'error',
+                errorMessage: 'SQL chart was deleted or missing.',
+            });
+            return () => updateTileCaptureSnapshot(tile.uuid, null);
+        }
+
+        if (chartError) {
+            updateTileCaptureSnapshot(tile.uuid, {
+                kind: 'sql_chart',
+                tileUuid: tile.uuid,
+                title,
+                savedSqlUuid: savedSqlUuidProp,
+                status: 'error',
+                errorMessage:
+                    chartError?.error?.message ?? 'Error fetching chart',
+            });
+            return () => updateTileCaptureSnapshot(tile.uuid, null);
+        }
+
+        if (isChartLoading) {
+            updateTileCaptureSnapshot(tile.uuid, {
+                kind: 'sql_chart',
+                tileUuid: tile.uuid,
+                title,
+                savedSqlUuid: savedSqlUuidProp,
+                status: 'loading',
+            });
+            return () => updateTileCaptureSnapshot(tile.uuid, null);
+        }
+
+        if (chartResultsError) {
+            updateTileCaptureSnapshot(tile.uuid, {
+                kind: 'sql_chart',
+                tileUuid: tile.uuid,
+                title,
+                savedSqlUuid: savedSqlUuidProp,
+                status: 'error',
+                errorMessage:
+                    chartResultsError?.error?.message ??
+                    'Error loading results',
+            });
+            return () => updateTileCaptureSnapshot(tile.uuid, null);
+        }
+
+        if (chartResultsData === undefined || isChartResultsLoading) {
+            updateTileCaptureSnapshot(tile.uuid, {
+                kind: 'sql_chart',
+                tileUuid: tile.uuid,
+                title,
+                savedSqlUuid: savedSqlUuidProp,
+                status: 'loading',
+            });
+            return () => updateTileCaptureSnapshot(tile.uuid, null);
+        }
+
+        updateTileCaptureSnapshot(tile.uuid, {
+            kind: 'sql_chart',
+            tileUuid: tile.uuid,
+            title,
+            savedSqlUuid: savedSqlUuidProp,
+            status: 'ready',
+            queryUuid: chartResultsData.queryUuid,
+            originalColumns: chartResultsData.originalColumns,
+            underlyingTable: chartResultsData.chartUnderlyingData,
+        });
+        return () => updateTileCaptureSnapshot(tile.uuid, null);
+    }, [
+        chartError,
+        chartResultsData,
+        chartResultsError,
+        isChartLoading,
+        isChartResultsLoading,
+        tile.properties.chartName,
+        tile.properties.savedSqlUuid,
+        tile.properties.title,
+        tile.uuid,
+        updateTileCaptureSnapshot,
+    ]);
+    // SMR-END
     const userCanExportData = user.data?.ability.can(
         'manage',
         subject('ExportCsv', {

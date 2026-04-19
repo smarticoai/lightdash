@@ -157,6 +157,9 @@ export type DashboardTab = {
     uuid: string;
     name: string;
     order: number;
+    // SMR-START
+    smarticoEnableAiAnalysis: boolean | null;
+    // SMR-END
 };
 
 export type DashboardTabWithUrls = DashboardTab & {

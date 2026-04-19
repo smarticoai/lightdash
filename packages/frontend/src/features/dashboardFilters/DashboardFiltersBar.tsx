@@ -33,6 +33,10 @@ type Props = {
     onParameterPin: (parameterKey: string) => void;
     isDateZoomDisabled: boolean;
     onCollapse: () => void;
+    // SMR-START
+    showAiAnalysis: boolean;
+    onAiAnalysisClick: () => void;
+    // SMR-END
 };
 
 export const DashboardFiltersBar: FC<Props> = ({
@@ -50,6 +54,10 @@ export const DashboardFiltersBar: FC<Props> = ({
     onParameterPin,
     isDateZoomDisabled,
     onCollapse,
+    // SMR-START
+    showAiAnalysis,
+    onAiAnalysisClick,
+    // SMR-END
 }) => {
     const hasParameters = Object.keys(parameters).length > 0;
 
@@ -129,6 +137,20 @@ export const DashboardFiltersBar: FC<Props> = ({
 
                 {/* Right section - date zoom and hide button */}
                 <Group gap="xs" style={{ marginLeft: 'auto' }} wrap="nowrap">
+                    {/* SMR-START */}
+                    {showAiAnalysis && (
+                        <>
+                            <Divider orientation="vertical" />
+                            <Button
+                                size="xs"
+                                color="blue"
+                                onClick={onAiAnalysisClick}
+                            >
+                                AI Analysis
+                            </Button>
+                        </>
+                    )}
+                    {/* SMR-END */}
                     {hasDashboardTiles &&
                         (!isDateZoomDisabled || isEditMode) && (
                             <>

@@ -10,6 +10,7 @@ import {
     type ParameterDefinitions,
     type ParametersValuesMap,
     type ParameterValue,
+    type RawResultRow,
     type ResultColumn,
     type SortField,
 } from '@lightdash/common';
@@ -22,6 +23,54 @@ import {
 export type SqlChartTileMetadata = {
     columns: ResultColumn[];
 };
+ // SMR-START
+export type DashboardTileCaptureSnapshot =
+    | {
+          kind: 'saved_chart';
+          tileUuid: string;
+          title: string;
+          savedChartUuid: string | null;
+          status: 'loading' | 'ready' | 'error';
+          metricQuery?: unknown;
+          fields?: unknown;
+          rows?: unknown[];
+          queryUuid?: string;
+          totalResults?: number;
+          hasFetchedAllRows?: boolean;
+          isFetchingRows?: boolean;
+          errorMessage?: string;
+      }
+    | {
+          kind: 'sql_chart';
+          tileUuid: string;
+          title: string;
+          savedSqlUuid: string | null;
+          status: 'loading' | 'ready' | 'error';
+          queryUuid?: string;
+          originalColumns?: unknown;
+          underlyingTable?: { columns: string[]; rows: RawResultRow[] };
+          errorMessage?: string;
+      }
+    | {
+          kind: 'markdown';
+          tileUuid: string;
+          title: string;
+          content: string;
+          hideFrame?: boolean;
+      }
+    | {
+          kind: 'heading';
+          tileUuid: string;
+          text: string;
+          showDivider?: boolean;
+      }
+    | {
+          kind: 'loom';
+          tileUuid: string;
+          title: string;
+          url: string;
+      };
+ // SMR-END
 export type DashboardContextType = {
     projectUuid?: string;
     isDashboardLoading: boolean;
@@ -128,4 +177,12 @@ export type DashboardContextType = {
     screenshotReadyTilesCount: number;
     screenshotErroredTilesCount: number;
     expectedScreenshotTilesCount: number;
+     // SMR-START
+    updateTileCaptureSnapshot: (
+        tileUuid: string,
+        snapshot: DashboardTileCaptureSnapshot | null,
+    ) => void;
+    downloadActiveTabViewCapture: () => void;
+    getActiveTabCapturePayload: () => Record<string, unknown>;
+    // SMR-END
 };
