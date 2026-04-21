@@ -1,7 +1,7 @@
 // SMR-START
-import { ActionIcon, Box, Group, Loader, ScrollArea, Text, Tooltip } from '@mantine-8/core';
+import { Box, Group, Loader, ScrollArea, Text } from '@mantine-8/core';
 import { getErrorMessage } from '@lightdash/common';
-import { IconDownload, IconSparkles } from '@tabler/icons-react';
+import { IconSparkles } from '@tabler/icons-react';
 import ReactMarkdownPreview from '@uiw/react-markdown-preview';
 import { useEffect, useRef, useState, type FC } from 'react';
 import rehypeExternalLinks from 'rehype-external-links';
@@ -15,7 +15,6 @@ type Props = {
     projectUuid: string | undefined;
     dashboardUuid: string | undefined;
     getActiveTabCapturePayload: () => Record<string, unknown>;
-    onDownloadJson: () => void;
 };
 
 const DashboardAiAnalysisModal: FC<Props> = ({
@@ -24,7 +23,6 @@ const DashboardAiAnalysisModal: FC<Props> = ({
     projectUuid,
     dashboardUuid,
     getActiveTabCapturePayload,
-    onDownloadJson,
 }) => {
     const [rawJson, setRawJson] = useState('');
     const [analysis, setAnalysis] = useState('');
@@ -116,13 +114,6 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             icon={IconSparkles}
             fullScreen
             cancelLabel={false}
-            headerActions={
-                <Tooltip label="Download JSON" position="bottom">
-                    <ActionIcon variant="subtle" onClick={onDownloadJson}>
-                        <IconDownload size={18} />
-                    </ActionIcon>
-                </Tooltip>
-            }
         >
             <Box className={classes.grid}>
                 {/* JSON panel */}

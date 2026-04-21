@@ -45,7 +45,7 @@ export class DashboardTabAnalysisService extends BaseService {
             this.lightdashConfig.ai.geminiDashboardTabAnalysis;
         if (!geminiConfig?.apiKey) {
             throw new MissingConfigError(
-                'Gemini is not configured. Set GEMINI_API_KEY or GOOGLE_GENERATIVE_AI_API_KEY.',
+                'Gemini is not configured. Set GEMINI_API_KEY.',
             );
         }
 

@@ -1251,43 +1251,6 @@ const DashboardProvider: React.FC<
         parameterValues,
         projectUuid,
     ]);
-
-    const downloadActiveTabViewCapture = useCallback(() => {
-        const payload = getActiveTabCapturePayload();
-        const text = JSON.stringify(payload, null, 2);
-        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-        const objectUrl = URL.createObjectURL(blob);
-        const dashboardName =
-            typeof payload.dashboardName === 'string'
-                ? payload.dashboardName
-                : 'dashboard';
-        const safeName = dashboardName
-            .replace(/[^a-zA-Z0-9-_]/g, '_')
-            .slice(0, 80);
-        const filename = `lightdash-ai-tab-capture_${safeName}_${Date.now()}.txt`;
-        const anchor = document.createElement('a');
-        anchor.href = objectUrl;
-        anchor.download = filename;
-        document.body.appendChild(anchor);
-        anchor.click();
-        document.body.removeChild(anchor);
-        URL.revokeObjectURL(objectUrl);
-        const tiles = payload.tiles as
-            | { runtimeCapture: unknown | null }[]
-            | undefined;
-        const tileList = tiles ?? [];
-        console.log(
-            '[Lightdash AI Analysis capture] Browser download started.',
-            {
-                filename,
-                suggestedPathHint:
-                    'Saved to your browser default download folder (often ~/Downloads on macOS).',
-                tileCountInTab: tileList.length,
-                tilesWithRuntimeCapture: tileList.filter((t) => t.runtimeCapture)
-                    .length,
-            },
-        );
-    }, [getActiveTabCapturePayload]);
     // SMR-END
 
     const value = {
@@ -1374,7 +1337,6 @@ const DashboardProvider: React.FC<
         expectedScreenshotTilesCount: expectedScreenshotTileUuids.length,
         // SMR-START
         updateTileCaptureSnapshot,
-        downloadActiveTabViewCapture,
         getActiveTabCapturePayload,
         // SMR-END
     };

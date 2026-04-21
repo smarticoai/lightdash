@@ -177,9 +177,6 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
         (c) => c.tileParameterReferences,
     );
     // SMR-START
-    const downloadActiveTabViewCapture = useDashboardContext(
-        (c) => c.downloadActiveTabViewCapture,
-    );
     const getActiveTabCapturePayload = useDashboardContext(
         (c) => c.getActiveTabCapturePayload,
     );
@@ -899,7 +896,6 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                 projectUuid={projectUuid}
                 dashboardUuid={dashboardUuid}
                 getActiveTabCapturePayload={getActiveTabCapturePayload}
-                onDownloadJson={() => downloadActiveTabViewCapture()}
             />
             {/* SMR-END */}
         </DragDropContext>

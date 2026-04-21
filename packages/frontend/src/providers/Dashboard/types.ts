@@ -182,7 +182,6 @@ export type DashboardContextType = {
         tileUuid: string,
         snapshot: DashboardTileCaptureSnapshot | null,
     ) => void;
-    downloadActiveTabViewCapture: () => void;
     getActiveTabCapturePayload: () => Record<string, unknown>;
     // SMR-END
 };
