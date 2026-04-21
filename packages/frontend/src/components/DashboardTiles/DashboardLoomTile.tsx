@@ -1,9 +1,12 @@
 import { type DashboardLoomTile } from '@lightdash/common';
 import { Box } from '@mantine/core';
 // SMR-START
-import React, { useEffect, useMemo, useState, type FC } from 'react';
+import React, { useMemo, useState, type FC } from 'react';
 // SMR-END
 import { DashboardTileComments } from '../../features/comments';
+// SMR-START
+import { useTileCaptureSnapshot } from '../../hooks/dashboard/SMRuseTileCaptureSnapshot';
+// SMR-END
 import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import TileBase from './TileBase/index';
 import { getLoomId } from './TileForms/utils';
@@ -28,19 +31,7 @@ const LoomTile: FC<Props> = (props) => {
     );
     const tileHasComments = useDashboardContext((c) => c.hasTileComments(uuid));
     // SMR-START
-    const updateTileCaptureSnapshot = useDashboardContext(
-        (c) => c.updateTileCaptureSnapshot,
-    );
-
-    useEffect(() => {
-        updateTileCaptureSnapshot(uuid, {
-            kind: 'loom',
-            tileUuid: uuid,
-            title,
-            url,
-        });
-        return () => updateTileCaptureSnapshot(uuid, null);
-    }, [title, updateTileCaptureSnapshot, url, uuid]);
+    useTileCaptureSnapshot(uuid, { kind: 'loom', tileUuid: uuid, title, url });
     // SMR-END
     const dashboardComments = useMemo(
         () =>

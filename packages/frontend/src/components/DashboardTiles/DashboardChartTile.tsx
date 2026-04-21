@@ -89,6 +89,9 @@ import {
     mergeExistingAndExpectedSeries,
 } from '../../hooks/cartesianChartConfig/utils';
 import { useDashboardChartDownload } from '../../hooks/dashboard/useDashboardChartDownload';
+// SMR-START
+import { useSavedChartTileCaptureSnapshot } from '../../hooks/dashboard/SMRuseTileCaptureSnapshot';
+// SMR-END
 import {
     useDashboardChartReadyQuery,
     type DashboardChartReadyQuery,
@@ -1823,77 +1826,21 @@ export const GenericDashboardChartTile: FC<
     const markTileScreenshotErrored = useDashboardContext(
         (c) => c.markTileScreenshotErrored,
     );
-    // SMR-START
-    const updateTileCaptureSnapshot = useDashboardContext(
-        (c) => c.updateTileCaptureSnapshot,
-    );
-    // SMR-END
     useEffect(() => {
         if (error !== null) {
             markTileScreenshotErrored(tile.uuid);
         }
     }, [error, markTileScreenshotErrored, tile.uuid]);
     // SMR-START
-    useEffect(() => {
-        const title =
-            tile.properties.title || tile.properties.chartName || '';
-        const savedChartUuid = tile.properties.savedChartUuid;
-
-        if (error !== null) {
-            updateTileCaptureSnapshot(tile.uuid, {
-                kind: 'saved_chart',
-                tileUuid: tile.uuid,
-                title,
-                savedChartUuid,
-                status: 'error',
-                errorMessage:
-                    'error' in error && error.error && 'message' in error.error
-                        ? String(error.error.message)
-                        : 'Error',
-            });
-            return () => updateTileCaptureSnapshot(tile.uuid, null);
-        }
-
-        if (isLoading || !dashboardChartReadyQuery || !resultsData) {
-            updateTileCaptureSnapshot(tile.uuid, {
-                kind: 'saved_chart',
-                tileUuid: tile.uuid,
-                title,
-                savedChartUuid,
-                status: 'loading',
-            });
-            return () => updateTileCaptureSnapshot(tile.uuid, null);
-        }
-
-        updateTileCaptureSnapshot(tile.uuid, {
-            kind: 'saved_chart',
-            tileUuid: tile.uuid,
-            title,
-            savedChartUuid,
-            status: 'ready',
-            metricQuery:
-                dashboardChartReadyQuery.executeQueryResponse.metricQuery,
-            fields: dashboardChartReadyQuery.executeQueryResponse.fields,
-            rows: resultsData.rows,
-            queryUuid:
-                resultsData.queryUuid ??
-                dashboardChartReadyQuery.executeQueryResponse.queryUuid,
-            totalResults: resultsData.totalResults,
-            hasFetchedAllRows: resultsData.hasFetchedAllRows,
-            isFetchingRows: resultsData.isFetchingRows,
-        });
-        return () => updateTileCaptureSnapshot(tile.uuid, null);
-    }, [
-        dashboardChartReadyQuery,
-        error,
+    useSavedChartTileCaptureSnapshot({
+        tileUuid: tile.uuid,
+        title: tile.properties.title || tile.properties.chartName || '',
+        savedChartUuid: tile.properties.savedChartUuid,
         isLoading,
+        error,
+        readyQuery: dashboardChartReadyQuery,
         resultsData,
-        tile.properties.chartName,
-        tile.properties.savedChartUuid,
-        tile.properties.title,
-        tile.uuid,
-        updateTileCaptureSnapshot,
-    ]);
+    });
     // SMR-END
     const userCanManageChart =
         dashboardChartReadyQuery?.chart &&

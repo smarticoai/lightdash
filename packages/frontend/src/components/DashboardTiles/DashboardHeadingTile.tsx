@@ -2,8 +2,8 @@ import { type DashboardHeadingTile as DashboardHeadingTileType } from '@lightdas
 import { Text } from '@mantine-8/core';
 import { clsx } from '@mantine/core';
 // SMR-START
-import React, { useEffect, type FC } from 'react';
-import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
+import React, { type FC } from 'react';
+import { useTileCaptureSnapshot } from '../../hooks/dashboard/SMRuseTileCaptureSnapshot';
 // SMR-END
 import styles from './DashboardHeadingTile.module.css';
 import TileBase from './TileBase/index';
@@ -25,19 +25,7 @@ const DashboardHeadingTile: FC<Props> = (props) => {
         },
     } = props;
     // SMR-START
-    const updateTileCaptureSnapshot = useDashboardContext(
-        (c) => c.updateTileCaptureSnapshot,
-    );
-
-    useEffect(() => {
-        updateTileCaptureSnapshot(uuid, {
-            kind: 'heading',
-            tileUuid: uuid,
-            text,
-            showDivider,
-        });
-        return () => updateTileCaptureSnapshot(uuid, null);
-    }, [showDivider, text, updateTileCaptureSnapshot, uuid]);
+    useTileCaptureSnapshot(uuid, { kind: 'heading', tileUuid: uuid, text, showDivider });
     // SMR-END
     return (
         <TileBase title="" transparent {...props}>

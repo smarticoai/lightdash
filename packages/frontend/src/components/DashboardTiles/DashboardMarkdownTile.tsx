@@ -8,7 +8,6 @@ import MarkdownPreview from '@uiw/react-markdown-preview';
 // SMR-START
 import React, {
     useCallback,
-    useEffect,
     useMemo,
     useState,
     type FC,
@@ -19,6 +18,9 @@ import { v4 as uuid4 } from 'uuid';
 import { DashboardTileComments } from '../../features/comments';
 import { appendNewTilesToBottom } from '../../hooks/dashboard/useDashboard';
 import useDashboardStorage from '../../hooks/dashboard/useDashboardStorage';
+// SMR-START
+import { useTileCaptureSnapshot } from '../../hooks/dashboard/SMRuseTileCaptureSnapshot';
+// SMR-END
 import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import MantineIcon from '../common/MantineIcon';
 import TileBase from './TileBase/index';
@@ -53,28 +55,9 @@ const MarkdownTile: FC<Props> = (props) => {
         (c) => c.setHaveTilesChanged,
     );
     // SMR-START
-    const updateTileCaptureSnapshot = useDashboardContext(
-        (c) => c.updateTileCaptureSnapshot,
-    );
-    const unsavedDashboardTiles = getUnsavedDashboardTiles();
-
-    useEffect(() => {
-        updateTileCaptureSnapshot(props.tile.uuid, {
-            kind: 'markdown',
-            tileUuid: props.tile.uuid,
-            title,
-            content,
-            hideFrame,
-        });
-        return () => updateTileCaptureSnapshot(props.tile.uuid, null);
-    }, [
-        content,
-        hideFrame,
-        props.tile.uuid,
-        title,
-        updateTileCaptureSnapshot,
-    ]);
+    useTileCaptureSnapshot(uuid, { kind: 'markdown', tileUuid: uuid, title, content, hideFrame });
     // SMR-END
+    const unsavedDashboardTiles = getUnsavedDashboardTiles();
 
     const dashboardComments = useMemo(
         () =>
