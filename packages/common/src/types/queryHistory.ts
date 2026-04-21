@@ -17,6 +17,16 @@ export interface BigQueryWarehouseQueryMetadata extends IWarehouseQueryMetadata 
 
 export type WarehouseQueryMetadata = BigQueryWarehouseQueryMetadata;
 
+// SMR-START
+export interface SmrWarehouseResponseMeta {
+    totalBytesBilled?: number;
+    totalBytesProcessed?: number;
+    cacheHit?: boolean;
+    totalSlotMs?: number;
+    elapsedMs?: number;
+}
+// SMR-END
+
 export enum QueryHistoryStatus {
     PENDING = 'pending',
     READY = 'ready',
@@ -54,4 +64,5 @@ export type QueryHistory = {
     resultsExpiresAt: Date | null;
     columns: ResultColumns | null; // result columns with or without pivoting
     originalColumns: ResultColumns | null; // columns from original SQL, before pivoting
+    smrWarehouseResponseMeta: SmrWarehouseResponseMeta | null;
 };

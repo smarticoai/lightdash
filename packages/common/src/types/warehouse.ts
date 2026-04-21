@@ -4,8 +4,12 @@ import { type AnyType } from './any';
 import { type SupportedDbtAdapter } from './dbt';
 import { type DimensionType, type Metric } from './field';
 import { type CreateWarehouseCredentials } from './projects';
-import type { WarehouseQueryMetadata } from './queryHistory';
-
+// SMR-START
+import type {
+    SmrWarehouseResponseMeta,
+    WarehouseQueryMetadata,
+} from './queryHistory';
+// SMR-END
 export type RunQueryTags = {
     project_uuid?: string;
     user_uuid?: string;
@@ -66,6 +70,7 @@ export type WarehouseExecuteAsyncQuery = {
     queryMetadata: WarehouseQueryMetadata | null;
     totalRows: number;
     durationMs: number;
+    smrWarehouseResponseMeta: SmrWarehouseResponseMeta | null;
 };
 
 export type WarehouseGetAsyncQueryResultsArgs = WarehousePaginationArgs & {

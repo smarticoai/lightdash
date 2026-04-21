@@ -53,6 +53,7 @@ export const warehouseClientMock: WarehouseClient = {
         queryMetadata: null,
         totalRows: 0,
         durationMs: 0,
+        smrWarehouseResponseMeta: null,
     }),
     runQuery: () =>
         Promise.resolve({

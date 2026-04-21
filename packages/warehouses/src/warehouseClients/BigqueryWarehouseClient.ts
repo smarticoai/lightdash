@@ -672,6 +672,30 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
             const fields =
                 BigqueryWarehouseClient.getFieldsFromResponse(resultsMetadata);
 
+            // SMR-START
+            const queryStats = job.metadata?.statistics?.query;
+            const smrWarehouseResponseMeta = queryStats
+                ? {
+                      totalBytesBilled:
+                          queryStats.totalBytesBilled != null
+                              ? Number(queryStats.totalBytesBilled)
+                              : undefined,
+                      totalBytesProcessed:
+                          queryStats.totalBytesProcessed != null
+                              ? Number(queryStats.totalBytesProcessed)
+                              : undefined,
+                      cacheHit: queryStats.cacheHit,
+                      totalSlotMs:
+                          queryStats.totalSlotMs != null
+                              ? Number(queryStats.totalSlotMs)
+                              : undefined,
+                      elapsedMs:
+                          queryStats.timeline?.[0]?.elapsedMs != null
+                              ? Number(queryStats.timeline[0].elapsedMs)
+                              : undefined,
+                  }
+                : null;
+            // SMR-END
             // If a callback is provided, stream the results to the callback
             if (resultsStreamCallback) {
                 await this.streamResults(job, (row) =>
@@ -687,6 +711,7 @@ export class BigqueryWarehouseClient extends WarehouseBaseClient<CreateBigqueryC
                 },
                 totalRows,
                 durationMs: startTime && endTime ? endTime - startTime : 0,
+                smrWarehouseResponseMeta,
             };
         } catch (e: unknown) {
             if (BigqueryWarehouseClient.isBigqueryError(e)) {

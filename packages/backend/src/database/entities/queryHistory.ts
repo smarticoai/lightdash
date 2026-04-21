@@ -7,6 +7,7 @@ import type {
     QueryExecutionContext,
     QueryHistoryStatus,
     ResultColumns,
+    SmrWarehouseResponseMeta,
     WarehouseQueryMetadata,
 } from '@lightdash/common';
 import { Knex } from 'knex';
@@ -40,6 +41,7 @@ export type DbQueryHistory = {
     results_expires_at: Date | null;
     columns: ResultColumns | null; // result columns with or without pivoting
     original_columns: ResultColumns | null; // columns from original SQL, before pivoting
+    smr_warehouse_response_meta: SmrWarehouseResponseMeta | null;
 };
 
 export type DbQueryHistoryIn = Omit<
@@ -66,6 +68,7 @@ export type DbQueryHistoryUpdate = Partial<
         | 'results_expires_at'
         | 'columns'
         | 'original_columns'
+        | 'smr_warehouse_response_meta'
     >
 >;
 

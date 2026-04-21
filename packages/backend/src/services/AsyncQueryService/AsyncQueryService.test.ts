@@ -11,6 +11,7 @@ import {
     type ExecuteAsyncQueryRequestParams,
     type QueryHistory,
     type ResultColumns,
+    type SmrWarehouseResponseMeta,
 } from '@lightdash/common';
 import { type SshTunnel } from '@lightdash/warehouses';
 import { Readable } from 'stream';
@@ -739,6 +740,7 @@ describe('AsyncQueryService', () => {
                 resultsExpiresAt: null,
                 columns: null,
                 originalColumns: null,
+                smrWarehouseResponseMeta: null,
             });
 
             serviceWithCache.getExplore = jest
@@ -909,6 +911,7 @@ describe('AsyncQueryService', () => {
                 resultsExpiresAt: new Date(Date.now() + 60_000),
                 columns: expectedColumns,
                 originalColumns: mockOriginalColumns,
+                smrWarehouseResponseMeta: null,
             };
 
             serviceWithCache.queryHistoryModel.get = jest
@@ -1256,6 +1259,155 @@ describe('AsyncQueryService', () => {
                     results_file_name: expect.any(String),
                 }),
                 expect.any(Object), // session account
+            );
+        });
+    });
+
+    describe('smr_warehouse_response_meta propagation', () => {
+        test('should pass smrWarehouseResponseMeta from warehouse to queryHistoryModel.update', async () => {
+            const expectedMeta: SmrWarehouseResponseMeta = {
+                totalBytesBilled: 1048576,
+                totalBytesProcessed: 2097152,
+                cacheHit: false,
+                totalSlotMs: 5000,
+                elapsedMs: 1234,
+            };
+
+            const mockWarehouseClient = {
+                ...warehouseClientMock,
+                credentials: {
+                    type: WarehouseTypes.BIGQUERY,
+                } as CreateWarehouseCredentials,
+                streamQuery: jest.fn(async (_sql: string, callback: Function) => {
+                    await callback({
+                        fields: { col: { type: DimensionType.STRING } },
+                        rows: [{ col: 'value' }],
+                    });
+                }),
+                executeAsyncQuery: jest.fn(async (_args: unknown, cb?: Function) => {
+                    cb?.([{ col: 'value' }], { col: { type: DimensionType.STRING } });
+                    return {
+                        queryId: 'bq-job-123',
+                        queryMetadata: {
+                            type: WarehouseTypes.BIGQUERY,
+                            jobLocation: 'US',
+                        },
+                        totalRows: 1,
+                        durationMs: 1000,
+                        smrWarehouseResponseMeta: expectedMeta,
+                    };
+                }),
+            };
+
+            const mockProjectModel = {
+                ...projectModel,
+                getWarehouseCredentialsForProject: jest.fn(() =>
+                    Promise.resolve(mockWarehouseClient.credentials),
+                ),
+                getWarehouseClientFromCredentials: jest.fn(
+                    () => mockWarehouseClient,
+                ),
+            };
+
+            const service = getMockedAsyncQueryService(lightdashConfigMock, {
+                projectModel: mockProjectModel as unknown as ProjectModel,
+            });
+
+            const mockStorageClient =
+                service.resultsStorageClient as unknown as {
+                    createUploadStream: jest.Mock;
+                };
+            mockStorageClient.createUploadStream = jest.fn(() => ({
+                write: jest.fn(),
+                close: jest.fn(),
+            }));
+
+            service.queryHistoryModel.update = jest.fn();
+
+            const runAsyncArgs: RunAsyncWarehouseQueryArgs = {
+                userId: sessionAccount.user.id,
+                isRegisteredUser: true,
+                projectUuid,
+                query: 'SELECT col FROM my_table',
+                fieldsMap: {},
+                queryTags: { query_context: QueryExecutionContext.EXPLORE },
+                warehouseCredentialsOverrides: undefined,
+                queryHistoryUuid: 'test-smr-meta-uuid',
+                cacheKey: 'test-cache-key',
+                pivotConfiguration: undefined,
+                originalColumns: undefined,
+            };
+
+            await service.runAsyncWarehouseQuery(runAsyncArgs);
+
+            expect(service.queryHistoryModel.update).toHaveBeenCalledWith(
+                'test-smr-meta-uuid',
+                projectUuid,
+                expect.objectContaining({
+                    smr_warehouse_response_meta: expectedMeta,
+                    status: QueryHistoryStatus.READY,
+                }),
+                expect.any(Object),
+            );
+        });
+
+        test('should pass null smr_warehouse_response_meta for non-BigQuery warehouses', async () => {
+            const mockWarehouseClient = {
+                ...warehouseClientMock,
+                credentials: {
+                    type: WarehouseTypes.POSTGRES,
+                } as CreateWarehouseCredentials,
+            };
+
+            const mockProjectModel = {
+                ...projectModel,
+                getWarehouseCredentialsForProject: jest.fn(() =>
+                    Promise.resolve(mockWarehouseClient.credentials),
+                ),
+                getWarehouseClientFromCredentials: jest.fn(
+                    () => mockWarehouseClient,
+                ),
+            };
+
+            const service = getMockedAsyncQueryService(lightdashConfigMock, {
+                projectModel: mockProjectModel as unknown as ProjectModel,
+            });
+
+            const mockStorageClient =
+                service.resultsStorageClient as unknown as {
+                    createUploadStream: jest.Mock;
+                };
+            mockStorageClient.createUploadStream = jest.fn(() => ({
+                write: jest.fn(),
+                close: jest.fn(),
+            }));
+
+            service.queryHistoryModel.update = jest.fn();
+
+            const runAsyncArgs: RunAsyncWarehouseQueryArgs = {
+                userId: sessionAccount.user.id,
+                isRegisteredUser: true,
+                projectUuid,
+                query: 'SELECT 1',
+                fieldsMap: {},
+                queryTags: { query_context: QueryExecutionContext.EXPLORE },
+                warehouseCredentialsOverrides: undefined,
+                queryHistoryUuid: 'test-null-meta-uuid',
+                cacheKey: 'test-cache-key',
+                pivotConfiguration: undefined,
+                originalColumns: undefined,
+            };
+
+            await service.runAsyncWarehouseQuery(runAsyncArgs);
+
+            expect(service.queryHistoryModel.update).toHaveBeenCalledWith(
+                'test-null-meta-uuid',
+                projectUuid,
+                expect.objectContaining({
+                    smr_warehouse_response_meta: null,
+                    status: QueryHistoryStatus.READY,
+                }),
+                expect.any(Object),
             );
         });
     });

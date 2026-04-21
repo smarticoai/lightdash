@@ -107,6 +107,7 @@ export const createTemporaryVirtualView = (
             queryMetadata: null,
             totalRows: 0,
             durationMs: 0,
+            smrWarehouseResponseMeta: null,
         }),
         runQuery: async () => ({ fields: {}, rows: [] }),
         test: async () => {},

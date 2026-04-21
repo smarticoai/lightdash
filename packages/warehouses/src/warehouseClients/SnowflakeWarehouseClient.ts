@@ -669,6 +669,7 @@ export class SnowflakeWarehouseClient extends WarehouseBaseClient<CreateSnowflak
             queryMetadata: null,
             totalRows,
             durationMs,
+            smrWarehouseResponseMeta: null,
         };
     }
 

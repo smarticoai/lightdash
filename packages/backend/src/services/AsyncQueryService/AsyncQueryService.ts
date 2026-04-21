@@ -1427,6 +1427,7 @@ export class AsyncQueryService extends ProjectService {
                     totalRows,
                     queryMetadata,
                     queryId,
+                    smrWarehouseResponseMeta,
                 },
                 pivotDetails,
                 columns,
@@ -1483,6 +1484,8 @@ export class AsyncQueryService extends ProjectService {
                 {
                     warehouse_query_id: queryId,
                     warehouse_query_metadata: queryMetadata,
+                    smr_warehouse_response_meta:
+                        smrWarehouseResponseMeta ?? null,
                     status: QueryHistoryStatus.READY,
                     error: null,
                     warehouse_execution_time_ms: Math.round(durationMs),

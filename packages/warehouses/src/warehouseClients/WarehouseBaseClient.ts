@@ -110,6 +110,7 @@ export default abstract class WarehouseBaseClient<
             queryMetadata: null,
             durationMs: performance.now() - startTime,
             totalRows: rowCount,
+            smrWarehouseResponseMeta: null,
         };
     }
 

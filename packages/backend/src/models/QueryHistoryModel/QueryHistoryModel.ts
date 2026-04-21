@@ -49,6 +49,7 @@ function convertDbQueryHistoryToQueryHistory(
         resultsExpiresAt: queryHistory.results_expires_at,
         columns: queryHistory.columns,
         originalColumns: queryHistory.original_columns,
+        smrWarehouseResponseMeta: queryHistory.smr_warehouse_response_meta,
     };
 }
 
@@ -110,6 +111,7 @@ export class QueryHistoryModel {
             | 'resultsExpiresAt'
             | 'columns'
             | 'originalColumns'
+            | 'smrWarehouseResponseMeta'
             | 'createdByAccount'
             | 'createdByUserUuid'
             | 'createdBy'
@@ -147,6 +149,7 @@ export class QueryHistoryModel {
                 results_expires_at: null,
                 columns: null,
                 original_columns: null,
+                smr_warehouse_response_meta: null,
             })
             .returning('query_uuid');
 

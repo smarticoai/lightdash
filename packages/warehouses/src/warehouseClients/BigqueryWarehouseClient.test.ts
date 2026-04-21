@@ -1,4 +1,7 @@
 import { Dataset } from '@google-cloud/bigquery';
+import { WarehouseTypes } from '@lightdash/common';
+import { EventEmitter } from 'events';
+import { Readable } from 'stream';
 import {
     BigquerySqlBuilder,
     BigqueryWarehouseClient,
@@ -43,8 +46,150 @@ describe('BigqueryWarehouseClient', () => {
         expect(getTableMock).toHaveBeenCalledTimes(1);
         expect(getTableResponse.getMetadata).toHaveBeenCalledTimes(1);
     });
-});
 
+    // SMR-START
+    describe('executeAsyncQuery extracts smrWarehouseResponseMeta', () => {
+        function createMockJob(queryStats: Record<string, unknown>) {
+            const emitter = new EventEmitter();
+            const job = Object.assign(emitter, {
+                id: 'test-job-id',
+                location: 'US',
+                metadata: {
+                    statistics: {
+                        startTime: 1000,
+                        endTime: 2000,
+                        query: queryStats,
+                    },
+                },
+                getQueryResults: jest.fn(() => [
+                    [],
+                    undefined,
+                    { totalRows: '5', schema: { fields: [] } },
+                ]),
+                getQueryResultsStream: jest.fn(
+                    () =>
+                        new Readable({
+                            objectMode: true,
+                            read() {
+                                this.push(null);
+                            },
+                        }),
+                ),
+            });
+            setTimeout(() => emitter.emit('complete'), 0);
+            return job;
+        }
+
+        it('should extract all BQ query statistics', async () => {
+            const warehouse = new BigqueryWarehouseClient(credentials);
+
+            const mockJob = createMockJob({
+                totalBytesBilled: '1048576',
+                totalBytesProcessed: '2097152',
+                cacheHit: false,
+                totalSlotMs: '5000',
+                timeline: [{ elapsedMs: 1234 }],
+            });
+
+            (warehouse.client.createQueryJob as jest.Mock) = jest.fn(() => [
+                mockJob,
+            ]);
+
+            const result = await warehouse.executeAsyncQuery({
+                sql: 'SELECT 1',
+                tags: {},
+            });
+
+            expect(result.smrWarehouseResponseMeta).toEqual({
+                totalBytesBilled: 1048576,
+                totalBytesProcessed: 2097152,
+                cacheHit: false,
+                totalSlotMs: 5000,
+                elapsedMs: 1234,
+            });
+
+            expect(result.queryId).toBe('test-job-id');
+            expect(result.queryMetadata).toEqual({
+                type: WarehouseTypes.BIGQUERY,
+                jobLocation: 'US',
+            });
+            expect(result.totalRows).toBe(5);
+            expect(result.durationMs).toBe(1000);
+        });
+
+        it('should return null when query stats are absent', async () => {
+            const warehouse = new BigqueryWarehouseClient(credentials);
+
+            const emitter = new EventEmitter();
+            const mockJob = Object.assign(emitter, {
+                id: 'test-job-id-2',
+                location: 'EU',
+                metadata: {
+                    statistics: {
+                        startTime: 100,
+                        endTime: 200,
+                    },
+                },
+                getQueryResults: jest.fn(() => [
+                    [],
+                    undefined,
+                    { totalRows: '0', schema: { fields: [] } },
+                ]),
+                getQueryResultsStream: jest.fn(
+                    () =>
+                        new Readable({
+                            objectMode: true,
+                            read() {
+                                this.push(null);
+                            },
+                        }),
+                ),
+            });
+            setTimeout(() => emitter.emit('complete'), 0);
+
+            (warehouse.client.createQueryJob as jest.Mock) = jest.fn(() => [
+                mockJob,
+            ]);
+
+            const result = await warehouse.executeAsyncQuery({
+                sql: 'SELECT 1',
+                tags: {},
+            });
+
+            expect(result.smrWarehouseResponseMeta).toBeNull();
+        });
+
+        it('should handle cache hit with zero bytes billed', async () => {
+            const warehouse = new BigqueryWarehouseClient(credentials);
+
+            const mockJob = createMockJob({
+                totalBytesBilled: '0',
+                totalBytesProcessed: '524288',
+                cacheHit: true,
+                totalSlotMs: '0',
+                timeline: [{ elapsedMs: 50 }],
+            });
+
+            (warehouse.client.createQueryJob as jest.Mock) = jest.fn(() => [
+                mockJob,
+            ]);
+
+            const result = await warehouse.executeAsyncQuery({
+                sql: 'SELECT 1',
+                tags: {},
+            });
+
+            expect(result.smrWarehouseResponseMeta).toEqual({
+                totalBytesBilled: 0,
+                totalBytesProcessed: 524288,
+                cacheHit: true,
+                totalSlotMs: 0,
+                elapsedMs: 50,
+            });
+        });
+    });
+});
+// SMR-END
 describe('BigquerySqlBuilder escaping', () => {
     const bigquerySqlBuilder = new BigquerySqlBuilder();
 
