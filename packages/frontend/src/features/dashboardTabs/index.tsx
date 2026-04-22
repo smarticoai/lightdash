@@ -60,7 +60,9 @@ type DashboardTabsProps = {
     handleEditTile: (tiles: IDashboard['tiles'][number]) => void;
     setAddingTab: (value: React.SetStateAction<boolean>) => void;
     setGridWidth: (value: React.SetStateAction<number>) => void;
-
+    // SMR-START
+    onSaveTabEdit: (updatedTabs: DashboardTab[]) => void;
+    // SMR-END
     // parameters
     hasTilesThatSupportFilters: boolean;
     parameterValues: ParametersValuesMap;
@@ -87,6 +89,9 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
     handleEditTile,
     setGridWidth,
     setAddingTab,
+    // SMR-START
+    onSaveTabEdit,
+    // SMR-END
     // parameters
     hasTilesThatSupportFilters,
     parameterValues,
@@ -335,7 +340,8 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
     const currentTabsCount = dashboardTabs?.length || 0;
     const canAddTab = currentTabsCount < maxTabsPerDashboard;
 
-    const handleAddTab = (name: string) => {
+    // SMR-START
+    const handleAddTab = (name: string, smarticoEnableAiAnalysis: boolean, smarticoAiAnalysisPrompt: string) => {
         // Check tab limit
         if (currentTabsCount >= maxTabsPerDashboard) {
             showToastError({
@@ -354,12 +360,10 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                     uuid: uuid4(),
                     isDefault: true,
                     order: 0,
-                    // SMR-START
                     smarticoEnableAiAnalysis: null,
-                    // SMR-END
+                    smarticoAiAnalysisPrompt: null,
                 };
                 newTabs.push(firstTab);
-                // Move all tiles to the new default tab (immutable update)
                 setDashboardTiles((currentTiles) =>
                     currentTiles?.map((tile) => ({
                         ...tile,
@@ -374,33 +378,36 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                 uuid: uuid4(),
                 isDefault: false,
                 order: lastOrd + 1,
-                smarticoEnableAiAnalysis: null, // SMR
+                smarticoEnableAiAnalysis: smarticoEnableAiAnalysis || null,
+                smarticoAiAnalysisPrompt: smarticoAiAnalysisPrompt || null,
             };
             newTabs.push(newTab);
             setDashboardTabs(newTabs);
             setHaveTabsChanged(true);
-
-            // Navigate to the new tab
             handleChangeTab(newTab);
+            onSaveTabEdit(newTabs);
         }
         setAddingTab(false);
     };
+    // SMR-END
 
-    const handleEditTab = (name: string, changedTabUuid: string) => {
+    // SMR-START
+    const handleEditTab = (name: string, changedTabUuid: string, smarticoEnableAiAnalysis: boolean, smarticoAiAnalysisPrompt: string) => {
         if (name && changedTabUuid) {
-            setDashboardTabs((currentTabs) => {
-                const newTabs: DashboardTab[] = currentTabs?.map((tab) => {
-                    if (tab.uuid === changedTabUuid) {
-                        return { ...tab, name };
-                    }
-                    return tab;
-                });
-                return newTabs;
+            const updatedTabs: DashboardTab[] = dashboardTabs.map((tab) => {
+                if (tab.uuid === changedTabUuid) {
+                    return { ...tab, name, smarticoEnableAiAnalysis, smarticoAiAnalysisPrompt };
+                }
+                return tab;
             });
+
+            setDashboardTabs(updatedTabs);
             setHaveTabsChanged(true);
             setEditingTab(false);
+            onSaveTabEdit(updatedTabs);
         }
     };
+    // SMR-END
 
     const handleDeleteTab = (tabUuid: string) => {
         setDashboardTabs((currentTabs) => {
@@ -476,6 +483,7 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                 order: lastOrd + 1,
                 // SMR-START
                 smarticoEnableAiAnalysis: null,
+                smarticoAiAnalysisPrompt: null,
                 // SMR-END
             };
 
@@ -836,9 +844,11 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                                 <AddTabModal
                                     onClose={() => setAddingTab(false)}
                                     opened={addingTab}
-                                    onConfirm={(name) => {
-                                        handleAddTab(name);
+                                    // SMR-START
+                                    onConfirm={(name, smarticoEnableAiAnalysis, smarticoAiAnalysisPrompt) => {
+                                        handleAddTab(name, smarticoEnableAiAnalysis, smarticoAiAnalysisPrompt);
                                     }}
+                                    // SMR-END
                                 />
                                 {tabToDuplicate && (
                                     <DuplicateTabModal
@@ -858,9 +868,11 @@ const DashboardTabs: FC<DashboardTabsProps> = ({
                                             tab={activeTab}
                                             onClose={() => setEditingTab(false)}
                                             opened={isEditingTab}
-                                            onConfirm={(name, uuid) => {
-                                                handleEditTab(name, uuid);
+                                            // SMR-START
+                                            onConfirm={(name, uuid, smarticoEnableAiAnalysis, smarticoAiAnalysisPrompt) => {
+                                                handleEditTab(name, uuid, smarticoEnableAiAnalysis, smarticoAiAnalysisPrompt);
                                             }}
+                                            // SMR-END
                                         />
                                         <TabDeleteModal
                                             tab={activeTab}

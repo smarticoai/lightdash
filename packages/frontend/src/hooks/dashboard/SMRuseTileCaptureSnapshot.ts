@@ -1,5 +1,5 @@
 // SMR-START
-import { type ApiError } from '@lightdash/common';
+import { type ApiError, type RawResultRow } from '@lightdash/common';
 import { useMemo, useEffect } from 'react';
 import type { DashboardTileCaptureSnapshot } from '../../providers/Dashboard/types';
 import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
@@ -102,7 +102,16 @@ export const useSqlChartTileCaptureSnapshot = ({
     chartError: Partial<ApiError> | null;
     isChartResultsLoading: boolean;
     chartResultsError: Partial<ApiError> | null;
-    chartResultsData: { queryUuid?: string; originalColumns?: unknown; chartUnderlyingData?: { columns: string[]; rows: unknown[] } } | undefined;
+    chartResultsData:
+        | {
+              queryUuid?: string;
+              originalColumns?: unknown;
+              chartUnderlyingData?: {
+                  columns: string[];
+                  rows: RawResultRow[];
+              };
+          }
+        | undefined;
 }) => {
     const snapshot = useMemo((): DashboardTileCaptureSnapshot => {
         if (!savedSqlUuid) {

@@ -1,20 +1,51 @@
-import { Button, Stack, TextInput, type ModalProps } from '@mantine-8/core';
+// SMR-START
+import {
+    Button,
+    Checkbox,
+    Stack,
+    Textarea,
+    TextInput,
+    type ModalProps,
+} from '@mantine-8/core';
+// SMR-END
 import { useForm } from '@mantine/form';
 import { IconPlus } from '@tabler/icons-react';
 import { type FC } from 'react';
 import MantineModal from '../../components/common/MantineModal';
 
 type AddProps = Pick<ModalProps, 'opened' | 'onClose'> & {
-    onConfirm: (tabName: string) => void;
+    // SMR-START
+    onConfirm: (
+        tabName: string,
+        smarticoEnableAiAnalysis: boolean,
+        smarticoAiAnalysisPrompt: string,
+    ) => void;
+    // SMR-END
 };
-
+    // SMR-START
 export const AddTabModal: FC<AddProps> = ({ opened, onClose, onConfirm }) => {
-    const form = useForm<{ tabName: string }>();
-
-    const handleConfirm = form.onSubmit(({ tabName }) => {
-        onConfirm(tabName);
-        form.reset();
+    const form = useForm<{
+        tabName: string;
+        smarticoEnableAiAnalysis: boolean;
+        smarticoAiAnalysisPrompt: string;
+    }>({
+        initialValues: {
+            tabName: '',
+            smarticoEnableAiAnalysis: false,
+            smarticoAiAnalysisPrompt: '',
+        },
     });
+
+    const handleConfirm = form.onSubmit(
+        ({ tabName, smarticoEnableAiAnalysis, smarticoAiAnalysisPrompt }) => {
+            onConfirm(
+                tabName,
+                smarticoEnableAiAnalysis,
+                smarticoAiAnalysisPrompt,
+            );
+            form.reset();
+        },
+    );
 
     const handleClose = () => {
         form.reset();
@@ -47,6 +78,19 @@ export const AddTabModal: FC<AddProps> = ({ opened, onClose, onConfirm }) => {
                         required
                         {...form.getInputProps('tabName')}
                     />
+                    // SMR-START
+                    <Checkbox
+                        label="Enable AI analysis"
+                        {...form.getInputProps('smarticoEnableAiAnalysis', {
+                            type: 'checkbox',
+                        })}
+                    />
+                    <Textarea
+                        label="AI analysis prompt"
+                        placeholder="Enter a prompt for the AI analysis"
+                        {...form.getInputProps('smarticoAiAnalysisPrompt')}
+                    />
+                    // SMR-END
                 </Stack>
             </form>
         </MantineModal>

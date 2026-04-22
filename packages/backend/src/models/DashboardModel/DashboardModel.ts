@@ -154,15 +154,20 @@ export class DashboardModel {
         });
 
         if (version.tabs.length > 0) {
-            await trx(DashboardTabsTableName).insert(
-                version.tabs.map((tab) => ({
-                    dashboard_version_id: versionId.dashboard_version_id,
-                    name: tab.name,
-                    uuid: tab.uuid,
-                    dashboard_id: dashboardId,
-                    order: tab.order,
-                })),
-            );
+            // SMR-START
+            const tabInsertRows = version.tabs.map((tab) => ({
+                dashboard_version_id: versionId.dashboard_version_id,
+                name: tab.name,
+                uuid: tab.uuid,
+                dashboard_id: dashboardId,
+                order: tab.order,
+                smartico_enable_ai_analysis:
+                    tab.smarticoEnableAiAnalysis ?? null,
+                smartico_ai_analysis_prompt:
+                    tab.smarticoAiAnalysisPrompt ?? null,
+            }));
+            await trx(DashboardTabsTableName).insert(tabInsertRows);
+            // SMR-END
         }
 
         const tilesWithUuids: Array<
@@ -926,14 +931,21 @@ export class DashboardModel {
             ]);
 
         // SMR-START
-        const tabs = await this.database(DashboardTabsTableName)
-            .select<
-                DashboardTab[]
-            >(
+        type DashboardTabQueryRow = {
+            name: string;
+            uuid: string;
+            order: number;
+            smartico_enable_ai_analysis: boolean | null;
+            smartico_ai_analysis_prompt: string | null;
+        };
+
+        const tabRows = await this.database(DashboardTabsTableName)
+            .select<DashboardTabQueryRow[]>(
                 `${DashboardTabsTableName}.name`,
                 `${DashboardTabsTableName}.uuid`,
                 `${DashboardTabsTableName}.order`,
-                `${DashboardTabsTableName}.smartico_enable_ai_analysis as smarticoEnableAiAnalysis`,
+                `${DashboardTabsTableName}.smartico_enable_ai_analysis`,
+                `${DashboardTabsTableName}.smartico_ai_analysis_prompt`,
             )
             .where(
                 `${DashboardTabsTableName}.dashboard_version_id`,
@@ -943,6 +955,14 @@ export class DashboardModel {
                 `${DashboardTabsTableName}.dashboard_id`,
                 dashboard.dashboard_id,
             );
+
+        const tabs: DashboardTab[] = tabRows.map((row) => ({
+            name: row.name,
+            uuid: row.uuid,
+            order: row.order,
+            smarticoEnableAiAnalysis: row.smartico_enable_ai_analysis,
+            smarticoAiAnalysisPrompt: row.smartico_ai_analysis_prompt,
+        }));
         // SMR-END
 
         const tableCalculationFilters = view?.filters?.tableCalculations;
@@ -1458,6 +1478,7 @@ export class DashboardModel {
             )
             .where(`${DashboardsTableName}.dashboard_uuid`, dashboardUuid)
             .andWhere(`${DashboardTabsTableName}.uuid`, tabUuid)
+            .orderBy(`${DashboardTabsTableName}.created_at`, 'desc')
             .first();
 
         if (!row) {

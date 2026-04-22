@@ -34,34 +34,41 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
     - `packages/backend/src/services/Smartico/NodeCache.ts`
     - `packages/backend/src/services/Smartico/OCache.ts`
     - `packages/backend/src/services/ServiceRepository.ts`
-- Per-tab AI analysis (Gemini streaming):
-    - `packages/common/src/types/dashboard.ts` (DashboardTab type: `smarticoEnableAiAnalysis`)
-    - `packages/backend/src/database/entities/dashboards.ts` (DbDashboardTabs: two new columns)
-    - `packages/backend/src/models/DashboardModel/DashboardModel.ts` (tabs SELECT + `getTabAiPrompt`)
-    - `packages/backend/src/services/DashboardTabAnalysisService/DashboardTabAnalysisService.ts` (new service)
-    - `packages/backend/src/services/ServiceRepository.ts` (registers DashboardTabAnalysisService)
-    - `packages/backend/src/routers/projectRouter.ts` (streaming POST route)
+- Per-tab AI analysis (Gemini streaming) and tab metadata:
+    - `packages/common/src/types/dashboard.ts` (`DashboardTab`: `smarticoEnableAiAnalysis`, `smarticoAiAnalysisPrompt`)
+    - `packages/backend/src/database/entities/dashboards.ts` (`DbDashboardTabs`; `CreateDashboardTabs` / `UpdateDashboardTabs` must **not** omit smartico columns so Knex inserts persist them)
+    - `packages/backend/src/models/DashboardModel/DashboardModel.ts` (latest-version tab query; `createVersion` tab inserts include smartico columns; `getTabAiPrompt` — see note below)
+    - `packages/backend/src/services/DashboardTabAnalysisService/SMRDashboardTabAnalysisService.ts` (streams analysis; loads prompt via `getTabAiPrompt`)
+    - `packages/backend/src/services/ServiceRepository.ts` (registers `DashboardTabAnalysisService`)
+    - `packages/backend/src/routers/projectRouter.ts` (`POST .../active-tab/ai-analysis/stream`)
     - `packages/backend/src/config/parseConfig.ts` (Gemini API key + model config)
     - `packages/backend/src/config/lightdashConfig.mock.ts` (mock config)
     - `packages/frontend/src/api.ts` (`lightdashApiStream` helper)
-    - `packages/frontend/src/hooks/dashboard/SMRuseTileCaptureSnapshot.ts` (shared hooks: `useTileCaptureSnapshot`, `useSavedChartTileCaptureSnapshot`, `useSqlChartTileCaptureSnapshot`)
-    - `packages/frontend/src/components/DashboardTiles/DashboardChartTile.tsx` (uses `useSavedChartTileCaptureSnapshot`)
-    - `packages/frontend/src/components/DashboardTiles/DashboardSqlChartTile.tsx` (uses `useSqlChartTileCaptureSnapshot`)
-    - `packages/frontend/src/components/DashboardTiles/DashboardHeadingTile.tsx` (uses `useTileCaptureSnapshot`)
-    - `packages/frontend/src/components/DashboardTiles/DashboardMarkdownTile.tsx` (uses `useTileCaptureSnapshot`)
-    - `packages/frontend/src/components/DashboardTiles/DashboardLoomTile.tsx` (uses `useTileCaptureSnapshot`)
-    - `packages/frontend/src/components/common/Dashboard/DashboardAiAnalysisModal.tsx` (new modal)
-    - `packages/frontend/src/components/common/Dashboard/DashboardAiAnalysisModal.module.css` (new styles)
-    - `packages/frontend/src/components/common/Dashboard/DashboardHeader.tsx` (conditional AI button)
-    - `packages/frontend/src/features/dashboardTabs/index.tsx` (new tab field default)
+    - `packages/frontend/src/hooks/dashboard/SMRuseTileCaptureSnapshot.ts` (`useTileCaptureSnapshot`, `useSavedChartTileCaptureSnapshot`, `useSqlChartTileCaptureSnapshot`; underlying table rows typed as `RawResultRow[]`)
+    - `packages/frontend/src/components/DashboardTiles/DashboardChartTile.tsx`
+    - `packages/frontend/src/components/DashboardTiles/DashboardSqlChartTile.tsx`
+    - `packages/frontend/src/components/DashboardTiles/DashboardHeadingTile.tsx`
+    - `packages/frontend/src/components/DashboardTiles/DashboardMarkdownTile.tsx`
+    - `packages/frontend/src/components/DashboardTiles/DashboardLoomTile.tsx`
+    - `packages/frontend/src/components/common/Dashboard/SMRDashboardAiAnalysisModal.tsx`
+    - `packages/frontend/src/components/common/Dashboard/SMRDashboardAiAnalysisModal.module.css`
+    - `packages/frontend/src/components/common/Dashboard/DashboardHeader.tsx` (AI entry in filters bar when tab has AI enabled; edit-mode header actions remain upstream-gated by `userCanManageDashboard` where applicable)
+    - `packages/frontend/src/features/dashboardTabs/EditTabModal.tsx` (tab name + AI fields; Mantine checkbox needs `getInputProps(..., { type: 'checkbox' })`)
+    - `packages/frontend/src/features/dashboardTabs/AddTabModal.tsx` (new tab name + AI fields)
+    - `packages/frontend/src/features/dashboardTabs/index.tsx` (`onSaveTabEdit` from `Dashboard.tsx` — **Update** / **Add** on tab modals triggers dashboard save so tab AI fields persist without relying on header **Save changes** alone)
+    - `packages/frontend/src/pages/Dashboard.tsx` (`handleSaveTabEdit(updatedTabs)` builds same PATCH payload as save; passed into `DashboardTabs`)
     - `packages/frontend/src/providers/Dashboard/DashboardProvider.tsx` (`getActiveTabCapturePayload`)
-    - `packages/frontend/src/providers/Dashboard/types.ts` (context type + `DashboardTileCaptureSnapshot`)
-    - `packages/frontend/src/utils/dashboardActiveTabCapture.ts` (tile filtering helper)
-    - `packages/frontend/src/utils/dashboardAiAnalysisPlain.ts` (markdown sanitizer, unused but present)
+    - `packages/frontend/src/providers/Dashboard/types.ts` (`DashboardTileCaptureSnapshot`, including SQL chart `underlyingTable`)
+    - `packages/frontend/src/utils/dashboardActiveTabCapture.ts`
+    - `packages/frontend/src/utils/dashboardAiAnalysisPlain.ts` (markdown sanitizer; may be unused)
 - Build/runtime deltas:
     - `dockerfile`
     - `.smr`
     - `.husky/pre-commit`
+
+### `getTabAiPrompt` and dashboard versions
+
+Each dashboard save creates new `dashboard_tabs` rows per version while **reusing tab UUIDs**. A naive `.first()` without ordering can return an **older** row. `getTabAiPrompt` must resolve the **latest** row (e.g. `orderBy(..., 'desc').first()` on a stable timestamp such as `created_at`). Rebase conflicts in `DashboardModel` must preserve this.
 
 ## Smartico behavior to preserve
 
@@ -71,7 +78,7 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
 - Currency placeholder replacement is applied recursively in API responses (`{cur}` -> `_smr_currency`).
 - BigQuery table SQL/database can be rewritten per user using `bq_project_id` and `SMR_BQ_PROJECT`.
 - Async query cache service is wired through `ServiceRepository`.
-- Per-tab AI analysis is driven by `dashboard_tabs.smartico_enable_ai_analysis` + `smartico_ai_analysis_prompt` (managed via SQL). The prompt replaces the LLM system prompt entirely. `GEMINI_API_KEY` env var required.
+- Per-tab AI: `dashboard_tabs.smartico_enable_ai_analysis` and `smartico_ai_analysis_prompt` are part of **versioned** dashboard state; inserts/updates must include them on new versions. UI edits persist via dashboard PATCH (including the tab-modal **Update** / **Add** path that calls `handleSaveTabEdit`). Streaming analysis uses the **latest** stored prompt for the tab UUID. `GEMINI_API_KEY` (or configured env) required for Gemini.
 - Docker image is optimized for dbt `1.9+` only.
 
 ## Review findings (important)
@@ -86,6 +93,8 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
 - **Guardrail drift**:
     - `.husky/pre-commit` checks are commented out.
     - If this is temporary, restore before long-lived release branches.
+- **Tab UUID + multiple `dashboard_tabs` rows**:
+    - Any new query joining `dashboard_tabs` by `uuid` only must define which version row wins (usually latest `dashboard_version_id` or latest `created_at`).
 
 ## Rebase from community (semantic-preserving workflow)
 
@@ -103,6 +112,7 @@ Use this flow when syncing from community Lightdash:
         - embedded UI
         - BQ per-user override
         - cache integration
+        - per-tab AI + tab capture payload
         - build/runtime customizations
 
 3. Resolve conflicts by meaning, not by side
@@ -117,7 +127,7 @@ Use this flow when syncing from community Lightdash:
     - Currency substitution works where expected.
     - User `bq_project_id` correctly rewrites compiled table/database.
     - Async query cache reads/writes still function.
-    - Per-tab AI analysis: tabs with `smartico_enable_ai_analysis = true` show button; prompt from DB is used.
+    - Per-tab AI: tab modal loads/saves `smartico_*` fields; reload shows persisted values; stream uses **latest** prompt for the tab UUID; chart/SQL tiles still populate capture snapshots (`SMRuseTileCaptureSnapshot` types align with `RawResultRow`).
     - Production Docker build still succeeds.
 
 5. Compare final branch against previous Smartico behavior

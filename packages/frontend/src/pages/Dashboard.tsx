@@ -1,5 +1,6 @@
 import {
     ContentType,
+    type DashboardTab,
     type DashboardTile,
     type Dashboard as IDashboard,
 } from '@lightdash/common';
@@ -614,6 +615,43 @@ const Dashboard: FC = () => {
         });
     };
 
+    // SMR-START
+    const handleSaveTabEdit = (updatedTabs: DashboardTab[]) => {
+        const dimensionFilters = [
+            ...dashboardFilters.dimensions,
+            ...dashboardTemporaryFilters.dimensions,
+        ];
+        const requiredFiltersWithoutValues = dimensionFilters.map((filter) => {
+            if (filter.required) {
+                return { ...filter, disabled: true, values: [] };
+            }
+            return filter;
+        });
+
+            mutate({
+            tiles: dashboardTiles,
+            filters: {
+                dimensions: requiredFiltersWithoutValues,
+                metrics: [
+                    ...dashboardFilters.metrics,
+                    ...dashboardTemporaryFilters.metrics,
+                ],
+                tableCalculations: [
+                    ...dashboardFilters.tableCalculations,
+                    ...dashboardTemporaryFilters.tableCalculations,
+                ],
+            },
+            name: dashboard.name,
+            tabs: updatedTabs,
+            config: {
+                isDateZoomDisabled,
+                pinnedParameters,
+            },
+            parameters: dashboardParameters,
+        });
+    };
+    // SMR-END
+
     const dashboardHeaderProps = {
         dashboard,
         organizationUuid: organization?.organizationUuid,
@@ -708,6 +746,9 @@ const Dashboard: FC = () => {
                         handleEditTile={handleEditTiles}
                         setGridWidth={setGridWidth}
                         setAddingTab={setAddingTab}
+                        // SMR-START
+                        onSaveTabEdit={handleSaveTabEdit}
+                        // SMR-END
                     />
                 </div>
                 {isDeleteModalOpen && (

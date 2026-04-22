@@ -154,9 +154,9 @@ export type DbDashboardTabs = {
 // SMR-START
 export type CreateDashboardTabs = Omit<
     DbDashboardTabs,
-    'uuid' | 'created_at' | 'updated_at' | 'smartico_enable_ai_analysis' | 'smartico_ai_analysis_prompt'
+    'uuid' | 'created_at' | 'updated_at'
 > & { uuid?: string };
-export type UpdateDashboardTabs = Omit<DbDashboardTabs, 'uuid' | 'created_at' | 'smartico_enable_ai_analysis' | 'smartico_ai_analysis_prompt'>;
+export type UpdateDashboardTabs = Omit<DbDashboardTabs, 'uuid' | 'created_at'>;
 // SMR-END
 
 export type DashboardTabsTable = Knex.CompositeTableType<

@@ -159,6 +159,7 @@ export type DashboardTab = {
     order: number;
     // SMR-START
     smarticoEnableAiAnalysis: boolean | null;
+    smarticoAiAnalysisPrompt: string | null;
     // SMR-END
 };
 
