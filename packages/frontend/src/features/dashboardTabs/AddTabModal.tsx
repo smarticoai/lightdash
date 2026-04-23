@@ -22,7 +22,7 @@ type AddProps = Pick<ModalProps, 'opened' | 'onClose'> & {
     ) => void;
     // SMR-END
 };
-    // SMR-START
+// SMR-START
 export const AddTabModal: FC<AddProps> = ({ opened, onClose, onConfirm }) => {
     const form = useForm<{
         tabName: string;
@@ -78,7 +78,7 @@ export const AddTabModal: FC<AddProps> = ({ opened, onClose, onConfirm }) => {
                         required
                         {...form.getInputProps('tabName')}
                     />
-                    // SMR-START
+                    {/* SMR-START */}
                     <Checkbox
                         label="Enable AI analysis"
                         {...form.getInputProps('smarticoEnableAiAnalysis', {
@@ -90,7 +90,7 @@ export const AddTabModal: FC<AddProps> = ({ opened, onClose, onConfirm }) => {
                         placeholder="Enter a prompt for the AI analysis"
                         {...form.getInputProps('smarticoAiAnalysisPrompt')}
                     />
-                    // SMR-END
+                    {/* // SMR-END */}
                 </Stack>
             </form>
         </MantineModal>

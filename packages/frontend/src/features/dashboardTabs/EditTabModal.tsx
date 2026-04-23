@@ -95,8 +95,8 @@ export const TabEditModal: FC<EditProps> = ({
                     required
                     {...form.getInputProps('newTabName')}
                 />
-                // SMR-START
-                <br/>
+                {/* // SMR-START */}
+                <br />
                 <Checkbox
                     label="Enable AI analysis"
                     placeholder="Enable AI analysis for this tab"
@@ -104,13 +104,13 @@ export const TabEditModal: FC<EditProps> = ({
                         type: 'checkbox',
                     })}
                 />
-                <br/>
+                <br />
                 <Textarea
                     label="AI analysis prompt"
                     placeholder="Enter a prompt for the AI analysis"
                     {...form.getInputProps('smarticoAiAnalysisPrompt')}
                 />
-                // SMR-END
+                {/* // SMR-END */}
             </form>
         </MantineModal>
     );

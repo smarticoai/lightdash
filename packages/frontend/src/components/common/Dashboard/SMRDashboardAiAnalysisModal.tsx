@@ -1,7 +1,15 @@
 // SMR-START
-import { Box, Group, Loader, ScrollArea, Text } from '@mantine-8/core';
+import {
+    ActionIcon,
+    Box,
+    Center,
+    Loader,
+    ScrollArea,
+    Stack,
+    Text,
+} from '@mantine-8/core';
 import { getErrorMessage } from '@lightdash/common';
-import { IconSparkles } from '@tabler/icons-react';
+import { IconBraces, IconSparkles } from '@tabler/icons-react';
 import ReactMarkdownPreview from '@uiw/react-markdown-preview';
 import { useEffect, useRef, useState, type FC } from 'react';
 import rehypeExternalLinks from 'rehype-external-links';
@@ -28,6 +36,7 @@ const DashboardAiAnalysisModal: FC<Props> = ({
     const [analysis, setAnalysis] = useState('');
     const [streamError, setStreamError] = useState<string | null>(null);
     const [isStreaming, setIsStreaming] = useState(false);
+    const [showCapturedData, setShowCapturedData] = useState(false);
     const abortRef = useRef<AbortController | null>(null);
     const getPayloadRef = useRef(getActiveTabCapturePayload);
     getPayloadRef.current = getActiveTabCapturePayload;
@@ -40,6 +49,7 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             setAnalysis('');
             setStreamError(null);
             setIsStreaming(false);
+            setShowCapturedData(false);
             return;
         }
 
@@ -106,6 +116,12 @@ const DashboardAiAnalysisModal: FC<Props> = ({
         onClose();
     };
 
+    const showCenteredLoading =
+        !showCapturedData &&
+        !streamError &&
+        isStreaming &&
+        analysis.length === 0;
+
     return (
         <MantineModal
             opened={opened}
@@ -115,60 +131,68 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             fullScreen
             cancelLabel={false}
         >
-            <Box className={classes.grid}>
-                {/* JSON panel */}
-                <Box className={classes.panel}>
-                    <Box className={classes.panelHeader}>
-                        <Text fw={600} fz="xs" c="dimmed" tt="uppercase" lts={0.5}>
-                            Captured data
-                        </Text>
-                    </Box>
-                    <ScrollArea className={classes.panelBody}>
-                        <Box p="sm" className={classes.jsonPane}>
-                            <Text
-                                component="pre"
-                                fz="xs"
-                                ff="monospace"
-                                className={classes.jsonContent}
-                            >
-                                {rawJson}
-                            </Text>
-                        </Box>
-                    </ScrollArea>
-                </Box>
-
-                {/* Analysis panel */}
-                <Box className={classes.panel}>
-                    <Box className={classes.panelHeader}>
-                        <Text fw={600} fz="xs" c="dimmed" tt="uppercase" lts={0.5}>
-                            Analysis
-                        </Text>
-                        {isStreaming && (
-                            <Group gap={6}>
-                                <Loader size={12} type="dots" />
-                                <Text fz="xs" c="dimmed">
-                                    Generating
+            <Box className={classes.panel}>
+                <Box className={classes.mainArea}>
+                    {showCenteredLoading ? (
+                        <Center className={classes.loadingArea}>
+                            <Stack align="center" gap="xs">
+                                <Loader size="sm" type="dots" />
+                                <Text fz="sm" c="dimmed" ta="center">
+                                    Preparing analysis...
                                 </Text>
-                            </Group>
+                            </Stack>
+                        </Center>
+                    ) : (
+                        <ScrollArea className={classes.panelBody} type="scroll">
+                            <Box p="md">
+                                {showCapturedData ? (
+                                    <Box className={classes.jsonPane}>
+                                        <Text
+                                            component="pre"
+                                            fz="xs"
+                                            ff="monospace"
+                                            className={classes.jsonContent}
+                                        >
+                                            {rawJson}
+                                        </Text>
+                                    </Box>
+                                ) : streamError ? (
+                                    <Text c="red" fz="sm" className={classes.errorText}>
+                                        {streamError}
+                                    </Text>
+                                ) : analysis ? (
+                                    <ReactMarkdownPreview
+                                        source={analysis}
+                                        rehypePlugins={[
+                                            [rehypeExternalLinks, { target: '_blank' }],
+                                        ]}
+                                        className={classes.markdown}
+                                    />
+                                ) : (
+                                    <Text fz="sm" c="dimmed">
+                                        No analysis available.
+                                    </Text>
+                                )}
+                            </Box>
+                        </ScrollArea>
+                    )}
+                    <ActionIcon
+                        className={classes.toggleFab}
+                        variant="light"
+                        color="gray"
+                        onClick={() => setShowCapturedData(!showCapturedData)}
+                        aria-label={
+                            showCapturedData
+                                ? 'Show AI analysis content'
+                                : 'Show original captured content'
+                        }
+                    >
+                        {showCapturedData ? (
+                            <IconSparkles size={14} />
+                        ) : (
+                            <IconBraces size={14} />
                         )}
-                    </Box>
-                    <ScrollArea className={classes.panelBody}>
-                        <Box p="md">
-                            {streamError ? (
-                                <Text c="red" fz="sm" className={classes.errorText}>
-                                    {streamError}
-                                </Text>
-                            ) : analysis ? (
-                                <ReactMarkdownPreview
-                                    source={analysis}
-                                    rehypePlugins={[[rehypeExternalLinks, { target: '_blank' }]]}
-                                    className={classes.markdown}
-                                />
-                            ) : !isStreaming ? (
-                                <Text fz="sm" c="dimmed">No analysis available.</Text>
-                            ) : null}
-                        </Box>
-                    </ScrollArea>
+                    </ActionIcon>
                 </Box>
             </Box>
         </MantineModal>
