@@ -15,6 +15,7 @@ import { DashboardService } from '../DashboardService/DashboardService';
 
 export class DashboardTabAnalysisService extends BaseService {
     private static readonly MAX_CACHE_ENTRIES = 100;
+
     private static readonly MODEL_TEMPERATURE = 0.2;
 
     private static readonly responseCache = new Map<string, string>();
