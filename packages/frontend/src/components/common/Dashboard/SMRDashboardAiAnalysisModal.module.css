@@ -4,8 +4,8 @@
     flex-direction: column;
     min-height: 0;
     height: 100%;
-    border: 1px solid var(--mantine-color-ldGray-2);
-    border-radius: var(--mantine-radius-md);
+    border: none;
+    border-radius: var(--mantine-radius-sm);
     overflow: hidden;
 }
 
@@ -15,6 +15,33 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
+}
+
+.modalInner {
+    align-items: stretch;
+    padding: 6px;
+    pointer-events: none;
+}
+
+.modalContentRight,
+.modalContentLeft {
+    width: min(36dvw, 640px);
+    min-width: 360px;
+    height: calc(100dvh - 12px);
+    pointer-events: auto;
+}
+
+.modalContentRight {
+    margin-left: auto;
+}
+
+.modalContentLeft {
+    margin-right: auto;
+}
+
+.modalOverlay {
+    background-color: transparent;
+    pointer-events: none;
 }
 
 .panelBody {
@@ -29,27 +56,14 @@
     width: 100%;
 }
 
-.toggleFab {
-    position: absolute;
-    right: var(--mantine-spacing-sm);
-    bottom: var(--mantine-spacing-sm);
-    z-index: 2;
-}
-
-.jsonPane {
-    background-color: var(--mantine-color-ldGray-0);
-    border-radius: var(--mantine-radius-sm);
+.disclaimer {
+    border-top: 1px solid var(--mantine-color-ldGray-2);
+    padding: 4px 8px;
+    background-color: var(--mantine-color-gray-0);
 
     @mixin dark {
         background-color: var(--mantine-color-ldDark-7);
     }
-}
-
-.jsonContent {
-    white-space: pre-wrap;
-    word-break: break-word;
-    margin: 0;
-    line-height: 1.5;
 }
 
 .markdown {

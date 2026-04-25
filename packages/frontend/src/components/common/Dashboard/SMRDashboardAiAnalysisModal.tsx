@@ -3,13 +3,18 @@ import {
     ActionIcon,
     Box,
     Center,
+    Group,
     Loader,
     ScrollArea,
     Stack,
     Text,
 } from '@mantine-8/core';
 import { getErrorMessage } from '@lightdash/common';
-import { IconBraces, IconSparkles } from '@tabler/icons-react';
+import {
+    IconLayoutSidebarLeftCollapse,
+    IconLayoutSidebarRightCollapse,
+    IconSparkles,
+} from '@tabler/icons-react';
 import ReactMarkdownPreview from '@uiw/react-markdown-preview';
 import { useEffect, useRef, useState, type FC } from 'react';
 import rehypeExternalLinks from 'rehype-external-links';
@@ -32,11 +37,10 @@ const DashboardAiAnalysisModal: FC<Props> = ({
     dashboardUuid,
     getActiveTabCapturePayload,
 }) => {
-    const [rawJson, setRawJson] = useState('');
     const [analysis, setAnalysis] = useState('');
     const [streamError, setStreamError] = useState<string | null>(null);
     const [isStreaming, setIsStreaming] = useState(false);
-    const [showCapturedData, setShowCapturedData] = useState(false);
+    const [panelSide, setPanelSide] = useState<'left' | 'right'>('right');
     const abortRef = useRef<AbortController | null>(null);
     const getPayloadRef = useRef(getActiveTabCapturePayload);
     getPayloadRef.current = getActiveTabCapturePayload;
@@ -45,11 +49,9 @@ const DashboardAiAnalysisModal: FC<Props> = ({
         if (!opened) {
             abortRef.current?.abort();
             abortRef.current = null;
-            setRawJson('');
             setAnalysis('');
             setStreamError(null);
             setIsStreaming(false);
-            setShowCapturedData(false);
             return;
         }
 
@@ -60,7 +62,6 @@ const DashboardAiAnalysisModal: FC<Props> = ({
 
         let cancelled = false;
         const payload = getPayloadRef.current();
-        setRawJson(JSON.stringify(payload, null, 2));
         setAnalysis('');
         setStreamError(null);
         setIsStreaming(true);
@@ -117,10 +118,7 @@ const DashboardAiAnalysisModal: FC<Props> = ({
     };
 
     const showCenteredLoading =
-        !showCapturedData &&
-        !streamError &&
-        isStreaming &&
-        analysis.length === 0;
+        !streamError && isStreaming && analysis.length === 0;
 
     return (
         <MantineModal
@@ -129,6 +127,42 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             title="AI Analysis"
             icon={IconSparkles}
             fullScreen
+            headerActions={
+                <Group gap="xs">
+                    <ActionIcon
+                        variant={panelSide === 'left' ? 'filled' : 'default'}
+                        onClick={() => setPanelSide('left')}
+                        aria-label="Dock panel to the left"
+                    >
+                        <IconLayoutSidebarLeftCollapse size={14} />
+                    </ActionIcon>
+                    <ActionIcon
+                        variant={panelSide === 'right' ? 'filled' : 'default'}
+                        onClick={() => setPanelSide('right')}
+                        aria-label="Dock panel to the right"
+                    >
+                        <IconLayoutSidebarRightCollapse size={14} />
+                    </ActionIcon>
+                </Group>
+            }
+            modalRootProps={{
+                centered: false,
+                lockScroll: false,
+                trapFocus: false,
+                returnFocus: false,
+                classNames: {
+                    inner: classes.modalInner,
+                    content:
+                        panelSide === 'right'
+                            ? classes.modalContentRight
+                            : classes.modalContentLeft,
+                    overlay: classes.modalOverlay,
+                },
+            }}
+            modalBodyProps={{
+                px: 'md',
+                py: 'sm',
+            }}
             cancelLabel={false}
         >
             <Box className={classes.panel}>
@@ -144,19 +178,8 @@ const DashboardAiAnalysisModal: FC<Props> = ({
                         </Center>
                     ) : (
                         <ScrollArea className={classes.panelBody} type="scroll">
-                            <Box p="md">
-                                {showCapturedData ? (
-                                    <Box className={classes.jsonPane}>
-                                        <Text
-                                            component="pre"
-                                            fz="xs"
-                                            ff="monospace"
-                                            className={classes.jsonContent}
-                                        >
-                                            {rawJson}
-                                        </Text>
-                                    </Box>
-                                ) : streamError ? (
+                            <Box p="xs">
+                                {streamError ? (
                                     <Text c="red" fz="sm" className={classes.errorText}>
                                         {streamError}
                                     </Text>
@@ -176,23 +199,14 @@ const DashboardAiAnalysisModal: FC<Props> = ({
                             </Box>
                         </ScrollArea>
                     )}
-                    <ActionIcon
-                        className={classes.toggleFab}
-                        variant="light"
-                        color="gray"
-                        onClick={() => setShowCapturedData(!showCapturedData)}
-                        aria-label={
-                            showCapturedData
-                                ? 'Show AI analysis content'
-                                : 'Show original captured content'
-                        }
-                    >
-                        {showCapturedData ? (
-                            <IconSparkles size={14} />
-                        ) : (
-                            <IconBraces size={14} />
-                        )}
-                    </ActionIcon>
+                    <Box className={classes.disclaimer}>
+                        <Text fz={11} c="dimmed">
+                            This analysis is generated by AI from the data
+                            currently visible in this dashboard tab. It may
+                            contain inaccuracies and should be reviewed before
+                            making decisions.
+                        </Text>
+                    </Box>
                 </Box>
             </Box>
         </MantineModal>
