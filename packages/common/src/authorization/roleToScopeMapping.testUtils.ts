@@ -104,7 +104,7 @@ export const createStandardTestCases = () => [
         resource: {
             organizationUuid: 'org-uuid-test',
             projectUuid: 'test-project-uuid',
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         },
     },
     {
@@ -113,7 +113,7 @@ export const createStandardTestCases = () => [
         resource: {
             organizationUuid: 'org-uuid-test',
             projectUuid: 'test-project-uuid',
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         },
     },
     {
@@ -122,7 +122,7 @@ export const createStandardTestCases = () => [
         resource: {
             organizationUuid: 'org-uuid-test',
             projectUuid: 'test-project-uuid',
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         },
     },
     {
@@ -158,7 +158,7 @@ export const createStandardTestCases = () => [
         resource: {
             organizationUuid: 'org-uuid-test',
             projectUuid: 'test-project-uuid',
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         },
     },
     {
@@ -199,6 +199,11 @@ export const createStandardTestCases = () => [
     {
         action: 'manage' as const,
         subject: 'CustomSql' as const,
+        resource: { projectUuid: 'test-project-uuid' },
+    },
+    {
+        action: 'manage' as const,
+        subject: 'CustomFields' as const,
         resource: { projectUuid: 'test-project-uuid' },
     },
 

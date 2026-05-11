@@ -1,13 +1,18 @@
 import { Knex } from 'knex';
 import { LightdashConfig } from '../config/parseConfig';
+import { PreAggregateDailyStatsModel } from '../ee/models/PreAggregateDailyStatsModel';
+import { PreAggregateModel } from '../ee/models/PreAggregateModel';
 import { type UtilRepository } from '../utils/UtilRepository';
 import { AnalyticsModel } from './AnalyticsModel';
+import { AppModel } from './AppModel';
 import { CatalogModel } from './CatalogModel/CatalogModel';
 import { ChangesetModel } from './ChangesetModel';
 import { CommentModel } from './CommentModel/CommentModel';
 import { ContentModel } from './ContentModel/ContentModel';
+import { ContentVerificationModel } from './ContentVerificationModel';
 import { DashboardModel } from './DashboardModel/DashboardModel';
 import { PersonalAccessTokenModel } from './DashboardModel/PersonalAccessTokenModel';
+import { DeploySessionModel } from './DeploySessionModel';
 import { DownloadAuditModel } from './DownloadAuditModel';
 import { DownloadFileModel } from './DownloadFileModel';
 import { EmailModel } from './EmailModel';
@@ -28,6 +33,7 @@ import { OrganizationMemberProfileModel } from './OrganizationMemberProfileModel
 import { OrganizationModel } from './OrganizationModel';
 import { OrganizationWarehouseCredentialsModel } from './OrganizationWarehouseCredentialsModel';
 import { PasswordResetLinkModel } from './PasswordResetLinkModel';
+import { PersistentDownloadFileModel } from './PersistentDownloadFileModel';
 import { PinnedListModel } from './PinnedListModel';
 import { ProjectCompileLogModel } from './ProjectCompileLogModel';
 import { ProjectModel } from './ProjectModel/ProjectModel';
@@ -43,11 +49,14 @@ import { SessionModel } from './SessionModel';
 import { ShareModel } from './ShareModel';
 import { SlackAuthenticationModel } from './SlackAuthenticationModel';
 import { SlackChannelCacheModel } from './SlackChannelCacheModel';
+import { SlackUnfurlImageModel } from './SlackUnfurlImageModel';
 import { SpaceModel } from './SpaceModel';
+import { SpacePermissionModel } from './SpacePermissionModel';
 import { SpotlightTableConfigModel } from './SpotlightTableConfigModel';
 import { SshKeyPairModel } from './SshKeyPairModel';
 import { TagsModel } from './TagsModel';
 import { UserAttributesModel } from './UserAttributesModel';
+import { UserFavoritesModel } from './UserFavoritesModel';
 import { UserModel } from './UserModel';
 import { UserWarehouseCredentialsModel } from './UserWarehouseCredentials/UserWarehouseCredentialsModel';
 import { ValidationModel } from './ValidationModel/ValidationModel';
@@ -59,10 +68,13 @@ import { WarehouseAvailableTablesModel } from './WarehouseAvailableTablesModel/W
 
 export type ModelManifest = {
     analyticsModel: AnalyticsModel;
+    appModel: AppModel;
     commentModel: CommentModel;
     dashboardModel: DashboardModel;
+    deploySessionModel: DeploySessionModel;
     downloadFileModel: DownloadFileModel;
     downloadAuditModel: DownloadAuditModel;
+    persistentDownloadFileModel: PersistentDownloadFileModel;
     emailModel: EmailModel;
     githubAppInstallationsModel: GithubAppInstallationsModel;
     gitlabAppInstallationsModel: GitlabAppInstallationsModel;
@@ -93,9 +105,12 @@ export type ModelManifest = {
     shareModel: ShareModel;
     slackAuthenticationModel: SlackAuthenticationModel;
     slackChannelCacheModel: SlackChannelCacheModel;
+    slackUnfurlImageModel: SlackUnfurlImageModel;
     spaceModel: SpaceModel;
+    spacePermissionModel: SpacePermissionModel;
     sshKeyPairModel: SshKeyPairModel;
     userAttributesModel: UserAttributesModel;
+    userFavoritesModel: UserFavoritesModel;
     userModel: UserModel;
     userWarehouseCredentialsModel: UserWarehouseCredentialsModel;
     warehouseAvailableTablesModel: WarehouseAvailableTablesModel;
@@ -103,14 +118,18 @@ export type ModelManifest = {
     catalogModel: CatalogModel;
     savedSqlModel: SavedSqlModel;
     contentModel: ContentModel;
+    contentVerificationModel: ContentVerificationModel;
     tagsModel: TagsModel;
     featureFlagModel: FeatureFlagModel;
     spotlightTableConfigModel: SpotlightTableConfigModel;
     queryHistoryModel: QueryHistoryModel;
+    preAggregateModel: PreAggregateModel;
+    preAggregateDailyStatsModel: PreAggregateDailyStatsModel;
     projectParametersModel: ProjectParametersModel;
     changesetModel: ChangesetModel;
     /** An implementation signature for these models are not available at this stage */
     aiAgentModel: unknown;
+    managedAgentModel: unknown;
     aiOrganizationSettingsModel: unknown;
     embedModel: unknown;
     dashboardSummaryModel: unknown;
@@ -218,6 +237,13 @@ export class ModelRepository
         );
     }
 
+    public getAppModel(): AppModel {
+        return this.getModel(
+            'appModel',
+            () => new AppModel({ database: this.database }),
+        );
+    }
+
     public getCommentModel(): CommentModel {
         return this.getModel(
             'commentModel',
@@ -228,7 +254,20 @@ export class ModelRepository
     public getDashboardModel(): DashboardModel {
         return this.getModel(
             'dashboardModel',
-            () => new DashboardModel({ database: this.database }),
+            () =>
+                new DashboardModel({
+                    database: this.database,
+                    lightdashConfig: this.lightdashConfig,
+                    contentVerificationModel:
+                        this.getContentVerificationModel(),
+                }),
+        );
+    }
+
+    public getDeploySessionModel(): DeploySessionModel {
+        return this.getModel(
+            'deploySessionModel',
+            () => new DeploySessionModel(this.database),
         );
     }
 
@@ -243,6 +282,16 @@ export class ModelRepository
         return this.getModel(
             'downloadAuditModel',
             () => new DownloadAuditModel({ database: this.database }),
+        );
+    }
+
+    public getPersistentDownloadFileModel(): PersistentDownloadFileModel {
+        return this.getModel(
+            'persistentDownloadFileModel',
+            () =>
+                new PersistentDownloadFileModel({
+                    database: this.database,
+                }),
         );
     }
 
@@ -443,6 +492,8 @@ export class ModelRepository
                 new SavedChartModel({
                     database: this.database,
                     lightdashConfig: this.lightdashConfig,
+                    contentVerificationModel:
+                        this.getContentVerificationModel(),
                 }),
         );
     }
@@ -457,7 +508,12 @@ export class ModelRepository
     public getSearchModel(): SearchModel {
         return this.getModel(
             'searchModel',
-            () => new SearchModel({ database: this.database }),
+            () =>
+                new SearchModel({
+                    database: this.database,
+                    contentVerificationModel:
+                        this.getContentVerificationModel(),
+                }),
         );
     }
 
@@ -489,10 +545,24 @@ export class ModelRepository
         );
     }
 
+    public getSlackUnfurlImageModel(): SlackUnfurlImageModel {
+        return this.getModel(
+            'slackUnfurlImageModel',
+            () => new SlackUnfurlImageModel({ database: this.database }),
+        );
+    }
+
     public getSpaceModel(): SpaceModel {
         return this.getModel(
             'spaceModel',
             () => new SpaceModel({ database: this.database }),
+        );
+    }
+
+    public getSpacePermissionModel(): SpacePermissionModel {
+        return this.getModel(
+            'spacePermissionModel',
+            () => new SpacePermissionModel(this.database),
         );
     }
 
@@ -511,6 +581,13 @@ export class ModelRepository
         return this.getModel(
             'userAttributesModel',
             () => new UserAttributesModel({ database: this.database }),
+        );
+    }
+
+    public getUserFavoritesModel(): UserFavoritesModel {
+        return this.getModel(
+            'userFavoritesModel',
+            () => new UserFavoritesModel({ database: this.database }),
         );
     }
 
@@ -571,7 +648,11 @@ export class ModelRepository
     public getSavedSqlModel(): SavedSqlModel {
         return this.getModel(
             'savedSqlModel',
-            () => new SavedSqlModel({ database: this.database }),
+            () =>
+                new SavedSqlModel({
+                    database: this.database,
+                    lightdashConfig: this.lightdashConfig,
+                }),
         );
     }
 
@@ -579,6 +660,13 @@ export class ModelRepository
         return this.getModel(
             'contentModel',
             () => new ContentModel({ database: this.database }),
+        );
+    }
+
+    public getContentVerificationModel(): ContentVerificationModel {
+        return this.getModel(
+            'contentVerificationModel',
+            () => new ContentVerificationModel({ database: this.database }),
         );
     }
 
@@ -616,6 +704,10 @@ export class ModelRepository
         );
     }
 
+    public getManagedAgentModel<ModelImplT>(): ModelImplT {
+        return this.getModel('managedAgentModel');
+    }
+
     public getServiceAccountModel<ModelImplT>(): ModelImplT {
         return this.getModel('serviceAccountModel');
     }
@@ -635,6 +727,26 @@ export class ModelRepository
         return this.getModel(
             'queryHistoryModel',
             () => new QueryHistoryModel({ database: this.database }),
+        );
+    }
+
+    public getPreAggregateDailyStatsModel(): PreAggregateDailyStatsModel {
+        return this.getModel(
+            'preAggregateDailyStatsModel',
+            () =>
+                new PreAggregateDailyStatsModel({
+                    database: this.database,
+                }),
+        );
+    }
+
+    public getPreAggregateModel(): PreAggregateModel {
+        return this.getModel(
+            'preAggregateModel',
+            () =>
+                new PreAggregateModel({
+                    database: this.database,
+                }),
         );
     }
 

@@ -65,5 +65,12 @@ export const defaultState: ExplorerSliceState = {
             isOpen: false,
         },
     },
+    unsavedColorPaletteUuid: null,
     queryExecution: defaultQueryExecution,
+    preAggregate: {
+        usePreAggregateCache: true,
+        check: {
+            status: 'idle',
+        },
+    },
 };

@@ -21,6 +21,7 @@ import { type EChartsOption, type PieSeriesOption } from 'echarts';
 import { useMemo } from 'react';
 import { isPieVisualizationConfig } from '../../components/LightdashVisualization/types';
 import { useVisualizationContext } from '../../components/LightdashVisualization/useVisualizationContext';
+import { sanitizeEchartsFontFamily } from '../../utils/sanitizeEchartsFontFamily';
 import { useLegendDoubleClickTooltip } from './useLegendDoubleClickTooltip';
 export type PieSeriesDataPoint = NonNullable<
     PieSeriesOption['data']
@@ -42,6 +43,7 @@ const useEchartsPieConfig = (
         minimal,
         parameters,
         isTouchDevice,
+        resolvedTimezone,
     } = useVisualizationContext();
 
     const theme = useMantineTheme();
@@ -196,6 +198,7 @@ const useEchartsPieConfig = (
                         value,
                         false,
                         parameters,
+                        resolvedTimezone,
                     );
 
                     const truncatedName =
@@ -217,7 +220,7 @@ const useEchartsPieConfig = (
                 },
             },
         };
-    }, [chartConfig, seriesData, parameters]);
+    }, [chartConfig, seriesData, parameters, resolvedTimezone]);
 
     const { tooltip: legendDoubleClickTooltip } = useLegendDoubleClickTooltip();
 
@@ -230,7 +233,9 @@ const useEchartsPieConfig = (
 
         return {
             textStyle: {
-                fontFamily: theme?.other?.chartFont as string | undefined,
+                fontFamily: sanitizeEchartsFontFamily(
+                    theme?.other?.chartFont as string | undefined,
+                ),
             },
             legend: {
                 show: showLegend,

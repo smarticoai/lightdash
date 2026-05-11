@@ -7,14 +7,24 @@ import {
     ApiGetMetricPeek,
     ApiMetricsCatalog,
     ApiSegmentDimensionsResponse,
+    assertRegisteredAccount,
     CatalogOwner,
     getItemId,
+    type ApiCreateMetricsTreePayload,
+    type ApiCreateMetricsTreeResponse,
     type ApiFilterDimensionsResponse,
+    type ApiGetAllMetricsTreeEdges,
     type ApiGetMetricsTree,
+    type ApiGetMetricsTreePayload,
+    type ApiGetMetricsTreeResponse,
+    type ApiGetMetricsTreesResponse,
     type ApiMetricsTreeEdgePayload,
+    type ApiMetricsTreeLockResponse,
     type ApiMetricsWithAssociatedTimeDimensionResponse,
     type ApiSort,
     type ApiSuccessEmpty,
+    type ApiUpdateMetricsTreePayload,
+    type ApiUpdateMetricsTreeResponse,
     type CatalogCategoryFilterMode,
     type CatalogItemIcon,
     type KnexPaginateArgs,
@@ -28,6 +38,7 @@ import {
     Patch,
     Path,
     Post,
+    Put,
     Query,
     Request,
     Response,
@@ -36,6 +47,7 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
+import { toSessionUser } from '../auth/account';
 import { CatalogSearchContext } from '../models/CatalogModel/CatalogModel';
 import {
     allowApiKeyAuthentication,
@@ -68,6 +80,7 @@ export class CatalogController extends BaseController {
         @Query() type?: ApiCatalogSearch['type'],
         @Query() filter?: ApiCatalogSearch['filter'],
     ): Promise<{ status: 'ok'; results: ApiCatalogResults }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         const query: ApiCatalogSearch = {
             searchQuery: search,
@@ -78,7 +91,7 @@ export class CatalogController extends BaseController {
         const { data: results } = await this.services
             .getCatalogService()
             .getCatalog(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 query,
                 CatalogSearchContext.CATALOG,
@@ -87,6 +100,297 @@ export class CatalogController extends BaseController {
         return {
             status: 'ok',
             results,
+        };
+    }
+
+    // --- Saved Metrics Trees ---
+
+    /**
+     * List saved metrics trees for a project
+     * @summary List metrics trees
+     * @param projectUuid
+     * @param page Page number (1-indexed)
+     * @param pageSize Number of trees per page
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/metrics/trees')
+    @OperationId('getMetricsTrees')
+    async getMetricsTrees(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+        @Query() page?: number,
+        @Query() pageSize?: number,
+    ): Promise<ApiGetMetricsTreesResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        const paginateArgs: KnexPaginateArgs | undefined =
+            page && pageSize ? { page, pageSize } : undefined;
+
+        const results = await this.services
+            .getCatalogService()
+            .getMetricsTrees(
+                toSessionUser(req.account),
+                projectUuid,
+                paginateArgs,
+            );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Get details of a saved metrics tree including nodes and edges
+     * @summary Get metrics tree details
+     * @param projectUuid
+     * @param metricsTreeUuidOrSlug
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/metrics/trees/{metricsTreeUuidOrSlug}')
+    @OperationId('getMetricsTreeDetails')
+    async getMetricsTreeDetails(
+        @Path() projectUuid: string,
+        @Path() metricsTreeUuidOrSlug: string,
+        @Request() req: express.Request,
+    ): Promise<ApiGetMetricsTreeResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        const results = await this.services
+            .getCatalogService()
+            .getMetricsTreeDetails(
+                toSessionUser(req.account),
+                projectUuid,
+                metricsTreeUuidOrSlug,
+            );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Create a new saved metrics tree with nodes and edges
+     * @summary Create metrics tree
+     * @param projectUuid
+     * @param body.name Name of the metrics tree
+     * @param body.slug Optional slug for the tree (auto-generated from name if omitted)
+     * @param body.description Optional description
+     * @param body.source Whether the tree was created from 'ui' or 'yaml' (defaults to 'ui')
+     * @param body.nodes List of catalog metrics to include as nodes, with optional positions
+     * @param body.edges List of edges between nodes, deduplicated against existing edges
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('201', 'Created')
+    @Post('/metrics/trees')
+    @OperationId('createMetricsTree')
+    async createMetricsTree(
+        @Path() projectUuid: string,
+        @Body() body: ApiCreateMetricsTreePayload,
+        @Request() req: express.Request,
+    ): Promise<ApiCreateMetricsTreeResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(201);
+
+        const results = await this.services
+            .getCatalogService()
+            .createMetricsTree(toSessionUser(req.account), projectUuid, body);
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Update a saved metrics tree including nodes and edges
+     * @summary Update metrics tree
+     * @param projectUuid
+     * @param metricsTreeUuid
+     * @param body Updated tree data including nodes and edges
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Patch('/metrics/trees/{metricsTreeUuid}')
+    @OperationId('updateMetricsTree')
+    async updateMetricsTree(
+        @Path() projectUuid: string,
+        @Path() metricsTreeUuid: string,
+        @Body() body: ApiUpdateMetricsTreePayload,
+        @Request() req: express.Request,
+    ): Promise<ApiUpdateMetricsTreeResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        const results = await this.services
+            .getCatalogService()
+            .updateMetricsTree(
+                toSessionUser(req.account),
+                projectUuid,
+                metricsTreeUuid,
+                body,
+            );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Delete a saved metrics tree and its associated nodes
+     * @summary Delete metrics tree
+     * @param projectUuid
+     * @param metricsTreeUuid
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Delete('/metrics/trees/{metricsTreeUuid}')
+    @OperationId('deleteMetricsTree')
+    async deleteMetricsTree(
+        @Path() projectUuid: string,
+        @Path() metricsTreeUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        await this.services
+            .getCatalogService()
+            .deleteMetricsTree(
+                toSessionUser(req.account),
+                projectUuid,
+                metricsTreeUuid,
+            );
+
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Acquire an edit lock on a metrics tree
+     * @summary Acquire tree lock
+     * @param projectUuid
+     * @param metricsTreeUuid
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('/metrics/trees/{metricsTreeUuid}/lock')
+    @OperationId('acquireMetricsTreeLock')
+    async acquireMetricsTreeLock(
+        @Path() projectUuid: string,
+        @Path() metricsTreeUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiMetricsTreeLockResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        const results = await this.services
+            .getCatalogService()
+            .acquireTreeLock(
+                toSessionUser(req.account),
+                projectUuid,
+                metricsTreeUuid,
+            );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Refresh the heartbeat on an edit lock to keep it alive
+     * @summary Refresh tree lock heartbeat
+     * @param projectUuid
+     * @param metricsTreeUuid
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Put('/metrics/trees/{metricsTreeUuid}/lock/heartbeat')
+    @OperationId('refreshMetricsTreeLockHeartbeat')
+    async refreshMetricsTreeLockHeartbeat(
+        @Path() projectUuid: string,
+        @Path() metricsTreeUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        await this.services
+            .getCatalogService()
+            .refreshTreeLockHeartbeat(
+                toSessionUser(req.account),
+                projectUuid,
+                metricsTreeUuid,
+            );
+
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Release an edit lock on a metrics tree
+     * @summary Release tree lock
+     * @param projectUuid
+     * @param metricsTreeUuid
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Delete('/metrics/trees/{metricsTreeUuid}/lock')
+    @OperationId('releaseMetricsTreeLock')
+    async releaseMetricsTreeLock(
+        @Path() projectUuid: string,
+        @Path() metricsTreeUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        await this.services
+            .getCatalogService()
+            .releaseTreeLock(
+                toSessionUser(req.account),
+                projectUuid,
+                metricsTreeUuid,
+            );
+
+        return {
+            status: 'ok',
+            results: undefined,
         };
     }
 
@@ -106,11 +410,12 @@ export class CatalogController extends BaseController {
         @Path() table: string,
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: ApiCatalogMetadataResults }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
-            .getMetadata(req.user!, projectUuid, table);
+            .getMetadata(toSessionUser(req.account), projectUuid, table);
         return {
             status: 'ok',
             results,
@@ -133,11 +438,12 @@ export class CatalogController extends BaseController {
         @Path() table: string,
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: ApiCatalogAnalyticsResults }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
-            .getAnalytics(req.user!, projectUuid, table);
+            .getAnalytics(toSessionUser(req.account), projectUuid, table);
         return {
             status: 'ok',
             results,
@@ -162,11 +468,12 @@ export class CatalogController extends BaseController {
         @Path() field: string,
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: ApiCatalogAnalyticsResults }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         const results = await this.services
             .getCatalogService()
             .getFieldAnalytics(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 getItemId({
                     name: field,
@@ -206,6 +513,7 @@ export class CatalogController extends BaseController {
         @Query() tables?: ApiCatalogSearch['tables'],
         @Query() ownerUserUuids?: ApiCatalogSearch['ownerUserUuids'],
     ): Promise<ApiMetricsCatalog> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const paginateArgs: KnexPaginateArgs | undefined =
@@ -226,7 +534,7 @@ export class CatalogController extends BaseController {
         const results = await this.services
             .getCatalogService()
             .getMetricsCatalog(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 CatalogSearchContext.SPOTLIGHT,
                 paginateArgs,
@@ -239,6 +547,31 @@ export class CatalogController extends BaseController {
                 },
                 sortArgs,
             );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Get all edges in the metrics tree for a project
+     * @summary Get all metrics tree edges
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('/metrics/tree/edges')
+    @OperationId('getAllMetricsTreeEdges')
+    async getAllMetricsTreeEdges(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiGetAllMetricsTreeEdges> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        const results = await this.services
+            .getCatalogService()
+            .getAllMetricsTreeEdges(toSessionUser(req.account), projectUuid);
 
         return {
             status: 'ok',
@@ -264,11 +597,17 @@ export class CatalogController extends BaseController {
         @Path() metricName: string,
         @Request() req: express.Request,
     ): Promise<ApiGetMetricPeek> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
-            .getMetric(req.user!, projectUuid, tableName, metricName);
+            .getMetric(
+                toSessionUser(req.account),
+                projectUuid,
+                tableName,
+                metricName,
+            );
 
         return {
             status: 'ok',
@@ -291,12 +630,13 @@ export class CatalogController extends BaseController {
         @Request() req: express.Request,
         @Query() tableName?: string,
     ): Promise<ApiMetricsWithAssociatedTimeDimensionResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
             .getAllCatalogMetricsWithTimeDimensions(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 CatalogSearchContext.SPOTLIGHT,
                 tableName,
@@ -324,12 +664,13 @@ export class CatalogController extends BaseController {
         @Path() tableName: string,
         @Request() req: express.Request,
     ): Promise<ApiFilterDimensionsResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
             .getFilterDimensions(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 tableName,
                 CatalogSearchContext.METRICS_EXPLORER,
@@ -357,12 +698,13 @@ export class CatalogController extends BaseController {
         @Path() tableName: string,
         @Request() req: express.Request,
     ): Promise<ApiSegmentDimensionsResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
             .getSegmentDimensions(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 tableName,
                 CatalogSearchContext.METRICS_EXPLORER,
@@ -394,9 +736,14 @@ export class CatalogController extends BaseController {
         },
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getCatalogService()
-            .tagCatalogItem(req.user!, catalogSearchUuid, body.tagUuid);
+            .tagCatalogItem(
+                toSessionUser(req.account),
+                catalogSearchUuid,
+                body.tagUuid,
+            );
 
         this.setStatus(200);
 
@@ -423,9 +770,14 @@ export class CatalogController extends BaseController {
         @Path() tagUuid: string,
         @Request() req: express.Request,
     ) {
+        assertRegisteredAccount(req.account);
         await this.services
             .getCatalogService()
-            .untagCatalogItem(req.user!, catalogSearchUuid, tagUuid);
+            .untagCatalogItem(
+                toSessionUser(req.account),
+                catalogSearchUuid,
+                tagUuid,
+            );
 
         this.setStatus(200);
 
@@ -453,10 +805,11 @@ export class CatalogController extends BaseController {
         @Body() body: { icon: CatalogItemIcon | null },
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getCatalogService()
             .updateCatalogItemIcon(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 catalogSearchUuid,
                 body.icon,
@@ -470,23 +823,60 @@ export class CatalogController extends BaseController {
     }
 
     /**
-     * Get the metrics tree structure
+     * Get the metrics tree structure (deprecated, use POST instead)
      * @summary Get metrics tree
+     * @deprecated Use POST /metrics/tree instead for large metric lists
      */
     @Middlewares([allowApiKeyAuthentication, isAuthenticated])
     @SuccessResponse('200', 'Success')
     @Get('/metrics/tree')
-    @OperationId('getMetricsTree')
-    async getMetricsTree(
+    @OperationId('getMetricsTreeLegacy')
+    async getMetricsTreeLegacy(
         @Path() projectUuid: string,
         @Request() req: express.Request,
         @Query() metricUuids: string[],
     ): Promise<ApiGetMetricsTree> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
-            .getMetricsTree(req.user!, projectUuid, metricUuids);
+            .getMetricsTree(
+                toSessionUser(req.account),
+                projectUuid,
+                metricUuids,
+            );
+
+        return {
+            status: 'ok',
+            results,
+        };
+    }
+
+    /**
+     * Get the metrics tree structure
+     * @summary Get metrics tree
+     * @deprecated Superseded by saved metrics trees (`/metrics/trees/{uuidOrSlug}`).
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Post('/metrics/tree')
+    @OperationId('getMetricsTree')
+    async getMetricsTree(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+        @Body() body: ApiGetMetricsTreePayload,
+    ): Promise<ApiGetMetricsTree> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        const results = await this.services
+            .getCatalogService()
+            .getMetricsTree(
+                toSessionUser(req.account),
+                projectUuid,
+                body.metricUuids,
+            );
 
         return {
             status: 'ok',
@@ -497,6 +887,7 @@ export class CatalogController extends BaseController {
     /**
      * Create an edge in the metrics tree
      * @summary Create metrics tree edge
+     * @deprecated Edges are now persisted via the saved metrics tree update endpoint (`PATCH /metrics/trees/{uuid}`).
      */
     @Middlewares([
         allowApiKeyAuthentication,
@@ -511,9 +902,14 @@ export class CatalogController extends BaseController {
         @Body() body: ApiMetricsTreeEdgePayload,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getCatalogService()
-            .createMetricsTreeEdge(req.user!, projectUuid, body);
+            .createMetricsTreeEdge(
+                toSessionUser(req.account),
+                projectUuid,
+                body,
+            );
 
         this.setStatus(200);
         return {
@@ -525,6 +921,7 @@ export class CatalogController extends BaseController {
     /**
      * Delete an edge from the metrics tree
      * @summary Delete metrics tree edge
+     * @deprecated Edges are now persisted via the saved metrics tree update endpoint (`PATCH /metrics/trees/{uuid}`).
      */
     @Middlewares([
         allowApiKeyAuthentication,
@@ -542,9 +939,10 @@ export class CatalogController extends BaseController {
         @Path() targetCatalogSearchUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getCatalogService()
-            .deleteMetricsTreeEdge(req.user!, projectUuid, {
+            .deleteMetricsTreeEdge(toSessionUser(req.account), projectUuid, {
                 sourceCatalogSearchUuid,
                 targetCatalogSearchUuid,
             });
@@ -570,11 +968,12 @@ export class CatalogController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: boolean }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
-            .hasMetricsInCatalog(req.user!, projectUuid);
+            .hasMetricsInCatalog(toSessionUser(req.account), projectUuid);
 
         return {
             status: 'ok',
@@ -594,17 +993,16 @@ export class CatalogController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: CatalogOwner[] }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getCatalogService()
-            .getMetricOwners(req.user!, projectUuid);
+            .getMetricOwners(toSessionUser(req.account), projectUuid);
 
         return {
             status: 'ok',
             results,
         };
     }
-
-    // TODO: handle metrics tree node position
 }

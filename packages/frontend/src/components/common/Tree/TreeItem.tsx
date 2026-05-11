@@ -1,4 +1,12 @@
-import { ActionIcon, Group, Highlight, Paper, rem } from '@mantine-8/core';
+import {
+    ActionIcon,
+    Group,
+    Highlight,
+    Paper,
+    rem,
+    Tooltip,
+} from '@mantine-8/core';
+import { clsx } from '@mantine/core';
 import {
     IconCheck,
     IconChevronDown,
@@ -6,10 +14,7 @@ import {
     IconFolder,
 } from '@tabler/icons-react';
 import React, { useMemo } from 'react';
-
 import MantineIcon from '../MantineIcon';
-
-import { clsx } from '@mantine/core';
 import classes from './TreeItem.module.css';
 
 type Props = {
@@ -19,6 +24,7 @@ type Props = {
     selected?: boolean;
     hasChildren?: boolean;
     isRoot?: boolean;
+    restricted?: boolean;
     className?: string;
     withPadding?: boolean;
     withRootSelectable?: boolean;
@@ -35,6 +41,7 @@ const TreeItem: React.FC<Props> = ({
     withPadding = true,
     withRootSelectable = true,
     isRoot = false,
+    restricted = false,
     className,
     onClick,
     onClickExpand,
@@ -48,11 +55,12 @@ const TreeItem: React.FC<Props> = ({
         );
     }, [label]);
 
-    return (
+    const content = (
         <Paper
             component={Group}
             data-selected={selected}
-            data-is-selectable={!isRoot || withRootSelectable}
+            data-is-selectable={!restricted && (!isRoot || withRootSelectable)}
+            data-restricted={restricted}
             className={clsx(classes.paper, className)}
             miw={rem(200)}
             w="100%"
@@ -68,7 +76,7 @@ const TreeItem: React.FC<Props> = ({
             withBorder={false}
             shadow="none"
             wrap="nowrap"
-            onClick={onClick}
+            onClick={restricted ? undefined : onClick}
         >
             {isRoot ? null : (
                 <ActionIcon
@@ -121,6 +129,20 @@ const TreeItem: React.FC<Props> = ({
             )}
         </Paper>
     );
+
+    if (restricted) {
+        return (
+            <Tooltip
+                label="You do not have access to this space"
+                position="top-start"
+                withArrow
+            >
+                {content}
+            </Tooltip>
+        );
+    }
+
+    return content;
 };
 
 export default TreeItem;

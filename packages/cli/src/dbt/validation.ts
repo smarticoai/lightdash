@@ -2,12 +2,12 @@ import {
     DbtModelNode,
     DbtRawModelNode,
     ExploreError,
+    friendlyName,
     InlineError,
     InlineErrorType,
     ManifestValidator,
-    SupportedDbtAdapter,
-    friendlyName,
     normaliseModelDatabase,
+    SupportedDbtAdapter,
     type DbtManifestVersion,
 } from '@lightdash/common';
 import GlobalState from '../globalState';
@@ -46,6 +46,11 @@ export const validateDbtModel = async (
                 };
             }
             if (error) {
+                // Seeds that fail validation are silently skipped —
+                // they're only used as join targets, not standalone explores.
+                if (model.resource_type === 'seed') {
+                    return acc;
+                }
                 const exploreError: ExploreError = {
                     name: model.name,
                     label: model.meta.label || friendlyName(model.name),

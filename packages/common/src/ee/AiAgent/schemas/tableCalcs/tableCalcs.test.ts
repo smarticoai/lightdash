@@ -36,6 +36,7 @@ describe('convertAiTableCalcsSchemaToTableCalcs', () => {
                 name: 'percent_change_sales',
                 displayName: 'Percent change sales',
                 fieldId: 'orders_revenue',
+                partitionBy: null,
                 orderBy: [
                     {
                         fieldId: 'percent_change_sales',

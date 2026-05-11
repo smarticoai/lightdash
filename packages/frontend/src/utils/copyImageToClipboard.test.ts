@@ -49,9 +49,13 @@ describe('copyImageToClipboard', () => {
         } as any;
 
         // Mock ClipboardItem
-        global.ClipboardItem = vi
-            .fn()
-            .mockImplementation((items) => ({ items })) as any;
+        global.ClipboardItem = class {
+            items: Record<string, Blob>;
+
+            constructor(items: Record<string, Blob>) {
+                this.items = items;
+            }
+        } as unknown as typeof ClipboardItem;
     });
 
     it('should successfully copy image to clipboard', async () => {
@@ -94,7 +98,10 @@ describe('copyImageToClipboard', () => {
             'Clipboard write failed',
         );
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-            'Failed to copy image to clipboard: Clipboard write failed',
+            'Failed to copy image to clipboard',
+            expect.objectContaining({
+                message: 'Clipboard write failed',
+            }),
         );
 
         consoleErrorSpy.mockRestore();

@@ -9,32 +9,40 @@ import {
 import { InvalidArgumentError, Option, program } from 'commander';
 import { validate } from 'uuid';
 import {
-    CLI_VERSION,
     DEFAULT_DBT_PROFILES_DIR as defaultProfilesDir,
     DEFAULT_DBT_PROJECT_DIR as defaultProjectDir,
     NODE_VERSION,
     OPTIMIZED_NODE_VERSION,
 } from './env';
+import { getDiagnosticsHint } from './error';
+import GlobalState from './globalState';
 import { compileHandler } from './handlers/compile';
 import { refreshHandler } from './handlers/dbt/refresh';
 import { dbtRunHandler } from './handlers/dbt/run';
 import { deployHandler } from './handlers/deploy';
 import { diagnosticsHandler } from './handlers/diagnostics';
 import { downloadHandler, uploadHandler } from './handlers/download';
+import { exportChartImageHandler } from './handlers/exportChartImage';
 import { generateHandler } from './handlers/generate';
 import { generateExposuresHandler } from './handlers/generateExposures';
 import { getProjectHandler } from './handlers/getProject';
-import { installSkillsHandler } from './handlers/installSkills';
+import {
+    getVersionWithSkills,
+    installSkillsHandler,
+} from './handlers/installSkills';
 import { lintHandler } from './handlers/lint';
 import { listProjectsHandler } from './handlers/listProjects';
 import { login } from './handlers/login';
+import { preAggregateAuditHandler } from './handlers/preAggregateAudit';
 import {
     previewHandler,
     startPreviewHandler,
     stopPreviewHandler,
 } from './handlers/preview';
 import { renameHandler } from './handlers/renameHandler';
-import { setProjectHandler } from './handlers/setProject';
+import { runChartHandler } from './handlers/runChart';
+import { setProjectHandler, unsetProjectHandler } from './handlers/setProject';
+import { setWarehouseHandler } from './handlers/setWarehouse';
 import { sqlHandler } from './handlers/sql';
 import { validateHandler } from './handlers/validate';
 import * as styles from './styles';
@@ -91,11 +99,21 @@ function parseProjectArgument(value: string | undefined): string | undefined {
 }
 
 program
-    .version(CLI_VERSION)
+    .version(getVersionWithSkills())
     .name(styles.title('⚡️lightdash'))
     .description(
         'Developer tools for dbt and Lightdash.\nSee https://docs.lightdash.com for more help and examples',
     )
+    .option(
+        '--non-interactive',
+        'Disable all interactive prompts. Commands fail with helpful error if required input is missing.',
+    )
+    .hook('preAction', (thisCommand) => {
+        const opts = thisCommand.opts();
+        if (opts.nonInteractive) {
+            GlobalState.setNonInteractive(true);
+        }
+    })
     .showHelpAfterError(
         styles.bold('Run ⚡️lightdash help [command] for more information'),
     )
@@ -104,55 +122,55 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold('generate')} ${styles.secondary(
-            '-- generates .yml file for all dbt models',
-        )}
+      '-- generates .yml file for all dbt models',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s mymodel ${styles.secondary(
-            '-- generates .yml file for a single dbt model',
-        )}
+      'generate',
+  )} -s mymodel ${styles.secondary(
+      '-- generates .yml file for a single dbt model',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s model1 model2 ${styles.secondary(
-            '-- generates .yml for multiple dbt models',
-        )}
+      'generate',
+  )} -s model1 model2 ${styles.secondary(
+      '-- generates .yml for multiple dbt models',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s tag:sales ${styles.secondary(
-            '-- generates .yml for all dbt models tagged as sales',
-        )}
+      'generate',
+  )} -s tag:sales ${styles.secondary(
+      '-- generates .yml for all dbt models tagged as sales',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s +mymodel ${styles.secondary(
-            "-- generates .yml for mymodel and all it's parents",
-        )}
+      'generate',
+  )} -s +mymodel ${styles.secondary(
+      "-- generates .yml for mymodel and all it's parents",
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} --help ${styles.secondary(
-            '-- shows detailed help for the "generate" command',
-        )}
+      'generate',
+  )} --help ${styles.secondary(
+      '-- shows detailed help for the "generate" command',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold('dbt run')} ${styles.secondary(
-            '-- runs dbt for all models and updates .yml for all models',
-        )}
+      '-- runs dbt for all models and updates .yml for all models',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'dbt run',
-        )} -s model1 model2+ tag:dev ${styles.secondary(
-            '-- runs dbt for models and generates .yml for affected models',
-        )}
+      'dbt run',
+  )} -s model1 model2+ tag:dev ${styles.secondary(
+      '-- runs dbt for models and generates .yml for affected models',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'dbt run',
-        )} --help ${styles.secondary(
-            '-- shows detailed help for the "dbt run" command',
-        )}
+      'dbt run',
+  )} --help ${styles.secondary(
+      '-- shows detailed help for the "dbt run" command',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold('compile')} ${styles.secondary(
-            '-- compiles Lightdash metrics and dimensions',
-        )}
+      '-- compiles Lightdash metrics and dimensions',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold('deploy')} ${styles.secondary(
-            '-- compiles and deploys Lightdash metrics to active project',
-        )}
+      '-- compiles and deploys Lightdash metrics to active project',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login https://lightdash.domain.com',
-        )} ${styles.secondary('-- logs in to a Lightdash instance')}
+      'login https://lightdash.domain.com',
+  )} ${styles.secondary('-- logs in to a Lightdash instance')}
 `,
     );
 
@@ -168,45 +186,61 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold('login')} ${styles.secondary(
-            '-- Uses previously saved URL (opens browser for OAuth)',
-        )}
+      '-- Uses previously saved URL (opens browser for OAuth)',
+  )}
+  ${styles.title('⚡')}️lightdash ${styles.bold('login')} app ${styles.secondary(
+      '-- Short form for https://app.lightdash.cloud (opens browser for OAuth)',
+  )}
+  ${styles.title('⚡')}️lightdash ${styles.bold('login')} eu1 ${styles.secondary(
+      '-- Short form for https://eu1.lightdash.cloud (opens browser for OAuth)',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} app ${styles.secondary(
-            '-- Short form for https://app.lightdash.cloud (opens browser for OAuth)',
-        )}
+      'login',
+  )} app.lightdash.cloud ${styles.secondary(
+      '-- Adds https:// automatically (opens browser for OAuth)',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} eu1 ${styles.secondary(
-            '-- Short form for https://eu1.lightdash.cloud (opens browser for OAuth)',
-        )}
+      'login',
+  )} https://custom.lightdash.domain/projects/123 ${styles.secondary(
+      '-- Strips path, uses https://custom.lightdash.domain (opens browser for OAuth)',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} app.lightdash.cloud ${styles.secondary(
-            '-- Adds https:// automatically (opens browser for OAuth)',
-        )}
+      'login',
+  )} http://localhost:3000 ${styles.secondary(
+      '-- Preserves http protocol for local development',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} https://custom.lightdash.domain/projects/123 ${styles.secondary(
-            '-- Strips path, uses https://custom.lightdash.domain (opens browser for OAuth)',
-        )}
+      'login',
+  )} --token 12345 ${styles.secondary(
+      '-- Logs in with API token using saved URL (bypasses OAuth)',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} http://localhost:3000 ${styles.secondary(
-            '-- Preserves http protocol for local development',
-        )}
-  ${styles.title('⚡')}️lightdash ${styles.bold(
-            'login',
-        )} --token 12345 ${styles.secondary(
-            '-- Logs in with API token using saved URL (bypasses OAuth)',
-        )}
+      'login',
+  )} http://localhost:3000 --email demo@lightdash.com ${styles.secondary(
+      '-- Local dev only: prompts for password securely',
+  )}
 `,
     )
     .option('--token <token>', 'Login with an API access token', undefined)
+    .addOption(
+        new Option(
+            '--project <project uuid>',
+            'Select a project by UUID after login',
+        )
+            .argParser(parseProjectArgument)
+            .conflicts('skipProjectSelection'),
+    )
+    .option('--email <email>', 'Login with email and password', undefined)
     .option(
-        '--project <project uuid>',
-        'Select a project by UUID after login',
-        parseProjectArgument,
+        '--oauth-port <port>',
+        'Port for the local OAuth callback server (default: random available port)',
+        (value: string) => {
+            const port = parseInt(value, 10);
+            if (Number.isNaN(port) || port < 1 || port > 65535) {
+                throw new Error('Port must be a number between 1 and 65535');
+            }
+            return port;
+        },
         undefined,
     )
     .option('--verbose', undefined, false)
@@ -247,6 +281,11 @@ configProgram
     .description('Show the currently selected project')
     .option('--verbose', undefined, false)
     .action(getProjectHandler);
+configProgram
+    .command('unset-project')
+    .description('Clear the currently selected project')
+    .option('--verbose', undefined, false)
+    .action(unsetProjectHandler);
 
 const dbtProgram = program.command('dbt').description('Runs dbt commands');
 
@@ -258,28 +297,26 @@ dbtProgram
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold('dbt run')} ${styles.secondary(
-            '-- run all models and generate .yml files',
-        )}
+      '-- run all models and generate .yml files',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'dbt run',
-        )} -s mymodel ${styles.secondary(
-            '-- runs a single model and generates .yml',
-        )}
+      'dbt run',
+  )} -s mymodel ${styles.secondary('-- runs a single model and generates .yml')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'dbt run',
-        )} -s model1 model2 ${styles.secondary(
-            '-- runs multiple models and generates .yml',
-        )}
+      'dbt run',
+  )} -s model1 model2 ${styles.secondary(
+      '-- runs multiple models and generates .yml',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'dbt run',
-        )} -s tag:sales ${styles.secondary(
-            '-- runs all models tagged as "sales" and generates .yml',
-        )}
+      'dbt run',
+  )} -s tag:sales ${styles.secondary(
+      '-- runs all models tagged as "sales" and generates .yml',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'dbt run',
-        )} -s +mymodel ${styles.secondary(
-            '-- runs mymodel and its parents and generates .yml',
-        )}
+      'dbt run',
+  )} -s +mymodel ${styles.secondary(
+      '-- runs mymodel and its parents and generates .yml',
+  )}
 `,
     )
     .option(
@@ -511,14 +548,27 @@ program
         false,
     )
     .option(
+        '--no-warehouse-credentials',
+        'Create preview without warehouse credentials. Copies credentials from upstream project.',
+    )
+    .option(
         '--organization-credentials <name>',
         'Use organization warehouse credentials with the specified name (Enterprise Edition feature)',
     )
     .option(
-        '--disable-timestamp-conversion [true|false]',
-        'Disable timestamp conversion to UTC for Snowflake warehouses. Only use this if your timestamp values are already in UTC.',
-        parseDisableTimestampConversionOption,
+        '--use-batched-deploy',
+        'Use the new batched deploy feature to upload explores in batches',
         false,
+    )
+    .option(
+        '--batch-size <number>',
+        'Number of explores to deploy in each batch (default: 50)',
+        '50',
+    )
+    .option(
+        '--parallel-batches <number>',
+        'Number of batches to send in parallel (default: 1, use higher values with caution)',
+        '1',
     )
     .action(previewHandler);
 
@@ -619,6 +669,26 @@ program
         parseDisableTimestampConversionOption,
         false,
     )
+    .option(
+        '--no-warehouse-credentials',
+        'Create preview without warehouse credentials. Copies credentials from upstream project.',
+    )
+    .option('-y, --assume-yes', 'assume yes to prompts', false)
+    .option(
+        '--use-batched-deploy',
+        'Use the new batched deploy feature to upload explores in batches',
+        false,
+    )
+    .option(
+        '--batch-size <number>',
+        'Number of explores to deploy in each batch (default: 50)',
+        '50',
+    )
+    .option(
+        '--parallel-batches <number>',
+        'Number of batches to send in parallel (default: 1, use higher values with caution)',
+        '1',
+    )
     .action(startPreviewHandler);
 
 program
@@ -666,6 +736,11 @@ program
         parseProjectArgument,
         undefined,
     )
+    .option(
+        '--skip-spaces',
+        'skip writing space metadata files during download',
+        false,
+    )
     .action(downloadHandler);
 
 program
@@ -705,10 +780,17 @@ program
     )
     .option('--public', 'Create new spaces as public instead of private', false)
     .option(
+        '--concurrency <number>',
+        'Number of parallel uploads (default: 1)',
+        '1',
+    )
+    .option(
         '--include-charts',
         'Include charts updates when uploading dashboards',
         false,
     )
+    .option('--validate', 'Validate charts and dashboards after upload', false)
+    .option('--gzip', 'Enable gzip compression for request bodies', false)
     .action(uploadHandler);
 
 program
@@ -808,6 +890,23 @@ program
         parseDisableTimestampConversionOption,
         false,
     )
+    .option('-y, --assume-yes', 'assume yes to prompts', false)
+    .option(
+        '--use-batched-deploy',
+        'Use batched deploy for large projects (sends explores in batches)',
+        false,
+    )
+    .option(
+        '--batch-size <number>',
+        'Number of explores per batch (default: 50)',
+        '50',
+    )
+    .option(
+        '--parallel-batches <number>',
+        'Number of batches to send in parallel (default: 1, use higher values with caution)',
+        '1',
+    )
+    .option('--gzip', 'Enable gzip compression for request bodies', false)
     .action(deployHandler);
 
 program
@@ -906,28 +1005,28 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold('generate')} ${styles.secondary(
-            '-- generates .yml file for all dbt models',
-        )}
+      '-- generates .yml file for all dbt models',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s mymodel ${styles.secondary(
-            '-- generates .yml file for a single dbt model',
-        )}
+      'generate',
+  )} -s mymodel ${styles.secondary(
+      '-- generates .yml file for a single dbt model',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s model1 model2 ${styles.secondary(
-            '-- generates .yml for multiple dbt models',
-        )}
+      'generate',
+  )} -s model1 model2 ${styles.secondary(
+      '-- generates .yml for multiple dbt models',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s tag:sales ${styles.secondary(
-            '-- generates .yml for all dbt models tagged as sales',
-        )}
+      'generate',
+  )} -s tag:sales ${styles.secondary(
+      '-- generates .yml for all dbt models tagged as sales',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate',
-        )} -s +mymodel ${styles.secondary(
-            "-- generates .yml for mymodel and all it's parents",
-        )}
+      'generate',
+  )} -s +mymodel ${styles.secondary(
+      "-- generates .yml for mymodel and all it's parents",
+  )}
 `,
     )
 
@@ -1015,10 +1114,8 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'generate-exposures',
-        )} ${styles.secondary(
-            '-- generates .yml file for all lightdash exposures',
-        )}
+      'generate-exposures',
+  )} ${styles.secondary('-- generates .yml file for all lightdash exposures')}
 `,
     )
     .option(
@@ -1042,18 +1139,18 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'diagnostics',
-        )} ${styles.secondary(
-            '-- shows CLI version, Node.js version, and auth status',
-        )}
+      'diagnostics',
+  )} ${styles.secondary(
+      '-- shows CLI version, Node.js version, and auth status',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'diagnostics',
-        )} --dbt ${styles.secondary('-- includes dbt debug output')}
+      'diagnostics',
+  )} --dbt ${styles.secondary('-- includes dbt debug output')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'diagnostics',
-        )} --dbt --project-dir ./my-dbt-project ${styles.secondary(
-            '-- runs dbt debug with custom project directory',
-        )}
+      'diagnostics',
+  )} --dbt --project-dir ./my-dbt-project ${styles.secondary(
+      '-- runs dbt debug with custom project directory',
+  )}
 `,
     )
     .option('--dbt', 'Include dbt debug information', false)
@@ -1089,26 +1186,24 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold('lint')} ${styles.secondary(
-            '-- validates all Lightdash Code files in current directory',
-        )}
+      '-- validates all Lightdash Code files in current directory',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'lint',
-        )} --path ./chart.yml ${styles.secondary(
-            '-- validates a single chart file',
-        )}
+      'lint',
+  )} --path ./chart.yml ${styles.secondary('-- validates a single chart file')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'lint',
-        )} --path ./lightdash ${styles.secondary(
-            '-- validates files in a specific directory',
-        )}
+      'lint',
+  )} --path ./lightdash ${styles.secondary(
+      '-- validates files in a specific directory',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'lint',
-        )} --verbose ${styles.secondary('-- shows detailed validation output')}
+      'lint',
+  )} --verbose ${styles.secondary('-- shows detailed validation output')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'lint',
-        )} --format json ${styles.secondary(
-            '-- outputs results in SARIF JSON format',
-        )}
+      'lint',
+  )} --format json ${styles.secondary(
+      '-- outputs results in SARIF JSON format',
+  )}
 `,
     )
     .option(
@@ -1123,6 +1218,33 @@ ${styles.bold('Examples:')}
         'cli',
     )
     .action(lintHandler);
+
+program
+    .command('pre-aggregate-audit')
+    .description(
+        'Audit pre-aggregate hit/miss coverage for a dashboard (or every dashboard with --all)',
+    )
+    .option(
+        '--dashboard <uuidOrSlug>',
+        'Dashboard UUID or slug (required unless --all is passed)',
+    )
+    .option('--all', 'Audit every dashboard in the target project', false)
+    .option(
+        '--project <projectUuid>',
+        'Project UUID (defaults to LIGHTDASH_PROJECT_UUID env or config)',
+    )
+    .option(
+        '--json',
+        'Emit machine-readable JSON instead of human output',
+        false,
+    )
+    .option(
+        '--fail-on-miss',
+        'Exit 1 if any eligible tile is a pre-aggregate miss (CI-friendly)',
+        false,
+    )
+    .option('--verbose', 'Expand the ineligible section in human output', false)
+    .action(preAggregateAuditHandler);
 
 program
     .command('sql')
@@ -1145,6 +1267,70 @@ program
     .action(sqlHandler);
 
 program
+    .command('run-chart')
+    .description('Execute a chart YAML to verify the query runs')
+    .requiredOption('-p, --path <path>', 'Path to chart YAML file')
+    .option('-o, --output <file>', 'Output file path for CSV results')
+    .option('-l, --limit <number>', 'Row limit for query', parseIntArgument)
+    .option(
+        '--page-size <number>',
+        'Number of rows per page (default: 500)',
+        parseIntArgument,
+    )
+    .option('--verbose', 'Show detailed output', false)
+    .action(runChartHandler);
+
+program
+    .command('set-warehouse')
+    .description(
+        "Update a project's warehouse connection from dbt profiles.yml. Use --assume-yes for non-interactive/CI usage. For organization-managed credentials, use the Lightdash UI.",
+    )
+    .option(
+        '--project-dir <path>',
+        'The directory of the dbt project',
+        defaultProjectDir,
+    )
+    .option(
+        '--profiles-dir <path>',
+        'The directory of the dbt profiles',
+        defaultProfilesDir,
+    )
+    .option(
+        '--profile <name>',
+        'The name of the profile to use (defaults to profile name in dbt_project.yml)',
+        undefined,
+    )
+    .option('--target <name>', 'target to use in profiles.yml file', undefined)
+    .option(
+        '--target-path <path>',
+        'The target directory for dbt (overrides DBT_TARGET_PATH and dbt_project.yml)',
+        undefined,
+    )
+    .option(
+        '--project <uuid>',
+        'Lightdash project UUID to update (defaults to currently selected project)',
+        undefined,
+    )
+    .option(
+        '--start-of-week <number>',
+        'Specifies the first day of the week (used by week-related date functions). 0 (Monday) to 6 (Sunday)',
+        parseStartOfWeekArgument,
+    )
+    .option('-y, --assume-yes', 'assume yes to prompts', false)
+    .option('--verbose', 'Show detailed output', false)
+    .action(setWarehouseHandler);
+
+program
+    .command('export-chart-image')
+    .description(
+        'Export a deployed chart as a PNG image. The chart must already exist on the server.',
+    )
+    .argument('<chart>', 'Chart slug')
+    .requiredOption('-o, --output <file>', 'Output file path for the PNG image')
+    .option('--verbose', 'Show detailed output', false)
+    .action(exportChartImageHandler);
+
+program
     .command('install-skills')
     .description(
         'Installs Lightdash skills for AI coding assistants (Claude, Cursor, Codex)',
@@ -1154,28 +1340,31 @@ program
         `
 ${styles.bold('Examples:')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'install-skills',
-        )} ${styles.secondary(
-            '-- installs skills for Claude at git root (default)',
-        )}
+      'install-skills',
+  )} ${styles.secondary('-- installs skills for Claude at git root (default)')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'install-skills',
-        )} --agent cursor ${styles.secondary('-- installs skills for Cursor')}
+      'install-skills',
+  )} --agent cursor ${styles.secondary('-- installs skills for Cursor')}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'install-skills',
-        )} --global ${styles.secondary(
-            '-- installs skills globally to ~/.claude/skills/',
-        )}
+      'install-skills',
+  )} --global ${styles.secondary(
+      '-- installs skills globally to ~/.claude/skills/',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'install-skills',
-        )} --agent codex --global ${styles.secondary(
-            '-- installs skills globally for Codex',
-        )}
+      'install-skills',
+  )} --agent codex --global ${styles.secondary(
+      '-- installs skills globally for Codex',
+  )}
   ${styles.title('⚡')}️lightdash ${styles.bold(
-            'install-skills',
-        )} --path ./my-project ${styles.secondary(
-            '-- installs skills to a specific path',
-        )}
+      'install-skills',
+  )} --path ./my-project ${styles.secondary(
+      '-- installs skills to a specific path',
+  )}
+  ${styles.title('⚡')}️lightdash ${styles.bold(
+      'install-skills',
+  )} --source my-org/lightdash-fork ${styles.secondary(
+      '-- installs skills from a custom GitHub repo',
+  )}
 
 ${styles.bold('Installation paths:')}
   ${styles.secondary('Project-level (default):')}
@@ -1203,6 +1392,11 @@ ${styles.bold('Installation paths:')}
     .option(
         '--path <path>',
         'Override the install path (skills directory will be created inside)',
+        undefined,
+    )
+    .option(
+        '--source <org/repo>',
+        'Override the GitHub repository to download skills from (default: lightdash/lightdash)',
         undefined,
     )
     .action(installSkillsHandler);
@@ -1244,6 +1438,10 @@ const errorHandler = (err: Error) => {
                 `\n You must have dbt installed to use this command. See https://docs.getdbt.com/docs/core/installation for installation instructions`,
             ),
         );
+    }
+    const diagnosticsHint = getDiagnosticsHint();
+    if (diagnosticsHint) {
+        console.error(diagnosticsHint);
     }
     if (NODE_VERSION.major !== OPTIMIZED_NODE_VERSION) {
         console.warn(

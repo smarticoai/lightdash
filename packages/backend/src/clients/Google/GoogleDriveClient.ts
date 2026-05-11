@@ -6,8 +6,8 @@ import {
     ForbiddenError,
     formatDate,
     getErrorMessage,
-    getItemLabel,
-    getItemLabelWithoutTableName,
+    GoogleSheetsQuotaError,
+    GoogleSheetsScopeError,
     GoogleSheetsTransientError,
     isDimension,
     isField,
@@ -15,12 +15,15 @@ import {
     Metric,
     MissingConfigError,
     NotFoundError,
+    shouldShiftItemTimezone,
     TableCalculation,
+    toIsoWithProjectOffset,
     UnexpectedGoogleSheetsError,
 } from '@lightdash/common';
 import { google, sheets_v4 } from 'googleapis';
 import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
+import { processFieldsForExport } from '../../utils/FileDownloadUtils/FileDownloadUtils';
 
 type GoogleDriveClientArguments = {
     lightdashConfig: LightdashConfig;
@@ -122,6 +125,13 @@ export class GoogleDriveClient {
                     `Google Drive internal error encountered. Please try again later.`,
                 );
             }
+
+            // Detect quota/rate limit errors - these should be retried, not permanently disabled
+            // like: Write requests per minute per user
+            if (err?.message && err.message.includes('Quota exceeded')) {
+                throw new GoogleSheetsQuotaError(getErrorMessage(err));
+            }
+
             throw new UnexpectedGoogleSheetsError(getErrorMessage(err));
         }
     }
@@ -293,6 +303,7 @@ export class GoogleDriveClient {
     static formatCell(
         value: AnyType,
         item?: Field | TableCalculation | CustomDimension | Metric,
+        timezone?: string,
     ) {
         // We don't want to use formatItemValue directly because the format for some types on Gsheets
         // is different to what we use to present the data in the UI (eg: timestamps, currencies)
@@ -316,11 +327,23 @@ export class GoogleDriveClient {
                 // For very large BigInt values, convert to string to preserve precision
                 formattedValue = value.toString();
             }
+        } else if (isField(item) && item.type === DimensionType.TIMESTAMP) {
+            // Shift the wall-clock into the project tz with an explicit
+            // offset so cells communicate the zone honestly. Falls through
+            // to the existing passthrough when timezone is unset / UTC.
+            const shifted = toIsoWithProjectOffset(value, timezone);
+            formattedValue = shifted ?? value;
         } else if (isField(item) && item.type === DimensionType.DATE) {
             const timeInterval = isDimension(item)
                 ? item.timeInterval
                 : undefined;
-            formattedValue = formatDate(value, timeInterval);
+            // TIMESTAMP-base DATE intervals carry a real instant; shift them
+            // alongside TIMESTAMP fields so non-pivot and pivot exports agree.
+            // Calendar DATEs (no TIMESTAMP base) keep wall-clock formatting.
+            const shifted = shouldShiftItemTimezone(item)
+                ? toIsoWithProjectOffset(value, timezone)
+                : undefined;
+            formattedValue = shifted ?? formatDate(value, timeInterval);
         } else if (
             // Return the string representation of the Object Wrappers for Primitive Types
             typeof value === 'object' &&
@@ -357,7 +380,7 @@ export class GoogleDriveClient {
     async appendToSheet(
         refreshToken: string,
         fileId: string,
-        csvContent: Record<string, string>[],
+        csvContent: Record<string, unknown>[],
         itemMap: ItemsMap,
         showTableNames: boolean,
 
@@ -365,6 +388,7 @@ export class GoogleDriveClient {
         columnOrder: string[] = [],
         customLabels: Record<string, string> = {},
         hiddenFields: string[] = [],
+        timezone?: string,
     ) {
         if (!this.isEnabled) {
             throw new MissingConfigError('Google Drive is not enabled');
@@ -375,28 +399,22 @@ export class GoogleDriveClient {
             return;
         }
 
-        const sortedFieldIds = Object.keys(csvContent[0])
-            .sort((a, b) => columnOrder.indexOf(a) - columnOrder.indexOf(b))
-            .filter((id) => !hiddenFields.includes(id));
-
-        const csvHeader = sortedFieldIds.map((id) => {
-            if (customLabels[id]) {
-                return customLabels[id];
-            }
-            if (itemMap[id]) {
-                return showTableNames
-                    ? getItemLabel(itemMap[id])
-                    : getItemLabelWithoutTableName(itemMap[id]);
-            }
-            return id;
-        });
+        const { sortedFieldIds, headers: csvHeader } = processFieldsForExport(
+            itemMap,
+            {
+                showTableNames,
+                customLabels,
+                columnOrder,
+                hiddenFields,
+            },
+        );
 
         const values = csvContent.map((row) =>
             sortedFieldIds.map((fieldId) => {
                 const item = itemMap[fieldId];
                 // Google sheet doesn't like arrays as values, so we need to convert them to strings
                 const value = row[fieldId];
-                return GoogleDriveClient.formatCell(value, item);
+                return GoogleDriveClient.formatCell(value, item, timezone);
             }),
         );
 

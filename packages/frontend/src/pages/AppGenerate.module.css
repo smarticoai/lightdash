@@ -1,0 +1,459 @@
+.layout {
+    height: calc(100vh - 50px);
+    overflow: hidden;
+}
+
+.chatPanel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+
+    @mixin light {
+        background-color: var(--mantine-color-white);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-7);
+    }
+}
+
+.chatMessages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--mantine-spacing-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--mantine-spacing-lg);
+}
+
+.emptyChat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--mantine-spacing-md);
+    padding: var(--mantine-spacing-xl);
+    padding-top: 50px;
+    text-align: center;
+}
+
+.userMessage {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.userBubble {
+    max-width: 85%;
+    padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+    border-radius: var(--mantine-radius-md);
+    font-size: var(--mantine-font-size-sm);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    border: 1px solid;
+
+    @mixin light {
+        background-color: var(--mantine-color-ldGray-0);
+        color: var(--mantine-color-black);
+        border-color: var(--mantine-color-ldGray-3);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-6);
+        color: var(--mantine-color-white);
+        border-color: var(--mantine-color-dark-4);
+    }
+}
+
+.assistantMessage {
+    display: flex;
+    gap: var(--mantine-spacing-sm);
+    align-items: flex-start;
+}
+
+.assistantBubble {
+    max-width: 90%;
+    font-size: var(--mantine-font-size-sm);
+    line-height: 1.5;
+}
+
+.markdown {
+    background-color: transparent !important;
+    font-size: var(--mantine-font-size-sm) !important;
+    line-height: 1.5 !important;
+    font-family: inherit !important;
+}
+
+.chatInputArea {
+    flex-shrink: 0;
+    padding: var(--mantine-spacing-sm) var(--mantine-spacing-sm) 20px;
+    border-top: 1px solid;
+
+    @mixin light {
+        border-color: var(--mantine-color-ldGray-2);
+    }
+    @mixin dark {
+        border-color: var(--mantine-color-ldDark-4);
+    }
+}
+
+.inputWrapper {
+    display: flex;
+    align-items: flex-end;
+    border-radius: var(--mantine-radius-lg);
+    padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+    transition:
+        border-color 150ms ease,
+        box-shadow 150ms ease;
+
+    @mixin light {
+        background-color: var(--mantine-color-white);
+        border: 1px solid var(--mantine-color-ldGray-3);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-ldDark-2);
+        border: 1px solid var(--mantine-color-ldDark-6);
+    }
+
+    &:focus-within {
+        @mixin light {
+            border-color: var(--mantine-color-ldGray-5);
+            box-shadow: 0 0 0 4px var(--mantine-color-ldGray-2);
+        }
+        @mixin dark {
+            border-color: var(--mantine-color-ldDark-7);
+            box-shadow: 0 0 0 4px var(--mantine-color-ldDark-4);
+        }
+    }
+}
+
+.textarea {
+    border: none;
+    background: transparent;
+    resize: none;
+    padding: 0;
+    padding-right: var(--mantine-spacing-sm);
+    font-size: var(--mantine-font-size-sm);
+    line-height: 1.5;
+    min-height: unset;
+
+    &:focus {
+        outline: none;
+        box-shadow: none;
+    }
+}
+
+.textareaRoot {
+    width: 100%;
+}
+
+.textareaWrapper {
+    --input-bd: transparent;
+    --input-bg: transparent;
+}
+
+.resourceSections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mantine-spacing-sm);
+    margin-top: var(--mantine-spacing-sm);
+    padding: var(--mantine-spacing-sm);
+    min-height: 120px;
+    max-height: 300px;
+    overflow-y: auto;
+    border-radius: var(--mantine-radius-md);
+    border: 1px dashed;
+
+    @mixin light {
+        border-color: var(--mantine-color-ldGray-2);
+    }
+    @mixin dark {
+        border-color: var(--mantine-color-ldDark-4);
+    }
+}
+
+.resourceEmpty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+}
+
+.submitButton {
+    flex-shrink: 0;
+    border-radius: var(--mantine-radius-xl);
+    transition:
+        transform 150ms ease,
+        opacity 150ms ease;
+
+    &:disabled {
+        opacity: 0.4;
+    }
+
+    &:active:not(:disabled) {
+        transform: scale(0.95);
+    }
+}
+
+.resizeHandle {
+    width: 1px;
+    cursor: col-resize;
+    transition: all 0.2s ease;
+
+    @mixin light {
+        background-color: var(--mantine-color-ldGray-2);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-ldDark-4);
+    }
+
+    &[data-resize-handle-state='hover'],
+    &[data-resize-handle-state='drag'] {
+        @mixin light {
+            background-color: var(--mantine-color-ldGray-4);
+            box-shadow: 0 0 0 1px var(--mantine-color-ldGray-4);
+        }
+        @mixin dark {
+            background-color: var(--mantine-color-ldDark-6);
+            box-shadow: 0 0 0 1px var(--mantine-color-ldDark-6);
+        }
+    }
+}
+
+.previewPanel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+
+    @mixin light {
+        background-color: var(--mantine-color-ldGray-0);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-8);
+    }
+}
+
+.previewHeader {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--mantine-spacing-sm);
+    padding: var(--mantine-spacing-md);
+    border-bottom: 1px solid;
+
+    @mixin light {
+        background-color: var(--mantine-color-white);
+        border-color: var(--mantine-color-ldGray-2);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-7);
+        border-color: var(--mantine-color-ldDark-4);
+    }
+}
+
+.previewHeaderInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.previewContent {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    position: relative;
+}
+
+.previewEmpty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding-bottom: 50px;
+    gap: var(--mantine-spacing-sm);
+
+    @mixin light {
+        color: var(--mantine-color-ldGray-5);
+    }
+    @mixin dark {
+        color: var(--mantine-color-ldDark-8);
+    }
+}
+
+.loadingDots {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.loadingDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    animation: dotPulse 1.4s ease-in-out infinite;
+
+    @mixin light {
+        background-color: var(--mantine-color-ldGray-5);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-ldDark-8);
+    }
+}
+
+.loadingDot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.loadingDot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes dotPulse {
+    0%,
+    80%,
+    100% {
+        opacity: 0.3;
+        transform: scale(0.8);
+    }
+    40% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.textareaColumn {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.bubbleQueryList {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bubbleQueryItem {
+    padding: 4px 6px;
+    border-radius: var(--mantine-radius-sm);
+
+    @mixin light {
+        background-color: var(--mantine-color-white);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-5);
+    }
+}
+
+/* Full-width framed panel that hosts the clarifying questions. Sits on the
+ * chat-panel bg with a slight tint + border so the user's eye is anchored
+ * here (paired with `.dimmedHistory` on the messages above). */
+.clarifyContainer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mantine-spacing-sm);
+    width: 100%;
+    padding: var(--mantine-spacing-md);
+    border-radius: var(--mantine-radius-md);
+    border: 1px solid;
+
+    @mixin light {
+        background-color: var(--mantine-color-ldGray-1);
+        border-color: var(--mantine-color-ldGray-3);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-7);
+        border-color: var(--mantine-color-dark-4);
+    }
+}
+
+/* Wraps the rendered chat history. Reproduces `.chatMessages` flex-column
+ * gap so layout is identical with or without the wrapper, and lets us dim
+ * the whole group via a sibling class. */
+.chatMessageGroup {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mantine-spacing-lg);
+}
+
+.dimmedHistory {
+    opacity: 0.4;
+    pointer-events: none;
+    transition: opacity 200ms ease;
+}
+
+.clarifyCard {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    border-radius: var(--mantine-radius-sm);
+    transition: background-color 100ms ease;
+
+    @mixin light {
+        background-color: var(--mantine-color-white);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-6);
+    }
+
+    &:focus-within {
+        @mixin light {
+            background-color: var(--mantine-color-ldGray-0);
+        }
+        @mixin dark {
+            background-color: var(--mantine-color-dark-5);
+        }
+    }
+}
+
+/* Strip the default Mantine Textarea framing so the answer reads as flowing
+ * chat text inside the card instead of an embedded form field. */
+.clarifyCardInput {
+    padding: 0 !important;
+    min-height: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    font-size: var(--mantine-font-size-sm) !important;
+    line-height: 1.5 !important;
+}
+
+.bubbleClarificationList {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bubbleClarificationItem {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border-radius: var(--mantine-radius-sm);
+
+    @mixin light {
+        background-color: var(--mantine-color-white);
+    }
+    @mixin dark {
+        background-color: var(--mantine-color-dark-5);
+    }
+}
+
+.bubbleClarificationQuestion {
+    color: var(--mantine-color-dimmed);
+}
+
+.sentImageThumbnail {
+    max-height: 40px;
+    max-width: 80px;
+    border-radius: var(--mantine-radius-xs);
+    object-fit: cover;
+    margin-top: var(--mantine-spacing-xs);
+    opacity: 0.9;
+}

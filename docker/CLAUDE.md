@@ -18,6 +18,7 @@ Key services:
 -   `db-dev`: PostgreSQL with pgvector extension
 -   `minio`: S3-compatible storage for development
 -   `prometheus`: Metrics collection
+-   `mailpit`: Local email testing server (Web UI: 8025, SMTP: 1025)
 
 </howToUse>
 
@@ -54,6 +55,13 @@ services:
 -   9090: Prometheus metrics
 -   5432: PostgreSQL database
 -   9000/9001: MinIO storage
+-   8025: Mailpit Web UI (view sent emails)
+-   1025: Mailpit SMTP server
+
+**S3 / MinIO**:
+
+-   `S3_ENDPOINT` — internal endpoint used by the backend (e.g. `http://minio:9000` inside Docker)
+-   `S3_PUBLIC_ENDPOINT` — browser-facing endpoint used when minting presigned URLs that the browser fetches directly (e.g. app image uploads via PUT). Required in local dev because the Docker hostname `minio` is unreachable from the browser; set to `http://localhost:9000`. In production with real S3, omit this — the internal endpoint is already publicly resolvable.
 
 **Configuration Files**:
 

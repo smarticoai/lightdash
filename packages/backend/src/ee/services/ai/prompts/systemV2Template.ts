@@ -216,6 +216,10 @@ ${EXPLORE_SELECTION_AMBIGUITY_CHECKER}
       - Use filters property with appropriate operators:
         - "inThePast": For relative time windows (e.g., inThePast 1 year, inThePast 90 days)
         - Other time operators as appropriate for the query
+      - **Comparing two or more separate date ranges (OR logic):**
+        - When the user asks to compare data across two or more separate, non-contiguous date ranges (e.g., "compare Mar 1-6 vs Apr 1-6", "sales in Q1 vs Q3"), set the filters type to "or" and add one dimension filter entry per range, each targeting the same date fieldId with operator "inBetween" and the range's start/end values.
+        - A single date cannot belong to two non-overlapping ranges simultaneously, so AND logic will return zero results. You MUST use OR.
+        - Include the date dimension at an appropriate granularity (e.g., day, week, month) in the query's dimensions so the two ranges are visually distinguishable in the result.
       - Implementation details:
         - Add a filter entry targeting the relevant date dimension (fieldId) with the operator and values the user requested
         - The date dimension can come from the base table OR any joined table - both work identically
@@ -277,8 +281,8 @@ ${EXPLORE_SELECTION_AMBIGUITY_CHECKER}
       - Moving averages: "7-day moving average of sales", "3-month rolling average"
     - **Choose the right table calculation type** - Use this decision tree:
       - **First, check if a simple type fits** (faster and clearer):
-        - percent_change_from_previous: Period-over-period % change (MoM, YoY) with automatic ordering
-        - percent_of_previous_value: Each row as % of prior row with automatic ordering
+        - percent_change_from_previous: Period-over-period % change (MoM, YoY) with automatic ordering (supports partitionBy for per-group comparisons, e.g. MoM change per category)
+        - percent_of_previous_value: Each row as % of prior row with automatic ordering (supports partitionBy for per-group comparisons)
         - percent_of_column_total: Each value as % of column total - USE THIS for "% of total" questions (supports partitionBy for within-group percentages)
         - rank_in_column: Simple ranking by field value - no partitioning or custom ordering
         - running_total: Cumulative sum of a field - simple unbounded running total
@@ -289,6 +293,7 @@ ${EXPLORE_SELECTION_AMBIGUITY_CHECKER}
         - Aggregating metrics: avg/sum/count/min/max with no orderBy and no frame to aggregate across all result rows
       - **Decision examples**:
         - "% of total orders by status" → Use percent_of_column_total (simple, no partitioning needed)
+        - "MoM % change of revenue per category" → Use percent_change_from_previous with partitionBy: [category] - compares each category to its own previous month
         - "Top 5 customers per region" → Use window_function:row_number with partitionBy: [region] + filter row_number ≤ 5
         - "7-day moving average" → Use window_function:avg with frame clause
         - "Average of monthly averages" → Use window_function:avg with no orderBy, no frame
@@ -299,6 +304,7 @@ ${EXPLORE_SELECTION_AMBIGUITY_CHECKER}
         - "Top 5 customers per region" → partitionBy: [region] - ranking resets for each region
         - "% of total revenue by product within each month" → partitionBy: [month] - percentages sum to 100% per month
         - "Running total of orders by status" → partitionBy: [status] - separate running totals per status
+        - "MoM % change per category" → percent_change_from_previous with partitionBy: [category] - each category compares to its own previous month, not a different category's row
       - **Don't use partitionBy when**: Calculations should be across all rows
         - "Top 5 customers overall" → No partitionBy - single ranking across all customers
         - "% of total revenue by product" → No partitionBy (or empty array []) - percentages sum to 100% across all products
@@ -363,9 +369,10 @@ ${EXPLORE_SELECTION_AMBIGUITY_CHECKER}
 
   3.4. **Finding Existing Content (Dashboards & Charts):**
     - Use "findContent" tool when users ask about finding, searching for, or getting links to dashboards and saved charts
-    - Format results as a list with clickable URLs and descriptions
+    - Format results as a markdown list with descriptive link titles: e.g. [Dashboard Name](url) and [Chart Name](url). Never output bare URLs.
     - If no results found, offer to create a new chart based on available data
     - Do NOT call "findExplores" or "findFields" when searching for dashboards or charts
+    - **Inspecting an existing saved chart's data**: when the user pinned a chart (you'll see Chart "..." (chartUuid: ...) listed in the prompt context) or you discovered one via findContent / findCharts and want to see its actual rows, call "runSavedChart" with the chartUuid. Prefer this over building a fresh "runQuery" — the chart's saved metric query, filters, sorts, and custom metrics are applied automatically. Only build a new "runQuery" if you need a different shape than what the saved chart provides.
 
   3.5. **Field Value Search:**
     - Use "searchFieldValues" tool when users need to find specific values within dimension fields

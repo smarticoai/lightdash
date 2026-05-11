@@ -1,7 +1,9 @@
-import { AbilityBuilder } from '@casl/ability';
+import { Ability, AbilityBuilder } from '@casl/ability';
 import {
     ActivateUser,
     AlreadyExistsError,
+    applyServiceAccountAbilities,
+    buildAbilityFromScopes,
     CreateUserArgs,
     CreateUserWithRole,
     ForbiddenError,
@@ -17,11 +19,11 @@ import {
     OpenIdUser,
     OrganizationMemberRole,
     ParameterError,
-    PersonalAccessToken,
     ProjectMemberProfile,
     ProjectMemberRole,
     Role,
     RoleWithScopes,
+    ServiceAccountScope,
     SessionUser,
     UpdateUserArgs,
     validatePassword,
@@ -46,10 +48,9 @@ import {
     PasswordLoginTableName,
 } from '../database/entities/passwordLogins';
 import { DbPersonalAccessToken } from '../database/entities/personalAccessTokens';
-import {
-    RolesTableName,
-    ScopedRolesTableName,
-} from '../database/entities/roles';
+import { ProjectMembershipsTableName } from '../database/entities/projectMemberships';
+import { ProjectTableName } from '../database/entities/projects';
+import { ScopedRolesTableName } from '../database/entities/roles';
 import {
     DbUser,
     DbUserIn,
@@ -57,6 +58,10 @@ import {
     UserTableName,
 } from '../database/entities/users';
 import { deprecatedHash, hash } from '../utils/hash';
+import {
+    CachedPatSessionUser,
+    PatSessionCache,
+} from './caches/PatSessionCache';
 import { PersonalAccessTokenModel } from './DashboardModel/PersonalAccessTokenModel';
 import Transaction = Knex.Transaction;
 
@@ -77,6 +82,7 @@ export type DbUserDetails = {
     role?: OrganizationMemberRole;
     role_uuid?: string;
     is_active: boolean;
+    is_internal: boolean;
     updated_at: Date;
 };
 
@@ -196,9 +202,12 @@ export class UserModel {
                 `${UserTableName}.user_id`,
                 `${OpenIdIdentitiesTableName}.user_id`,
             )
-            .select<
-                { user_uuid: string; has_authentication: false }[]
-            >(`${UserTableName}.user_uuid`, trx.raw(`CASE WHEN COALESCE(password_logins.user_id, openid_identities.user_id, null) IS NOT NULL THEN TRUE ELSE FALSE END as has_authentication`))
+            .select<{ user_uuid: string; has_authentication: false }[]>(
+                `${UserTableName}.user_uuid`,
+                trx.raw(
+                    `CASE WHEN COALESCE(password_logins.user_id, openid_identities.user_id, null) IS NOT NULL THEN TRUE ELSE FALSE END as has_authentication`,
+                ),
+            )
             .distinctOn(`user_uuid`)
             .whereIn(`${UserTableName}.user_uuid`, filters.userUuids);
     }
@@ -301,9 +310,11 @@ export class UserModel {
                     .where('user_uuid', userUuid)
                     .select('user_id'),
             )
-            .select<
-                DbOrganization[]
-            >('organizations.organization_uuid', 'organizations.created_at', 'organizations.organization_name');
+            .select<DbOrganization[]>(
+                'organizations.organization_uuid',
+                'organizations.created_at',
+                'organizations.organization_name',
+            );
 
         return organizations.map((organization) => ({
             organizationUuid: organization.organization_uuid,
@@ -355,9 +366,15 @@ export class UserModel {
                 'password_logins.user_id',
             )
             .where('email', email)
-            .select<
-                (DbUserDetails & { password_hash: string })[]
-            >('*', 'organizations.created_at as organization_created_at');
+            // Defence-in-depth: internal user records (service accounts,
+            // future: persisted embed/AI principals) have no email row, so
+            // this is already empty for them — the explicit guard documents
+            // intent and survives any join refactor.
+            .andWhere(`${UserTableName}.is_internal`, false)
+            .select<(DbUserDetails & { password_hash: string })[]>(
+                '*',
+                'organizations.created_at as organization_created_at',
+            );
         if (user === undefined) {
             throw new NotFoundError(
                 `No user found with email ${email} and password`,
@@ -402,9 +419,10 @@ export class UserModel {
                 'password_logins.user_id',
             )
             .where('users.user_uuid', userUuid)
-            .select<
-                (DbUserDetails & { password_hash: string })[]
-            >('*', 'organizations.created_at as organization_created_at');
+            .select<(DbUserDetails & { password_hash: string })[]>(
+                '*',
+                'organizations.created_at as organization_created_at',
+            );
         if (user === undefined) {
             throw new NotFoundError(`No user found with uuid ${userUuid}`);
         }
@@ -475,6 +493,9 @@ export class UserModel {
                 }
             }
         });
+        if (isActive === false) {
+            PatSessionCache.invalidate();
+        }
         return this.getUserDetailsByUuid(userUuid);
     }
 
@@ -482,6 +503,7 @@ export class UserModel {
         await this.database(UserTableName)
             .where('user_uuid', userUuid)
             .delete();
+        PatSessionCache.invalidate();
     }
 
     async getUserProjectRoles(
@@ -492,14 +514,23 @@ export class UserModel {
             'projectUuid' | 'role' | 'userUuid' | 'roleUuid'
         >[]
     > {
+        type Row = {
+            project_uuid: string;
+            role: ProjectMemberRole | null;
+            role_uuid: string | null;
+        };
         const projectMemberships = await this.database('project_memberships')
             .leftJoin(
-                'projects',
+                ProjectTableName,
                 'project_memberships.project_id',
-                'projects.project_id',
+                `${ProjectTableName}.project_id`,
             )
             .leftJoin('users', 'project_memberships.user_id', 'users.user_id')
-            .select('*')
+            .select<Row[]>([
+                `${ProjectTableName}.project_uuid`,
+                'project_memberships.role',
+                'project_memberships.role_uuid',
+            ])
             .where('users.user_uuid', userUuid);
 
         return projectMemberships.map((membership) => ({
@@ -593,6 +624,76 @@ export class UserModel {
             hasAuthentication,
         );
 
+        // Service accounts get a dedicated `users` row marked `is_internal`.
+        // Two permission shapes coexist:
+        //  1. Custom org role (preferred): `organization_memberships.role_uuid`
+        //     points at a custom role; CASL composes from its `scoped_roles`
+        //     via the standard `buildAbilityFromScopes` path. UI scope-toggling
+        //     drives runtime behavior end-to-end.
+        //  2. Legacy scopes (back-compat): `service_accounts.scopes` drives
+        //     CASL via `applyServiceAccountAbilities`. SAs created before
+        //     custom-role support keep working unchanged.
+        if (user.is_internal) {
+            // Custom-role path: if the SA's user has a role_uuid set, build
+            // CASL from that role's scopes. Reuses the same loader the human
+            // path uses below. The `customRoles.enabled` flag is intentionally
+            // NOT consulted here — it's a feature/UI gate (does the role
+            // builder appear in settings?), not a runtime ability gate. Once
+            // a role exists in the DB and is bound to the SA's
+            // organization_membership, the runtime must respect it. If we
+            // silently neutered role-driven SAs whenever an admin toggled
+            // the flag off, every CI workflow on those tokens would 403
+            // overnight.
+            if (user.role_uuid) {
+                const customRoleScopes = await this.customRoleScopes([
+                    user.role_uuid,
+                ]);
+                const scopes = customRoleScopes[user.role_uuid];
+                if (scopes) {
+                    const builder = new AbilityBuilder<MemberAbility>(Ability);
+                    buildAbilityFromScopes(
+                        {
+                            organizationUuid: user.organization_uuid as string,
+                            userUuid: user.user_uuid,
+                            scopes,
+                            isEnterprise:
+                                this.lightdashConfig.license.licenseKey !==
+                                undefined,
+                            organizationRole: user.role,
+                            permissionsConfig: {
+                                pat: this.lightdashConfig.auth.pat,
+                            },
+                        },
+                        builder,
+                    );
+                    return {
+                        abilityBuilder: builder,
+                        lightdashUser,
+                    };
+                }
+            }
+
+            // Legacy scopes path: SA pre-dates custom-role support, or the
+            // role lookup didn't resolve. Fall back to the scope-derived
+            // ability set.
+            const serviceAccount = await this.findServiceAccountByUserUuid(
+                user.user_uuid,
+            );
+            if (serviceAccount) {
+                const builder = new AbilityBuilder<MemberAbility>(Ability);
+                applyServiceAccountAbilities({
+                    scopes: serviceAccount.scopes,
+                    organizationUuid: serviceAccount.organizationUuid,
+                    userUuid: user.user_uuid,
+                    builder,
+                });
+                return {
+                    abilityBuilder: builder,
+                    lightdashUser,
+                };
+            }
+        }
+
         // Fetch scopes for custom roles
         const customRoleUuids = [...projectRoles, ...groupProjectRoles]
             .map((role) => role.roleUuid)
@@ -615,6 +716,31 @@ export class UserModel {
         };
     }
 
+    private async findServiceAccountByUserUuid(userUuid: string): Promise<
+        | {
+              scopes: ServiceAccountScope[];
+              organizationUuid: string;
+          }
+        | undefined
+    > {
+        const row = await this.database('service_accounts')
+            .where('service_account_user_uuid', userUuid)
+            .select<
+                {
+                    scopes: string[];
+                    organization_uuid: string;
+                }[]
+            >('scopes', 'organization_uuid')
+            .first();
+        if (!row) {
+            return undefined;
+        }
+        return {
+            scopes: row.scopes as ServiceAccountScope[],
+            organizationUuid: row.organization_uuid,
+        };
+    }
+
     async findSessionUserByOpenId(
         issuer: string,
         subject: string,
@@ -627,9 +753,10 @@ export class UserModel {
             )
             .where('openid_identities.issuer', issuer)
             .andWhere('openid_identities.subject', subject)
-            .select<
-                DbUserDetails[]
-            >('*', 'organizations.created_at as organization_created_at');
+            .select<DbUserDetails[]>(
+                '*',
+                'organizations.created_at as organization_created_at',
+            );
         if (user === undefined) {
             return user;
         }
@@ -818,6 +945,7 @@ export class UserModel {
         const [user] = await userDetailsQueryBuilder(this.database)
             .where('email', email)
             .andWhere('emails.is_primary', true)
+            .andWhere(`${UserTableName}.is_internal`, false)
             .select('*', 'organizations.created_at as organization_created_at');
         if (user === undefined) {
             return undefined;
@@ -843,6 +971,7 @@ export class UserModel {
     async findUserByEmail(email: string): Promise<LightdashUser | undefined> {
         const [user] = await userDetailsQueryBuilder(this.database)
             .where('email', email)
+            .andWhere(`${UserTableName}.is_internal`, false)
             .select('*', 'organizations.created_at as organization_created_at');
         return user
             ? mapDbUserDetailsToLightdashUser(
@@ -878,9 +1007,16 @@ export class UserModel {
         token: string,
         noHash: boolean = false,
     ): Promise<
-        | { user: SessionUser; personalAccessToken: PersonalAccessToken }
+        | {
+              data: CachedPatSessionUser;
+              cacheHit: boolean;
+          }
         | undefined
     > {
+        const cached = PatSessionCache.get(token);
+        if (cached) {
+            return { data: cached, cacheHit: true };
+        }
         const tokenHash = noHash ? token : await hash(token);
         const [row] = await userDetailsQueryBuilder(this.database)
             .innerJoin(
@@ -889,18 +1025,49 @@ export class UserModel {
                 'users.user_id',
             )
             .where('token_hash', tokenHash)
-            .orWhere('token_hash', deprecatedHash(token)) // Adding old sha256 hash for backwards compatibility
             .select<(DbUserDetails & DbPersonalAccessToken)[]>(
                 '*',
                 'organizations.created_at as organization_created_at',
             );
+        if (row === undefined && !noHash) {
+            const [deprecatedRow] = await userDetailsQueryBuilder(this.database)
+                .innerJoin(
+                    'personal_access_tokens',
+                    'personal_access_tokens.created_by_user_id',
+                    'users.user_id',
+                )
+                .where('token_hash', deprecatedHash(token))
+                .select<(DbUserDetails & DbPersonalAccessToken)[]>(
+                    '*',
+                    'organizations.created_at as organization_created_at',
+                );
+            if (deprecatedRow) {
+                const { abilityBuilder, lightdashUser } =
+                    await this.generateUserAbilityBuilder(deprecatedRow);
+
+                const deprecatedData: CachedPatSessionUser = {
+                    user: {
+                        ...lightdashUser,
+                        abilityRules: abilityBuilder.rules,
+                        ability: abilityBuilder.build(),
+                        userId: deprecatedRow.user_id,
+                    },
+                    personalAccessToken:
+                        PersonalAccessTokenModel.mapDbObjectToPersonalAccessToken(
+                            deprecatedRow,
+                        ),
+                };
+                PatSessionCache.set(token, deprecatedData);
+                return { data: deprecatedData, cacheHit: false };
+            }
+        }
         if (row === undefined) {
             return undefined;
         }
         const { abilityBuilder, lightdashUser } =
             await this.generateUserAbilityBuilder(row);
 
-        return {
+        const data: CachedPatSessionUser = {
             user: {
                 ...lightdashUser,
                 abilityRules: abilityBuilder.rules,
@@ -910,6 +1077,8 @@ export class UserModel {
             personalAccessToken:
                 PersonalAccessTokenModel.mapDbObjectToPersonalAccessToken(row),
         };
+        PatSessionCache.set(token, data);
+        return { data, cacheHit: false };
     }
 
     async createPassword(userId: number, newPassword: string): Promise<void> {
@@ -1007,6 +1176,39 @@ export class UserModel {
             await Promise.all(projectMemberships);
         });
         return this.getUserDetailsByUuid(userUuid);
+    }
+
+    async addProjectMemberships(
+        userUuid: string,
+        projects: { [projectUuid: string]: ProjectMemberRole },
+    ): Promise<void> {
+        const [user] = await this.database(UserTableName)
+            .where('user_uuid', userUuid)
+            .select('user_id');
+        if (!user) {
+            throw new NotFoundError('Cannot find user');
+        }
+
+        const projectMemberships = Object.entries(projects).map(
+            async ([projectUuid, projectRole]) => {
+                const [project] = await this.database(ProjectTableName)
+                    .select('project_id')
+                    .where('project_uuid', projectUuid);
+
+                if (project) {
+                    await this.database(ProjectMembershipsTableName)
+                        .insert({
+                            project_id: project.project_id,
+                            role: projectRole,
+                            user_id: user.user_id,
+                        })
+                        .onConflict(['project_id', 'user_id'])
+                        .ignore();
+                }
+            },
+        );
+
+        await Promise.all(projectMemberships);
     }
 
     async getRefreshToken(

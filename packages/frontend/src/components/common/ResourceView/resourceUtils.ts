@@ -1,8 +1,8 @@
 import {
+    assertUnreachable,
     ChartKind,
     ChartSourceType,
     ResourceViewItemType,
-    assertUnreachable,
     type ResourceViewChartItem,
     type ResourceViewItem,
 } from '@lightdash/common';
@@ -14,6 +14,8 @@ export const getResourceTypeName = (item: ResourceViewItem) => {
             return 'Dashboard';
         case ResourceViewItemType.SPACE:
             return 'Space';
+        case ResourceViewItemType.DATA_APP:
+            return 'Data app';
         case ResourceViewItemType.CHART:
             switch (item.data.chartKind) {
                 case undefined:
@@ -45,11 +47,10 @@ export const getResourceTypeName = (item: ResourceViewItem) => {
                     return 'Custom visualization';
                 case ChartKind.MAP:
                     return 'Map';
+                case ChartKind.SANKEY:
+                    return 'Sankey';
                 default:
-                    return assertUnreachable(
-                        item.data.chartKind,
-                        `Chart type ${item.data.chartKind} not supported`,
-                    );
+                    return 'Chart';
             }
         default:
             return assertUnreachable(item, 'Resource type not supported');
@@ -83,6 +84,8 @@ export const getResourceUrl = (projectUuid: string, item: ResourceViewItem) => {
             return getChartResourceUrl(projectUuid, item);
         case ResourceViewItemType.SPACE:
             return `/projects/${projectUuid}/spaces/${item.data.uuid}`;
+        case ResourceViewItemType.DATA_APP:
+            return `/projects/${projectUuid}/apps/${item.data.uuid}/preview`;
         default:
             return assertUnreachable(item, `Can't get URL for ${itemType}`);
     }
@@ -96,6 +99,8 @@ export const getResourceName = (type: ResourceViewItemType) => {
             return 'Chart';
         case ResourceViewItemType.SPACE:
             return 'Space';
+        case ResourceViewItemType.DATA_APP:
+            return 'Data app';
         default:
             return assertUnreachable(type, 'Resource type not supported');
     }
@@ -106,9 +111,10 @@ export const getResourceViewsSinceWhenDescription = (
 ) => {
     if (
         item.type !== ResourceViewItemType.CHART &&
-        item.type !== ResourceViewItemType.DASHBOARD
+        item.type !== ResourceViewItemType.DASHBOARD &&
+        item.type !== ResourceViewItemType.DATA_APP
     ) {
-        throw new Error('Only supported for charts and dashboards');
+        throw new Error('Only supported for charts, dashboards and data apps');
     }
 
     return item.data.firstViewedAt

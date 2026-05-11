@@ -50,6 +50,7 @@ export function convertLightdashModelToDbtModel(
             colors: dimension.colors,
             urls: dimension.urls,
             required_attributes: dimension.required_attributes,
+            any_attributes: dimension.any_attributes,
             ai_hint: dimension.ai_hint,
             tags: dimension.tags,
             compact: dimension.compact,
@@ -78,10 +79,12 @@ export function convertLightdashModelToDbtModel(
         sets: model.sets,
         order_fields_by: model.order_fields_by,
         group_label: model.group_label,
+        groups: model.groups,
         sql_filter: model.sql_filter,
         sql_where: model.sql_where,
         sql_from: sqlFrom, // from_sql maps directly to sql_from
         required_attributes: model.required_attributes,
+        any_attributes: model.any_attributes,
         group_details: model.group_details,
         default_time_dimension: model.default_time_dimension,
         spotlight: model.spotlight,
@@ -92,6 +95,7 @@ export function convertLightdashModelToDbtModel(
         ai_hint: model.ai_hint,
         parameters: model.parameters,
         primary_key: model.primary_key,
+        pre_aggregates: model.pre_aggregates,
     };
 
     // Create a DbtModelNode that mimics what dbt would produce

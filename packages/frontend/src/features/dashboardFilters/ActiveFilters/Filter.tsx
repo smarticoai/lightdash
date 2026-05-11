@@ -2,16 +2,18 @@ import {
     applyDefaultTileTargets,
     DimensionType,
     getFilterTypeFromItemType,
+    type DashboardFilterableField,
     type DashboardFilterRule,
-    type FilterableDimension,
 } from '@lightdash/common';
 import {
     ActionIcon,
     Badge,
     Box,
     Button,
+    HoverCard,
     Indicator,
     Popover,
+    ScrollArea,
     Text,
     Tooltip,
 } from '@mantine-8/core';
@@ -26,6 +28,7 @@ import {
 } from '../../../components/common/Filters/FilterInputs/utils';
 import MantineIcon from '../../../components/common/MantineIcon';
 import useDashboardContext from '../../../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../../../providers/Dashboard/useDashboardTileStatusContext';
 import FilterConfiguration from '../FilterConfiguration';
 import { hasFilterValueSet } from '../FilterConfiguration/utils';
 import classes from './Filter.module.css';
@@ -35,7 +38,7 @@ type Props = {
     isOrphaned: boolean;
     orphanedTooltip?: string;
     isTemporary?: boolean;
-    field: FilterableDimension | undefined;
+    field: DashboardFilterableField | undefined;
     filterRule: DashboardFilterRule;
     openPopoverId: string | undefined;
     onPopoverOpen: (popoverId: string) => void;
@@ -65,7 +68,7 @@ const Filter: FC<Props> = ({
     const allFilterableFields = useDashboardContext(
         (c) => c.allFilterableFields,
     );
-    const sqlChartTilesMetadata = useDashboardContext(
+    const sqlChartTilesMetadata = useDashboardTileStatusContext(
         (c) => c.sqlChartTilesMetadata,
     );
     const disabled = useMemo(() => {
@@ -372,25 +375,49 @@ const Filter: FC<Props> = ({
                                                         : filterRuleLabels?.value}
                                                 </Text>
                                                 {truncatedValuesDisplay.hasMore && (
-                                                    <Tooltip
+                                                    <HoverCard
                                                         withinPortal
                                                         position="bottom"
-                                                        label={
-                                                            <Box>
-                                                                <Text
-                                                                    fz="xs"
-                                                                    fw={500}
-                                                                    c="dimmed"
-                                                                >
-                                                                    Additional
-                                                                    values (
-                                                                    {
-                                                                        truncatedValuesDisplay
-                                                                            .additionalValues
-                                                                            .length
-                                                                    }
-                                                                    )
-                                                                </Text>
+                                                        classNames={{
+                                                            dropdown:
+                                                                classes.additionalValuesList,
+                                                        }}
+                                                    >
+                                                        <HoverCard.Target>
+                                                            <Badge
+                                                                size="sm"
+                                                                variant="light"
+                                                                color="gray"
+                                                                ml={4}
+                                                            >
+                                                                +
+                                                                {
+                                                                    truncatedValuesDisplay
+                                                                        .additionalValues
+                                                                        .length
+                                                                }
+                                                            </Badge>
+                                                        </HoverCard.Target>
+                                                        <HoverCard.Dropdown>
+                                                            <Text
+                                                                fz="xs"
+                                                                fw={500}
+                                                                c="ldGray.5"
+                                                            >
+                                                                Additional
+                                                                values (
+                                                                {
+                                                                    truncatedValuesDisplay
+                                                                        .additionalValues
+                                                                        .length
+                                                                }
+                                                                )
+                                                            </Text>
+                                                            <ScrollArea.Autosize
+                                                                mah={200}
+                                                                type="always"
+                                                                scrollbars="y"
+                                                            >
                                                                 {truncatedValuesDisplay.additionalValues.map(
                                                                     (
                                                                         val,
@@ -401,6 +428,7 @@ const Filter: FC<Props> = ({
                                                                                 idx
                                                                             }
                                                                             fz="xs"
+                                                                            c="white"
                                                                         >
                                                                             •{' '}
                                                                             {
@@ -409,23 +437,9 @@ const Filter: FC<Props> = ({
                                                                         </Text>
                                                                     ),
                                                                 )}
-                                                            </Box>
-                                                        }
-                                                    >
-                                                        <Badge
-                                                            size="sm"
-                                                            variant="light"
-                                                            color="gray"
-                                                            ml={4}
-                                                        >
-                                                            +
-                                                            {
-                                                                truncatedValuesDisplay
-                                                                    .additionalValues
-                                                                    .length
-                                                            }
-                                                        </Badge>
-                                                    </Tooltip>
+                                                            </ScrollArea.Autosize>
+                                                        </HoverCard.Dropdown>
+                                                    </HoverCard>
                                                 )}
                                             </>
                                         )}

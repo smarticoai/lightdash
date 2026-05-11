@@ -5,7 +5,7 @@ import {
     type SortField,
     type TableCalculation,
 } from '@lightdash/common';
-import { Menu, Text } from '@mantine/core';
+import { Menu, Text } from '@mantine-8/core';
 import { IconCheck } from '@tabler/icons-react';
 import { useCallback, type FC } from 'react';
 import {
@@ -13,9 +13,9 @@ import {
     useExplorerDispatch,
 } from '../../../features/explorer/store';
 import {
-    SortDirection,
     getSortDirectionOrder,
     getSortLabel,
+    SortDirection,
 } from '../../../utils/sortUtils';
 import MantineIcon from '../../common/MantineIcon';
 
@@ -59,7 +59,7 @@ const ColumnHeaderSortMenuOptions: FC<Props> = ({ item, sort }) => {
                 getSortDirectionOrder(item).map((sortDirection) => (
                     <Menu.Item
                         key={sortDirection}
-                        icon={
+                        leftSection={
                             hasSort &&
                             selectedSortDirection === sortDirection ? (
                                 <MantineIcon icon={IconCheck} />
@@ -71,7 +71,7 @@ const ColumnHeaderSortMenuOptions: FC<Props> = ({ item, sort }) => {
                         onClick={() => handleSortClick(sortDirection)}
                     >
                         Sort{' '}
-                        <Text span fw={500}>
+                        <Text span fz="inherit" lh="inherit" fw="bold">
                             {getSortLabel(item, sortDirection)}
                         </Text>
                     </Menu.Item>

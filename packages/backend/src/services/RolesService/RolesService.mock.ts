@@ -1,5 +1,7 @@
+import { Ability } from '@casl/ability';
 import {
     OrganizationMemberRole,
+    PossibleAbilities,
     Role,
     RoleWithScopes,
     SessionAccount,
@@ -19,10 +21,10 @@ export const mockAccount = {
         userUuid: 'test-user-uuid',
         isActive: true,
         role: OrganizationMemberRole.ADMIN,
-        ability: {
-            can: jest.fn(() => true),
-            cannot: jest.fn(() => false),
-        } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        ability: new Ability<PossibleAbilities>([
+            { subject: 'Organization', action: ['manage'] },
+            { subject: 'Project', action: ['manage'] },
+        ]),
         abilityRules: [] as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         isTrackingAnonymized: false,
         isMarketingOptedIn: false,
@@ -50,10 +52,7 @@ export const mockAccountNoAccess = {
     ...mockAccount,
     user: {
         ...mockAccount.user,
-        ability: {
-            can: jest.fn(() => false),
-            cannot: jest.fn(() => true),
-        } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        ability: new Ability<PossibleAbilities>([]),
     },
 } as SessionAccount;
 
@@ -113,6 +112,7 @@ export const mockRolesModel = {
     deleteRole: jest.fn(),
     removeScopeFromRole: jest.fn(),
     getOrganizationRoleAssignments: jest.fn(),
+    getOrganizationAdmins: jest.fn(),
     upsertOrganizationUserRoleAssignment: jest.fn(),
     upsertSystemRoleProjectAccess: jest.fn(),
     upsertCustomRoleProjectAccess: jest.fn(),
@@ -122,6 +122,7 @@ export const mockRolesModel = {
     assignRoleToGroup: jest.fn(),
     unassignRoleFromGroup: jest.fn(),
     getProjectAccess: jest.fn(),
+    getProjectAccessByUserUuid: jest.fn(),
     getGroupProjectAccess: jest.fn(),
     removeUserProjectAccess: jest.fn(),
     db: {
@@ -166,4 +167,9 @@ export const mockGroupsModel = {
         groupUuid: 'test-group-uuid',
         name: 'Test Group',
     }),
+};
+
+export const mockAdminNotificationService = {
+    notifyOrgAdminRoleChange: jest.fn().mockResolvedValue(undefined),
+    notifyProjectAdminRoleChange: jest.fn().mockResolvedValue(undefined),
 };

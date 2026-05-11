@@ -121,6 +121,8 @@ export class HealthService extends BaseService {
                 maxLimit: this.lightdashConfig.query.maxLimit,
                 maxPageSize: this.lightdashConfig.query.maxPageSize,
                 defaultLimit: this.lightdashConfig.query.defaultLimit,
+                retryQueryOnTransientErrors:
+                    this.lightdashConfig.query.retryQueryOnTransientErrors,
             },
             dashboard: this.lightdashConfig.dashboard,
             pivotTable: this.lightdashConfig.pivotTable,
@@ -169,12 +171,10 @@ export class HealthService extends BaseService {
                         this.isEnterpriseEnabled(),
                 },
                 databricks: {
-                    // U2M OAuth only requires endpoints - client ID defaults to 'databricks-cli'
+                    // Databricks OAuth browser flow requires a configured client ID.
                     enabled:
                         !!this.lightdashConfig.auth.databricks.clientId &&
-                        !!this.lightdashConfig.auth.databricks
-                            .authorizationEndpoint &&
-                        !!this.lightdashConfig.auth.databricks.tokenEndpoint,
+                        this.isEnterpriseEnabled(),
                 },
             },
             hasEmailClient: !!this.lightdashConfig.smtp,
@@ -184,6 +184,7 @@ export class HealthService extends BaseService {
                 this.lightdashConfig.extendedUsageAnalytics.enabled,
             hasCacheAutocompleResults:
                 this.lightdashConfig.results.autocompleteEnabled,
+            hasResultsCaching: this.lightdashConfig.results.cacheEnabled,
             appearance: {
                 overrideColorPalette:
                     this.lightdashConfig.appearance.overrideColorPalette,
@@ -197,6 +198,10 @@ export class HealthService extends BaseService {
                 this.lightdashConfig.serviceAccount.enabled,
             isOrganizationWarehouseCredentialsEnabled:
                 this.lightdashConfig.organizationWarehouseCredentials.enabled,
+            isAthenaWarehouseIamRoleAuthEnabled:
+                this.lightdashConfig.athenaWarehouseIamRoleAuth.enabled,
+            isSaveCredentialsFormEnabled:
+                this.lightdashConfig.saveCredentialsForm.enabled,
             isCustomRolesEnabled:
                 this.isEnterpriseEnabled() &&
                 this.lightdashConfig.customRoles.enabled,
@@ -222,6 +227,20 @@ export class HealthService extends BaseService {
             },
             funnelBuilder: {
                 enabled: this.lightdashConfig.funnelBuilder.enabled,
+            },
+            softDelete: {
+                enabled: this.lightdashConfig.softDelete.enabled,
+                retentionDays: this.lightdashConfig.softDelete.retentionDays,
+            },
+            dashboardComments: {
+                enabled: this.lightdashConfig.dashboardComments.enabled,
+            },
+            preAggregates: {
+                enabled: this.lightdashConfig.preAggregates.enabled,
+            },
+            dataApps: {
+                enabled: this.lightdashConfig.appRuntime.enabled,
+                previewOrigin: this.lightdashConfig.appRuntime.previewOrigin,
             },
         };
     }

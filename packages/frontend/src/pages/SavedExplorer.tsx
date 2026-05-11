@@ -50,8 +50,9 @@ const SavedExplorerContent = memo(() => {
 const SavedExplorer = () => {
     const { health } = useApp();
 
-    const { savedQueryUuid, mode } = useParams<{
+    const { savedQueryUuid, projectUuid, mode } = useParams<{
         savedQueryUuid: string;
+        projectUuid: string;
         mode?: string;
     }>();
 
@@ -60,7 +61,8 @@ const SavedExplorer = () => {
     const { setDashboardChartInfo } = useDashboardStorage();
 
     const { data, isInitialLoading, error } = useSavedQuery({
-        id: savedQueryUuid,
+        uuidOrSlug: savedQueryUuid,
+        projectUuid,
     });
 
     useEffect(() => {
@@ -83,8 +85,10 @@ const SavedExplorer = () => {
 
         const currentSavedChart = store.getState().explorer.savedChart;
         const isNewChart = currentSavedChart?.uuid !== data.uuid;
+        const isExploreChanged =
+            currentSavedChart?.tableName !== data.tableName;
 
-        if (isNewChart) {
+        if (isNewChart || isExploreChanged) {
             const initialState = buildInitialExplorerState({
                 savedChart: data,
                 isEditMode,

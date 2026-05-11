@@ -5,14 +5,14 @@ import {
     type SortField,
     type TableCalculation,
 } from '@lightdash/common';
-import { ActionIcon, Flex, Menu, Text } from '@mantine/core';
+import { ActionIcon, Flex, Menu, Text } from '@mantine-8/core';
 import { IconCheck, IconChevronDown } from '@tabler/icons-react';
 import { useMemo, type FC } from 'react';
 import {
-    SortDirection,
     getSortDirectionOrder,
     getSortIcon,
     getSortLabel,
+    SortDirection,
 } from '../../utils/sortUtils';
 import MantineIcon from '../common/MantineIcon';
 import { type HeaderProps, type TableColumn } from '../common/Table/types';
@@ -42,7 +42,7 @@ const ColumnHeaderSortMenuOptions: FC<ColumnHeaderSortMenuOptionsProps> = ({
             {getSortDirectionOrder(item).map((sortDirection) => (
                 <Menu.Item
                     key={sortDirection}
-                    icon={
+                    leftSection={
                         isSorted(sortDirection) ? (
                             <MantineIcon icon={IconCheck} />
                         ) : undefined

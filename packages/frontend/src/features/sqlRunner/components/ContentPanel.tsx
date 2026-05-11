@@ -6,8 +6,10 @@ import {
     MAX_SAFE_INTEGER,
     type VizTableConfig,
     type VizTableHeaderSortConfig,
+    formatSql,
 } from '@lightdash/common';
 import {
+    ActionIcon,
     Box,
     Group,
     Indicator,
@@ -24,6 +26,7 @@ import { notifications } from '@mantine/notifications';
 import {
     IconAlertCircle,
     IconChartHistogram,
+    IconCode,
     IconGripHorizontal,
 } from '@tabler/icons-react';
 import {
@@ -77,6 +80,7 @@ import {
     selectSqlRunnerResultsRunner,
     setActiveEditorTab,
     setEditorHighlightError,
+    setSql,
     setSqlLimit,
     updateParameterValue,
 } from '../store/sqlRunnerSlice';
@@ -105,11 +109,18 @@ export const ContentPanel: FC = () => {
     const editorHighlightError = useAppSelector(
         (state) => state.sqlRunner.editorHighlightError,
     );
+    const warehouseConnectionType = useAppSelector(
+        (state) => state.sqlRunner.warehouseConnectionType,
+    );
     // So we can dispatch to redux
     const dispatch = useAppDispatch();
 
-    // Get organization colors to generate chart specs with a color palette defined by the organization
+    // Resolved palette from the org → project → space → dashboard cascade.
+    // Falls back to org-level colors for brand-new (unsaved) SQL charts where
+    // no SqlChart has been loaded yet.
     const { data: organization } = useOrganization();
+    const chartColors =
+        savedSqlChart?.resolvedColorPalette.colors ?? organization?.chartColors;
     const { health } = useApp();
 
     const { showToastError } = useToaster();
@@ -210,6 +221,11 @@ export const ContentPanel: FC = () => {
             notifications.clean();
         }
     }, [queryError, showToastError]);
+
+    const handleFormatSql = useCallback(() => {
+        if (!sql) return;
+        dispatch(setSql(formatSql(sql, warehouseConnectionType)));
+    }, [sql, warehouseConnectionType, dispatch]);
 
     // Run query on cmd + enter
     useHotkeys([
@@ -536,6 +552,22 @@ export const ContentPanel: FC = () => {
                                       }
                                     : {})}
                             />
+                            {activeEditorTab === EditorTabs.SQL && (
+                                <Tooltip
+                                    variant="xs"
+                                    label="Format SQL"
+                                    withArrow
+                                    position="bottom"
+                                >
+                                    <ActionIcon
+                                        onClick={handleFormatSql}
+                                        disabled={!sql}
+                                        variant="default"
+                                    >
+                                        <MantineIcon icon={IconCode} />
+                                    </ActionIcon>
+                                </Tooltip>
+                            )}
                             {activeEditorTab === EditorTabs.VISUALIZATION &&
                             !isVizTableConfig(currentVizConfig) &&
                             selectedChartType ? (
@@ -693,7 +725,7 @@ export const ContentPanel: FC = () => {
                                                                                 c
                                                                             }
                                                                             spec={pivotedChartInfo?.data?.getChartSpec(
-                                                                                organization?.chartColors,
+                                                                                chartColors,
                                                                             )}
                                                                             isLoading={
                                                                                 !!pivotedChartInfo?.loading

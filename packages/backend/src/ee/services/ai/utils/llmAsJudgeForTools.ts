@@ -6,14 +6,16 @@ import {
     toolFindDashboardsArgsSchema,
     toolFindExploresArgsSchemaV3,
     toolFindFieldsArgsSchema,
+    toolGetDashboardChartsArgsSchema,
     toolImproveContextArgsSchema,
-    type ToolName,
     toolProposeChangeArgsSchema,
     toolRunQueryArgsSchema,
+    toolRunSavedChartArgsSchema,
     toolSearchFieldValuesArgsSchema,
     toolTableVizArgsSchema,
     toolTimeSeriesArgsSchema,
     toolVerticalBarArgsSchema,
+    type ToolName,
 } from '@lightdash/common';
 import { generateObject } from 'ai';
 import { JSONDiff } from 'autoevals';
@@ -30,10 +32,12 @@ const TOOL_NAME_TO_DB_TOOL_NAME = {
     findContent: 'find_content',
     findDashboards: 'find_dashboards',
     findCharts: 'find_charts',
+    getDashboardCharts: 'get_dashboard_charts',
     generateTableVizConfig: 'table',
     generateTimeSeriesVizConfig: 'time_series_chart',
     generateBarVizConfig: 'vertical_bar_chart',
     runQuery: 'query_result',
+    runSavedChart: 'run_saved_chart',
     generateDashboard: 'generate_dashboard',
     improveContext: 'improve_context',
     proposeChange: 'propose_change',
@@ -52,9 +56,11 @@ const TOOL_SCHEMAS = {
     findContent: toolFindContentArgsSchema,
     findDashboards: toolFindDashboardsArgsSchema,
     findCharts: toolFindChartsArgsSchema,
+    getDashboardCharts: toolGetDashboardChartsArgsSchema,
     improveContext: toolImproveContextArgsSchema,
     proposeChange: toolProposeChangeArgsSchema,
     runQuery: toolRunQueryArgsSchema,
+    runSavedChart: toolRunSavedChartArgsSchema,
 } satisfies Record<ToolName, z.ZodSchema>;
 
 const getToolInfo = (toolName: string) => {

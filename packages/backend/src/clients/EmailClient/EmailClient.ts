@@ -1,4 +1,6 @@
 import {
+    AdminNotificationPayload,
+    AdminNotificationType,
     CreateProjectMember,
     getErrorMessage,
     InviteLink,
@@ -10,9 +12,10 @@ import {
     SmptError,
     type PartialFailure,
 } from '@lightdash/common';
+import fs from 'fs';
+import Handlebars from 'handlebars';
 import { marked } from 'marked';
 import * as nodemailer from 'nodemailer';
-import hbs from 'nodemailer-express-handlebars';
 import Mail from 'nodemailer/lib/mailer';
 import SMTPConnection, {
     AuthenticationType,
@@ -49,15 +52,7 @@ type EmailClientArguments = {
 
 type EmailTemplate = {
     template: string;
-    context: Record<
-        string,
-        | string
-        | boolean
-        | number
-        | AttachmentUrl[]
-        | PartialFailure[]
-        | undefined
-    >;
+    context: Record<string, unknown>;
     attachments?: (Mail.Attachment | AttachmentUrl)[] | undefined;
 };
 
@@ -66,11 +61,13 @@ export default class EmailClient {
 
     transporter: nodemailer.Transporter | undefined;
 
+    private initPromise: Promise<void> | undefined;
+
     constructor({ lightdashConfig }: EmailClientArguments) {
         this.lightdashConfig = lightdashConfig;
 
         if (this.lightdashConfig.smtp) {
-            this.createTransporter();
+            this.initPromise = this.createTransporter();
         }
     }
 
@@ -99,7 +96,7 @@ export default class EmailClient {
         };
     }
 
-    private createTransporter(): void {
+    private async createTransporter(): Promise<void> {
         if (!this.lightdashConfig.smtp) return;
 
         Logger.debug(`Create email transporter`);
@@ -154,31 +151,115 @@ export default class EmailClient {
             }
         });
 
-        this.transporter.use(
-            'compile',
-            hbs({
-                viewEngine: {
-                    partialsDir: path.join(__dirname, './templates/'),
-                    defaultLayout: undefined,
-                    extname: '.html',
-                },
-                viewPath: path.join(__dirname, './templates/'),
-                extName: '.html',
-            }),
-        );
+        // Register partials from templates directory (files starting with _)
+        const templatesDir = path.join(__dirname, './templates/');
+        const partialFiles = fs
+            .readdirSync(templatesDir)
+            .filter((f) => f.startsWith('_') && f.endsWith('.html'));
+        partialFiles.forEach((file) => {
+            const partialName = file.replace('.html', '');
+            const partialContent = fs.readFileSync(
+                path.join(templatesDir, file),
+                'utf-8',
+            );
+            Handlebars.registerPartial(partialName, partialContent);
+        });
+
+        // Custom nodemailer plugin for Handlebars template compilation
+        this.transporter.use('compile', (mail, callback) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const mailData = mail.data as any;
+            if (mailData.template) {
+                try {
+                    const templatePath = path.join(
+                        templatesDir,
+                        `${mailData.template}.html`,
+                    );
+                    const source = fs.readFileSync(templatePath, 'utf-8');
+                    const compiled = Handlebars.compile(source);
+                    mailData.html = compiled(mailData.context || {});
+                    callback();
+                } catch (err) {
+                    callback(err as Error);
+                }
+            } else {
+                callback();
+            }
+        });
     }
+
+    private static readonly STATIC_CID_IMAGES = [
+        {
+            filename: 'lightdash-logo.png',
+            cid: 'lightdash-logo',
+            contextKey: 'logoSrc',
+            hostPath: '/lightdash-logo.png',
+        },
+        {
+            filename: 'twitter.png',
+            cid: 'twitter-logo',
+            contextKey: 'twitterSrc',
+            hostPath: '/twitter.png',
+        },
+        {
+            filename: 'github.png',
+            cid: 'github-logo',
+            contextKey: 'githubSrc',
+            hostPath: '/github.png',
+        },
+        {
+            filename: 'linkedin.png',
+            cid: 'linkedin-logo',
+            contextKey: 'linkedinSrc',
+            hostPath: '/linkedin.png',
+        },
+    ] as const;
 
     private async sendEmail(
         options: Mail.Options & EmailTemplate,
     ): Promise<void> {
+        if (this.initPromise) {
+            await this.initPromise;
+        }
         if (this.transporter) {
+            const useCid = this.lightdashConfig.smtp?.inlineImageCid === true;
+            const host = this.lightdashConfig.siteUrl;
+
+            const imageSources: Record<string, string> = {};
+            for (const img of EmailClient.STATIC_CID_IMAGES) {
+                imageSources[img.contextKey] = useCid
+                    ? `cid:${img.cid}`
+                    : `${host}${img.hostPath}`;
+            }
+
+            const emailOptions: Mail.Options & EmailTemplate = {
+                ...options,
+                context: { ...options.context, ...imageSources },
+                attachments: [
+                    ...(Array.isArray(options.attachments)
+                        ? options.attachments
+                        : []),
+                    ...(useCid
+                        ? EmailClient.STATIC_CID_IMAGES.map((img) => ({
+                              filename: img.filename,
+                              path: path.join(
+                                  __dirname,
+                                  `./templates/${img.filename}`,
+                              ),
+                              cid: img.cid,
+                              contentDisposition: 'inline' as const,
+                          }))
+                        : []),
+                ],
+            };
+
             const maxRetries = 3;
             const baseDelay = 1000; // 1 second
 
             /* eslint-disable no-await-in-loop */
             for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
                 try {
-                    const info = await this.transporter.sendMail(options);
+                    const info = await this.transporter.sendMail(emailOptions);
                     Logger.debug(`Email sent: ${info.messageId}`);
                     return; // Success, exit retry loop
                 } catch (error) {
@@ -263,7 +344,8 @@ export default class EmailClient {
 
         if (this.lightdashConfig.smtp) {
             Logger.debug('Recreating email transporter');
-            this.createTransporter();
+            this.initPromise = this.createTransporter();
+            await this.initPromise;
         }
     }
 
@@ -391,7 +473,7 @@ export default class EmailClient {
         recipient: string,
         schedulerName: string,
         schedulerUrl: string,
-        deliveryType: 'slack' | 'email' | 'msteams',
+        deliveryType: 'slack' | 'email' | 'msteams' | 'googlechat',
         failedTargets: { target: string; error?: string }[],
         totalTargets: number,
     ) {
@@ -526,14 +608,45 @@ export default class EmailClient {
         message: string | undefined,
         date: string,
         frequency: string,
-        imageUrl: string,
+        imageUrl: string | undefined,
         url: string,
         schedulerUrl: string,
         includeLinks: boolean,
         pdfFile?: string,
         expirationDays?: number,
         deliveryType: string = 'Scheduled delivery',
+        imageBuffer?: Buffer,
     ) {
+        const useCidImage =
+            this.lightdashConfig.smtp?.inlineImageCid === true &&
+            imageBuffer !== undefined;
+
+        const attachments: Array<{
+            filename: string;
+            path?: string;
+            content?: Buffer;
+            contentType?: string;
+            cid?: string;
+            contentDisposition?: 'inline' | 'attachment';
+        }> = [];
+
+        if (useCidImage) {
+            attachments.push({
+                filename: 'chart-image.png',
+                content: imageBuffer,
+                cid: 'chart-image',
+                contentDisposition: 'inline',
+            });
+        }
+
+        if (pdfFile) {
+            attachments.push({
+                filename: `${title}.pdf`,
+                path: pdfFile,
+                contentType: 'application/pdf',
+            });
+        }
+
         return this.sendEmail({
             to: recipient,
             subject,
@@ -542,7 +655,7 @@ export default class EmailClient {
                 title,
                 hasMessage: !!message,
                 message: message && marked(message),
-                imageUrl,
+                imageUrl: useCidImage ? 'cid:chart-image' : imageUrl,
                 description,
                 date,
                 frequency,
@@ -550,19 +663,15 @@ export default class EmailClient {
                 host: this.lightdashConfig.siteUrl,
                 schedulerUrl,
                 expirationDays,
+                expirationDaysLabel:
+                    expirationDays !== undefined
+                        ? `${expirationDays} ${expirationDays === 1 ? 'day' : 'days'}`
+                        : undefined,
                 deliveryType,
                 includeLinks,
             },
             text: title,
-            attachments: pdfFile
-                ? [
-                      {
-                          filename: `${title}.pdf`,
-                          path: pdfFile,
-                          contentType: 'application/pdf',
-                      },
-                  ]
-                : undefined,
+            attachments: attachments.length > 0 ? attachments : undefined,
         });
     }
 
@@ -609,6 +718,10 @@ export default class EmailClient {
                 host: this.lightdashConfig.siteUrl,
                 schedulerUrl,
                 expirationDays,
+                expirationDaysLabel:
+                    expirationDays !== undefined
+                        ? `${expirationDays} ${expirationDays === 1 ? 'day' : 'days'}`
+                        : undefined,
                 includeLinks,
                 hasAttachment: attachments && attachments.length > 0,
                 attachmentCount: attachments?.length || 0,
@@ -677,6 +790,10 @@ export default class EmailClient {
                 host: this.lightdashConfig.siteUrl,
                 schedulerUrl,
                 expirationDays,
+                expirationDaysLabel:
+                    expirationDays !== undefined
+                        ? `${expirationDays} ${expirationDays === 1 ? 'day' : 'days'}`
+                        : undefined,
                 includeLinks,
                 hasAttachments: emailAttachments && emailAttachments.length > 0,
                 attachmentCount: emailAttachments?.length || 0,
@@ -731,6 +848,89 @@ export default class EmailClient {
             },
             text: `${title}\n\n${message}`,
             attachments,
+        });
+    }
+
+    private static getAdminChangeNotificationText(
+        payload: AdminNotificationPayload,
+        isRemoval: boolean,
+    ): string {
+        const changedByName = payload.changedBy.isServiceAccount
+            ? `Service Account: ${payload.changedBy.serviceAccountDescription}`
+            : `${payload.changedBy.firstName} ${payload.changedBy.lastName}`;
+
+        if (payload.targetUser) {
+            const targetName = `${payload.targetUser.firstName} ${payload.targetUser.lastName}`;
+            const action = isRemoval ? 'removed as admin' : 'added as admin';
+            return `${targetName} was ${action} by ${changedByName}`;
+        }
+
+        if (payload.type === AdminNotificationType.CONNECTION_SETTINGS_CHANGE) {
+            return `Connection settings updated by ${changedByName}`;
+        }
+
+        return `Settings changed by ${changedByName}`;
+    }
+
+    public async sendAdminChangeNotificationEmail(
+        recipients: string[],
+        payload: AdminNotificationPayload,
+    ): Promise<void> {
+        const subjectMap: Record<AdminNotificationType, string> = {
+            [AdminNotificationType.ORG_ADMIN_ADDED]: 'Organization Admin Added',
+            [AdminNotificationType.ORG_ADMIN_REMOVED]:
+                'Organization Admin Removed',
+            [AdminNotificationType.PROJECT_ADMIN_ADDED]: 'Project Admin Added',
+            [AdminNotificationType.PROJECT_ADMIN_REMOVED]:
+                'Project Admin Removed',
+            [AdminNotificationType.CONNECTION_SETTINGS_CHANGE]:
+                'Connection Settings Changed',
+        };
+
+        const templateMap: Record<AdminNotificationType, string> = {
+            [AdminNotificationType.ORG_ADMIN_ADDED]: 'adminChangeNotification',
+            [AdminNotificationType.ORG_ADMIN_REMOVED]:
+                'adminChangeNotification',
+            [AdminNotificationType.PROJECT_ADMIN_ADDED]:
+                'adminChangeNotification',
+            [AdminNotificationType.PROJECT_ADMIN_REMOVED]:
+                'adminChangeNotification',
+            [AdminNotificationType.CONNECTION_SETTINGS_CHANGE]:
+                'connectionSettingsChange',
+        };
+
+        const projectContext = payload.projectName
+            ? `${payload.projectName} - ${payload.organizationName}`
+            : payload.organizationName;
+
+        const isRemoval =
+            payload.type === AdminNotificationType.ORG_ADMIN_REMOVED ||
+            payload.type === AdminNotificationType.PROJECT_ADMIN_REMOVED;
+        const isConnectionChange =
+            payload.type === AdminNotificationType.CONNECTION_SETTINGS_CHANGE;
+
+        return this.sendEmail({
+            bcc: recipients,
+            subject: `[Lightdash] ${
+                subjectMap[payload.type]
+            } - ${projectContext}`,
+            template: templateMap[payload.type],
+            context: {
+                type: payload.type,
+                organizationName: payload.organizationName,
+                projectName: payload.projectName,
+                changedBy: payload.changedBy,
+                targetUser: payload.targetUser,
+                timestamp: payload.timestamp.toISOString(),
+                settingsUrl: payload.settingsUrl,
+                host: this.lightdashConfig.siteUrl,
+                isRemoval,
+                isConnectionChange,
+            },
+            text: EmailClient.getAdminChangeNotificationText(
+                payload,
+                isRemoval,
+            ),
         });
     }
 }

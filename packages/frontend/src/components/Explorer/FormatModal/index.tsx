@@ -1,6 +1,5 @@
 import {
     CustomFormatType,
-    NumberSeparator,
     getCustomFormat,
     getEffectiveItemType,
     getItemId,
@@ -8,6 +7,7 @@ import {
     hasFormatting,
     isDimension,
     isMetric,
+    NumberSeparator,
     type CustomFormat,
     type Dimension,
     type Metric,
@@ -42,6 +42,11 @@ const DEFAULT_FORMAT: CustomFormat = {
     prefix: undefined,
     suffix: undefined,
 };
+
+// Returns a fresh copy to avoid the module-level constant being frozen by Immer
+// when passed through Redux. klona (used by Mantine form) preserves frozen
+// property descriptors, causing "Cannot assign to read only property" errors.
+const getDefaultFormat = (): CustomFormat => ({ ...DEFAULT_FORMAT });
 
 export const FormatModal = memo(() => {
     const dispatch = useExplorerDispatch();
@@ -90,7 +95,7 @@ export const FormatModal = memo(() => {
     const form = useForm<{ format: CustomFormat }>({
         validateInputOnChange: true,
         initialValues: {
-            format: DEFAULT_FORMAT,
+            format: getDefaultFormat(),
         },
     });
 
@@ -177,7 +182,7 @@ export const FormatModal = memo(() => {
                         leftSection={<MantineIcon icon={IconEraser} />}
                         onClick={() =>
                             form.setValues({
-                                format: DEFAULT_FORMAT,
+                                format: getDefaultFormat(),
                             })
                         }
                     >

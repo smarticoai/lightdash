@@ -185,9 +185,12 @@ export const findAndUpdateModelYaml = async ({
     if (patchPath) {
         const { project: expectedYamlProject, path: expectedYamlSubPath } =
             patchPathParts(patchPath);
+        // dbt-fusion omits the project prefix from patch_path — fall back to the
+        // model's packageName, which carries the same information.
+        const resolvedProject = expectedYamlProject ?? packageName;
         const projectSubpath =
-            expectedYamlProject !== projectName
-                ? path.join('dbt_packages', expectedYamlProject)
+            resolvedProject !== projectName
+                ? path.join('dbt_packages', resolvedProject)
                 : '.';
         const expectedYamlPath = path.join(
             projectDir,
@@ -222,7 +225,17 @@ export const findAndUpdateModelYaml = async ({
         const { schemaEditor } = match;
         const docsNames = Object.values(docs).map((doc) => doc.name);
         const existingColumns = schemaEditor.getModelColumns(model.name) ?? [];
-        const existingColumnNames = existingColumns.map((c) => c.name);
+        const existingColumnNamesLower = existingColumns.map((c) =>
+            c.name.toLowerCase(),
+        );
+
+        // Build a case-insensitive lookup for warehouse table columns
+        const tableLower = Object.entries(table).reduce<
+            Record<string, DimensionType>
+        >((acc, [key, value]) => {
+            acc[key.toLowerCase()] = value;
+            return acc;
+        }, {});
 
         // Update existing columns description and dimension type
         for (const column of existingColumns) {
@@ -230,7 +243,7 @@ export const findAndUpdateModelYaml = async ({
             const newDescription = hasDoc ? `{{doc('${column.name}')}}` : '';
             const existingDescription = column.description;
             const existingDimensionType = column.meta?.dimension?.type;
-            const dimensionType = table[column.name] as
+            const dimensionType = tableLower[column.name.toLowerCase()] as
                 | DimensionType
                 | undefined;
 
@@ -264,19 +277,25 @@ export const findAndUpdateModelYaml = async ({
             });
         }
 
-        // Add columns that don't exist in the model
+        // Add columns that don't exist in the model (case-insensitive comparison)
         const newColumns = generatedModel.columns.filter(
-            (c) => !existingColumnNames.includes(c.name),
+            (c) => !existingColumnNamesLower.includes(c.name.toLowerCase()),
         );
         newColumns.forEach((column) => {
             schemaEditor.addColumn(model.name, column);
         });
 
-        // Delete columns that no longer exist in the warehouse
-        const deletedColumnNames = existingColumnNames.filter(
-            (c) => !generatedModel.columns.map((gc) => gc.name).includes(c),
+        // Delete columns that no longer exist in the warehouse (case-insensitive comparison)
+        const generatedColumnNamesLower = generatedModel.columns.map((gc) =>
+            gc.name.toLowerCase(),
         );
-        if (deletedColumnNames.length > 0 && process.env.CI !== 'true') {
+        const deletedColumnNames = existingColumns
+            .filter(
+                (c) =>
+                    !generatedColumnNamesLower.includes(c.name.toLowerCase()),
+            )
+            .map((c) => c.name);
+        if (deletedColumnNames.length > 0 && !GlobalState.isNonInteractive()) {
             let answers = { isConfirm: assumeYes };
 
             if (!assumeYes) {

@@ -6,9 +6,10 @@ import {
     type BreadcrumbsProps,
     type MantineSize,
     type TooltipProps,
-} from '@mantine/core';
-import { type FC, type HTMLAttributes } from 'react';
+} from '@mantine-8/core';
+import { useMemo, useState, type FC, type HTMLAttributes } from 'react';
 import { Link } from 'react-router';
+import classes from './PageBreadcrumbs.module.css';
 
 type BreadCrumbItem = {
     title: React.ReactNode;
@@ -19,8 +20,22 @@ type BreadCrumbItem = {
     tooltipProps?: Omit<TooltipProps, 'children'>;
 };
 
-export interface PageBreadcrumbsProps
-    extends Omit<BreadcrumbsProps, 'children'> {
+type EllipsisItem = { type: 'ellipsis' };
+
+type VisibleItem = BreadCrumbItem | EllipsisItem;
+
+function isEllipsis(item: VisibleItem): item is EllipsisItem {
+    return 'type' in item && item.type === 'ellipsis';
+}
+
+const VISIBLE_START = 2;
+const VISIBLE_END = 2;
+const COLLAPSE_THRESHOLD = VISIBLE_START + VISIBLE_END + 1;
+
+export interface PageBreadcrumbsProps extends Omit<
+    BreadcrumbsProps,
+    'children'
+> {
     size?: MantineSize;
     items: BreadCrumbItem[];
 }
@@ -30,39 +45,61 @@ const PageBreadcrumbs: FC<PageBreadcrumbsProps> = ({
     size = 'lg',
     ...rest
 }) => {
+    const [expandedForItemsLength, setExpandedForItemsLength] = useState<
+        number | null
+    >(null);
+    const isExpanded = expandedForItemsLength === items.length;
+
+    const visibleItems: VisibleItem[] = useMemo(() => {
+        if (isExpanded || items.length <= COLLAPSE_THRESHOLD) {
+            return items;
+        }
+
+        return [
+            ...items.slice(0, VISIBLE_START),
+            { type: 'ellipsis' },
+            ...items.slice(items.length - VISIBLE_END),
+        ];
+    }, [items, isExpanded]);
+
     return (
         <Breadcrumbs
             {...rest}
-            styles={{
-                root: {
-                    display: 'block',
-                    flexWrap: 'wrap',
-                },
-                separator: {
-                    display: 'inline-block',
-                },
+            classNames={{
+                root: classes.breadcrumbs,
+                separator: classes.separator,
             }}
         >
-            {items.map((item, index) => {
+            {visibleItems.map((item, index) => {
+                if (isEllipsis(item)) {
+                    return (
+                        <Anchor
+                            key="ellipsis"
+                            size={size}
+                            fw={500}
+                            c="ldGray.6"
+                            className={`${classes.anchor} ${classes.anchorClickable}`}
+                            onClick={() =>
+                                setExpandedForItemsLength(items.length)
+                            }
+                        >
+                            ...
+                        </Anchor>
+                    );
+                }
+
+                const isClickable = !!(item.onClick || item.to);
+                const anchorClassName = `${classes.anchor} ${
+                    isClickable ? classes.anchorClickable : classes.anchorStatic
+                }`;
+
                 const commonProps: AnchorProps &
                     HTMLAttributes<HTMLAnchorElement> = {
-                    size: size,
+                    size,
                     fw: item.active ? 600 : 500,
-                    color: item.active ? 'ldGray.9' : 'ldGray.6',
+                    c: item.active ? 'ldGray.9' : 'ldGray.6',
                     onClick: item.onClick,
-                    sx: {
-                        whiteSpace: 'normal',
-                        ...(item.onClick || item.to
-                            ? {
-                                  cursor: 'pointer',
-                              }
-                            : {
-                                  cursor: 'text',
-                                  '&:hover': {
-                                      textDecoration: 'none',
-                                  },
-                              }),
-                    },
+                    className: anchorClassName,
                 };
 
                 const anchor = item.to ? (

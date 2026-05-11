@@ -6,12 +6,18 @@ import {
     formatRows,
     getErrorMessage,
     getFormatExpression,
+    isDimension,
     isField,
     isNumber,
     ItemsMap,
     MetricQuery,
     PivotConfig,
     pivotResultsAsCsv,
+    pivotResultsAsData,
+    ResultRow,
+    shouldShiftItemTimezone,
+    timeIntervalToExcelNumFmt,
+    toExcelWallClockDate,
     type ReadyQueryResultsPage,
 } from '@lightdash/common';
 import * as Excel from 'exceljs';
@@ -20,8 +26,8 @@ import moment from 'moment';
 import os from 'os';
 import path from 'path';
 import { Readable, Writable } from 'stream';
-import { S3Client } from '../../clients/Aws/S3Client';
 import { transformAndExportResults } from '../../clients/Aws/transformAndExportResults';
+import { type FileStorageClient } from '../../clients/FileStorage/FileStorageClient';
 import { S3ResultsFileStorageClient } from '../../clients/ResultsFileStorageClients/S3ResultsFileStorageClient';
 import { LightdashConfig } from '../../config/parseConfig';
 import Logger from '../../logging/logger';
@@ -34,11 +40,23 @@ import {
 export class ExcelService {
     private static readonly EXCEL_ROW_LIMIT = 1_000_000;
 
-    // Helper method for date/timestamp conversion
-    static convertToExcelDate(value: unknown): Date | unknown {
+    private static isTzActive(
+        timezone: string | undefined,
+    ): timezone is string {
+        return !!timezone && timezone !== 'UTC';
+    }
+
+    static convertToExcelDate(
+        value: unknown,
+        timezone?: string,
+    ): Date | unknown {
         if (typeof value === 'string') {
             const dateValue = moment(value, moment.ISO_8601, true);
             if (dateValue.isValid()) {
+                // Bare date strings (no 'T') skip the shift to keep calendar values.
+                if (ExcelService.isTzActive(timezone) && value.includes('T')) {
+                    return toExcelWallClockDate(value, timezone);
+                }
                 return dateValue.toDate();
             }
         }
@@ -63,6 +81,7 @@ export class ExcelService {
         itemMap: ItemsMap,
         onlyRaw: boolean,
         sortedFieldIds: string[],
+        timezone?: string,
     ): (string | number | Date | null)[] {
         return sortedFieldIds.map((fieldId) => {
             const rawValue = row[fieldId];
@@ -78,12 +97,17 @@ export class ExcelService {
             const item = itemMap[fieldId];
             const isItemField = isField(item);
 
-            // For date/timestamp fields with custom formatting, convert to Date object first
             if (
                 isItemField &&
                 (item.type === DimensionType.DATE ||
                     item.type === DimensionType.TIMESTAMP)
             ) {
+                if (
+                    ExcelService.isTzActive(timezone) &&
+                    shouldShiftItemTimezone(item)
+                ) {
+                    return toExcelWallClockDate(rawValue, timezone);
+                }
                 return moment(rawValue).toDate();
             }
 
@@ -102,7 +126,13 @@ export class ExcelService {
             }
 
             // Otherwise, use standard Lightdash formatting as there won't be a format expression
-            return formatItemValue(item, rawValue);
+            return formatItemValue(
+                item,
+                rawValue,
+                undefined,
+                undefined,
+                timezone,
+            );
         });
     }
 
@@ -115,6 +145,8 @@ export class ExcelService {
         customLabels,
         maxColumnLimit,
         pivotDetails,
+        enableImprovedExcelDates = false,
+        timezone,
     }: {
         rows: Record<string, AnyType>[];
         itemMap: ItemsMap;
@@ -124,11 +156,32 @@ export class ExcelService {
         customLabels: Record<string, string> | undefined;
         maxColumnLimit: number;
         pivotDetails: ReadyQueryResultsPage['pivotDetails'];
+        enableImprovedExcelDates?: boolean;
+        timezone?: string;
     }): Promise<Excel.Buffer> {
-        // PivotQueryResults expects a formatted ResultRow[] type, so we need to convert it first
-        const formattedRows = formatRows(rows, itemMap);
+        const formattedRows = formatRows(
+            rows,
+            itemMap,
+            undefined,
+            undefined,
+            timezone,
+        );
 
-        const csvResults = pivotResultsAsCsv({
+        if (!enableImprovedExcelDates) {
+            return ExcelService.downloadPivotTableXlsxLegacy({
+                formattedRows,
+                itemMap,
+                metricQuery,
+                pivotConfig,
+                onlyRaw,
+                customLabels,
+                maxColumnLimit,
+                pivotDetails,
+                timezone,
+            });
+        }
+
+        const pivotData = pivotResultsAsData({
             pivotConfig,
             rows: formattedRows,
             itemMap,
@@ -139,19 +192,50 @@ export class ExcelService {
             pivotDetails,
         });
 
-        // Create Excel workbook
+        // Build date column metadata: for each data column, determine if
+        // it's a date/timestamp dimension and what Excel numFmt to apply.
+        const dateColumnFormats = new Map<
+            number,
+            {
+                numFmt: string;
+                shouldShift: boolean;
+            }
+        >();
+        if (!onlyRaw) {
+            const tzActive = ExcelService.isTzActive(timezone);
+            pivotData.fieldIds.forEach((fieldId, colIndex) => {
+                const field = itemMap[fieldId];
+                if (
+                    field &&
+                    isField(field) &&
+                    isDimension(field) &&
+                    (field.type === DimensionType.DATE ||
+                        field.type === DimensionType.TIMESTAMP)
+                ) {
+                    const numFmt = timeIntervalToExcelNumFmt(
+                        field.timeInterval,
+                        field.type,
+                    );
+                    if (numFmt) {
+                        const offset = pivotData.hasIndex ? 0 : 1;
+                        dateColumnFormats.set(colIndex + offset, {
+                            numFmt,
+                            shouldShift:
+                                tzActive && shouldShiftItemTimezone(field),
+                        });
+                    }
+                }
+            });
+        }
+
         const workbook = new Excel.Workbook();
         const worksheet = workbook.addWorksheet('Pivot Table');
 
-        // Add data to worksheet
-        csvResults.forEach((row, index) => {
-            const excelRow = row.map((value) =>
-                ExcelService.convertToExcelDate(value),
-            );
-            worksheet.addRow(excelRow);
+        // Add header rows
+        pivotData.headers.forEach((row, rowIndex) => {
+            worksheet.addRow(row);
 
-            // Style headers (first row)
-            if (index === 0) {
+            if (rowIndex === 0) {
                 const headerRow = worksheet.getRow(1);
                 headerRow.font = { bold: true };
                 headerRow.fill = {
@@ -162,11 +246,45 @@ export class ExcelService {
             }
         });
 
+        // Add data rows — use raw values for date columns, formatted for everything else
+        pivotData.dataRows.forEach((row) => {
+            const excelRow = row.map((cell, colIndex) => {
+                const dateFmt = dateColumnFormats.get(colIndex);
+                if (
+                    dateFmt &&
+                    cell.raw != null &&
+                    cell.raw !== '' &&
+                    typeof cell.raw === 'string'
+                ) {
+                    const m = moment.utc(cell.raw);
+                    if (m.isValid()) {
+                        return dateFmt.shouldShift && timezone
+                            ? toExcelWallClockDate(cell.raw, timezone)
+                            : m.toDate();
+                    }
+                }
+                return cell.formatted;
+            });
+            const wsRow = worksheet.addRow(excelRow);
+
+            // Apply numFmt to date cells in this row
+            dateColumnFormats.forEach(({ numFmt }, colIndex) => {
+                const cell = wsRow.getCell(colIndex + 1); // 1-indexed
+                if (cell.value instanceof Date) {
+                    cell.numFmt = numFmt;
+                }
+            });
+        });
+
         // Auto-adjust column widths
+        const allRows = [
+            ...pivotData.headers,
+            ...pivotData.dataRows.map((row) => row.map((c) => c.formatted)),
+        ];
         worksheet.columns.forEach((column, index) => {
             if (column) {
                 let maxLength = 0;
-                csvResults.forEach((row) => {
+                allRows.forEach((row) => {
                     if (
                         row[index] &&
                         row[index].toString().length > maxLength
@@ -183,6 +301,77 @@ export class ExcelService {
         return workbook.xlsx.writeBuffer();
     }
 
+    private static async downloadPivotTableXlsxLegacy({
+        formattedRows,
+        itemMap,
+        metricQuery,
+        pivotConfig,
+        onlyRaw,
+        customLabels,
+        maxColumnLimit,
+        pivotDetails,
+        timezone,
+    }: {
+        formattedRows: ResultRow[];
+        itemMap: ItemsMap;
+        metricQuery: MetricQuery;
+        pivotConfig: PivotConfig;
+        onlyRaw: boolean;
+        customLabels: Record<string, string> | undefined;
+        maxColumnLimit: number;
+        pivotDetails: ReadyQueryResultsPage['pivotDetails'];
+        timezone?: string;
+    }): Promise<Excel.Buffer> {
+        const csvResults = pivotResultsAsCsv({
+            pivotConfig,
+            rows: formattedRows,
+            itemMap,
+            metricQuery,
+            customLabels,
+            onlyRaw,
+            maxColumnLimit,
+            pivotDetails,
+        });
+
+        const workbook = new Excel.Workbook();
+        const worksheet = workbook.addWorksheet('Pivot Table');
+
+        csvResults.forEach((row, index) => {
+            const excelRow = row.map((value) =>
+                ExcelService.convertToExcelDate(value, timezone),
+            );
+            worksheet.addRow(excelRow);
+
+            if (index === 0) {
+                const headerRow = worksheet.getRow(1);
+                headerRow.font = { bold: true };
+                headerRow.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFE0E0E0' },
+                };
+            }
+        });
+
+        worksheet.columns.forEach((column, index) => {
+            if (column) {
+                let maxLength = 0;
+                csvResults.forEach((row) => {
+                    if (
+                        row[index] &&
+                        row[index].toString().length > maxLength
+                    ) {
+                        maxLength = row[index].toString().length;
+                    }
+                });
+                // eslint-disable-next-line no-param-reassign
+                column.width = Math.min(Math.max(maxLength + 2, 10), 50);
+            }
+        });
+
+        return workbook.xlsx.writeBuffer();
+    }
+
     /**
      * Downloads pivot table XLSX from async query results file
      * Handles loading data from JSONL storage file and generating pivot Excel file
@@ -196,12 +385,13 @@ export class ExcelService {
         lightdashConfig,
         options,
         pivotDetails,
+        timezone,
     }: {
         resultsFileName: string;
         fields: ItemsMap;
         metricQuery: MetricQuery;
         resultsStorageClient: S3ResultsFileStorageClient;
-        exportsStorageClient: S3Client;
+        exportsStorageClient: FileStorageClient;
         lightdashConfig: LightdashConfig;
         pivotDetails: ReadyQueryResultsPage['pivotDetails'];
         options: {
@@ -213,7 +403,8 @@ export class ExcelService {
             pivotConfig: PivotConfig;
             attachmentDownloadName?: string;
         };
-    }): Promise<{ fileUrl: string; truncated: boolean }> {
+        timezone?: string;
+    }): Promise<{ fileUrl: string; truncated: boolean; s3Key: string }> {
         const { onlyRaw, customLabels, pivotConfig, attachmentDownloadName } =
             options;
 
@@ -261,6 +452,8 @@ export class ExcelService {
             customLabels,
             maxColumnLimit: lightdashConfig.pivotTable.maxColumnLimit,
             pivotDetails,
+            enableImprovedExcelDates: lightdashConfig.enableImprovedExcelDates,
+            timezone,
         });
 
         // Upload the Excel buffer to exports bucket using cross-bucket transform
@@ -313,6 +506,7 @@ export class ExcelService {
         fields: ItemsMap,
         onlyRaw: boolean,
         sortedFieldIds: string[],
+        timezone?: string,
     ): Promise<{ truncated: boolean }> {
         // Use the same approach as our working tests - direct filename instead of stream
         const workbook = new Excel.stream.xlsx.WorkbookWriter({
@@ -354,6 +548,7 @@ export class ExcelService {
                     fields,
                     onlyRaw,
                     sortedFieldIds,
+                    timezone,
                 );
 
                 if (Array.isArray(rowData) && rowData.length > 0) {
@@ -401,7 +596,7 @@ export class ExcelService {
         fields: ItemsMap,
         clients: {
             resultsStorageClient: S3ResultsFileStorageClient;
-            exportsStorageClient: S3Client;
+            exportsStorageClient: FileStorageClient;
         },
         options: {
             onlyRaw?: boolean;
@@ -411,7 +606,8 @@ export class ExcelService {
             hiddenFields?: string[];
             attachmentDownloadName?: string;
         } = {},
-    ): Promise<{ fileUrl: string; truncated: boolean }> {
+        timezone?: string,
+    ): Promise<{ fileUrl: string; truncated: boolean; s3Key: string }> {
         // Handle column ordering and filtering
         const {
             onlyRaw = false,
@@ -448,6 +644,7 @@ export class ExcelService {
                 fields,
                 onlyRaw,
                 sortedFieldIds,
+                timezone,
             );
 
             // Generate filename with truncated flag
@@ -469,6 +666,7 @@ export class ExcelService {
             return {
                 fileUrl,
                 truncated,
+                s3Key: formattedFileName,
             };
         } catch (error) {
             Logger.error(

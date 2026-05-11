@@ -17,6 +17,23 @@
                 ]
             }
         },
+        "AnyAttributes": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+                "oneOf": [
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "type": "string"
+                    }
+                ]
+            }
+        },
         "Compact": {
             "type": "string",
             "enum": [
@@ -155,6 +172,10 @@
                         }
                     ]
                 },
+                "convert_timezone": {
+                    "type": "boolean",
+                    "description": "When false, this dimension is rendered in its raw warehouse value and is not converted to the project timezone for display. Filter SQL still converts. Defaults to true."
+                },
                 "hidden": {
                     "type": "boolean"
                 },
@@ -168,7 +189,9 @@
                     "$ref": "#/definitions/Format"
                 },
                 "group_label": {
-                    "type": "string"
+                    "type": "string",
+                    "deprecated": true,
+                    "description": "Deprecated: use groups instead"
                 },
                 "urls": {
                     "$ref": "#/definitions/Urls"
@@ -181,6 +204,9 @@
                 },
                 "required_attributes": {
                     "$ref": "#/definitions/RequiredAttributes"
+                },
+                "any_attributes": {
+                    "$ref": "#/definitions/AnyAttributes"
                 }
             }
         },
@@ -201,6 +227,10 @@
                 "sql": {
                     "type": "string"
                 },
+                "convert_timezone": {
+                    "type": "boolean",
+                    "description": "When false, this dimension is rendered in its raw warehouse value and is not converted to the project timezone for display. Filter SQL still converts. Defaults to true."
+                },
                 "hidden": {
                     "type": "boolean"
                 },
@@ -214,7 +244,9 @@
                     "$ref": "#/definitions/Format"
                 },
                 "group_label": {
-                    "type": "string"
+                    "type": "string",
+                    "deprecated": true,
+                    "description": "Deprecated: use groups instead"
                 },
                 "urls": {
                     "$ref": "#/definitions/Urls"
@@ -227,6 +259,9 @@
                 },
                 "required_attributes": {
                     "$ref": "#/definitions/RequiredAttributes"
+                },
+                "any_attributes": {
+                    "$ref": "#/definitions/AnyAttributes"
                 }
             }
         },
@@ -246,6 +281,8 @@
                         "count",
                         "count_distinct",
                         "sum",
+                        "sum_distinct",
+                        "average_distinct",
                         "min",
                         "max",
                         "number",
@@ -276,7 +313,9 @@
                     "$ref": "#/definitions/Format"
                 },
                 "group_label": {
-                    "type": "string"
+                    "type": "string",
+                    "deprecated": true,
+                    "description": "Deprecated: use groups instead"
                 },
                 "urls": {
                     "$ref": "#/definitions/Urls"
@@ -295,6 +334,19 @@
                 },
                 "percentile": {
                     "type": "number"
+                },
+                "distinct_keys": {
+                    "oneOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    ]
                 },
                 "tags": {
                     "$ref": "#/definitions/Tags"
@@ -400,8 +452,25 @@
                 "sql_from": {
                     "type": "string"
                 },
+                "group_label": {
+                    "type": "string",
+                    "deprecated": true,
+                    "description": "Deprecated: use groups instead"
+                },
+                "groups": {
+                    "type": "array",
+                    "description": "Groups are used to group tables in the sidebar. You can create nested groups up to 3 levels. Define labels & descriptions for the group keys in lightdash.config.yml under table_groups.",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "maxItems": 3
+                },
                 "required_attributes": {
                     "$ref": "#/definitions/RequiredAttributes"
+                },
+                "any_attributes": {
+                    "$ref": "#/definitions/AnyAttributes"
                 }
             },
             "default": {}

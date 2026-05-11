@@ -19,14 +19,24 @@ export const IGNORE_ERRORS = [
     'UserInfoError', // Google oauth2 error when using invalid credentials
 ];
 
+const spotlightEnabled =
+    process.env.NODE_ENV === 'development' && !!process.env.SENTRY_SPOTLIGHT;
+
+// Use a dummy DSN when Spotlight is enabled but no real DSN is configured.
+// This allows Sentry to initialize and send events to Spotlight locally.
+const SPOTLIGHT_DUMMY_DSN = 'https://0@o0.ingest.sentry.io/0';
+
 Sentry.init({
     release: VERSION,
     enabled: process.env.NODE_ENV !== 'test',
-    dsn: lightdashConfig.sentry.backend.dsn,
+    dsn:
+        lightdashConfig.sentry.backend.dsn ||
+        (spotlightEnabled ? SPOTLIGHT_DUMMY_DSN : ''),
     environment:
         process.env.NODE_ENV === 'development'
             ? 'development'
             : lightdashConfig.mode,
+    spotlight: spotlightEnabled,
     integrations: [
         /**
          * Some integrations are enabled by default
@@ -55,10 +65,7 @@ Sentry.init({
     ],
     ignoreErrors: IGNORE_ERRORS,
     tracesSampler: (context) => {
-        if (
-            process.env.NODE_ENV === 'development' &&
-            process.env.SENTRY_SPOTLIGHT
-        ) {
+        if (spotlightEnabled) {
             return 1.0;
         }
 
@@ -76,6 +83,36 @@ Sentry.init({
 
         if (context.parentSampled) {
             return context.parentSampled;
+        }
+
+        // Boost sampling for async query execution when queryTracesSampleRate is set
+        // Set SENTRY_QUERY_TRACES_SAMPLE_RATE=1.0 for 100% attribution on query traces
+        const { queryTracesSampleRate } = lightdashConfig.sentry;
+        if (queryTracesSampleRate !== null) {
+            // Match by span/transaction name (e.g. scheduler-triggered queries)
+            const spanName = context.name ?? '';
+            if (spanName.includes('ProjectService.executeAsyncQuery')) {
+                return queryTracesSampleRate;
+            }
+
+            // Match query endpoints (metric-query/dashboard-chart)
+            if (request?.url) {
+                try {
+                    const url = new URL(
+                        request.url,
+                        `http://${request.headers?.host || 'localhost'}`,
+                    );
+                    if (
+                        /\/api\/v2\/projects\/[^/]+\/query\/(?:metric-query|dashboard-chart)$/.test(
+                            url.pathname,
+                        )
+                    ) {
+                        return queryTracesSampleRate;
+                    }
+                } catch {
+                    // Ignore URL parse errors, fall through to default
+                }
+            }
         }
 
         return lightdashConfig.sentry.tracesSampleRate;

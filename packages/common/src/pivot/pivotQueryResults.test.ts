@@ -4,13 +4,14 @@ import {
 } from './pivotQueryResults';
 import {
     COMPLEX_NON_PIVOTED_ROWS,
-    COMPLEX_SQL_PIVOTED_ROWS,
     COMPLEX_SQL_PIVOT_DETAILS,
+    COMPLEX_SQL_PIVOTED_ROWS,
     EXPECTED_COMPLEX_PIVOT_DATA,
     EXPECTED_COMPLEX_PIVOT_DATA_WITH_METRICS_AS_ROWS,
     EXPECTED_PIVOT_DATA,
     EXPECTED_PIVOT_DATA_METRICS_AS_ROWS,
     EXPECTED_PIVOT_DATA_WITH_TOTALS,
+    getFieldMock,
     METRIC_QUERY_0DIM_2METRIC,
     METRIC_QUERY_1DIM_2METRIC,
     METRIC_QUERY_2DIM_2METRIC,
@@ -18,9 +19,8 @@ import {
     RESULT_ROWS_0DIM_2METRIC,
     RESULT_ROWS_1DIM_2METRIC,
     RESULT_ROWS_2DIM_2METRIC,
-    SQL_PIVOTED_ROWS,
     SQL_PIVOT_DETAILS,
-    getFieldMock,
+    SQL_PIVOTED_ROWS,
 } from './pivotQueryResults.mock';
 
 describe('Should pivot data', () => {
@@ -1264,5 +1264,374 @@ describe('convertSqlPivotedRowsToPivotData', () => {
 
         // Verify the new conversion matches legacy method
         expect(result).toStrictEqual(resultLegacy);
+    });
+
+    it('should limit pivot columns when columnLimit is provided', () => {
+        const fullResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+        });
+
+        const limitedResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+            columnLimit: 2,
+        });
+
+        // Limited result should have exactly 2 pivot groups
+        const limitedColumnCount = limitedResult.headerValues[0]?.length ?? 0;
+        expect(limitedColumnCount).toBe(2);
+
+        // Verify the retained groups are the FIRST 2 from the full result
+        const fullHeaderValues = fullResult.headerValues[0]?.map(
+            (h) => 'value' in h && h.value?.raw,
+        );
+        const limitedHeaderValues = limitedResult.headerValues[0]?.map(
+            (h) => 'value' in h && h.value?.raw,
+        );
+        expect(limitedHeaderValues).toStrictEqual(
+            fullHeaderValues?.slice(0, 2),
+        );
+    });
+
+    it('should not filter when columnLimit is undefined', () => {
+        const result1 = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+        });
+
+        const result2 = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+            columnLimit: undefined,
+        });
+
+        expect(result1).toStrictEqual(result2);
+    });
+
+    it('should treat columnLimit of 0 as no limit', () => {
+        const fullResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+        });
+
+        const zeroResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+            columnLimit: 0,
+        });
+
+        expect(zeroResult).toStrictEqual(fullResult);
+    });
+
+    it('should keep only the first pivot group when columnLimit is 1', () => {
+        const limitedResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+            columnLimit: 1,
+        });
+
+        const limitedColumnCount = limitedResult.headerValues[0]?.length ?? 0;
+        expect(limitedColumnCount).toBe(1);
+    });
+
+    it('should return all columns when columnLimit exceeds available', () => {
+        const fullResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+        });
+
+        const largeResult = convertSqlPivotedRowsToPivotData({
+            rows: SQL_PIVOTED_ROWS,
+            pivotDetails: SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: false,
+                columnOrder: [
+                    'payments_payment_method',
+                    'orders_order_date_year',
+                    'payments_total_revenue',
+                ],
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+            columnLimit: 999,
+        });
+
+        expect(largeResult).toStrictEqual(fullResult);
+    });
+});
+
+describe('visibleMetricFieldIds in pivotQueryResults', () => {
+    it('filters out metrics not in visibleMetricFieldIds', () => {
+        // Simulates PROD-6906: sort-only metric (devices) added to valuesColumns
+        // but should not appear in pivot output when visibleMetricFieldIds = ['views']
+        const pivotConfig = {
+            pivotDimensions: ['page'],
+            metricsAsRows: false,
+            visibleMetricFieldIds: ['views'], // only views should appear
+        };
+        const result = pivotQueryResults({
+            pivotConfig,
+            metricQuery: METRIC_QUERY_1DIM_2METRIC, // has views + devices
+            rows: RESULT_ROWS_1DIM_2METRIC,
+            options: { maxColumns: 60 },
+            getFieldLabel: (fieldId) => fieldId,
+            getField: (_fieldId) => undefined,
+        });
+
+        // Only 'views' should appear in headerValues metric labels (second row)
+        const metricLabels = result.headerValues[1]?.map((v) =>
+            'fieldId' in v ? v.fieldId : undefined,
+        );
+        expect(metricLabels).toEqual(['views', 'views', 'views']);
+
+        // dataColumnCount should reflect only visible metrics (3 pages × 1 metric)
+        expect(result.dataColumnCount).toBe(3);
+    });
+
+    it('falls back to hiddenMetricFieldIds when visibleMetricFieldIds is undefined', () => {
+        const pivotConfig = {
+            pivotDimensions: ['page'],
+            metricsAsRows: false,
+            hiddenMetricFieldIds: ['devices'],
+        };
+        const result = pivotQueryResults({
+            pivotConfig,
+            metricQuery: METRIC_QUERY_1DIM_2METRIC,
+            rows: RESULT_ROWS_1DIM_2METRIC,
+            options: { maxColumns: 60 },
+            getFieldLabel: (fieldId) => fieldId,
+            getField: (_fieldId) => undefined,
+        });
+
+        const metricLabels = result.headerValues[1]?.map((v) =>
+            'fieldId' in v ? v.fieldId : undefined,
+        );
+        expect(metricLabels).toEqual(['views', 'views', 'views']);
+        expect(result.dataColumnCount).toBe(3);
+    });
+
+    it('preserves dimension IDs in columnOrder when visibleMetricFieldIds is set', () => {
+        // Regression: columnOrder filter must not strip dimension IDs through
+        // the metric visibility check. Dimensions are always visible.
+        const pivotConfig = {
+            pivotDimensions: ['page'],
+            metricsAsRows: false,
+            visibleMetricFieldIds: ['views'],
+            columnOrder: ['site', 'views'], // 'site' is a dimension — must survive filter
+        };
+        const result = pivotQueryResults({
+            pivotConfig,
+            metricQuery: METRIC_QUERY_2DIM_2METRIC,
+            rows: RESULT_ROWS_2DIM_2METRIC,
+            options: { maxColumns: 60 },
+            getFieldLabel: (fieldId) => fieldId,
+            getField: (_fieldId) => undefined,
+        });
+
+        // site dimension must appear as an index dimension
+        const indexFieldIds = result.indexValueTypes
+            .filter((t) => t.type === 'dimension')
+            .map((t) => ('fieldId' in t ? t.fieldId : undefined));
+        expect(indexFieldIds).toContain('site');
+
+        // Only 'views' metric should appear (devices filtered by visibleMetricFieldIds)
+        const metricLabels = result.headerValues[1]?.map((v) =>
+            'fieldId' in v ? v.fieldId : undefined,
+        );
+        expect(metricLabels).toEqual(['views', 'views', 'views']);
+    });
+
+    it('visibleMetricFieldIds takes precedence when both it and hiddenMetricFieldIds are set', () => {
+        // Edge case: both allowlist and blocklist are provided.
+        // The allowlist (visibleMetricFieldIds) should win — hiddenMetricFieldIds is ignored.
+        const pivotConfig = {
+            pivotDimensions: ['page'],
+            metricsAsRows: false,
+            visibleMetricFieldIds: ['views', 'devices'], // allowlist says show both
+            hiddenMetricFieldIds: ['devices'], // blocklist says hide devices — should be ignored
+        };
+        const result = pivotQueryResults({
+            pivotConfig,
+            metricQuery: METRIC_QUERY_1DIM_2METRIC,
+            rows: RESULT_ROWS_1DIM_2METRIC,
+            options: { maxColumns: 60 },
+            getFieldLabel: (fieldId) => fieldId,
+            getField: (_fieldId) => undefined,
+        });
+
+        // Both metrics should appear because allowlist includes both
+        const metricLabels = result.headerValues[1]?.map((v) =>
+            'fieldId' in v ? v.fieldId : undefined,
+        );
+        expect(metricLabels).toEqual([
+            'views',
+            'devices',
+            'views',
+            'devices',
+            'views',
+            'devices',
+        ]);
+        // 3 pages × 2 metrics = 6 data columns
+        expect(result.dataColumnCount).toBe(6);
+    });
+});
+
+describe('convertSqlPivotedRowsToPivotData metric ordering (#19838 / #19919)', () => {
+    it('orders metricsAsRows row labels by columnOrder, not valuesColumns first-occurrence', () => {
+        // baseMetricsArray was previously derived via Array.from(new Set(...)),
+        // which preserves valuesColumns first-occurrence order rather than the
+        // user's metric selection sequence (columnOrder). With metricsAsRows: true
+        // this produced metric label rows in the wrong order. Fixed in PR #19910
+        // by sorting by columnOrder.indexOf.
+        //
+        // valuesColumns order in COMPLEX_SQL_PIVOT_DETAILS:
+        //   payments_total_revenue, orders_average_order_size, orders_total_order_amount
+        // columnOrder below intentionally reverses that, so the two derivations diverge.
+        const columnOrder = [
+            'payments_payment_method',
+            'orders_order_date_year',
+            'orders_is_completed',
+            'orders_promo_code',
+            'orders_total_order_amount',
+            'payments_total_revenue',
+            'orders_average_order_size',
+        ];
+
+        const result = convertSqlPivotedRowsToPivotData({
+            rows: COMPLEX_SQL_PIVOTED_ROWS,
+            pivotDetails: COMPLEX_SQL_PIVOT_DETAILS,
+            pivotConfig: {
+                rowTotals: false,
+                columnTotals: false,
+                metricsAsRows: true,
+                columnOrder,
+            },
+            getField: getFieldMock,
+            getFieldLabel: (fieldId) => fieldId,
+            groupedSubtotals: undefined,
+        });
+
+        // In metricsAsRows mode each indexValues row ends with a metric label.
+        const metricRowOrder = result.indexValues
+            .map((row) => row[row.length - 1])
+            .filter(
+                (entry): entry is { type: 'label'; fieldId: string } =>
+                    entry.type === 'label',
+            )
+            .map((entry) => entry.fieldId);
+
+        expect(metricRowOrder).toEqual([
+            'orders_total_order_amount',
+            'payments_total_revenue',
+            'orders_average_order_size',
+        ]);
     });
 });

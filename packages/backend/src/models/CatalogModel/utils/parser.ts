@@ -15,6 +15,13 @@ import {
 } from '@lightdash/common';
 import { DbCatalog } from '../../../database/entities/catalog';
 
+// Metric/dimension YAML tags should be returned alongside the inherited
+// table-level tags, with order preserved (table tags first) and duplicates removed.
+const mergeFieldAndTableTags = (
+    fieldTags: string[] | null | undefined,
+    tableTags: string[] | null | undefined,
+): string[] => [...new Set([...(tableTags ?? []), ...(fieldTags ?? [])])];
+
 const parseFieldFromMetricOrDimension = (
     table: CompiledTable,
     field: CompiledMetric | CompiledDimension,
@@ -25,6 +32,7 @@ const parseFieldFromMetricOrDimension = (
         tags: string[];
         categories: Pick<Tag, 'tagUuid' | 'color' | 'name' | 'yamlReference'>[];
         requiredAttributes: Record<string, string | string[]> | undefined;
+        anyAttributes: Record<string, string | string[]> | undefined;
         chartUsage: number | undefined;
         icon: CatalogItemIcon | null;
         searchRank?: number;
@@ -43,6 +51,7 @@ const parseFieldFromMetricOrDimension = (
     type: CatalogType.Field,
     aiHints: convertToAiHints(field.aiHint) ?? null,
     requiredAttributes: catalogArgs.requiredAttributes,
+    anyAttributes: catalogArgs.anyAttributes,
     tags: catalogArgs.tags,
     categories: catalogArgs.categories,
     chartUsage: catalogArgs.chartUsage,
@@ -60,6 +69,7 @@ const parseFieldFromMetricOrDimension = (
 
 export const parseFieldsFromCompiledTable = (
     table: CompiledTable,
+    exploreTags: string[] = [],
 ): CatalogField[] => {
     const tableFields = [
         ...Object.values(table.dimensions).filter((d) => !d.isIntervalBase),
@@ -69,10 +79,11 @@ export const parseFieldsFromCompiledTable = (
         parseFieldFromMetricOrDimension(table, field, {
             label: field.label,
             description: field.description ?? '',
-            tags: [],
+            tags: mergeFieldAndTableTags(field.tags, exploreTags),
             categories: [],
             requiredAttributes:
                 field.requiredAttributes ?? table.requiredAttributes,
+            anyAttributes: field.anyAttributes ?? table.anyAttributes,
             // ! since we're not pulling from the catalog search table these do not exist (keep compatibility with data catalog)
             chartUsage: undefined,
             catalogSearchUuid: '',
@@ -119,6 +130,7 @@ export const parseCatalog = (
             description: dbCatalog.description || undefined,
             type: CatalogType.Table,
             requiredAttributes: dbCatalog.required_attributes ?? undefined,
+            anyAttributes: dbCatalog.any_attributes ?? undefined,
             tags: dbCatalog.explore.tags,
             categories: dbCatalog.catalog_tags,
             chartUsage: dbCatalog.chart_usage ?? undefined,
@@ -160,9 +172,13 @@ export const parseCatalog = (
         label: dbCatalog.label,
         description: dbCatalog.description,
         catalogSearchUuid: dbCatalog.catalog_search_uuid,
-        tags: dbCatalog.explore.tags,
+        tags: mergeFieldAndTableTags(
+            dbCatalog.yaml_tags,
+            dbCatalog.explore.tags,
+        ),
         categories: dbCatalog.catalog_tags,
         requiredAttributes: dbCatalog.required_attributes ?? undefined,
+        anyAttributes: dbCatalog.any_attributes ?? undefined,
         chartUsage: dbCatalog.chart_usage ?? 0,
         icon: dbCatalog.icon ?? null,
         searchRank: dbCatalog.search_rank,

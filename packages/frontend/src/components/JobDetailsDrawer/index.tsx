@@ -18,6 +18,7 @@ import {
     useMantineTheme,
     type DefaultMantineColor,
 } from '@mantine/core';
+import { useInterval } from '@mantine/hooks';
 import {
     IconAlertTriangle,
     IconAlertTriangleFilled,
@@ -28,7 +29,7 @@ import {
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
 import utc from 'dayjs/plugin/utc';
-import { type FC } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import {
     jobStatusLabel,
     jobStepStatusLabel,
@@ -36,6 +37,7 @@ import {
 } from '../../hooks/useRefreshServer';
 import useActiveJob from '../../providers/ActiveJob/useActiveJob';
 import MantineIcon from '../common/MantineIcon';
+import { NAVBAR_HEIGHT } from '../common/Page/constants';
 import ProjectCompileLog from './ProjectCompileLog';
 
 dayjs.extend(duration);
@@ -119,6 +121,19 @@ const JobDetailsDrawer: FC = () => {
     const theme = useMantineTheme();
     const { isJobsDrawerOpen, setIsJobsDrawerOpen, activeJob } = useActiveJob();
 
+    // Force re-render every second so elapsed timers update in real-time
+    const [, setTick] = useState(0);
+    const isRunning = activeJob?.jobStatus === JobStatusType.RUNNING;
+    const ticker = useInterval(() => setTick((t) => t + 1), 1000);
+    useEffect(() => {
+        if (isRunning) {
+            ticker.start();
+        } else {
+            ticker.stop();
+        }
+        return ticker.stop;
+    }, [isRunning]); // eslint-disable-line react-hooks/exhaustive-deps
+
     if (!activeJob) {
         return null;
     }
@@ -136,6 +151,11 @@ const JobDetailsDrawer: FC = () => {
             position="right"
             opened={isJobsDrawerOpen}
             onClose={() => setIsJobsDrawerOpen(false)}
+            styles={{
+                inner: {
+                    paddingTop: NAVBAR_HEIGHT,
+                },
+            }}
             title={
                 <Group noWrap align="center" spacing="xs">
                     <DrawerIcon job={activeJob} />

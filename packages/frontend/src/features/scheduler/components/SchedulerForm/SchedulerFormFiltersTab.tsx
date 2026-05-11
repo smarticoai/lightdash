@@ -40,6 +40,7 @@ import useFiltersContext from '../../../../components/common/Filters/useFiltersC
 import MantineIcon from '../../../../components/common/MantineIcon';
 import { useProject } from '../../../../hooks/useProject';
 import useDashboardContext from '../../../../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../../../../providers/Dashboard/useDashboardTileStatusContext';
 import { hasSavedFilterValueChanged } from '../../../dashboardFilters/FilterConfiguration/utils';
 
 const isValidFilterOperator = (value: unknown): value is FilterOperator =>
@@ -105,24 +106,18 @@ const FilterItem: FC<SchedulerFilterItemProps> = ({
     );
 
     const filterOperatorOptions = useMemo(() => {
-        return getFilterOperatorOptions(filterType);
-    }, [filterType]);
+        return getFilterOperatorOptions(filterType, field);
+    }, [filterType, field]);
 
     if (!field) {
         // show invalid dashboard filter
         return (
-            <Group gap="xs" wrap="nowrap">
+            <Group gap="xs" wrap="nowrap" justify="flex-start">
                 <ActionIcon size="xs" disabled>
                     <MantineIcon icon={IconRotate2} />
                 </ActionIcon>
 
-                <Paper
-                    key={dashboardFilter.id}
-                    w="100%"
-                    withBorder
-                    p="xs"
-                    radius="md"
-                >
+                <Paper key={dashboardFilter.id} withBorder p="xs" radius="md">
                     <Group gap="xs">
                         <MantineIcon icon={IconAlertTriangle} color="red" />
                         <Text span fw={500} fz="sm">
@@ -139,6 +134,13 @@ const FilterItem: FC<SchedulerFilterItemProps> = ({
                         </Text>
                     </Group>
                 </Paper>
+                {onRemove && (
+                    <Tooltip label="Remove invalid filter" fz="xs">
+                        <ActionIcon size="xs" onClick={onRemove}>
+                            <MantineIcon icon={IconTrash} />
+                        </ActionIcon>
+                    </Tooltip>
+                )}
             </Group>
         );
     }
@@ -350,7 +352,7 @@ export const SchedulerFormFiltersTab: FC<SchedulerFiltersProps> = ({
         (c) => c.allFilterableFieldsMap,
     );
 
-    const tileNamesById = useDashboardContext((c) => c.tileNamesById);
+    const tileNamesById = useDashboardTileStatusContext((c) => c.tileNamesById);
 
     const { savedFiltersInDashboard, savedFiltersNotInDashboard } =
         useMemo(() => {
@@ -490,6 +492,7 @@ export const SchedulerFormFiltersTab: FC<SchedulerFiltersProps> = ({
                                           )
                                         : false
                                 }
+                                onRemove={() => handleRemoveFilter(filter.id)}
                             />
                         );
                     })}

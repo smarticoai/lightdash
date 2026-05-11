@@ -2,35 +2,39 @@ import { BigqueryAuthenticationType, WarehouseTypes } from '@lightdash/common';
 import type { SelectItem } from '@mantine/core';
 import {
     Anchor,
+    Autocomplete,
     Button,
     FileInput,
     Group,
     Image,
+    Loader,
     NumberInput,
     Select,
     Stack,
+    Switch,
     Text,
     TextInput,
     Tooltip,
 } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
-import { IconCheck } from '@tabler/icons-react';
+import { IconCheck, IconExclamationCircle } from '@tabler/icons-react';
 import { useState, type ChangeEvent, type FC } from 'react';
 import { useToggle } from 'react-use';
 import { useGoogleLoginPopup } from '../../../hooks/gdrive/useGdrive';
 import useHealth from '../../../hooks/health/useHealth';
 import {
     useBigqueryDatasets,
+    useBigqueryProjects,
     useIsBigQueryAuthenticated,
 } from '../../../hooks/useBigquerySSO';
 import MantineIcon from '../../common/MantineIcon';
 import DocumentationHelpButton from '../../DocumentationHelpButton';
 import FormCollapseButton from '../FormCollapseButton';
 import { useFormContext } from '../formContext';
-import BooleanSwitch from '../Inputs/BooleanSwitch';
 import FormSection from '../Inputs/FormSection';
 import StartOfWeekSelect from '../Inputs/StartOfWeekSelect';
 import { useProjectFormContext } from '../useProjectFormContext';
+import classes from './BigQueryForm.module.css';
 import { BigQueryDefaultValues } from './defaultValues';
 
 export const BigQuerySchemaInput: FC<{
@@ -93,7 +97,7 @@ export const BigQuerySSOInput: FC<{
                         alt="Google logo"
                     />
                 }
-                sx={{ ':hover': { textDecoration: 'underline' } }}
+                className={classes.signInButton}
             >
                 Sign in with Google
             </Button>
@@ -127,6 +131,11 @@ const BigQueryForm: FC<{
         refetch: refetchDatasets,
         error: datasetsError,
     } = useBigqueryDatasets(isAuthenticated && isSso, debouncedProject);
+    const {
+        data: gcpProjects,
+        isLoading: isLoadingProjects,
+        error: projectsError,
+    } = useBigqueryProjects(isAuthenticated && isSso);
     const [isOpen, toggleOpen] = useToggle(false);
     const [temporaryFile, setTemporaryFile] = useState<File | null>(null);
     const { savedProject } = useProjectFormContext();
@@ -139,6 +148,7 @@ const BigQueryForm: FC<{
     const executionProjectField = form.getInputProps(
         'warehouse.executionProject',
     );
+    const accessUrlField = form.getInputProps('warehouse.accessUrl');
     if (form.values.warehouse?.type !== WarehouseTypes.BIGQUERY) {
         throw new Error('Bigquery form is not used for this warehouse type');
     }
@@ -178,7 +188,7 @@ const BigQueryForm: FC<{
     ].filter(Boolean) as SelectItem[];
     return (
         <>
-            <Stack style={{ marginTop: '8px' }}>
+            <Stack mt={8}>
                 {
                     <Group spacing="sm">
                         <Select
@@ -231,34 +241,90 @@ const BigQueryForm: FC<{
                     />
                 )}
                 <Group spacing="sm">
-                    <TextInput
-                        name="warehouse.project"
-                        label="Project"
-                        description={
-                            <p>
-                                <Anchor
-                                    target="_blank"
-                                    href="https://docs.lightdash.com/get-started/setup-lightdash/connect-project#project"
-                                    rel="noreferrer"
-                                >
-                                    This is the GCP project ID
-                                </Anchor>
-                                .
-                            </p>
-                        }
-                        required
-                        {...form.getInputProps('warehouse.project')}
-                        disabled={disabled}
-                        labelProps={{ style: { marginTop: '8px' } }}
-                        w={hasDatasets ? '90%' : '100%'}
-                        error={
-                            datasetsError ? (
-                                <Text color="red">
-                                    {datasetsError.error.message}
-                                </Text>
-                            ) : undefined
-                        }
-                    />
+                    {isSso && isAuthenticated ? (
+                        <Autocomplete
+                            name="warehouse.project"
+                            label="Project"
+                            description={
+                                <p>
+                                    <Anchor
+                                        target="_blank"
+                                        href="https://docs.lightdash.com/get-started/setup-lightdash/connect-project#project"
+                                        rel="noreferrer"
+                                    >
+                                        This is the GCP project ID
+                                    </Anchor>
+                                    .
+                                </p>
+                            }
+                            placeholder={
+                                isLoadingProjects
+                                    ? 'Loading projects...'
+                                    : 'Type or select a project'
+                            }
+                            required
+                            {...form.getInputProps('warehouse.project')}
+                            disabled={disabled}
+                            labelProps={{ style: { marginTop: '8px' } }}
+                            w={hasDatasets ? '90%' : '100%'}
+                            data={
+                                gcpProjects?.map((p) => ({
+                                    value: p.projectId,
+                                    label: p.friendlyName
+                                        ? `${p.friendlyName} (${p.projectId})`
+                                        : p.projectId,
+                                })) ?? []
+                            }
+                            rightSection={
+                                isLoadingProjects ? (
+                                    <Loader size="xs" />
+                                ) : projectsError ? (
+                                    <Tooltip label="Failed to load projects. You can type manually.">
+                                        <MantineIcon
+                                            icon={IconExclamationCircle}
+                                            color="yellow"
+                                        />
+                                    </Tooltip>
+                                ) : undefined
+                            }
+                            error={
+                                datasetsError ? (
+                                    <Text c="red">
+                                        {datasetsError.error.message}
+                                    </Text>
+                                ) : undefined
+                            }
+                        />
+                    ) : (
+                        <TextInput
+                            name="warehouse.project"
+                            label="Project"
+                            description={
+                                <p>
+                                    <Anchor
+                                        target="_blank"
+                                        href="https://docs.lightdash.com/get-started/setup-lightdash/connect-project#project"
+                                        rel="noreferrer"
+                                    >
+                                        This is the GCP project ID
+                                    </Anchor>
+                                    .
+                                </p>
+                            }
+                            required
+                            {...form.getInputProps('warehouse.project')}
+                            disabled={disabled}
+                            labelProps={{ style: { marginTop: '8px' } }}
+                            w={hasDatasets ? '90%' : '100%'}
+                            error={
+                                datasetsError ? (
+                                    <Text c="red">
+                                        {datasetsError.error.message}
+                                    </Text>
+                                ) : undefined
+                            }
+                        />
+                    )}
                     {hasDatasets && (
                         <Tooltip label="You have access to this project">
                             <Group mt="50px">
@@ -414,8 +480,8 @@ const BigQueryForm: FC<{
                     <></>
                 )}
                 <FormSection isOpen={isOpen} name="advanced">
-                    <Stack style={{ marginTop: '8px' }}>
-                        <BooleanSwitch
+                    <Stack mt={8}>
+                        <Switch
                             name="warehouse.requireUserCredentials"
                             {...form.getInputProps(
                                 'warehouse.requireUserCredentials',
@@ -453,6 +519,21 @@ const BigQueryForm: FC<{
                             onChange={onChangeFactory(
                                 executionProjectField.onChange,
                             )}
+                            disabled={disabled}
+                        />
+                        <TextInput
+                            name="warehouse.accessUrl"
+                            label="BigQuery URL override"
+                            placeholder="e.g. https://bigquery.googleapis.com"
+                            description={
+                                <p>
+                                    Override the default BigQuery API endpoint.
+                                    This is useful for Private Service Connect,
+                                    custom proxies, or local emulators.
+                                </p>
+                            }
+                            {...accessUrlField}
+                            onChange={onChangeFactory(accessUrlField.onChange)}
                             disabled={disabled}
                         />
 

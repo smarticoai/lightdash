@@ -1,5 +1,6 @@
 import {
     AnyType,
+    BinGroup,
     BinRange,
     ChartConfig,
     ChartKind,
@@ -61,6 +62,9 @@ export type SavedChartTable = Knex.CompositeTableType<
             | 'slug'
             | 'views_count'
             | 'first_viewed_at'
+            | 'deleted_at'
+            | 'deleted_by_user_uuid'
+            | 'color_palette_uuid'
         >
     >
 >;
@@ -80,6 +84,9 @@ export type DbSavedChart = {
     slug: string;
     views_count: number;
     first_viewed_at: Date | null;
+    deleted_at: Date | null;
+    deleted_by_user_uuid: string | null;
+    color_palette_uuid: string | null;
 };
 
 export type DbSavedChartVersion = {
@@ -176,6 +183,7 @@ export type DbSavedChartTableCalculation = {
     format?: CustomFormat;
     type?: TableCalculationType;
     template?: TableCalculationTemplate;
+    formula?: string;
 };
 
 export type DbSavedChartTableCalculationInsert = Omit<
@@ -200,13 +208,17 @@ export type DbSavedChartCustomDimension = {
     bin_number: number | null;
     bin_width: number | null;
     custom_range: BinRange[] | null; // JSONB
+    custom_groups: BinGroup[] | null; // JSONB
     order: number;
 };
 export type DbSavedChartCustomDimensionInsert = Omit<
     DbSavedChartCustomDimension,
-    'saved_queries_version_custom_dimension_id' | 'custom_range'
+    | 'saved_queries_version_custom_dimension_id'
+    | 'custom_range'
+    | 'custom_groups'
 > & {
     custom_range: string | null;
+    custom_groups: string | null;
 };
 
 export type SavedChartCustomDimensionsTable = Knex.CompositeTableType<
@@ -229,6 +241,7 @@ export type DbSavedChartAdditionalMetric = {
     compact?: CompactOrAlias;
     format?: string;
     percentile?: number;
+    distinct_keys?: string | null; // JSONB array of dimension references
     saved_queries_version_id: number;
     filters: MetricFilterRule[] | null; // JSONB
     base_dimension_name: string | null;
@@ -276,6 +289,7 @@ export type DBFilteredAdditionalMetrics = Pick<
             | 'compact'
             | 'format'
             | 'percentile'
+            | 'distinct_keys'
             | 'filters'
             | 'base_dimension_name'
             | 'format_options'

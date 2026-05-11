@@ -1,6 +1,6 @@
 import {
-    DashboardTileTypes,
     assertUnreachable,
+    DashboardTileTypes,
     getDefaultChartTileSize,
     type DashboardTile,
 } from '@lightdash/common';
@@ -10,8 +10,8 @@ import {
     Group,
     Select,
     Stack,
-    TextInput,
     Textarea,
+    TextInput,
 } from '@mantine-8/core';
 import { useForm } from '@mantine/form';
 import {
@@ -58,7 +58,8 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
     const [isLoading, setIsLoading] = useState(false);
 
     const exploreChartQuery = useSavedQuery({
-        id: uuid,
+        uuidOrSlug: uuid,
+        projectUuid,
         useQueryOptions: {
             enabled: dashboardTileType === DashboardTileTypes.SAVED_CHART,
         },
@@ -204,13 +205,17 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
         data: selectedDashboard,
         isFetching: isFetchingSelectedDashboard,
         isError: isSelectedDashboardError,
-    } = useDashboardQuery(form.getInputProps('dashboardUuid').value);
+    } = useDashboardQuery({
+        uuidOrSlug: form.getInputProps('dashboardUuid').value,
+        projectUuid,
+    });
     const { mutateAsync: createDashboard } = useCreateMutation(
         projectUuid,
         true,
     );
     const { mutateAsync: updateDashboard } = useUpdateDashboard(
         form.getInputProps('dashboardUuid').value,
+        projectUuid,
         true,
     );
     const { mutateAsync: createSpace } = useSpaceCreateMutation(projectUuid);
@@ -230,7 +235,7 @@ const AddTilesToDashboardModal: FC<AddTilesToDashboardModalProps> = ({
                 if (isCreatingNewSpace) {
                     const newSpace = await createSpace({
                         name: spaceName,
-                        isPrivate: false,
+                        inheritParentPermissions: true,
                         access: [],
                     });
                     spaceUuid = newSpace.uuid;

@@ -1,9 +1,14 @@
-import { SnowflakeAuthenticationType, WarehouseTypes } from '@lightdash/common';
+import {
+    FeatureFlags,
+    SnowflakeAuthenticationType,
+    WarehouseTypes,
+} from '@lightdash/common';
 import {
     Anchor,
     Button,
     FileInput,
     Group,
+    NumberInput,
     PasswordInput,
     Radio,
     Select,
@@ -16,12 +21,15 @@ import { IconCheck } from '@tabler/icons-react';
 import { useState, type FC } from 'react';
 import { useToggle } from 'react-use';
 import { useOrganizationWarehouseCredentials } from '../../../hooks/organization/useOrganizationWarehouseCredentials';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import {
     useIsSnowflakeAuthenticated,
     useSnowflakeDatasets,
     useSnowflakeLoginPopup,
 } from '../../../hooks/useSnowflake';
+import useApp from '../../../providers/App/useApp';
 import MantineIcon from '../../common/MantineIcon';
+import TimeZonePicker from '../../common/TimeZonePicker';
 import FormCollapseButton from '../FormCollapseButton';
 import { useFormContext } from '../formContext';
 import BooleanSwitch from '../Inputs/BooleanSwitch';
@@ -33,6 +41,7 @@ import { SnowflakeDefaultValues } from './defaultValues';
 import {
     EXTERNAL_BROWSER_LABEL,
     getSsoLabel,
+    NONE_LABEL,
     PASSWORD_LABEL,
     PRIVATE_KEY_LABEL,
 } from './util';
@@ -81,7 +90,12 @@ const SnowflakeForm: FC<{
 }> = ({ disabled }) => {
     const [isOpen, toggleOpen] = useToggle(false);
     const { savedProject } = useProjectFormContext();
+    const { health } = useApp();
     const form = useFormContext();
+    const { data: timezoneSupportFlag } = useServerFeatureFlag(
+        FeatureFlags.EnableTimezoneSupport,
+    );
+    const isTimezoneSupportEnabled = timezoneSupportFlag?.enabled ?? false;
     const {
         data,
         isLoading: isLoadingAuth,
@@ -98,7 +112,7 @@ const SnowflakeForm: FC<{
     const { mutate: openLoginPopup, isSsoEnabled } = useSnowflakeLoginPopup({
         onLogin: async () => {
             await refetchAuth();
-            await refetchDatasets();
+            refetchDatasets();
         },
     });
 
@@ -114,6 +128,10 @@ const SnowflakeForm: FC<{
 
     const requireSecrets: boolean =
         savedProject?.warehouseConnection?.type !== WarehouseTypes.SNOWFLAKE;
+
+    const [temporaryFile, setTemporaryFile] = useState<File>();
+    const showSaveCredentials = !!health.data?.isSaveCredentialsFormEnabled;
+    const isEditMode = !!savedProject;
 
     if (form.values.warehouse?.type !== WarehouseTypes.SNOWFLAKE) {
         throw new Error('Snowflake form is not used for this warehouse type');
@@ -141,7 +159,7 @@ const SnowflakeForm: FC<{
     const authenticationType: SnowflakeAuthenticationType =
         form.values.warehouse.authenticationType ?? defaultAuthType;
 
-    const [temporaryFile, setTemporaryFile] = useState<File>();
+    const isNoneAuth = authenticationType === SnowflakeAuthenticationType.NONE;
 
     // Build base authentication options
     const baseAuthOptions = isSsoEnabled
@@ -171,16 +189,25 @@ const SnowflakeForm: FC<{
           ];
 
     // Only show EXTERNAL_BROWSER if it's already selected (edit mode only)
-    const authOptions =
-        savedAuthType === SnowflakeAuthenticationType.EXTERNAL_BROWSER
+    const authOptions = [
+        ...baseAuthOptions,
+        ...(savedAuthType === SnowflakeAuthenticationType.EXTERNAL_BROWSER
             ? [
-                  ...baseAuthOptions,
                   {
                       value: SnowflakeAuthenticationType.EXTERNAL_BROWSER,
                       label: EXTERNAL_BROWSER_LABEL,
                   },
               ]
-            : baseAuthOptions;
+            : []),
+        ...(showSaveCredentials && isEditMode
+            ? [
+                  {
+                      value: SnowflakeAuthenticationType.NONE,
+                      label: NONE_LABEL,
+                  },
+              ]
+            : []),
+    ];
 
     return (
         <>
@@ -302,8 +329,9 @@ const SnowflakeForm: FC<{
                             )}
                         </Group>
 
-                        {authenticationType !==
-                            SnowflakeAuthenticationType.SSO &&
+                        {!isNoneAuth &&
+                            authenticationType !==
+                                SnowflakeAuthenticationType.SSO &&
                             authenticationType !==
                                 SnowflakeAuthenticationType.EXTERNAL_BROWSER && (
                                 <>
@@ -334,8 +362,28 @@ const SnowflakeForm: FC<{
                                 </>
                             )}
 
-                        {authenticationType ===
-                        SnowflakeAuthenticationType.PRIVATE_KEY ? (
+                        {isNoneAuth ? (
+                            <>
+                                <Text size="sm" c="dimmed">
+                                    No project-level credentials will be used.
+                                    Users must provide their own credentials to
+                                    connect.
+                                </Text>
+                                <BooleanSwitch
+                                    name="warehouse.requireUserCredentials"
+                                    label="Require users to provide their own credentials"
+                                    defaultChecked={
+                                        SnowflakeDefaultValues.requireUserCredentials
+                                    }
+                                    disabled={disabled}
+                                    {...form.getInputProps(
+                                        'warehouse.requireUserCredentials',
+                                        { type: 'checkbox' },
+                                    )}
+                                />
+                            </>
+                        ) : authenticationType ===
+                          SnowflakeAuthenticationType.PRIVATE_KEY ? (
                             <>
                                 <FileInput
                                     name="warehouse.privateKey"
@@ -480,18 +528,20 @@ const SnowflakeForm: FC<{
 
                         <FormSection isOpen={isOpen} name="advanced">
                             <Stack style={{ marginTop: '8px' }}>
-                                <BooleanSwitch
-                                    name="warehouse.requireUserCredentials"
-                                    label="Require users to provide their own credentials"
-                                    defaultChecked={
-                                        SnowflakeDefaultValues.requireUserCredentials
-                                    }
-                                    disabled={disabled}
-                                    {...form.getInputProps(
-                                        'warehouse.requireUserCredentials',
-                                        { type: 'checkbox' },
-                                    )}
-                                />
+                                {!isNoneAuth && (
+                                    <BooleanSwitch
+                                        name="warehouse.requireUserCredentials"
+                                        label="Require users to provide their own credentials"
+                                        defaultChecked={
+                                            SnowflakeDefaultValues.requireUserCredentials
+                                        }
+                                        disabled={disabled}
+                                        {...form.getInputProps(
+                                            'warehouse.requireUserCredentials',
+                                            { type: 'checkbox' },
+                                        )}
+                                    />
+                                )}
 
                                 <BooleanSwitch
                                     name="warehouse.clientSessionKeepAlive"
@@ -563,6 +613,21 @@ const SnowflakeForm: FC<{
                                         'warehouse.accessUrl',
                                     )}
                                 />
+                                {isTimezoneSupportEnabled && (
+                                    <TimeZonePicker
+                                        size="sm"
+                                        maw="100%"
+                                        label="Data timezone"
+                                        description="The timezone your warehouse stores ambiguous timestamps in. Defaults to UTC if not set."
+                                        searchable
+                                        clearable
+                                        placeholder="Not set (uses warehouse default)"
+                                        disabled={disabled}
+                                        {...form.getInputProps(
+                                            'warehouse.dataTimezone',
+                                        )}
+                                    />
+                                )}
                                 <StartOfWeekSelect
                                     disabled={disabled}
                                     isRedeployRequired={false}
@@ -578,6 +643,27 @@ const SnowflakeForm: FC<{
                                         'warehouse.disableTimestampConversion',
                                         { type: 'checkbox' },
                                     )}
+                                />
+                                <NumberInput
+                                    name="warehouse.timeoutSeconds"
+                                    {...form.getInputProps(
+                                        'warehouse.timeoutSeconds',
+                                    )}
+                                    label="Timeout in seconds"
+                                    defaultValue={
+                                        SnowflakeDefaultValues.timeoutSeconds
+                                    }
+                                    description={
+                                        <p>
+                                            Sets the maximum execution time for
+                                            queries. If a query takes longer
+                                            than this timeout, Snowflake will
+                                            cancel it. This uses Snowflake's
+                                            STATEMENT_TIMEOUT_IN_SECONDS session
+                                            parameter.
+                                        </p>
+                                    }
+                                    disabled={disabled}
                                 />
                             </Stack>
                         </FormSection>

@@ -1,10 +1,10 @@
 import {
-    DashboardTileTypes,
     assertUnreachable,
+    DashboardTileTypes,
     type DashboardTab,
     type Dashboard as IDashboard,
 } from '@lightdash/common';
-import { Box } from '@mantine/core';
+import { Box } from '@mantine-8/core';
 import { memo, type FC } from 'react';
 import ChartTile from '../../components/DashboardTiles/DashboardChartTile';
 import HeadingTile from '../../components/DashboardTiles/DashboardHeadingTile';
@@ -12,18 +12,19 @@ import LoomTile from '../../components/DashboardTiles/DashboardLoomTile';
 import MarkdownTile from '../../components/DashboardTiles/DashboardMarkdownTile';
 import SqlChartTile from '../../components/DashboardTiles/DashboardSqlChartTile';
 import TileBase from '../../components/DashboardTiles/TileBase';
+import ErrorBoundary from '../errorBoundary/ErrorBoundary';
 
-const GridTile: FC<
-    Pick<
-        React.ComponentProps<typeof TileBase>,
-        'tile' | 'onEdit' | 'onDelete' | 'isEditMode'
-    > & {
-        index: number;
-        tabs?: DashboardTab[];
-        onAddTiles: (tiles: IDashboard['tiles'][number][]) => Promise<void>;
-        locked: boolean;
-    }
-> = memo((props) => {
+type GridTileProps = Pick<
+    React.ComponentProps<typeof TileBase>,
+    'tile' | 'onEdit' | 'onDelete' | 'isEditMode'
+> & {
+    index: number;
+    tabs?: DashboardTab[];
+    onAddTiles: (tiles: IDashboard['tiles'][number][]) => Promise<void>;
+    locked: boolean;
+};
+
+const GridTileInner: FC<GridTileProps> = memo((props) => {
     const { tile } = props;
 
     if (props.locked) {
@@ -64,5 +65,11 @@ const GridTile: FC<
         }
     }
 });
+
+const GridTile: FC<GridTileProps> = (props) => (
+    <ErrorBoundary wrapper={{ h: '100%', w: '100%' }}>
+        <GridTileInner {...props} />
+    </ErrorBoundary>
+);
 
 export default GridTile;

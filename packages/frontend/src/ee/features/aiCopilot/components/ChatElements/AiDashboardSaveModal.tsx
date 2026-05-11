@@ -8,8 +8,8 @@ import {
     Button,
     LoadingOverlay,
     Stack,
-    TextInput,
     Textarea,
+    TextInput,
 } from '@mantine-8/core';
 import { useForm } from '@mantine/form';
 import { IconLayoutDashboard, IconPlus } from '@tabler/icons-react';
@@ -193,7 +193,7 @@ export const AiDashboardSaveModal: FC<Props> = ({
                 if (values.newSpaceName) {
                     const newSpace = await spaceManagement.handleCreateNewSpace(
                         {
-                            isPrivate: false,
+                            inheritParentPermissions: true,
                         },
                     );
                     targetSpaceUuid = newSpace?.uuid || values.spaceUuid;

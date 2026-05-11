@@ -6,13 +6,14 @@ import { type AnyType } from '../types/any';
 import { DashboardTileTypes, type DashboardTile } from '../types/dashboard';
 import { type Explore } from '../types/explore';
 import {
-    DimensionType,
-    MetricType,
-    TableCalculationType,
     convertFieldRefToFieldId,
+    DimensionType,
     isCustomSqlDimension,
     isDimension,
+    isFilterableDimension,
     isTableCalculation,
+    MetricType,
+    TableCalculationType,
     type CompiledField,
     type CustomSqlDimension,
     type Dimension,
@@ -27,12 +28,11 @@ import {
 import {
     FilterOperator,
     FilterType,
-    UnitOfTime,
     isAndFilterGroup,
     isFilterGroup,
     isFilterRule,
-    isFilterRuleDefinedForFieldId,
     isJoinModelRequiredFilter,
+    UnitOfTime,
     type AndFilterGroup,
     type DashboardFieldTarget,
     type DashboardFilterRule,
@@ -51,6 +51,7 @@ import { type MetricQuery } from '../types/metricQuery';
 import { type ResultColumn } from '../types/results';
 import { TimeFrames } from '../types/timeFrames';
 import assertUnreachable from './assertUnreachable';
+import { getDimensionMapFromTables, getMetricsMapFromTables } from './fields';
 import { formatDate } from './formatting';
 import { getItemId, getItemType, isDateItem } from './item';
 
@@ -131,6 +132,8 @@ export const getFilterTypeFromItemType = (
         case MetricType.COUNT:
         case MetricType.COUNT_DISTINCT:
         case MetricType.SUM:
+        case MetricType.SUM_DISTINCT:
+        case MetricType.AVERAGE_DISTINCT:
         case MetricType.MIN:
         case MetricType.MAX:
         case MetricType.PERCENT_OF_PREVIOUS:
@@ -204,7 +207,8 @@ export const supportsSingleValue = (
 
 export const isWithValueFilter = (filterOperator: FilterOperator) =>
     filterOperator !== FilterOperator.NULL &&
-    filterOperator !== FilterOperator.NOT_NULL;
+    filterOperator !== FilterOperator.NOT_NULL &&
+    filterOperator !== FilterOperator.IN_PERIOD_TO_DATE;
 
 export const getFilterRuleWithDefaultValue = <T extends FilterRule>(
     filterType: FilterType,
@@ -215,9 +219,11 @@ export const getFilterRuleWithDefaultValue = <T extends FilterRule>(
     const filterRuleDefaults: Partial<FilterRule> = {};
 
     if (
-        ![FilterOperator.NULL, FilterOperator.NOT_NULL].includes(
-            filterRule.operator,
-        ) &&
+        ![
+            FilterOperator.NULL,
+            FilterOperator.NOT_NULL,
+            FilterOperator.IN_PERIOD_TO_DATE,
+        ].includes(filterRule.operator) &&
         values !== null
     ) {
         switch (filterType) {
@@ -318,6 +324,12 @@ export const getFilterRuleWithDefaultValue = <T extends FilterRule>(
                 break;
         }
     }
+    if (filterRule.operator === FilterOperator.IN_PERIOD_TO_DATE) {
+        filterRuleDefaults.settings = {
+            unitOfTime: UnitOfTime.years,
+            completed: false,
+        } as DateFilterRule['settings'];
+    }
     return {
         ...filterRule,
         values: values !== undefined && values !== null ? values : [],
@@ -368,7 +380,10 @@ export const isTileFilterable = (tile: DashboardTile) =>
 
 const getDefaultTileTargets = (
     field: FilterableDimension | Metric | Field,
-    availableTileFilters: Record<string, FilterableDimension[] | undefined>,
+    availableTileFilters: Record<
+        string,
+        (FilterableDimension | Metric)[] | undefined
+    >,
 ) =>
     Object.entries(availableTileFilters).reduce<
         Record<string, DashboardFieldTarget>
@@ -394,8 +409,11 @@ export const applyDefaultTileTargets = (
         AnyType,
         AnyType
     >,
-    field: FilterableDimension,
-    availableTileFilters: Record<string, FilterableDimension[] | undefined>,
+    field: FilterableDimension | Metric,
+    availableTileFilters: Record<
+        string,
+        (FilterableDimension | Metric)[] | undefined
+    >,
 ) => {
     if (!filterRule.tileTargets) {
         return {
@@ -415,7 +433,10 @@ export const createDashboardFilterRuleFromField = ({
     field:
         | Exclude<FilterableItem, TableCalculation | CustomSqlDimension>
         | CompiledField;
-    availableTileFilters: Record<string, FilterableDimension[] | undefined>;
+    availableTileFilters: Record<
+        string,
+        (FilterableDimension | Metric)[] | undefined
+    >;
     isTemporary: boolean;
     value?: unknown;
 }): FilterDashboardToRule =>
@@ -641,7 +662,10 @@ export const getFiltersFromGroup = (
                     ...accumulator.dimensions,
                     [getFilterGroupItemsPropertyName(flatFilterGroup)]: [
                         ...getItemsFromFilterGroup(accumulator.dimensions),
-                        filters.dimensions,
+                        // Preserve the original group ID so React can maintain
+                        // stable keys and avoid unmounting/remounting nested
+                        // FilterGroupForm components on every filter edit
+                        { ...filters.dimensions, id: item.id },
                     ],
                 } as FilterGroup;
             }
@@ -652,7 +676,7 @@ export const getFiltersFromGroup = (
                     ...accumulator.metrics,
                     [getFilterGroupItemsPropertyName(flatFilterGroup)]: [
                         ...getItemsFromFilterGroup(accumulator.metrics),
-                        filters.metrics,
+                        { ...filters.metrics, id: item.id },
                     ],
                 } as FilterGroup;
             }
@@ -665,7 +689,7 @@ export const getFiltersFromGroup = (
                         ...getItemsFromFilterGroup(
                             accumulator.tableCalculations,
                         ),
-                        filters.tableCalculations,
+                        { ...filters.tableCalculations, id: item.id },
                     ],
                 } as FilterGroup;
             }
@@ -792,40 +816,55 @@ export const getDashboardFilterRulesForTileAndReferences = (
         (f) => f.target.isSqlColumn && references.includes(f.target.fieldId),
     );
 
+/**
+ * Filter dashboard filter rules to those whose target field id is actually
+ * present in the explore.
+ *
+ * Previously this matched by `target.tableName` against the explore's joined
+ * table aliases. That diverged from the UI's "is this filter applicable to
+ * this tile?" check, which matches by field id (see TileFilterConfiguration's
+ * `selectedField` computation). When a filter rule's `target.tableName` is
+ * stale (e.g. the dbt model was renamed since the filter was created) but
+ * `target.fieldId` still resolves against the explore, the UI rendered the
+ * filter as applied while the server silently dropped it — resulting in
+ * unfiltered data on dashboards (notably a PII leak risk for org-scoping
+ * filters). Matching by field id makes both checks use the same source of
+ * truth.
+ */
 export const getDashboardFilterRulesForTables = (
-    tables: string[],
+    availableFieldIds: string[],
     rules: DashboardFilterRule[],
 ): DashboardFilterRule[] =>
-    rules.filter((f) => tables.includes(f.target.tableName));
+    rules.filter((f) => availableFieldIds.includes(f.target.fieldId));
 
 export const getDashboardFilterRulesForTileAndTables = (
     tileUuid: string,
-    tables: string[],
+    availableFieldIds: string[],
     rules: DashboardFilterRule[],
 ): DashboardFilterRule[] =>
     getDashboardFilterRulesForTables(
-        tables,
+        availableFieldIds,
         getDashboardFilterRulesForTile(tileUuid, rules),
     );
 
 export const getDashboardFiltersForTileAndTables = (
     tileUuid: string,
-    tables: string[],
+    availableFieldIds: string[],
     dashboardFilters: DashboardFilters,
 ): DashboardFilters => ({
     dimensions: getDashboardFilterRulesForTileAndTables(
         tileUuid,
-        tables,
+        availableFieldIds,
         dashboardFilters.dimensions,
     ),
     metrics: getDashboardFilterRulesForTileAndTables(
         tileUuid,
-        tables,
+        availableFieldIds,
         dashboardFilters.metrics,
     ),
     tableCalculations: getDashboardFilterRulesForTileAndTables(
         tileUuid,
-        tables,
+        availableFieldIds,
         dashboardFilters.tableCalculations,
     ),
 });
@@ -1162,6 +1201,45 @@ export const addDashboardFiltersToMetricQuery = (
     };
 };
 
+// Mirrors the UI's getAvailableFiltersForSavedQueries. Matching on field-id (not tableName) is the source of truth — see getDashboardFilterRulesForTables below for why.
+export const getAvailableFilterFieldIds = (explore: Explore): string[] => [
+    ...Object.entries(getDimensionMapFromTables(explore.tables))
+        .filter(([, field]) => isFilterableDimension(field) && !field.hidden)
+        .map(([fieldId]) => fieldId),
+    ...Object.entries(getMetricsMapFromTables(explore.tables))
+        .filter(([, field]) => !field.hidden)
+        .map(([fieldId]) => fieldId),
+];
+
+export const applyDashboardFiltersForTile = ({
+    tileUuid,
+    metricQuery,
+    dashboardFilters,
+    explore,
+}: {
+    tileUuid: string;
+    metricQuery: MetricQuery;
+    dashboardFilters: DashboardFilters;
+    explore: Explore;
+}): {
+    metricQuery: MetricQuery;
+    appliedDashboardFilters: DashboardFilters;
+} => {
+    const appliedDashboardFilters = getDashboardFiltersForTileAndTables(
+        tileUuid,
+        getAvailableFilterFieldIds(explore),
+        dashboardFilters,
+    );
+    return {
+        metricQuery: addDashboardFiltersToMetricQuery(
+            metricQuery,
+            appliedDashboardFilters,
+            explore,
+        ),
+        appliedDashboardFilters,
+    };
+};
+
 export const createFilterRuleFromModelRequiredFilterRule = (
     filter: ModelRequiredFilterRule,
     tableName: string,
@@ -1184,24 +1262,60 @@ export const isFilterRuleInQuery = (
     dimension: Dimension,
     filterRule: FilterRule,
     dimensionsFilterGroup: FilterGroup | undefined,
+    explore: Explore,
 ): undefined | boolean => {
-    let dimensionFieldId = filterRule.target.fieldId;
-    const timeDimension =
-        dimension.isIntervalBase || dimension.timeInterval !== undefined;
-    if (!dimension.isIntervalBase && dimension.timeInterval) {
-        dimensionFieldId = dimensionFieldId.replace(
-            `_${dimension.timeInterval.toLowerCase()}`,
-            '',
+    if (!dimensionsFilterGroup) return undefined;
+
+    const getBaseTimeDimensionName = (
+        timeDimension: Dimension,
+    ): string | undefined => {
+        if (timeDimension.isIntervalBase) return timeDimension.name;
+        return timeDimension.timeIntervalBaseDimensionName;
+    };
+
+    const getDimensionFromExplore = (fieldId: string): Dimension | undefined =>
+        Object.values(explore.tables)
+            .flatMap((table) => Object.values(table.dimensions))
+            .find(
+                (candidateDimension) =>
+                    getItemId(candidateDimension) === fieldId,
+            );
+
+    const isCompatibleDerivedTimeDimension = (
+        candidateDimension: Dimension,
+    ): boolean => {
+        const shouldAllowSiblingTimeDimensions =
+            dimension.isIntervalBase || dimension.timeInterval !== undefined;
+
+        if (!shouldAllowSiblingTimeDimensions) {
+            return false;
+        }
+
+        const requiredBaseDimensionName = getBaseTimeDimensionName(dimension);
+        const candidateBaseDimensionName =
+            getBaseTimeDimensionName(candidateDimension);
+
+        return (
+            requiredBaseDimensionName !== undefined &&
+            candidateBaseDimensionName === requiredBaseDimensionName &&
+            candidateDimension.table === dimension.table &&
+            getFilterTypeFromItem(candidateDimension) ===
+                getFilterTypeFromItem(dimension)
         );
-    }
-    return (
-        dimensionsFilterGroup &&
-        isFilterRuleDefinedForFieldId(
-            dimensionsFilterGroup,
-            dimensionFieldId,
-            timeDimension,
-        )
-    );
+    };
+
+    return getFilterRulesFromGroup(dimensionsFilterGroup).some((queryRule) => {
+        if (queryRule.target.fieldId === filterRule.target.fieldId) {
+            return true;
+        }
+
+        const queryDimension = getDimensionFromExplore(
+            queryRule.target.fieldId,
+        );
+        return queryDimension
+            ? isCompatibleDerivedTimeDimension(queryDimension)
+            : false;
+    });
 };
 
 export const reduceRequiredDimensionFiltersToFilterRules = (
@@ -1233,7 +1347,10 @@ export const reduceRequiredDimensionFiltersToFilterRules = (
             );
         }
 
-        if (dimension && !isFilterRuleInQuery(dimension, filterRule, filters)) {
+        if (
+            dimension &&
+            !isFilterRuleInQuery(dimension, filterRule, filters, explore)
+        ) {
             return [...acc, filterRule];
         }
         return acc;

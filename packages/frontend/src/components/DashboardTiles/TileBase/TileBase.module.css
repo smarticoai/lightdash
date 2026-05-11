@@ -8,10 +8,7 @@
     box-shadow: unset;
 
     border: 1px solid
-        light-dark(
-            var(--mantine-color-ldGray-2),
-            lighten(var(--mantine-color-ldDark-2), 0.05)
-        ) !important;
+        light-dark(var(--mantine-color-ldGray-2), var(--mantine-color-ldDark-2)) !important;
 
     &[data-with-transparent-border='true'] {
         border: 1px solid transparent !important;
@@ -47,7 +44,8 @@
     text-decoration: none;
 
     display: block;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -61,6 +59,7 @@
         position: absolute;
         top: 0;
         left: 0;
+        right: 0;
         z-index: 10;
         white-space: normal;
         overflow: visible;
@@ -112,6 +111,8 @@
 
 .chartContainer {
     overflow: hidden;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
 
     &[data-full-width='true'] {
         margin: 0 -16px -16px -16px;

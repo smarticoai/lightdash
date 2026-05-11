@@ -1,8 +1,10 @@
 import {
     AuthTokenPrefix,
+    LightdashCliVersionHeader,
     LightdashRequestMethodHeader,
     RequestMethod,
 } from '@lightdash/common';
+import { CLI_VERSION } from '../env';
 
 enum TokenType {
     ApiKey = 'ApiKey',
@@ -11,9 +13,11 @@ enum TokenType {
 
 type RequestHeader = {
     'Content-Type': 'application/json';
+    'Content-Encoding'?: string;
     Authorization: string;
     'Proxy-Authorization'?: string;
     [LightdashRequestMethodHeader]: RequestMethod;
+    [LightdashCliVersionHeader]: string;
 };
 
 /**
@@ -38,6 +42,7 @@ export function buildRequestHeaders(token: string) {
             process.env.CI === 'true'
                 ? RequestMethod.CLI_CI
                 : RequestMethod.CLI,
+        [LightdashCliVersionHeader]: CLI_VERSION,
     };
 
     if (process.env.LIGHTDASH_PROXY_AUTHORIZATION) {

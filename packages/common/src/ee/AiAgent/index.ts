@@ -16,6 +16,10 @@ import type {
     ToolVerticalBarArgs,
 } from '../..';
 import { type AiEvalRunResultAssessment } from './aiEvalAssessment';
+import {
+    type AiPromptContext,
+    type AiPromptContextInput,
+} from './requestTypes';
 import { type AgentToolOutput } from './schemas';
 import { type AiMetricQuery, type AiResultType } from './types';
 
@@ -71,7 +75,6 @@ export const baseAgentSchema = z.object({
     spaceAccess: z.array(z.string()),
     enableDataAccess: z.boolean(),
     enableSelfImprovement: z.boolean(),
-    enableReasoning: z.boolean(),
     version: z.number(),
 });
 
@@ -95,7 +98,6 @@ export type AiAgent = Pick<
     | 'spaceAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
-    | 'enableReasoning'
     | 'version'
 >;
 
@@ -117,7 +119,6 @@ export type AiAgentSummary = Pick<
     | 'spaceAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
-    | 'enableReasoning'
     | 'version'
 >;
 
@@ -134,6 +135,7 @@ export type AiAgentMessageUser<TUser extends AiAgentUser = AiAgentUser> = {
     createdAt: string;
 
     user: TUser;
+    context: AiPromptContext;
 };
 
 export type AiAgentMessageAssistantArtifact = Pick<
@@ -224,7 +226,6 @@ export type ApiCreateAiAgent = Pick<
     | 'spaceAccess'
     | 'enableDataAccess'
     | 'enableSelfImprovement'
-    | 'enableReasoning'
     | 'version'
 >;
 
@@ -243,7 +244,6 @@ export type ApiUpdateAiAgent = Partial<
         | 'spaceAccess'
         | 'enableDataAccess'
         | 'enableSelfImprovement'
-        | 'enableReasoning'
         | 'version'
     >
 > & {
@@ -267,6 +267,7 @@ export type ApiAiAgentThreadResponse = {
 
 export type ApiAiAgentThreadCreateRequest = {
     prompt?: string;
+    context?: AiPromptContextInput;
     modelConfig?: {
         modelName: string;
         modelProvider: string;
@@ -278,6 +279,7 @@ export type ApiAiAgentThreadCreateResponse = ApiSuccess<AiAgentThreadSummary>;
 
 export type ApiAiAgentThreadMessageCreateRequest = {
     prompt: string;
+    context?: AiPromptContextInput;
     modelConfig?: {
         modelName: string;
         modelProvider: string;

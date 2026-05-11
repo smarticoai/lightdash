@@ -12,6 +12,10 @@
             "okteto.yaml",
             "okteto.preview.yaml",
             "okteto.dev.yaml"
+        ],
+        "https://raw.githubusercontent.com/lightdash/lightdash/main/packages/common/src/schemas/json/lightdash-dbt-2.0.json": [
+            "/**/models/**/*.yml",
+            "/**/models/**/*.yaml"
         ]
     },
     "eslint.workingDirectories": [
@@ -45,7 +49,8 @@
 
     // Editor defaults
     "editor.formatOnSave": true,
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "oxc.fmt.configPath": ".oxfmtrc.json",
+    "editor.defaultFormatter": "oxc.oxc-vscode",
     "editor.codeActionsOnSave": {
         "source.fixAll.eslint": "explicit"
     },

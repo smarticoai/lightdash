@@ -1,19 +1,23 @@
 import {
     ApiSuccessEmpty,
+    assertRegisteredAccount,
     GitIntegrationConfiguration,
     GitRepo,
 } from '@lightdash/common';
 import {
+    Body,
     Delete,
     Get,
     Middlewares,
     OperationId,
+    Post,
     Query,
     Request,
     Route,
     SuccessResponse,
 } from '@tsoa/runtime';
 import express from 'express';
+import { toSessionUser } from '../auth/account';
 import { isAuthenticated, unauthorisedInDemo } from './authentication';
 import { BaseController } from './baseController';
 
@@ -43,9 +47,10 @@ export class GithubInstallController extends BaseController {
     async installGithubAppForOrganization(
         @Request() req: express.Request,
     ): Promise<void> {
+        assertRegisteredAccount(req.account);
         const context = await this.services
             .getGithubAppService()
-            .installRedirect(req.user!);
+            .installRedirect(toSessionUser(req.account));
 
         req.session.oauth = {};
         req.session.oauth.returnTo = context.returnToUrl;
@@ -70,9 +75,10 @@ export class GithubInstallController extends BaseController {
         status: 'ok';
         results: GitIntegrationConfiguration;
     }> {
+        assertRegisteredAccount(req.account);
         const config = await this.services
             .getGitIntegrationService()
-            .getConfiguration(req.user!);
+            .getConfiguration(toSessionUser(req.account));
 
         return {
             status: 'ok',
@@ -98,6 +104,7 @@ export class GithubInstallController extends BaseController {
         @Query() installation_id?: string,
         @Query() setup_action?: string,
     ): Promise<void> {
+        assertRegisteredAccount(req.account);
         if (!state || state !== req.session.oauth?.state) {
             this.setStatus(400);
             throw new Error('State does not match');
@@ -105,7 +112,7 @@ export class GithubInstallController extends BaseController {
         const redirectUrl = await this.services
             .getGithubAppService()
             .installCallback(
-                req.user!,
+                toSessionUser(req.account),
                 req.session.oauth,
                 code,
                 state,
@@ -126,9 +133,10 @@ export class GithubInstallController extends BaseController {
     async uninstallGithubAppForOrganization(
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getGithubAppService()
-            .deleteAppInstallation(req.user!);
+            .deleteAppInstallation(toSessionUser(req.account));
 
         this.setStatus(200);
         return {
@@ -149,13 +157,56 @@ export class GithubInstallController extends BaseController {
         status: 'ok';
         results: Array<GitRepo>;
     }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         return {
             status: 'ok',
             results: await this.services
                 .getGithubAppService()
-                .getRepos(req.user!),
+                .getRepos(toSessionUser(req.account)),
+        };
+    }
+
+    /**
+     * Create a new GitHub repository via the installed app
+     * @summary Create GitHub repository
+     */
+    @Middlewares([isAuthenticated, unauthorisedInDemo])
+    @SuccessResponse('201', 'Created')
+    @Post('/repos')
+    @OperationId('createGithubRepository')
+    async createGithubRepository(
+        @Request() req: express.Request,
+        @Body()
+        body: {
+            name: string;
+            description?: string;
+            isPrivate?: boolean;
+        },
+    ): Promise<{
+        status: 'ok';
+        results: {
+            owner: string;
+            repo: string;
+            fullName: string;
+            defaultBranch: string;
+        };
+    }> {
+        assertRegisteredAccount(req.account);
+        const result = await this.services
+            .getGithubAppService()
+            .createRepository(
+                toSessionUser(req.account),
+                body.name,
+                body.description,
+                body.isPrivate,
+            );
+
+        this.setStatus(201);
+        return {
+            status: 'ok',
+            results: result,
         };
     }
 }

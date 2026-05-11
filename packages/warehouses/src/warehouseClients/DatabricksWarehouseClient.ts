@@ -35,11 +35,21 @@ import WarehouseBaseSqlBuilder from './WarehouseBaseSqlBuilder';
 /**
  * Pre-registered Databricks public OAuth client ID for U2M authentication.
  * This is a built-in client that doesn't require registering a custom OAuth app.
- * This client id only works on he CLI redirect URIs. For the UI we require a custom OAuth app
+ * This client id only works on the CLI redirect URIs. For the UI we require a custom OAuth app
  * with a valid whitelisted redirect URI.
  * https://docs.databricks.com/en/dev-tools/auth/oauth-u2m.html
  */
 export const DATABRICKS_DEFAULT_OAUTH_CLIENT_ID = 'databricks-cli';
+
+/** Client IDs that only work with CLI redirect URIs, not browser OAuth flows */
+const DATABRICKS_CLI_OAUTH_CLIENT_IDS = new Set([
+    'databricks-cli',
+    'dbt-databricks',
+]);
+
+export const isDatabricksCliOAuthClientId = (
+    clientId: string | undefined,
+): boolean => !!clientId && DATABRICKS_CLI_OAUTH_CLIENT_IDS.has(clientId);
 
 type SchemaResult = {
     TABLE_CAT: string;
@@ -242,6 +252,20 @@ export class DatabricksSqlBuilder extends WarehouseBaseSqlBuilder {
         // Databricks uses PERCENTILE function
         return `PERCENTILE(${valueSql}, 0.5)`;
     }
+
+    buildArray(elements: string[]): string {
+        // Databricks/Spark SQL array construction syntax
+        return `ARRAY(${elements.join(', ')})`;
+    }
+
+    buildArrayAgg(expression: string, orderBy?: string): string {
+        // Databricks uses COLLECT_LIST for array aggregation
+        // Note: COLLECT_LIST doesn't support ORDER BY directly, need to sort array after collection
+        if (orderBy) {
+            return `SORT_ARRAY(COLLECT_LIST(${expression}))`;
+        }
+        return `COLLECT_LIST(${expression})`;
+    }
 }
 
 const DATABRICKS_SOCKET_TIMEOUT_MS = 60000;
@@ -312,7 +336,7 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
 
         try {
             connection = await client.connect(this.connectionOptions);
-        } catch (e: AnyType) {
+        } catch (e: unknown) {
             throw new WarehouseConnectionError(getErrorMessage(e));
         }
 
@@ -321,10 +345,10 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
                 initialCatalog: this.catalog,
                 initialSchema: this.schema,
             });
-        } catch (e: AnyType) {
+        } catch (e: unknown) {
             try {
                 await connection.close();
-            } catch (closeError: AnyType) {
+            } catch (closeError: unknown) {
                 console.error(
                     'Error closing connection after session failure',
                     closeError,
@@ -366,16 +390,17 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
                 console.debug(
                     `Setting databricks timezone to ${options?.timezone}`,
                 );
-                await session.executeStatement(
-                    `SET TIME ZONE '${options?.timezone}'`,
-                    {
-                        runAsync: false,
-                    },
+                const setTimezoneOp = await session.executeStatement(
+                    `SET TIME ZONE '${options.timezone}'`,
                 );
+                try {
+                    await setTimezoneOp.finished(); // ensures SET is applied before main query
+                } finally {
+                    await setTimezoneOp.close();
+                }
             }
 
             query = await session.executeStatement(alteredQuery, {
-                runAsync: true,
                 ...(this.enableTimeouts && {
                     queryTimeout: DATABRICKS_QUERY_TIMEOUT_SECONDS,
                 }),
@@ -401,17 +426,18 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
             do {
                 // eslint-disable-next-line no-await-in-loop
                 const chunk = await query.fetchChunk();
+                console.log(chunk.length, ' - ♻️ rows fetched');
                 // eslint-disable-next-line no-await-in-loop
                 await streamCallback({ fields, rows: chunk });
                 // eslint-disable-next-line no-await-in-loop
             } while (await query.hasMoreRows());
-        } catch (e: AnyType) {
+        } catch (e: unknown) {
             throw new WarehouseQueryError(getErrorMessage(e));
         } finally {
             try {
                 if (query) await query.close();
                 await close();
-            } catch (e: AnyType) {
+            } catch (e: unknown) {
                 // Only console error. Don't allow close errors to override the original error
                 console.error(
                     'Error closing Databricks session on streamQuery',
@@ -444,12 +470,12 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
                             tableName: request.table,
                         });
                         return (await query.fetchAll()) as SchemaResult[];
-                    } catch (e: AnyType) {
+                    } catch (e: unknown) {
                         throw new WarehouseQueryError(getErrorMessage(e));
                     } finally {
                         try {
                             if (query) await query.close();
-                        } catch (e: AnyType) {
+                        } catch (e: unknown) {
                             // Only console error. Don't allow close errors to override the original error
                             console.error(
                                 'Error closing Databricks query on getCatalog',
@@ -459,12 +485,12 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
                     }
                 },
             );
-        } catch (e: AnyType) {
+        } catch (e: unknown) {
             throw new WarehouseQueryError(getErrorMessage(e));
         } finally {
             try {
                 await close();
-            } catch (e: AnyType) {
+            } catch (e: unknown) {
                 // Only console error. Don't allow close errors to override the original error
                 console.error(
                     'Error closing Databricks session on getCatalog',
@@ -497,7 +523,7 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
         const query = `
             SELECT table_catalog, table_schema, table_name
             FROM information_schema.tables
-            WHERE table_type = 'MANAGED' 
+            WHERE table_type = 'MANAGED'
             ORDER BY 1,2,3
         `;
         const { rows } = await this.runQuery(query, {}, undefined, undefined);
@@ -516,7 +542,7 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
         const query = `
             SELECT table_catalog, table_schema, table_name
             FROM information_schema.tables
-            WHERE table_type = 'BASE TABLE' 
+            WHERE table_type = 'BASE TABLE'
             ${schemaFilter}
             ORDER BY 1,2,3
         `;
@@ -539,7 +565,7 @@ export class DatabricksWarehouseClient extends WarehouseBaseClient<CreateDatabri
             SELECT table_catalog,
                    table_schema,
                    table_name,
-                   column_name, 
+                   column_name,
                    data_type
             FROM information_schema.columns
             WHERE table_name = ?
@@ -605,6 +631,7 @@ export const refreshDatabricksOAuthToken = async (
     host: string,
     clientId: string,
     refreshToken: string,
+    clientSecret?: string,
 ): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -612,16 +639,21 @@ export const refreshDatabricksOAuthToken = async (
 }> => {
     const tokenUrl = `https://${host}/oidc/v1/token`;
 
+    const params = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: clientId,
+    });
+    if (clientSecret) {
+        params.set('client_secret', clientSecret);
+    }
+
     const response = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            client_id: clientId,
-        }).toString(),
+        body: params.toString(),
     });
 
     if (!response.ok) {

@@ -4,6 +4,7 @@ import { type Entries } from 'type-fest';
 import type { ReadyQueryResultsPage } from '../index';
 import { UnexpectedIndexError, UnexpectedServerError } from '../types/errors';
 import {
+    DimensionType,
     FieldType,
     isDimension,
     isField,
@@ -18,8 +19,14 @@ import {
     type TotalField,
 } from '../types/pivot';
 import { type ResultRow, type ResultValue } from '../types/results';
+import { TimeFrames } from '../types/timeFrames';
 import { getArrayValue, getObjectValue } from '../utils/accessors';
-import { formatItemValue } from '../utils/formatting';
+import {
+    formatItemValue,
+    formatTemporalCellForSpreadsheet,
+    shouldShiftItemTimezone,
+    toIsoWithProjectOffset,
+} from '../utils/formatting';
 
 type FieldFunction = (fieldId: string) => ItemsMap[string] | undefined;
 
@@ -529,19 +536,28 @@ export const pivotQueryResults = ({
     }
 
     const hiddenMetricFieldIds = pivotConfig.hiddenMetricFieldIds || [];
+    const { visibleMetricFieldIds } = pivotConfig;
+
+    const isMetricVisible = (metricId: string): boolean => {
+        if (visibleMetricFieldIds) {
+            return visibleMetricFieldIds.includes(metricId);
+        }
+        return !hiddenMetricFieldIds.includes(metricId);
+    };
 
     const summableMetricFieldIds = metricQuery.metrics.filter((metricId) => {
         const field = getField(metricId);
 
         // Skip if field is not found or is a dimension or is hidden
         if (!field || isDimension(field)) return false;
-        if (hiddenMetricFieldIds.includes(metricId)) return false;
+        if (!isMetricVisible(metricId)) return false;
 
         return isSummable(field);
     });
 
+    const allDimensionIds = new Set(metricQuery.dimensions);
     const columnOrder = (pivotConfig.columnOrder || []).filter(
-        (id) => !hiddenMetricFieldIds.includes(id),
+        (id) => allDimensionIds.has(id) || isMetricVisible(id),
     );
 
     const dimensions = [...metricQuery.dimensions];
@@ -579,7 +595,7 @@ export const pivotQueryResults = ({
         ...metricQuery.metrics,
         ...metricQuery.tableCalculations.map((tc) => tc.name),
     ]
-        .filter((m) => !hiddenMetricFieldIds.includes(m))
+        .filter((m) => isMetricVisible(m))
         .sort((a, b) => columnOrder.indexOf(a) - columnOrder.indexOf(b))
         .map((id) => ({ fieldId: id }));
 
@@ -685,9 +701,13 @@ export const pivotQueryResults = ({
                     }
                     const keys = row
                         .slice(0, colIndex + 1)
-                        .reduce<
-                            string[]
-                        >((acc, l) => (l.type === 'value' ? [...acc, String(l.value.raw)] : acc), []);
+                        .reduce<string[]>(
+                            (acc, l) =>
+                                l.type === 'value'
+                                    ? [...acc, String(l.value.raw)]
+                                    : acc,
+                            [],
+                        );
                     const cellWithSpan: PivotData['headerValues'][number][number] =
                         {
                             ...cell,
@@ -876,6 +896,7 @@ export const convertSqlPivotedRowsToPivotData = ({
     getField,
     getFieldLabel,
     groupedSubtotals,
+    columnLimit,
 }: {
     rows: ResultRow[];
     pivotDetails: NonNullable<ReadyQueryResultsPage['pivotDetails']>;
@@ -885,18 +906,28 @@ export const convertSqlPivotedRowsToPivotData = ({
         | 'columnTotals'
         | 'metricsAsRows'
         | 'hiddenMetricFieldIds'
+        | 'visibleMetricFieldIds'
         | 'columnOrder'
     >; // only use properties that are not part of pivot details metadata
     getField: FieldFunction;
     getFieldLabel: FieldLabelFunction;
     groupedSubtotals: PivotQueryResultsArgs['groupedSubtotals'];
+    columnLimit?: number;
 }): PivotData => {
     if (rows.length === 0) {
         throw new Error('Cannot convert SQL pivoted results with no rows');
     }
 
     const hiddenMetricFieldIds = pivotConfig.hiddenMetricFieldIds || [];
+    const { visibleMetricFieldIds } = pivotConfig;
     const columnOrder = pivotConfig.columnOrder || [];
+
+    const isMetricVisibleInPivot = (fieldId: string): boolean => {
+        if (visibleMetricFieldIds) {
+            return visibleMetricFieldIds.includes(fieldId);
+        }
+        return !hiddenMetricFieldIds.includes(fieldId);
+    };
 
     // Extract information from pivot details metadata
     let indexColumns: string[];
@@ -914,14 +945,35 @@ export const convertSqlPivotedRowsToPivotData = ({
         indexColumns = [];
     }
 
-    const filteredValuesColumns = pivotDetails.valuesColumns.filter(
-        ({ referenceField }) => !hiddenMetricFieldIds.includes(referenceField),
+    // Filter value columns: visibleMetricFieldIds (allowlist) takes precedence
+    // over hiddenMetricFieldIds (blocklist). Cartesian charts use the allowlist
+    // to exclude sort-only metrics injected for pivot sorting (PROD-6906).
+    let filteredValuesColumns = pivotDetails.valuesColumns.filter(
+        ({ referenceField }) => isMetricVisibleInPivot(referenceField),
     );
 
-    // Get unique base metrics from valuesColumns
-    const baseMetricsArray = Array.from(
-        new Set(filteredValuesColumns.map((col) => col.referenceField)),
-    );
+    // Apply column limit: keep only the first N unique pivot column groups
+    if (columnLimit !== undefined && columnLimit > 0) {
+        const seenGroups = new Set<string>();
+        filteredValuesColumns = filteredValuesColumns.filter((col) => {
+            const groupKey = col.pivotValues
+                .map(
+                    ({ referenceField, value }) => `${referenceField}:${value}`,
+                )
+                .join('|');
+            if (!seenGroups.has(groupKey)) {
+                if (seenGroups.size >= columnLimit) return false;
+                seenGroups.add(groupKey);
+            }
+            return true;
+        });
+    }
+
+    // Get unique base metrics from valuesColumns, preserving order
+    const baseMetricsArray = filteredValuesColumns
+        .map((col) => col.referenceField)
+        .filter((field, index, self) => self.indexOf(field) === index)
+        .sort((a, b) => columnOrder.indexOf(a) - columnOrder.indexOf(b));
 
     const headerValueTypes = getHeaderValueTypes({
         metricsAsRows: pivotConfig.metricsAsRows,
@@ -1158,6 +1210,9 @@ export const convertSqlPivotedRowsToPivotData = ({
         metricsAsRows: pivotConfig.metricsAsRows || false,
         columnOrder: pivotConfig.columnOrder,
         hiddenMetricFieldIds: pivotConfig.hiddenMetricFieldIds || [],
+        ...(pivotConfig.visibleMetricFieldIds && {
+            visibleMetricFieldIds: pivotConfig.visibleMetricFieldIds,
+        }),
         columnTotals: pivotConfig.columnTotals,
         rowTotals: pivotConfig.rowTotals,
     };
@@ -1226,7 +1281,7 @@ export const convertSqlPivotedRowsToPivotData = ({
 
         // Skip if field is not found or is a dimension or is hidden
         if (!field || isDimension(field)) return false;
-        if (hiddenMetricFieldIds.includes(metricId)) return false;
+        if (!isMetricVisibleInPivot(metricId)) return false;
 
         return isSummable(field);
     });
@@ -1460,17 +1515,64 @@ export const convertSqlPivotedRowsToPivotData = ({
     return combinedRetrofit(pivotData, getField, getFieldLabel);
 };
 
-export const pivotResultsAsCsv = ({
-    pivotConfig,
-    rows,
-    itemMap,
-    metricQuery,
-    customLabels,
-    onlyRaw,
-    maxColumnLimit,
-    undefinedCharacter = '',
-    pivotDetails,
-}: {
+export type PivotResultsDataCell = {
+    raw: unknown;
+    formatted: string;
+    fieldId: string;
+};
+
+export type PivotResultsData = {
+    headers: string[][];
+    dataRows: Array<Array<PivotResultsDataCell>>;
+    fieldIds: string[];
+    hasIndex: boolean;
+};
+
+const NATIVE_DATE_TIME_FRAMES = new Set<TimeFrames>([
+    TimeFrames.YEAR,
+    TimeFrames.MONTH,
+    TimeFrames.DAY,
+    TimeFrames.HOUR,
+    TimeFrames.MINUTE,
+    TimeFrames.SECOND,
+    TimeFrames.MILLISECOND,
+    TimeFrames.RAW,
+]);
+
+export function timeIntervalToExcelNumFmt(
+    timeInterval: TimeFrames | undefined,
+    dimensionType: DimensionType,
+): string | null {
+    if (timeInterval && !NATIVE_DATE_TIME_FRAMES.has(timeInterval)) {
+        return null;
+    }
+
+    switch (timeInterval) {
+        case TimeFrames.YEAR:
+            return 'yyyy';
+        case TimeFrames.MONTH:
+            return 'yyyy-mm';
+        case TimeFrames.DAY:
+            return 'yyyy-mm-dd';
+        case TimeFrames.HOUR:
+            return 'yyyy-mm-dd hh:00';
+        case TimeFrames.MINUTE:
+            return 'yyyy-mm-dd hh:mm';
+        case TimeFrames.SECOND:
+            return 'yyyy-mm-dd hh:mm:ss';
+        case TimeFrames.MILLISECOND:
+            return 'yyyy-mm-dd hh:mm:ss.000';
+        case TimeFrames.RAW:
+        case undefined:
+            return dimensionType === DimensionType.TIMESTAMP
+                ? 'yyyy-mm-dd hh:mm:ss'
+                : 'yyyy-mm-dd';
+        default:
+            return null;
+    }
+}
+
+type PivotResultsParams = {
     pivotConfig: PivotConfig;
     pivotDetails: ReadyQueryResultsPage['pivotDetails'];
     rows: ResultRow[];
@@ -1480,7 +1582,28 @@ export const pivotResultsAsCsv = ({
     onlyRaw: boolean;
     maxColumnLimit: number;
     undefinedCharacter?: string;
-}) => {
+    // When set + onlyRaw + the cell's field is TIMESTAMP, the emitted value
+    // is the warehouse instant shifted into the project tz with an explicit
+    // offset suffix. No-op for other modes / fields.
+    timezone?: string;
+    // When true, shiftable temporal cells (header + body, both modes) emit
+    // the wall-clock format spreadsheet apps auto-detect as a date.
+    formatTemporalsForSpreadsheet?: boolean;
+};
+
+export const pivotResultsAsData = ({
+    pivotConfig,
+    rows,
+    itemMap,
+    metricQuery,
+    customLabels,
+    onlyRaw,
+    maxColumnLimit,
+    undefinedCharacter = '',
+    pivotDetails,
+    timezone,
+    formatTemporalsForSpreadsheet = false,
+}: PivotResultsParams): PivotResultsData => {
     const getFieldLabel = (fieldId: string) => {
         const customLabel = customLabels?.[fieldId];
         if (customLabel !== undefined) return customLabel;
@@ -1494,7 +1617,7 @@ export const pivotResultsAsCsv = ({
               rows,
               pivotDetails,
               pivotConfig,
-              groupedSubtotals: undefined, // TODO: is this something that we have?
+              groupedSubtotals: undefined,
           })
         : pivotQueryResults({
               pivotConfig,
@@ -1503,15 +1626,35 @@ export const pivotResultsAsCsv = ({
               options: {
                   maxColumns: maxColumnLimit,
               },
-              getField: (fieldId: string) => itemMap && itemMap[fieldId], // itemsMap && itemsMap[fieldId],
+              getField: (fieldId: string) => itemMap && itemMap[fieldId],
               getFieldLabel,
           });
+
     const formatField = onlyRaw ? 'raw' : 'formatted';
+    const pickValue = (
+        cellValue: ResultValue | undefined,
+        fieldId: string,
+    ): string => {
+        const item = itemMap[fieldId];
+        if (formatTemporalsForSpreadsheet) {
+            const spreadsheetTemporal = formatTemporalCellForSpreadsheet(
+                item,
+                cellValue?.raw,
+                timezone,
+            );
+            if (spreadsheetTemporal !== undefined) return spreadsheetTemporal;
+        }
+        const base = (cellValue?.[formatField] as string) ?? '';
+        if (!onlyRaw || !timezone) return base;
+        if (!shouldShiftItemTimezone(item)) return base;
+        const shifted = toIsoWithProjectOffset(cellValue?.raw, timezone);
+        return shifted ?? base;
+    };
     const headers = pivotedResults.headerValues.reduce<string[][]>(
         (acc, row, i) => {
             const values = row.map((header) =>
                 'value' in header
-                    ? (header.value[formatField] as string)
+                    ? pickValue(header.value, header.fieldId)
                     : getFieldLabel(header.fieldId),
             );
             const fields = pivotedResults.titleFields[i];
@@ -1519,7 +1662,6 @@ export const pivotResultsAsCsv = ({
                 field ? getFieldLabel(field.fieldId) : undefinedCharacter,
             );
 
-            // Row totals
             const rowTotalLabels =
                 pivotedResults.rowTotalFields?.[i]?.map((totalField) =>
                     totalField?.fieldId
@@ -1532,23 +1674,34 @@ export const pivotResultsAsCsv = ({
         },
         [[]],
     );
+
     const fieldIds = Object.values(
         pivotedResults.retrofitData.pivotColumnInfo,
     ).map((field) => field.fieldId);
 
     const hasIndex = pivotedResults.indexValues.length > 0;
-    const pivotedRows: string[][] =
-        pivotedResults.retrofitData.allCombinedData.map((row) => {
-            // Fields that return `null` don't appear in the pivot table
-            // If there are no index fields, we need to add an empty string to the beginning of the row
-            const noIndexPrefix = hasIndex ? [] : [''];
-            const formattedRows = fieldIds.map(
-                (fieldId) =>
-                    (row[fieldId]?.value?.[formatField] as string) ||
-                    undefinedCharacter,
-            );
-            return [...noIndexPrefix, ...formattedRows];
-        });
+    const dataRows = pivotedResults.retrofitData.allCombinedData.map((row) => {
+        const noIndexPrefix: PivotResultsDataCell[] = hasIndex
+            ? []
+            : [{ raw: '', formatted: '', fieldId: '' }];
+        const cells: PivotResultsDataCell[] = fieldIds.map((fieldId) => ({
+            raw: row[fieldId]?.value?.raw ?? '',
+            formatted:
+                pickValue(row[fieldId]?.value, fieldId) || undefinedCharacter,
+            fieldId,
+        }));
+        return [...noIndexPrefix, ...cells];
+    });
 
-    return [...headers, ...pivotedRows];
+    return { headers, dataRows, fieldIds, hasIndex };
+};
+
+export const pivotResultsAsCsv = (params: PivotResultsParams) => {
+    const data = pivotResultsAsData(params);
+
+    const pivotedRows: string[][] = data.dataRows.map((row) =>
+        row.map((cell) => cell.formatted),
+    );
+
+    return [...data.headers, ...pivotedRows];
 };

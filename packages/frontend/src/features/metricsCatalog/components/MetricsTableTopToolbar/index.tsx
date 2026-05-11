@@ -1,8 +1,8 @@
 import {
+    closestCenter,
     DndContext,
     KeyboardSensor,
     PointerSensor,
-    closestCenter,
     useSensor,
     useSensors,
     type DragEndEvent,
@@ -70,7 +70,6 @@ import {
 import { MetricCatalogView } from '../../types';
 import CategoriesFilter from './CategoriesFilter';
 import OwnersFilter from './OwnersFilter';
-import SegmentedControlHoverCard from './SegmentedControlHoverCard';
 import TableFilter from './TableFilter';
 type MetricsTableTopToolbarProps = GroupProps & {
     search: string | undefined;
@@ -86,10 +85,7 @@ type MetricsTableTopToolbarProps = GroupProps & {
     selectedOwners: string[];
     setSelectedOwners: (owners: string[]) => void;
     totalResults: number;
-    isValidMetricsNodeCount: boolean;
-    isValidMetricsEdgeCount: boolean;
     showCategoriesFilter?: boolean;
-    isValidMetricsTree: boolean;
     metricCatalogView: MetricCatalogView;
     table: MRT_TableInstance<CatalogField>;
 };
@@ -170,9 +166,6 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
         selectedOwners,
         setSelectedOwners,
         showCategoriesFilter,
-        isValidMetricsTree,
-        isValidMetricsNodeCount,
-        isValidMetricsEdgeCount,
         metricCatalogView,
         table,
         ...props
@@ -628,45 +621,24 @@ export const MetricsTableTopToolbar: FC<MetricsTableTopToolbarProps> = memo(
                             },
                             {
                                 label: (
-                                    <SegmentedControlHoverCard
-                                        totalMetricsCount={totalResults}
-                                        isValidMetricsNodeCount={
-                                            isValidMetricsNodeCount
-                                        }
-                                        isValidMetricsEdgeCount={
-                                            isValidMetricsEdgeCount
-                                        }
+                                    <Tooltip
                                         withinPortal
+                                        variant="xs"
+                                        label="Canvas"
                                         position="bottom-end"
-                                        withArrow
                                     >
-                                        <Center
-                                            sx={{
-                                                cursor: !isValidMetricsTree
-                                                    ? 'not-allowed'
-                                                    : 'pointer',
-                                            }}
-                                        >
+                                        <Center>
                                             <MantineIcon
                                                 icon={IconSitemap}
                                                 size="md"
-                                                opacity={
-                                                    !isValidMetricsTree
-                                                        ? 0.5
-                                                        : 1
-                                                }
                                             />
                                         </Center>
-                                    </SegmentedControlHoverCard>
+                                    </Tooltip>
                                 ),
                                 value: MetricCatalogView.CANVAS,
                             },
                         ]}
                         onChange={(value) => {
-                            if (!isValidMetricsTree) {
-                                return;
-                            }
-
                             const view = value as MetricCatalogView;
 
                             switch (view) {

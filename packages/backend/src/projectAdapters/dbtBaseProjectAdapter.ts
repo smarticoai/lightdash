@@ -1,37 +1,39 @@
 import {
     AnyType,
-    DEFAULT_SPOTLIGHT_CONFIG,
+    attachTypesToModels,
+    convertExplores,
     DbtManifestVersion,
     DbtMetric,
     DbtModelNode,
     DbtPackages,
     DbtRawModelNode,
+    DEFAULT_SPOTLIGHT_CONFIG,
     Explore,
     ExploreError,
-    InlineError,
-    InlineErrorType,
-    ManifestValidator,
-    MissingCatalogEntryError,
-    NotFoundError,
-    ParseError,
-    SupportedDbtAdapter,
-    SupportedDbtVersions,
-    attachTypesToModels,
-    convertExplores,
     friendlyName,
     getCompiledModels,
     getDbtManifestVersion,
     getModelsFromManifest,
     getSchemaStructureFromDbtModels,
+    InlineError,
+    InlineErrorType,
     isSupportedDbtAdapter,
     loadLightdashProjectConfig,
+    ManifestValidator,
+    MissingCatalogEntryError,
     normaliseModelDatabase,
+    NotFoundError,
+    ParseError,
+    SupportedDbtAdapter,
+    SupportedDbtVersions,
     type LightdashProjectConfig,
 } from '@lightdash/common';
 import { WarehouseClient } from '@lightdash/warehouses';
+import * as Sentry from '@sentry/node';
 import fs from 'fs/promises';
 import path from 'path';
 import { LightdashAnalytics } from '../analytics/LightdashAnalytics';
+import { preAggregatePostProcessor } from '../ee/preAggregates/postProcessor';
 import Logger from '../logging/logger';
 import {
     CachedWarehouse,
@@ -39,6 +41,8 @@ import {
     ProjectAdapter,
     type TrackingParams,
 } from '../types';
+
+const postProcessors = [preAggregatePostProcessor];
 
 export class DbtBaseProjectAdapter implements ProjectAdapter {
     dbtClient: DbtClient;
@@ -155,7 +159,8 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
             await this.dbtClient.installDeps();
         }
         Logger.debug('Get dbt manifest');
-        const { manifest } = await this.dbtClient.getDbtManifest();
+        const { manifest, selectedModelIds } =
+            await this.dbtClient.getDbtManifest();
         // Type of the target warehouse
         if (!isSupportedDbtAdapter(manifest.metadata)) {
             throw new ParseError(
@@ -163,31 +168,36 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 {},
             );
         }
-        let models: DbtRawModelNode[] = [];
 
-        if (this.dbtClient.getSelector()) {
+        if (selectedModelIds) {
             Logger.info(
-                `Manifest generated with selector "${this.dbtClient.getSelector()}"`,
+                `Manifest generated with selector, matched ${selectedModelIds.length} model(s)`,
             );
-            // If selector is provided, we use compile to get the models that match the selector
-            const manifestModels = getModelsFromManifest(manifest);
-            Logger.info(`Manifest models ${manifestModels.length}`);
-            const compiledModels = getCompiledModels(manifestModels, undefined);
-            Logger.info(`Compiled models ${compiledModels.length}`);
-            models = compiledModels.filter(
-                (node: AnyType) => node.resource_type === 'model' && node.meta, // check that node.meta exists
-            ) as DbtRawModelNode[];
-            Logger.info(`Filtered models ${models.length}`);
-        } else {
-            const nodes = Object.values(manifest.nodes);
-            Logger.info(`Manifest models ${nodes.length}`);
-            // If selector is not provided, we use all the models from the manifest
-            // models with invalid metadata will compile to failed Explores
-            models = nodes.filter(
-                (node: AnyType) => node.resource_type === 'model' && node.meta, // check that node.meta exists
-            ) as DbtRawModelNode[];
-            Logger.info(`Filtered models ${models.length}`);
         }
+
+        const models = Sentry.startSpan(
+            { op: 'dbt', name: 'filterManifestModels' },
+            () => {
+                const startTime = Date.now();
+                const manifestModels = getModelsFromManifest(manifest);
+                Logger.info(`Manifest models ${manifestModels.length}`);
+                const compiledModels = getCompiledModels(
+                    manifestModels,
+                    selectedModelIds,
+                );
+                Logger.info(`Compiled models ${compiledModels.length}`);
+                const filtered = compiledModels.filter(
+                    (node: AnyType) =>
+                        ['model', 'seed'].includes(node.resource_type) &&
+                        node.meta,
+                ) as DbtRawModelNode[];
+                const elapsed = Date.now() - startTime;
+                Logger.info(
+                    `Filtered to ${filtered.length} model(s) in ${elapsed}ms`,
+                );
+                return filtered;
+            },
+        );
 
         const adapterType = manifest.metadata.adapter_type;
 
@@ -250,8 +260,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                 metrics,
                 this.warehouseClient,
                 lightdashProjectConfig,
-                disableTimestampConversion,
-                allowPartialCompilation,
+                {
+                    disableTimestampConversion,
+                    allowPartialCompilation,
+                    postProcessors,
+                },
             );
             Logger.info('Finished compiling explores');
             return [...lazyExplores, ...failedExplores];
@@ -295,8 +308,11 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     metrics,
                     this.warehouseClient,
                     lightdashProjectConfig,
-                    disableTimestampConversion,
-                    allowPartialCompilation,
+                    {
+                        disableTimestampConversion,
+                        allowPartialCompilation,
+                        postProcessors,
+                    },
                 );
                 Logger.info(
                     'Finished compiling explores after missing catalog error',
@@ -350,10 +366,19 @@ export class DbtBaseProjectAdapter implements ProjectAdapter {
                     };
                 }
                 if (error) {
+                    // Seeds that fail validation are silently skipped —
+                    // they're only used as join targets, not standalone explores.
+                    if (model.resource_type === 'seed') {
+                        return [validModels, invalidModels];
+                    }
+                    const metaGroups: string[] | undefined = model.meta.groups;
                     const exploreError: ExploreError = {
                         name: model.name,
                         label: model.meta.label || friendlyName(model.name),
                         groupLabel: model.meta.group_label,
+                        ...(metaGroups && metaGroups.length > 0
+                            ? { groups: metaGroups }
+                            : {}),
                         errors: [
                             error.type === InlineErrorType.METADATA_PARSE_ERROR
                                 ? {

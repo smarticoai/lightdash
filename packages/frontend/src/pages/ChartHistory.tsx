@@ -68,6 +68,7 @@ const ChartHistoryExplorer = memo<{ selectedVersionUuid: string | undefined }>(
                     parameterDefinitions: {},
                     expandedSections: [ExplorerSection.VISUALIZATION],
                     unsavedChartVersion: chartVersionQuery.data.chart,
+                    savedChart: chartVersionQuery.data.chart,
                     modals: {
                         format: { isOpen: false },
                         additionalMetric: { isOpen: false },
@@ -77,7 +78,6 @@ const ChartHistoryExplorer = memo<{ selectedVersionUuid: string | undefined }>(
                         periodOverPeriodComparison: { isOpen: false },
                     },
                 },
-                savedChart: chartVersionQuery.data.chart,
             });
 
             store.dispatch(explorerActions.reset(initialState));
@@ -105,7 +105,8 @@ const ChartHistory = () => {
     const [selectedVersionUuid, selectVersionUuid] = useState<string>();
     const [isRollbackModalOpen, setIsRollbackModalOpen] = useState(false);
     const chartQuery = useSavedQuery({
-        id: savedQueryUuid,
+        uuidOrSlug: savedQueryUuid,
+        projectUuid,
     });
     const historyQuery = useChartHistory(savedQueryUuid);
 

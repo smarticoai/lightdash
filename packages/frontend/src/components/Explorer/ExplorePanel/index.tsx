@@ -6,7 +6,8 @@ import {
     findReplaceableCustomMetrics,
     getMetrics,
 } from '@lightdash/common';
-import { ActionIcon, Group, HoverCard, Menu, Stack, Text } from '@mantine/core';
+import { Menu } from '@mantine-8/core';
+import { ActionIcon, Group, HoverCard, Stack, Text } from '@mantine/core';
 import {
     IconAlertTriangle,
     IconCode,
@@ -32,6 +33,7 @@ import {
     useExplorerDispatch,
     useExplorerSelector,
 } from '../../../features/explorer/store';
+import { useSourceCodeEditor } from '../../../features/sourceCodeEditor';
 import {
     DeleteVirtualViewModal,
     EditVirtualViewModal,
@@ -48,8 +50,7 @@ import PageBreadcrumbs from '../../common/PageBreadcrumbs';
 import ExploreTree from '../ExploreTree';
 import LoadingSkeleton from '../ExploreTree/LoadingSkeleton';
 import { ItemDetailProvider } from '../ExploreTree/TableTree/ItemDetailProvider';
-import ExploreYamlModal from '../ExploreYamlModal';
-import WarningsHoverCardContent from '../WarningsHoverCard';
+import WarningsHoverCardContent from '../WarningsHoverCardContent';
 import { useIsGitProject } from '../WriteBackModal/hooks';
 import { VisualizationConfigPortalId } from './constants';
 
@@ -63,11 +64,11 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
     const [isEditVirtualViewOpen, setIsEditVirtualViewOpen] = useState(false);
     const [isDeleteVirtualViewOpen, setIsDeleteVirtualViewOpen] =
         useState(false);
-    const [isViewSourceOpen, setIsViewSourceOpen] = useState(false);
     const [, startTransition] = useTransition();
 
     const projectUuid = useProjectUuid();
     const isGitProject = useIsGitProject(projectUuid ?? '');
+    const { open: openSourceCodeEditor } = useSourceCodeEditor();
     const { data: editYamlInUiFlag } = useServerFeatureFlag(
         FeatureFlags.EditYamlInUi,
     );
@@ -157,8 +158,9 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
     }, []);
 
     const handleViewSourceCode = useCallback(() => {
-        setIsViewSourceOpen(true);
-    }, []);
+        if (!activeTableName) return;
+        openSourceCodeEditor({ explore: activeTableName });
+    }, [openSourceCodeEditor, activeTableName]);
 
     const breadcrumbs = useMemo(() => {
         if (!explore) return [];
@@ -249,7 +251,9 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
                                 </Menu.Target>
                                 <Menu.Dropdown>
                                     <Menu.Item
-                                        icon={<MantineIcon icon={IconPencil} />}
+                                        leftSection={
+                                            <MantineIcon icon={IconPencil} />
+                                        }
                                         onClick={handleEditVirtualView}
                                     >
                                         <Text fz="xs" fw={500}>
@@ -265,7 +269,7 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
                                         })}
                                     >
                                         <Menu.Item
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon icon={IconTrash} />
                                             }
                                             color="red"
@@ -300,7 +304,7 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
                                     </Menu.Target>
                                     <Menu.Dropdown>
                                         <Menu.Item
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon icon={IconCode} />
                                             }
                                             onClick={handleViewSourceCode}
@@ -337,14 +341,6 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
                         onClose={() => setIsDeleteVirtualViewOpen(false)}
                         virtualViewName={activeTableName}
                         projectUuid={projectUuid}
-                    />
-                )}
-                {isViewSourceOpen && projectUuid && activeTableName && (
-                    <ExploreYamlModal
-                        opened={isViewSourceOpen}
-                        onClose={() => setIsViewSourceOpen(false)}
-                        projectUuid={projectUuid}
-                        exploreName={activeTableName}
                     />
                 )}
             </Stack>

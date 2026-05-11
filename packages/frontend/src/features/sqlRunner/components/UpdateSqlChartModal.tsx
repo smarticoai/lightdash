@@ -1,5 +1,5 @@
 import type { Space, SpaceSummary, SqlChart } from '@lightdash/common';
-import { Button, Stack, TextInput, Textarea } from '@mantine-8/core';
+import { Button, Stack, Textarea, TextInput } from '@mantine-8/core';
 import { useForm, zodResolver } from '@mantine/form';
 import { IconChartBar, IconPlus } from '@tabler/icons-react';
 import { useEffect, useMemo, type FC } from 'react';
@@ -115,7 +115,7 @@ export const UpdateSqlChartModal: FC<Props> = ({
         async ({ name, description, spaceUuid, newSpaceName }) => {
             let newSpace = newSpaceName
                 ? await spaceManagement.handleCreateNewSpace({
-                      isPrivate: true,
+                      inheritParentPermissions: false,
                   })
                 : undefined;
 
@@ -141,7 +141,6 @@ export const UpdateSqlChartModal: FC<Props> = ({
                 }
                 newSavedSqlChart.space = {
                     name: updatedSpace.name,
-                    isPrivate: updatedSpace.isPrivate,
                     userAccess:
                         'userAccess' in updatedSpace
                             ? updatedSpace.userAccess

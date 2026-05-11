@@ -16,6 +16,7 @@ export enum PageName {
     SAVED_QUERIES = 'saved_charts',
     SAVED_QUERY_EXPLORER = 'saved_chart_explorer',
     CHART_HISTORY = 'chart_history',
+    DASHBOARD_HISTORY = 'dashboard_history',
     PROJECT_SETTINGS = 'project_settings',
     PROFILE_SETTINGS = 'profile_settings',
     GENERAL_SETTINGS = 'general_settings',
@@ -34,6 +35,7 @@ export enum PageName {
     SAVED_DASHBOARDS = 'saved_dashboards',
     DASHBOARD = 'DASHBOARD',
     SQL_RUNNER = 'SQL_RUNNER',
+    SOURCE_CODE = 'SOURCE_CODE',
     SEMANTIC_VIEWER_VIEW = 'SEMANTIC_VIEWER_VIEW',
     SEMANTIC_VIEWER_EDIT = 'SEMANTIC_VIEWER_EDIT',
     SOCIAL_LOGIN_SETTINGS = 'social_login_settings',
@@ -81,6 +83,7 @@ export enum EventName {
     UPDATE_TABLE_CALCULATION_BUTTON_CLICKED = 'update_table_calculation_button.click',
     DELETE_TABLE_CALCULATION_BUTTON_CLICKED = 'delete_table_calculation_button.click',
     CONFIRM_DELETE_TABLE_CALCULATION_BUTTON_CLICKED = 'confirm_delete_table_calculation_button.click',
+    FORMULA_TABLE_CALCULATION_AI_GENERATE_CLICKED = 'formula_table_calculation_ai_generate.clicked',
     UPDATE_PROJECT_BUTTON_CLICKED = 'update_project_button.click',
     CREATE_PROJECT_BUTTON_CLICKED = 'create_project_button.click',
     REFRESH_DBT_CONNECTION_BUTTON_CLICKED = 'refresh_dbt_connection_button.click',
@@ -161,6 +164,7 @@ export enum EventName {
     AI_AGENT_CHART_HOW_ITS_CALCULATED_CLICKED = 'ai_agent_chart_how_its_calculated.clicked',
     AI_AGENT_CHART_CREATED = 'ai_agent_chart.created',
     AI_AGENT_CHART_EXPLORED = 'ai_agent_chart.explored',
+    AI_AGENT_ASK_CLICKED = 'ai_agent_ask.clicked',
 
     // Theme
     THEME_TOGGLED = 'theme.toggled',

@@ -1,44 +1,35 @@
 {
     "extends": "./../../tsconfig.json",
     "compilerOptions": {
-        "composite": true,
+        "composite": false,
         "target": "ESNext",
-        "lib": [
-            "dom",
-            "dom.iterable",
-            "esnext"
-        ],
+        "lib": ["dom", "dom.iterable", "esnext"],
         "allowJs": true,
-        "skipLibCheck": true,
-        "esModuleInterop": true,
-        "allowSyntheticDefaultImports": true,
-        "strict": true,
-        "forceConsistentCasingInFileNames": true,
         "noFallthroughCasesInSwitch": true,
         "module": "ESNext",
-        "moduleResolution": "node",
+        "moduleResolution": "bundler",
         "resolveJsonModule": true,
         "isolatedModules": true,
         "importHelpers": true,
         "jsx": "react-jsx",
         "jsxImportSource": "react",
+        "skipLibCheck": true,
         "types": [
             "node",
             "vite/client",
             "vite-plugin-svgr/client",
             "@testing-library/jest-dom"
         ],
-        "noUncheckedIndexedAccess": false, // TODO fix errors ,then enable
-        "tsBuildInfoFile": "dist/.tsbuildinfo",
+        "noUncheckedIndexedAccess": false, // TODO fix errors, then enable
+        "tsBuildInfoFile": "dist/.tsbuildinfo"
     },
-    "include": [
-        "./src",
-        "./sdk/index.tsx",
-        "./vite-env.d.ts",
-    ],
+    "include": ["./src", "./sdk/index.tsx", "./vite-env.d.ts"],
     "references": [
         {
             "path": "../common"
+        },
+        {
+            "path": "../formula"
         },
         {
             "path": "./tsconfig.node.json"

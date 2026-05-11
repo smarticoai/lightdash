@@ -1,6 +1,6 @@
 import { SupportedDbtAdapter, type DbtModelNode } from '../types/dbt';
-import { type Explore } from '../types/explore';
-import { DimensionType, FieldType } from '../types/field';
+import { InlineErrorType, type Explore } from '../types/explore';
+import { DimensionType, FieldType, MetricType } from '../types/field';
 import { DEFAULT_SPOTLIGHT_CONFIG } from '../types/lightdashProjectConfig';
 import { TimeFrames } from '../types/timeFrames';
 import { warehouseClientMock } from './exploreCompiler.mock';
@@ -16,8 +16,8 @@ import {
     DBT_METRIC_WITH_FILTER,
     DBT_METRIC_WITH_SQL_FIELD,
     DBT_V9_METRIC,
+    expectedModelWithType,
     LIGHTDASH_TABLE_SQL_WHERE,
-    LIGHTDASH_TABLE_WITHOUT_AUTO_METRICS,
     LIGHTDASH_TABLE_WITH_ADDITIONAL_DIMENSIONS,
     LIGHTDASH_TABLE_WITH_AI_HINT,
     LIGHTDASH_TABLE_WITH_AI_HINT_ARRAY,
@@ -33,30 +33,36 @@ import {
     LIGHTDASH_TABLE_WITH_DIMENSION_AI_HINT_ARRAY,
     LIGHTDASH_TABLE_WITH_GROUP_BLOCK,
     LIGHTDASH_TABLE_WITH_GROUP_LABEL,
-    LIGHTDASH_TABLE_WITH_METRICS,
     LIGHTDASH_TABLE_WITH_METRIC_AI_HINT,
     LIGHTDASH_TABLE_WITH_METRIC_AI_HINT_ARRAY,
     LIGHTDASH_TABLE_WITH_METRIC_LEVEL_CATEGORIES,
+    LIGHTDASH_TABLE_WITH_METRICS,
     LIGHTDASH_TABLE_WITH_MODEL_LEVEL_CATEGORIES,
     LIGHTDASH_TABLE_WITH_MODEL_METRIC_AI_HINT,
     LIGHTDASH_TABLE_WITH_NO_CATEGORIES,
     LIGHTDASH_TABLE_WITH_OFF_TIME_INTERVAL_DIMENSIONS,
     LIGHTDASH_TABLE_WITH_SINGLE_PRIMARY_KEY,
+    LIGHTDASH_TABLE_WITHOUT_AUTO_METRICS,
+    model,
     MODEL_WITH_ADDITIONAL_DIMENSIONS,
     MODEL_WITH_AI_HINT,
     MODEL_WITH_AI_HINT_ARRAY,
     MODEL_WITH_AI_HINT_IN_CONFIG,
     MODEL_WITH_COMPOSITE_PRIMARY_KEY,
+    MODEL_WITH_CUSTOM_GRANULARITY,
+    MODEL_WITH_CUSTOM_GRANULARITY_AND_REQUIRED_ATTRIBUTES,
     MODEL_WITH_CUSTOM_TIME_INTERVAL_DIMENSIONS,
     MODEL_WITH_DEFAULT_SHOW_UNDERLYING_VALUES,
     MODEL_WITH_DEFAULT_TIME_INTERVAL_DIMENSIONS,
     MODEL_WITH_DIMENSION_AI_HINT,
     MODEL_WITH_DIMENSION_AI_HINT_ARRAY,
-    MODEL_WITH_GROUPS_BLOCK,
+    MODEL_WITH_DUPLICATE_METRIC_DIMENSION_NAME,
     MODEL_WITH_GROUP_LABEL,
+    MODEL_WITH_GROUPS_BLOCK,
     MODEL_WITH_METRIC,
     MODEL_WITH_METRIC_AI_HINT,
     MODEL_WITH_METRIC_AI_HINT_ARRAY,
+    MODEL_WITH_METRIC_DRIVERS,
     MODEL_WITH_METRIC_LEVEL_CATEGORIES,
     MODEL_WITH_MODEL_LEVEL_CATEGORIES,
     MODEL_WITH_MODEL_METRIC_AI_HINT,
@@ -71,8 +77,6 @@ import {
     MODEL_WITH_WRONG_METRIC,
     MODEL_WITH_WRONG_METRICS,
     SPOTLIGHT_CONFIG_WITH_CATEGORIES_AND_HIDE,
-    expectedModelWithType,
-    model,
     warehouseSchema,
     warehouseSchemaWithMissingColumn,
     warehouseSchemaWithMissingTable,
@@ -332,6 +336,22 @@ describe('convert tables from dbt models', () => {
             ),
         ).toStrictEqual(LIGHTDASH_TABLE_WITH_METRICS);
     });
+    it('should convert dbt model with metrics that have drivers', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            MODEL_WITH_METRIC_DRIVERS,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+
+        // Metric without drivers should not have the property
+        expect(result.metrics.user_count.drivers).toBeUndefined();
+
+        // Metric with drivers should have them parsed correctly
+        expect(result.metrics.total_num_participating_athletes.drivers).toEqual(
+            ['user_count', 'other_table.other_metric'],
+        );
+    });
     it('should convert dbt model with dimension with default time intervals bigquery', () => {
         expect(
             convertTable(
@@ -410,29 +430,45 @@ describe('convert tables from dbt models', () => {
             ),
         ).toStrictEqual(LIGHTDASH_TABLE_WITH_CUSTOM_TIME_INTERVAL_DIMENSIONS);
     });
-    it('should throw an error when metric and dimension have the same name', async () => {
-        expect(() =>
-            convertTable(
-                SupportedDbtAdapter.BIGQUERY,
-                MODEL_WITH_WRONG_METRIC,
-                [],
-                DEFAULT_SPOTLIGHT_CONFIG,
-            ),
-        ).toThrowError(
-            'Found a metric and a dimension with the same name: user_id',
+    it('should warn and skip metric when metric and dimension have the same name', async () => {
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            MODEL_WITH_WRONG_METRIC,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
         );
+        expect(result.warnings).toBeDefined();
+        expect(result.warnings).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: InlineErrorType.DUPLICATE_FIELD_NAME,
+                    message: expect.stringContaining('user_id'),
+                }),
+            ]),
+        );
+        expect(result.dimensions).toHaveProperty('user_id');
+        expect(result.metrics).not.toHaveProperty('user_id');
     });
-    it('should throw an error when multiple metrics and dimensions have the same name', async () => {
-        expect(() =>
-            convertTable(
-                SupportedDbtAdapter.BIGQUERY,
-                MODEL_WITH_WRONG_METRICS,
-                [],
-                DEFAULT_SPOTLIGHT_CONFIG,
-            ),
-        ).toThrowError(
-            'Found multiple metrics and a dimensions with the same name: user_id,user_id2',
+    it('should warn and skip metrics when multiple metrics and dimensions have the same name', async () => {
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            MODEL_WITH_WRONG_METRICS,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
         );
+        expect(result.warnings).toBeDefined();
+        expect(result.warnings).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: InlineErrorType.DUPLICATE_FIELD_NAME,
+                    message: expect.stringContaining('user_id'),
+                }),
+            ]),
+        );
+        expect(result.dimensions).toHaveProperty('user_id');
+        expect(result.dimensions).toHaveProperty('user_id2');
+        expect(result.metrics).not.toHaveProperty('user_id');
+        expect(result.metrics).not.toHaveProperty('user_id2');
     });
 
     it('should convert dbt model with group label', async () => {
@@ -1177,6 +1213,46 @@ describe('explore-scoped additional dimensions', () => {
         ).toBe('custom_date');
     });
 
+    it('should apply sql_filter from explore config', async () => {
+        const modelWithExploreSqlFilter: DbtModelNode = {
+            ...MODEL_WITH_EXPLORE_SCOPED_DIMENSIONS,
+            meta: {
+                explores: {
+                    completed_orders: {
+                        label: 'Completed Orders Only',
+                        sql_filter: "${TABLE}.status = 'completed'",
+                    },
+                },
+            },
+        };
+
+        const explores = await convertExplores(
+            [modelWithExploreSqlFilter],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+            },
+        );
+
+        const completedExplore = explores.find(
+            (e) => 'name' in e && e.name === 'completed_orders',
+        ) as Explore;
+
+        expect(completedExplore).toBeDefined();
+        expect(completedExplore.tables.test_model.sqlWhere).toBe(
+            '"test_model".status = \'completed\'',
+        );
+
+        // Base explore should NOT have the sql_filter
+        const baseExplore = explores.find(
+            (e) => 'name' in e && e.name === 'test_model',
+        ) as Explore;
+        expect(baseExplore.tables.test_model.sqlWhere).toBeUndefined();
+    });
+
     it('should apply default show underlying values to metrics', () => {
         const table = convertTable(
             SupportedDbtAdapter.POSTGRES,
@@ -1199,5 +1275,566 @@ describe('explore-scoped additional dimensions', () => {
         expect(table.metrics.average_revenue.showUnderlyingValues).toEqual([
             'custom_field',
         ]);
+    });
+});
+
+describe('required/default filters on hidden dimensions', () => {
+    const createOrdersModel = (
+        defaultFilters: Array<Record<string, unknown>>,
+    ): DbtModelNode => ({
+        ...model,
+        name: 'orders',
+        alias: 'orders',
+        relation_name: 'orders',
+        columns: {
+            status: {
+                name: 'status',
+                data_type: DimensionType.STRING,
+                meta: {
+                    dimension: {
+                        type: DimensionType.STRING,
+                    },
+                },
+            },
+            credit_card_amount: {
+                name: 'credit_card_amount',
+                data_type: DimensionType.NUMBER,
+                meta: {
+                    dimension: {
+                        type: DimensionType.NUMBER,
+                        hidden: true,
+                    },
+                    additional_dimensions: {
+                        has_credit_card_payment: {
+                            type: DimensionType.BOOLEAN,
+                            label: 'Has credit card payment',
+                            sql: '${TABLE}.credit_card_amount > 0',
+                        },
+                    },
+                },
+            },
+        },
+        meta: {
+            default_filters:
+                defaultFilters as DbtModelNode['meta']['default_filters'],
+        },
+    });
+
+    it('should fail only the explore with hidden-dimension default filters and keep base explore valid', async () => {
+        const modelWithExploreScopedFilters: DbtModelNode = {
+            ...createOrdersModel([]),
+            meta: {
+                explores: {
+                    orders_news_portal: {
+                        label: 'Orders News Portal',
+                        default_filters: [
+                            {
+                                credit_card_amount: '>= 0',
+                                required: true,
+                            },
+                            {
+                                has_credit_card_payment: 'true',
+                                required: true,
+                            },
+                        ] as DbtModelNode['meta']['default_filters'],
+                    },
+                },
+            },
+        };
+
+        const explores = await convertExplores(
+            [modelWithExploreScopedFilters],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+            },
+        );
+
+        const baseExplore = explores.find((e) => e.name === 'orders');
+        const exploreWithHiddenFilterError = explores.find(
+            (e) => e.name === 'orders_news_portal',
+        );
+
+        expect(baseExplore).toBeDefined();
+        expect(baseExplore && 'errors' in baseExplore).toBe(false);
+        expect(exploreWithHiddenFilterError).toBeDefined();
+        expect(
+            exploreWithHiddenFilterError &&
+                'errors' in exploreWithHiddenFilterError,
+        ).toBe(true);
+
+        if (
+            exploreWithHiddenFilterError &&
+            'errors' in exploreWithHiddenFilterError
+        ) {
+            expect(exploreWithHiddenFilterError.errors[0].message).toContain(
+                'credit_card_amount',
+            );
+            expect(exploreWithHiddenFilterError.errors[0].type).toBe(
+                InlineErrorType.METADATA_PARSE_ERROR,
+            );
+        }
+    });
+});
+
+describe('custom granularities', () => {
+    const customGranularities = {
+        slt_week: {
+            label: 'SLT Week',
+            sql: "DATE_TRUNC('week', ${COLUMN} + INTERVAL '2 days') - INTERVAL '2 days'",
+        },
+    };
+
+    it('should generate dimensions for custom granularities in time_intervals', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.POSTGRES,
+            MODEL_WITH_CUSTOM_GRANULARITY,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+            undefined,
+            undefined,
+            customGranularities,
+        );
+
+        // Should have the custom granularity dimension
+        expect(result.dimensions.created_at_slt_week).toBeDefined();
+        expect(result.dimensions.created_at_slt_week.label).toBe('SLT Week');
+        expect(
+            result.dimensions.created_at_slt_week.timeIntervalBaseDimensionName,
+        ).toBe('created_at');
+        expect(result.dimensions.created_at_slt_week.sql).toContain(
+            "DATE_TRUNC('week',",
+        );
+        expect(result.dimensions.created_at_slt_week.sql).not.toContain(
+            '${COLUMN}',
+        );
+        expect(result.dimensions.created_at_slt_week.type).toBe(
+            DimensionType.DATE,
+        );
+    });
+
+    it('should also generate standard interval dimensions alongside custom ones', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.POSTGRES,
+            MODEL_WITH_CUSTOM_GRANULARITY,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+            undefined,
+            undefined,
+            customGranularities,
+        );
+
+        // Should have standard day dimension
+        expect(result.dimensions.created_at_day).toBeDefined();
+        // Should have custom slt_week dimension
+        expect(result.dimensions.created_at_slt_week).toBeDefined();
+    });
+
+    it('should inherit requiredAttributes and anyAttributes from base dimension', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.POSTGRES,
+            MODEL_WITH_CUSTOM_GRANULARITY_AND_REQUIRED_ATTRIBUTES,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+            undefined,
+            undefined,
+            customGranularities,
+        );
+
+        expect(
+            result.dimensions.created_at_slt_week.requiredAttributes,
+        ).toEqual({ department: 'finance' });
+
+        // Standard interval should also have it
+        expect(result.dimensions.created_at_day.requiredAttributes).toEqual({
+            department: 'finance',
+        });
+    });
+
+    it('should skip unknown custom granularity names without throwing', () => {
+        // time_intervals has 'slt_week' but no custom granularity defined for it
+        const result = convertTable(
+            SupportedDbtAdapter.POSTGRES,
+            MODEL_WITH_CUSTOM_GRANULARITY,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+            undefined,
+            undefined,
+            {}, // empty custom granularities
+        );
+
+        // Should not have the unrecognized custom granularity dimension
+        expect(result.dimensions.created_at_slt_week).toBeUndefined();
+        // Should still have the standard day dimension
+        expect(result.dimensions.created_at_day).toBeDefined();
+    });
+
+    it('should produce warnings for unresolved custom granularities in convertExplores', async () => {
+        const result = await convertExplores(
+            [MODEL_WITH_CUSTOM_GRANULARITY],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+                custom_granularities: {}, // slt_week is not defined
+            },
+        );
+
+        expect(result).toHaveLength(1);
+        const explore = result[0];
+        expect('errors' in explore).toBe(false);
+        expect('warnings' in explore).toBe(true);
+        if ('warnings' in explore && explore.warnings) {
+            expect(explore.warnings).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        type: InlineErrorType.FIELD_ERROR,
+                        message: expect.stringContaining(
+                            'Unknown time interval "slt_week"',
+                        ),
+                    }),
+                ]),
+            );
+        }
+    });
+
+    it('should not produce warnings when all custom granularities are defined', async () => {
+        const result = await convertExplores(
+            [MODEL_WITH_CUSTOM_GRANULARITY],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+                custom_granularities: customGranularities,
+            },
+        );
+
+        expect(result).toHaveLength(1);
+        const explore = result[0];
+        expect('errors' in explore).toBe(false);
+        // Should have no warnings (or empty warnings)
+        if ('warnings' in explore) {
+            expect(explore.warnings).toHaveLength(0);
+        }
+    });
+
+    it('should only warn for unresolved custom granularities, not defined ones', async () => {
+        const modelWithMixedGranularities: DbtModelNode & {
+            relation_name: string;
+        } = {
+            ...MODEL_WITH_CUSTOM_GRANULARITY,
+            columns: {
+                created_at: {
+                    name: 'created_at',
+                    data_type: DimensionType.TIMESTAMP,
+                    meta: {
+                        dimension: {
+                            type: DimensionType.TIMESTAMP,
+                            time_intervals: ['DAY', 'slt_week', 'unknown_one'],
+                        },
+                    },
+                },
+            },
+        };
+
+        const result = await convertExplores(
+            [modelWithMixedGranularities],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+                custom_granularities: customGranularities, // has slt_week but not unknown_one
+            },
+        );
+
+        expect(result).toHaveLength(1);
+        const explore = result[0];
+        expect('errors' in explore).toBe(false);
+        expect('warnings' in explore).toBe(true);
+        if ('warnings' in explore && explore.warnings) {
+            // Only unknown_one should produce a warning
+            expect(explore.warnings).toHaveLength(1);
+            expect(explore.warnings[0].message).toContain('unknown_one');
+            expect(explore.warnings[0].message).not.toContain('slt_week');
+        }
+    });
+});
+
+describe('duplicate metric/dimension names', () => {
+    it('should produce a warning instead of an error when a metric and dimension share the same name', async () => {
+        const result = await convertExplores(
+            [MODEL_WITH_DUPLICATE_METRIC_DIMENSION_NAME],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+            },
+        );
+
+        expect(result).toHaveLength(1);
+        const explore = result[0];
+        expect('errors' in explore).toBe(false);
+        expect('warnings' in explore).toBe(true);
+        if ('warnings' in explore && explore.warnings) {
+            expect(explore.warnings).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        type: InlineErrorType.DUPLICATE_FIELD_NAME,
+                        message: expect.stringContaining('myColumnName'),
+                    }),
+                ]),
+            );
+        }
+    });
+
+    it('should keep the dimension and remove the duplicate metric', async () => {
+        const result = await convertExplores(
+            [MODEL_WITH_DUPLICATE_METRIC_DIMENSION_NAME],
+            false,
+            SupportedDbtAdapter.POSTGRES,
+            [],
+            warehouseClientMock,
+            {
+                spotlight: DEFAULT_SPOTLIGHT_CONFIG,
+            },
+        );
+
+        expect(result).toHaveLength(1);
+        const explore = result[0];
+        expect('errors' in explore).toBe(false);
+        if (!('errors' in explore)) {
+            const table = explore.tables[explore.baseTable];
+            expect(table.dimensions).toHaveProperty('myColumnName');
+            expect(table.metrics).not.toHaveProperty('myColumnName');
+        }
+    });
+
+    it('should preserve non-duplicate metrics alongside removed duplicates', () => {
+        const modelWithMixedMetrics: DbtModelNode & {
+            relation_name: string;
+        } = {
+            ...model,
+            columns: {
+                user_id: {
+                    name: 'user_id',
+                    data_type: DimensionType.STRING,
+                    meta: {
+                        metrics: {
+                            user_id: { type: MetricType.COUNT_DISTINCT },
+                            user_id_count: { type: MetricType.COUNT },
+                        },
+                    },
+                },
+            },
+        };
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            modelWithMixedMetrics,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        expect(result.dimensions).toHaveProperty('user_id');
+        expect(result.metrics).not.toHaveProperty('user_id');
+        expect(result.metrics).toHaveProperty('user_id_count');
+        expect(result.warnings).toHaveLength(1);
+    });
+
+    it('should not break set validation when a set references a duplicate name', () => {
+        const modelWithSetAndDuplicate: DbtModelNode & {
+            relation_name: string;
+        } = {
+            ...model,
+            columns: {
+                user_id: {
+                    name: 'user_id',
+                    data_type: DimensionType.STRING,
+                    meta: {
+                        metrics: {
+                            user_id: { type: MetricType.COUNT_DISTINCT },
+                        },
+                    },
+                },
+            },
+            meta: {
+                sets: {
+                    my_set: {
+                        fields: ['user_id'],
+                    },
+                },
+            },
+        };
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            modelWithSetAndDuplicate,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings![0]).toMatchObject({
+            type: InlineErrorType.DUPLICATE_FIELD_NAME,
+            message: expect.stringContaining('Skipped metric'),
+        });
+        expect(result.dimensions).toHaveProperty('user_id');
+        expect(result.metrics).not.toHaveProperty('user_id');
+    });
+
+    it('should use singular warning message for one duplicate', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            MODEL_WITH_WRONG_METRIC,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        expect(result.warnings).toHaveLength(1);
+        expect(result.warnings![0].message).toMatch(
+            /^Skipped metric "user_id" because a dimension with the same name exists/,
+        );
+    });
+
+    it('should emit one warning per duplicate when multiple duplicates exist', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            MODEL_WITH_WRONG_METRICS,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        const duplicateWarnings = result.warnings!.filter(
+            (w) => w.type === InlineErrorType.DUPLICATE_FIELD_NAME,
+        );
+        expect(duplicateWarnings).toHaveLength(2);
+        expect(duplicateWarnings[0].message).toContain('user_id');
+        expect(duplicateWarnings[1].message).toContain('user_id2');
+    });
+});
+
+describe('convert_timezone dimension override', () => {
+    const buildModel = (
+        convertTimezoneValue: boolean | undefined,
+    ): DbtModelNode & { relation_name: string } => ({
+        ...model,
+        columns: {
+            created_at: {
+                name: 'created_at',
+                description: 'when the row was created',
+                data_type: DimensionType.TIMESTAMP,
+                meta: {
+                    dimension: {
+                        type: DimensionType.TIMESTAMP,
+                        ...(convertTimezoneValue !== undefined
+                            ? { convert_timezone: convertTimezoneValue }
+                            : {}),
+                        time_intervals: [TimeFrames.DAY, TimeFrames.MONTH_NUM],
+                    },
+                },
+            },
+        },
+    });
+
+    it('writes skipTimezoneConversion: true onto the compiled dimension and its time-interval children', () => {
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            buildModel(false),
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        expect(result.dimensions.created_at.skipTimezoneConversion).toBe(true);
+        expect(result.dimensions.created_at_day.skipTimezoneConversion).toBe(
+            true,
+        );
+        expect(
+            result.dimensions.created_at_month_num.skipTimezoneConversion,
+        ).toBe(true);
+    });
+
+    it('propagates skipTimezoneConversion onto custom-granularity children', () => {
+        const modelWithCustom: DbtModelNode & { relation_name: string } = {
+            ...model,
+            columns: {
+                created_at: {
+                    name: 'created_at',
+                    description: 'when the row was created',
+                    data_type: DimensionType.TIMESTAMP,
+                    meta: {
+                        dimension: {
+                            type: DimensionType.TIMESTAMP,
+                            convert_timezone: false,
+                            time_intervals: ['my_quarter'],
+                        },
+                    },
+                },
+            },
+        };
+        const result = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            modelWithCustom,
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+            undefined,
+            undefined,
+            {
+                my_quarter: {
+                    label: 'My Quarter',
+                    sql: "DATE_TRUNC(${COLUMN}, 'QUARTER')",
+                },
+            },
+        );
+        expect(
+            result.dimensions.created_at_my_quarter.skipTimezoneConversion,
+        ).toBe(true);
+    });
+
+    it('still propagates skipTimezoneConversion when disableTimestampConversion is also set', () => {
+        // The two flags are independent — both should compose.
+        const result = convertTable(
+            SupportedDbtAdapter.SNOWFLAKE,
+            buildModel(false),
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+            undefined,
+            true,
+        );
+        expect(result.dimensions.created_at.skipTimezoneConversion).toBe(true);
+        expect(result.dimensions.created_at_day.skipTimezoneConversion).toBe(
+            true,
+        );
+        expect(
+            result.dimensions.created_at_month_num.skipTimezoneConversion,
+        ).toBe(true);
+        expect(result.dimensions.created_at.sql).not.toContain(
+            'CONVERT_TIMEZONE',
+        );
+    });
+
+    it('omits skipTimezoneConversion when convert_timezone is unset or true (default behavior)', () => {
+        const undef = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            buildModel(undefined),
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        expect(
+            undef.dimensions.created_at.skipTimezoneConversion,
+        ).toBeUndefined();
+
+        const truthy = convertTable(
+            SupportedDbtAdapter.BIGQUERY,
+            buildModel(true),
+            [],
+            DEFAULT_SPOTLIGHT_CONFIG,
+        );
+        expect(
+            truthy.dimensions.created_at.skipTimezoneConversion,
+        ).toBeUndefined();
     });
 });

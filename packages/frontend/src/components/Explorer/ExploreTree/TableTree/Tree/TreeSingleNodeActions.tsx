@@ -14,7 +14,8 @@ import {
     type Dimension,
     type Metric,
 } from '@lightdash/common';
-import { ActionIcon, Box, Menu, Tooltip, type MenuProps } from '@mantine/core';
+import { Menu, type MenuProps } from '@mantine-8/core';
+import { ActionIcon, Box, Tooltip } from '@mantine/core';
 import {
     IconCode,
     IconCopy,
@@ -28,12 +29,15 @@ import { useMemo, type FC } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import {
     explorerActions,
+    selectSavedChart,
     useExplorerDispatch,
+    useExplorerSelector,
 } from '../../../../../features/explorer/store';
 import useToaster from '../../../../../hooks/toaster/useToaster';
 import { useFilteredFields } from '../../../../../hooks/useFilters';
 import { useProjectUuid } from '../../../../../hooks/useProjectUuid';
-import { useClientFeatureFlag } from '../../../../../hooks/useServerOrClientFeatureFlag';
+import { useCannotAuthorCustomSql } from '../../../../../hooks/user/useCannotAuthorCustomSql';
+import { useServerFeatureFlag } from '../../../../../hooks/useServerOrClientFeatureFlag';
 import useApp from '../../../../../providers/App/useApp';
 import useTracking from '../../../../../providers/Tracking/useTracking';
 import { EventName } from '../../../../../types/Events';
@@ -59,6 +63,8 @@ const TreeSingleNodeActions: FC<Props> = ({
     onViewDescription,
 }) => {
     const projectUuid = useProjectUuid();
+    const cannotAuthorCustomSql = useCannotAuthorCustomSql(projectUuid);
+    const savedChart = useExplorerSelector(selectSavedChart);
     const { user } = useApp();
     const { showToastSuccess } = useToaster();
     const { addFilter } = useFilteredFields();
@@ -72,9 +78,16 @@ const TreeSingleNodeActions: FC<Props> = ({
         return isDimension(item) ? getCustomMetricType(item.type) : [];
     }, [item]);
 
-    const isWriteBackCustomBinDimensionsEnabled = useClientFeatureFlag(
+    const { data: writeBackCustomBinDimensionsFlag } = useServerFeatureFlag(
         FeatureFlags.WriteBackCustomBinDimensions,
     );
+    const isWriteBackCustomBinDimensionsEnabled =
+        writeBackCustomBinDimensionsFlag?.enabled ?? false;
+
+    const { data: customGroupBinsFlag } = useServerFeatureFlag(
+        FeatureFlags.CustomGroupBins,
+    );
+    const isCustomGroupBinsEnabled = customGroupBinsFlag?.enabled ?? false;
 
     const duplicateCustomMetric = (customMetric: AdditionalMetric) => {
         const newDeepCopyItem = JSON.parse(JSON.stringify(customMetric));
@@ -127,7 +140,7 @@ const TreeSingleNodeActions: FC<Props> = ({
                 {!isAdditionalMetric(item) && isFilterableField(item) ? (
                     <Menu.Item
                         component="button"
-                        icon={<MantineIcon icon={IconFilter} />}
+                        leftSection={<MantineIcon icon={IconFilter} />}
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.stopPropagation();
 
@@ -145,7 +158,7 @@ const TreeSingleNodeActions: FC<Props> = ({
                     <>
                         <Menu.Item
                             component="button"
-                            icon={<MantineIcon icon={IconEdit} />}
+                            leftSection={<MantineIcon icon={IconEdit} />}
                             onClick={(
                                 e: React.MouseEvent<HTMLButtonElement>,
                             ) => {
@@ -165,7 +178,7 @@ const TreeSingleNodeActions: FC<Props> = ({
                         </Menu.Item>
                         <Menu.Item
                             component="button"
-                            icon={<MantineIcon icon={IconCopy} />}
+                            leftSection={<MantineIcon icon={IconCopy} />}
                             onClick={(
                                 e: React.MouseEvent<HTMLButtonElement>,
                             ) => {
@@ -184,7 +197,7 @@ const TreeSingleNodeActions: FC<Props> = ({
 
                         <Menu.Item
                             component="button"
-                            icon={<MantineIcon icon={IconCode} />}
+                            leftSection={<MantineIcon icon={IconCode} />}
                             onClick={(
                                 e: React.MouseEvent<HTMLButtonElement>,
                             ) => {
@@ -218,7 +231,7 @@ const TreeSingleNodeActions: FC<Props> = ({
                             color="red"
                             key="custommetric"
                             component="button"
-                            icon={<MantineIcon icon={IconTrash} />}
+                            leftSection={<MantineIcon icon={IconTrash} />}
                             onClick={(
                                 e: React.MouseEvent<HTMLButtonElement>,
                             ) => {
@@ -242,7 +255,7 @@ const TreeSingleNodeActions: FC<Props> = ({
                 {hasDescription && (
                     <Menu.Item
                         component="button"
-                        icon={<MantineIcon icon={IconDots} />}
+                        leftSection={<MantineIcon icon={IconDots} />}
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.stopPropagation();
                             onViewDescription();
@@ -254,94 +267,118 @@ const TreeSingleNodeActions: FC<Props> = ({
 
                 {isCustomDimension(item) && (
                     <>
-                        <Menu.Item
-                            component="button"
-                            icon={<MantineIcon icon={IconEdit} />}
-                            onClick={(
-                                e: React.MouseEvent<HTMLButtonElement>,
-                            ) => {
-                                e.stopPropagation();
-                                dispatch(
-                                    explorerActions.toggleCustomDimensionModal({
-                                        item,
-                                        isEditing: true,
-                                    }),
-                                );
-                            }}
-                        >
-                            Edit custom dimension
-                        </Menu.Item>
-                        <Menu.Item
-                            component="button"
-                            icon={<MantineIcon icon={IconCopy} />}
-                            onClick={(
-                                e: React.MouseEvent<HTMLButtonElement>,
-                            ) => {
-                                e.stopPropagation();
-                                duplicateCustomDimension(item);
-                                track({
-                                    name: EventName.ADD_CUSTOM_DIMENSION_CLICKED,
-                                });
-                                showToastSuccess({
-                                    title: 'Copy of Custom Dimension added successfully',
-                                });
-                            }}
-                        >
-                            Duplicate custom dimension
-                        </Menu.Item>
-                        {(isCustomSqlDimension(item) ||
-                            isWriteBackCustomBinDimensionsEnabled) && (
+                        {!(
+                            isCustomSqlDimension(item) && cannotAuthorCustomSql
+                        ) && (
+                            <>
+                                <Menu.Item
+                                    component="button"
+                                    leftSection={
+                                        <MantineIcon icon={IconEdit} />
+                                    }
+                                    onClick={(
+                                        e: React.MouseEvent<HTMLButtonElement>,
+                                    ) => {
+                                        e.stopPropagation();
+                                        dispatch(
+                                            explorerActions.toggleCustomDimensionModal(
+                                                {
+                                                    item,
+                                                    isEditing: true,
+                                                },
+                                            ),
+                                        );
+                                    }}
+                                >
+                                    Edit custom dimension
+                                </Menu.Item>
+                                <Menu.Item
+                                    component="button"
+                                    leftSection={
+                                        <MantineIcon icon={IconCopy} />
+                                    }
+                                    onClick={(
+                                        e: React.MouseEvent<HTMLButtonElement>,
+                                    ) => {
+                                        e.stopPropagation();
+                                        duplicateCustomDimension(item);
+                                        track({
+                                            name: EventName.ADD_CUSTOM_DIMENSION_CLICKED,
+                                        });
+                                        showToastSuccess({
+                                            title: 'Copy of Custom Dimension added successfully',
+                                        });
+                                    }}
+                                >
+                                    Duplicate custom dimension
+                                </Menu.Item>
+                                {(isCustomSqlDimension(item) ||
+                                    isWriteBackCustomBinDimensionsEnabled) && (
+                                    <Menu.Item
+                                        component="button"
+                                        leftSection={
+                                            <MantineIcon icon={IconCode} />
+                                        }
+                                        onClick={(
+                                            e: React.MouseEvent<HTMLButtonElement>,
+                                        ) => {
+                                            e.stopPropagation();
+                                            if (
+                                                projectUuid &&
+                                                user.data?.organizationUuid
+                                            ) {
+                                                track({
+                                                    name: EventName.WRITE_BACK_FROM_CUSTOM_DIMENSION_CLICKED,
+                                                    properties: {
+                                                        userId: user.data
+                                                            .userUuid,
+                                                        projectId: projectUuid,
+                                                        organizationId:
+                                                            user.data
+                                                                .organizationUuid,
+                                                        customDimensionsCount: 1,
+                                                    },
+                                                });
+                                            }
+
+                                            dispatch(
+                                                explorerActions.toggleWriteBackModal(
+                                                    {
+                                                        items: [item],
+                                                    },
+                                                ),
+                                            );
+                                        }}
+                                    >
+                                        Write back to dbt
+                                    </Menu.Item>
+                                )}
+                            </>
+                        )}
+
+                        {!(
+                            isCustomSqlDimension(item) &&
+                            cannotAuthorCustomSql &&
+                            !!savedChart
+                        ) && (
                             <Menu.Item
+                                color="red"
                                 component="button"
-                                icon={<MantineIcon icon={IconCode} />}
+                                leftSection={<MantineIcon icon={IconTrash} />}
                                 onClick={(
                                     e: React.MouseEvent<HTMLButtonElement>,
                                 ) => {
                                     e.stopPropagation();
-                                    if (
-                                        projectUuid &&
-                                        user.data?.organizationUuid
-                                    ) {
-                                        track({
-                                            name: EventName.WRITE_BACK_FROM_CUSTOM_DIMENSION_CLICKED,
-                                            properties: {
-                                                userId: user.data.userUuid,
-                                                projectId: projectUuid,
-                                                organizationId:
-                                                    user.data.organizationUuid,
-                                                customDimensionsCount: 1,
-                                            },
-                                        });
-                                    }
-
                                     dispatch(
-                                        explorerActions.toggleWriteBackModal({
-                                            items: [item],
-                                        }),
+                                        explorerActions.removeCustomDimension(
+                                            getItemId(item),
+                                        ),
                                     );
                                 }}
                             >
-                                Write back to dbt
+                                Remove custom dimension
                             </Menu.Item>
                         )}
-
-                        <Menu.Item
-                            color="red"
-                            component="button"
-                            icon={<MantineIcon icon={IconTrash} />}
-                            onClick={(
-                                e: React.MouseEvent<HTMLButtonElement>,
-                            ) => {
-                                e.stopPropagation();
-                                dispatch(
-                                    explorerActions.removeCustomDimension(
-                                        getItemId(item),
-                                    ),
-                                );
-                            }}
-                        >
-                            Remove custom dimension
-                        </Menu.Item>
                     </>
                 )}
 
@@ -386,12 +423,15 @@ const TreeSingleNodeActions: FC<Props> = ({
                     </>
                 ) : null}
 
-                {isDimension(item) && item.type === DimensionType.NUMBER ? (
+                {isDimension(item) &&
+                (item.type === DimensionType.NUMBER ||
+                    (item.type === DimensionType.STRING &&
+                        isCustomGroupBinsEnabled)) ? (
                     <>
                         <Menu.Divider />
                         <Menu.Item
                             component="button"
-                            icon={<MantineIcon icon={IconSparkles} />}
+                            leftSection={<MantineIcon icon={IconSparkles} />}
                             onClick={(
                                 e: React.MouseEvent<HTMLButtonElement>,
                             ) => {

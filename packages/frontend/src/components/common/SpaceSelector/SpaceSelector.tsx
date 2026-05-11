@@ -7,7 +7,6 @@ import {
 import { Paper, Stack, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useMemo, useState } from 'react';
-import { hasDirectAccessToSpace } from '../../../hooks/useSpaces';
 import useApp from '../../../providers/App/useApp';
 import AdminContentViewFilter from '../ResourceView/AdminContentViewFilter';
 import Tree from '../Tree/Tree';
@@ -18,7 +17,10 @@ type SpaceSelectorProps = {
     projectUuid: string | undefined;
     selectedSpaceUuid: string | null;
     spaces:
-        | Array<Pick<SpaceSummary, 'isPrivate' | 'access'> & NestableItem>
+        | Array<
+              Pick<SpaceSummary, 'inheritsFromOrgOrProject' | 'access'> &
+                  NestableItem
+          >
         | undefined;
     isLoading?: boolean;
     itemType: ResourceViewItemType | undefined;
@@ -55,10 +57,18 @@ const SpaceSelector = ({
         switch (selectedAdminContentType) {
             case 'all':
                 return spaces;
-            case 'shared':
-                return spaces.filter((space) =>
-                    hasDirectAccessToSpace(space, user.data.userUuid),
-                );
+            case 'shared': {
+                // Instead of dropping inaccessible spaces, keep them in the
+                // tree as non-selectable placeholders so hierarchy is preserved
+                // and same-named children remain visually distinguishable.
+                return spaces.map((space) => {
+                    const isAccessible =
+                        space.inheritsFromOrgOrProject ||
+                        space.access.includes(user.data.userUuid);
+                    if (isAccessible) return space;
+                    return { ...space, restricted: true };
+                });
+            }
             default:
                 return assertUnreachable(
                     selectedAdminContentType,
@@ -83,9 +93,7 @@ const SpaceSelector = ({
                     onChange={setSelectedAdminContentType}
                     withDivider={false}
                     segmentedControlProps={{
-                        sx: {
-                            flexShrink: 0,
-                        },
+                        flex: '0 0 auto',
                     }}
                 />
             ) : null}

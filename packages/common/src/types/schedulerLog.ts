@@ -8,7 +8,18 @@ import {
 } from './scheduler';
 import { type SchedulerTaskName } from './schedulerTaskList';
 
-export type SchedulerTargetType = 'email' | 'slack' | 'gsheets' | 'msteams';
+export type SchedulerTargetType =
+    | 'email'
+    | 'slack'
+    | 'gsheets'
+    | 'msteams'
+    | 'googlechat';
+
+export enum SchedulerResourceType {
+    CHART = 'chart',
+    DASHBOARD = 'dashboard',
+    SQL_CHART = 'sqlChart',
+}
 
 // Partial failure types for different scenarios
 export enum PartialFailureType {
@@ -43,12 +54,24 @@ export type PartialFailure =
     | DashboardSqlChartPartialFailure
     | MissingTargetsPartialFailure;
 
+/**
+ * Outcome of evaluating a threshold-alert scheduler against the latest query results.
+ * Emitted on `SchedulerDetails.thresholdStatus` and on the `scheduler_job.completed`
+ * analytics event so downstream consumers (UI toasts, dashboards) can branch reliably.
+ */
+export enum ThresholdStatus {
+    MET = 'met',
+    NOT_MET = 'not_met',
+}
+
 export type SchedulerDetails = {
     projectUuid?: string;
     organizationUuid?: string;
     createdByUserUuid?: string;
     /** Partial failures that occurred during the scheduled delivery (e.g., some charts failed in a dashboard export) */
     partialFailures?: PartialFailure[];
+    /** Set when a threshold-alert scheduler completed without sending a notification because the threshold was not met. */
+    thresholdStatus?: ThresholdStatus;
     [key: string]: AnyType;
 };
 
@@ -111,7 +134,7 @@ export type SchedulerRun = {
     details: Record<string, AnyType> | null;
     logCounts: LogCounts;
     // Metadata for filtering/display
-    resourceType: 'chart' | 'dashboard';
+    resourceType: SchedulerResourceType;
     resourceUuid: string;
     resourceName: string;
     createdByUserUuid: string;
@@ -140,7 +163,7 @@ export type SchedulerRunLogsResponse = {
     scheduledTime: Date;
     logs: SchedulerRunLog[];
     // Metadata
-    resourceType: 'chart' | 'dashboard';
+    resourceType: SchedulerResourceType;
     resourceUuid: string;
     resourceName: string;
     createdByUserUuid: string;

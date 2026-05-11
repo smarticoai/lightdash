@@ -1,4 +1,4 @@
-import { NavLink, type NavLinkProps } from '@mantine/core';
+import { NavLink, type NavLinkProps } from '@mantine-8/core';
 import { type FC } from 'react';
 import {
     NavLink as ReactRouterNavLink,
@@ -9,17 +9,34 @@ import {
 
 type RouterNavLinkProps = Omit<NavLinkProps, 'component' | 'active'> & {
     exact?: boolean;
-} & Omit<ReactRouterNavLinkProps, 'component'>;
+} & Omit<ReactRouterNavLinkProps, 'component' | 'end'>;
 
-const RouterNavLink: FC<RouterNavLinkProps> = (props) => {
+const RouterNavLink: FC<RouterNavLinkProps> = ({
+    exact,
+    disabled,
+    onClick,
+    ...props
+}) => {
     const location = useLocation();
     const exactMatch = useMatch(props.to.toString());
     const isPartialMatch = location.pathname.startsWith(props.to.toString());
     return (
         <NavLink
             {...props}
+            disabled={disabled}
+            onClick={(e) => {
+                if (disabled) {
+                    e.preventDefault();
+                    return;
+                }
+                onClick?.(e);
+            }}
             component={ReactRouterNavLink}
-            active={props.exact ? !!exactMatch : isPartialMatch}
+            active={exact ? !!exactMatch : isPartialMatch}
+            // Pass 'end' to React Router's NavLink to sync its active state
+            // When end=true, NavLink only matches exact paths (no partial matching)
+            end={exact}
+            variant="subtle"
         />
     );
 };

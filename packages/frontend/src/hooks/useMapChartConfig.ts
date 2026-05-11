@@ -50,10 +50,19 @@ type MapChartConfig = {
             | { radius?: number; blur?: number; opacity?: number }
             | undefined,
     ) => void;
+    setHexbinConfig: (
+        config: NonNullable<MapChart['hexbinConfig']> | undefined,
+    ) => void;
     setTileBackground: (background: MapTileBackground | undefined) => void;
+    setDarkModeTileBackground: (
+        background: MapTileBackground | undefined,
+    ) => void;
     setBackgroundColor: (color: string | undefined) => void;
     setNoDataColor: (color: string | undefined) => void;
     setDataLayerOpacity: (opacity: number | undefined) => void;
+    // Categorical color overrides (for string fields)
+    setColorOverride: (value: string, color: string) => void;
+    setColorOverrides: (overrides: Record<string, string>) => void;
     // Field configuration methods
     updateFieldConfig: (
         fieldId: string,
@@ -119,12 +128,18 @@ const useMapChartConfig = (
     const [sizeFieldId, setSizeFieldIdState] = useState<string | undefined>(
         initialConfig?.sizeFieldId,
     );
+    const [hexbinConfig, setHexbinConfigState] = useState<
+        MapChart['hexbinConfig']
+    >(initialConfig?.hexbinConfig);
     const [heatmapConfig, setHeatmapConfigState] = useState<
         { radius?: number; blur?: number; opacity?: number } | undefined
     >(initialConfig?.heatmapConfig);
     const [tileBackground, setTileBackgroundState] = useState<
         MapTileBackground | undefined
     >(initialConfig?.tileBackground ?? MapTileBackground.OPENSTREETMAP);
+    const [darkModeTileBackground, setDarkModeTileBackgroundState] = useState<
+        MapTileBackground | undefined
+    >(initialConfig?.darkModeTileBackground);
     const [backgroundColor, setBackgroundColorState] = useState<
         string | undefined
     >(initialConfig?.backgroundColor);
@@ -134,6 +149,9 @@ const useMapChartConfig = (
     const [dataLayerOpacity, setDataLayerOpacityState] = useState<
         number | undefined
     >(initialConfig?.dataLayerOpacity);
+    const [colorOverrides, setColorOverridesState] = useState<
+        Record<string, string>
+    >(initialConfig?.colorOverrides ?? {});
     const [fieldConfig, setFieldConfigState] = useState<
         Record<string, MapFieldConfig>
     >(initialConfig?.fieldConfig ?? {});
@@ -212,10 +230,13 @@ const useMapChartConfig = (
             maxBubbleSize,
             sizeFieldId,
             heatmapConfig,
+            hexbinConfig,
             tileBackground,
+            darkModeTileBackground,
             backgroundColor,
             noDataColor,
             dataLayerOpacity,
+            colorOverrides,
             fieldConfig,
         };
     }, [
@@ -237,10 +258,13 @@ const useMapChartConfig = (
         maxBubbleSize,
         sizeFieldId,
         heatmapConfig,
+        hexbinConfig,
         tileBackground,
+        darkModeTileBackground,
         backgroundColor,
         noDataColor,
         dataLayerOpacity,
+        colorOverrides,
         fieldConfig,
     ]);
 
@@ -301,6 +325,8 @@ const useMapChartConfig = (
 
     const setValueFieldId = useCallback((fieldId: string | undefined) => {
         setValueFieldIdState(fieldId);
+        // Clear categorical color overrides when the color field changes
+        setColorOverridesState({});
     }, []);
 
     const setColorRange = useCallback((colors: string[]) => {
@@ -384,9 +410,27 @@ const useMapChartConfig = (
         [],
     );
 
+    const setHexbinConfig = useCallback(
+        (config: NonNullable<MapChart['hexbinConfig']> | undefined) => {
+            if (config === undefined) {
+                setHexbinConfigState(undefined);
+            } else {
+                setHexbinConfigState((prev) => ({ ...prev, ...config }));
+            }
+        },
+        [],
+    );
+
     const setTileBackground = useCallback(
         (background: MapTileBackground | undefined) => {
             setTileBackgroundState(background);
+        },
+        [],
+    );
+
+    const setDarkModeTileBackground = useCallback(
+        (background: MapTileBackground | undefined) => {
+            setDarkModeTileBackgroundState(background);
         },
         [],
     );
@@ -402,6 +446,17 @@ const useMapChartConfig = (
     const setDataLayerOpacity = useCallback((opacity: number | undefined) => {
         setDataLayerOpacityState(opacity);
     }, []);
+
+    const setColorOverride = useCallback((value: string, color: string) => {
+        setColorOverridesState((prev) => ({ ...prev, [value]: color }));
+    }, []);
+
+    const setColorOverrides = useCallback(
+        (overrides: Record<string, string>) => {
+            setColorOverridesState(overrides);
+        },
+        [],
+    );
 
     const updateFieldConfig = useCallback(
         (fieldId: string, config: Partial<MapFieldConfig>) => {
@@ -455,10 +510,14 @@ const useMapChartConfig = (
         setMaxBubbleSize,
         setSizeFieldId,
         setHeatmapConfig,
+        setHexbinConfig,
         setTileBackground,
+        setDarkModeTileBackground,
         setBackgroundColor,
         setNoDataColor,
         setDataLayerOpacity,
+        setColorOverride,
+        setColorOverrides,
         updateFieldConfig,
         isFieldVisible,
         getFieldLabel,

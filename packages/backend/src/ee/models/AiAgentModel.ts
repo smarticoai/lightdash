@@ -23,20 +23,26 @@ import {
     AiAgentUserPreferences,
     AiArtifact,
     AiEvalRunResultAssessment,
+    AiPromptContext,
+    AiPromptContextInput,
+    AiPromptContextItem,
     AiResultType,
     AiThread,
     AiWebAppPrompt,
+    AlreadyExistsError,
     ApiAppendEvaluationRequest,
     ApiCreateAiAgent,
     ApiCreateEvaluationRequest,
     ApiUpdateAiAgent,
     ApiUpdateEvaluationRequest,
     assertUnreachable,
+    ChartKind,
     CreateLlmAssessment,
     CreateSlackPrompt,
     CreateSlackThread,
     CreateWebAppPrompt,
     CreateWebAppThread,
+    generateSlug,
     isThreadPrompt,
     isToolName,
     KnexPaginateArgs,
@@ -56,15 +62,26 @@ import { Knex } from 'knex';
 import moment from 'moment';
 import { LightdashConfig } from '../../config/parseConfig';
 import { AiAgentReasoningTableName } from '../../database/entities/aiAgentReasoning';
+import {
+    DashboardsTableName,
+    DashboardVersionsTableName,
+} from '../../database/entities/dashboards';
 import { DbEmail, EmailTableName } from '../../database/entities/emails';
 import { DbProject, ProjectTableName } from '../../database/entities/projects';
+import {
+    SavedChartsTableName,
+    SavedChartVersionsTableName,
+} from '../../database/entities/savedCharts';
 import { DbUser, UserTableName } from '../../database/entities/users';
+import { isUniqueConstraintViolation } from '../../database/errors';
 import KnexPaginate from '../../database/pagination';
 import Logger from '../../logging/logger';
 import { wrapSentryTransaction } from '../../utils';
 import {
     AiAgentToolCallTableName,
     AiAgentToolResultTableName,
+    AiPromptContextEntityType,
+    AiPromptContextTableName,
     AiPromptTableName,
     AiSlackPromptTableName,
     AiSlackThreadTableName,
@@ -74,6 +91,7 @@ import {
     DbAiAgentToolCall,
     DbAiAgentToolResult,
     DbAiPrompt,
+    DbAiPromptContext,
     DbAiSlackPrompt,
     DbAiSlackThread,
     DbAiThread,
@@ -233,7 +251,6 @@ export class AiAgentModel {
                 imageUrl: `${AiAgentTableName}.image_url`,
                 enableDataAccess: `${AiAgentTableName}.enable_data_access`,
                 enableSelfImprovement: `${AiAgentTableName}.enable_self_improvement`,
-                enableReasoning: `${AiAgentTableName}.enable_reasoning`,
                 version: `${AiAgentTableName}.version`,
                 groupAccess: this.database.raw(`
                     COALESCE(
@@ -367,7 +384,6 @@ export class AiAgentModel {
                 imageUrl: `${AiAgentTableName}.image_url`,
                 enableDataAccess: `${AiAgentTableName}.enable_data_access`,
                 enableSelfImprovement: `${AiAgentTableName}.enable_self_improvement`,
-                enableReasoning: `${AiAgentTableName}.enable_reasoning`,
                 version: `${AiAgentTableName}.version`,
                 groupAccess: this.database.raw(`
                     COALESCE(
@@ -463,6 +479,26 @@ export class AiAgentModel {
         return agent;
     }
 
+    private static async generateUniqueSlug(
+        trx: Knex,
+        projectUuid: string,
+        name: string,
+    ): Promise<string> {
+        const baseSlug = generateSlug(name);
+        const matchingSlugs: string[] = await trx(AiAgentTableName)
+            .where({ project_uuid: projectUuid })
+            .where('slug', 'like', `${baseSlug}%`)
+            .pluck('slug');
+
+        let slug = baseSlug;
+        let inc = 0;
+        while (matchingSlugs.includes(slug)) {
+            inc += 1;
+            slug = `${baseSlug}-${inc}`;
+        }
+        return slug;
+    }
+
     async createAgent(
         args: Pick<
             ApiCreateAiAgent,
@@ -477,16 +513,22 @@ export class AiAgentModel {
             | 'spaceAccess'
             | 'enableDataAccess'
             | 'enableSelfImprovement'
-            | 'enableReasoning'
             | 'version'
         > & {
             organizationUuid: string;
         },
     ): Promise<AiAgent> {
         return this.database.transaction(async (trx) => {
+            const slug = await AiAgentModel.generateUniqueSlug(
+                trx,
+                args.projectUuid,
+                args.name,
+            );
+
             const [agent] = await trx(AiAgentTableName)
                 .insert({
                     name: args.name,
+                    slug,
                     project_uuid: args.projectUuid,
                     organization_uuid: args.organizationUuid,
                     tags: args.tags,
@@ -494,7 +536,6 @@ export class AiAgentModel {
                     image_url: null,
                     enable_data_access: args.enableDataAccess,
                     enable_self_improvement: args.enableSelfImprovement,
-                    enable_reasoning: args.enableReasoning,
                     version: args.version,
                 })
                 .returning('*');
@@ -503,21 +544,32 @@ export class AiAgentModel {
                 args.integrations?.map(async (integration) => {
                     switch (integration.type) {
                         case 'slack':
-                            const [baseIntegration] = await trx(
-                                AiAgentIntegrationTableName,
-                            )
-                                .insert({
-                                    ai_agent_uuid: agent.ai_agent_uuid,
-                                    integration_type: integration.type,
-                                })
-                                .returning('*');
+                            try {
+                                const [baseIntegration] = await trx(
+                                    AiAgentIntegrationTableName,
+                                )
+                                    .insert({
+                                        ai_agent_uuid: agent.ai_agent_uuid,
+                                        integration_type: integration.type,
+                                    })
+                                    .returning('*');
 
-                            await trx(AiAgentSlackIntegrationTableName).insert({
-                                ai_agent_integration_uuid:
-                                    baseIntegration.ai_agent_integration_uuid,
-                                organization_uuid: agent.organization_uuid,
-                                slack_channel_id: integration.channelId,
-                            });
+                                await trx(
+                                    AiAgentSlackIntegrationTableName,
+                                ).insert({
+                                    ai_agent_integration_uuid:
+                                        baseIntegration.ai_agent_integration_uuid,
+                                    organization_uuid: agent.organization_uuid,
+                                    slack_channel_id: integration.channelId,
+                                });
+                            } catch (error) {
+                                if (isUniqueConstraintViolation(error)) {
+                                    throw new AlreadyExistsError(
+                                        'This Slack channel is already assigned to another AI agent',
+                                    );
+                                }
+                                throw error;
+                            }
 
                             return {
                                 type: integration.type,
@@ -575,7 +627,6 @@ export class AiAgentModel {
                 spaceAccess,
                 enableDataAccess: agent.enable_data_access,
                 enableSelfImprovement: agent.enable_self_improvement,
-                enableReasoning: agent.enable_reasoning,
                 version: agent.version,
             };
         });
@@ -615,9 +666,6 @@ export class AiAgentModel {
                                   args.enableSelfImprovement,
                           }
                         : {}),
-                    ...(args.enableReasoning !== undefined
-                        ? { enable_reasoning: args.enableReasoning }
-                        : {}),
                     ...(args.version !== undefined
                         ? { version: args.version }
                         : {}),
@@ -651,21 +699,32 @@ export class AiAgentModel {
                 args.integrations?.map(async (integration) => {
                     switch (integration.type) {
                         case 'slack':
-                            const [baseIntegration] = await trx(
-                                AiAgentIntegrationTableName,
-                            )
-                                .insert({
-                                    ai_agent_uuid: agent.ai_agent_uuid,
-                                    integration_type: integration.type,
-                                })
-                                .returning('*');
+                            try {
+                                const [baseIntegration] = await trx(
+                                    AiAgentIntegrationTableName,
+                                )
+                                    .insert({
+                                        ai_agent_uuid: agent.ai_agent_uuid,
+                                        integration_type: integration.type,
+                                    })
+                                    .returning('*');
 
-                            await trx(AiAgentSlackIntegrationTableName).insert({
-                                ai_agent_integration_uuid:
-                                    baseIntegration.ai_agent_integration_uuid,
-                                organization_uuid: agent.organization_uuid,
-                                slack_channel_id: integration.channelId,
-                            });
+                                await trx(
+                                    AiAgentSlackIntegrationTableName,
+                                ).insert({
+                                    ai_agent_integration_uuid:
+                                        baseIntegration.ai_agent_integration_uuid,
+                                    organization_uuid: agent.organization_uuid,
+                                    slack_channel_id: integration.channelId,
+                                });
+                            } catch (error) {
+                                if (isUniqueConstraintViolation(error)) {
+                                    throw new AlreadyExistsError(
+                                        'This Slack channel is already assigned to another AI agent',
+                                    );
+                                }
+                                throw error;
+                            }
 
                             return {
                                 type: integration.type,
@@ -733,7 +792,6 @@ export class AiAgentModel {
                 spaceAccess,
                 enableDataAccess: agent.enable_data_access,
                 enableSelfImprovement: agent.enable_self_improvement,
-                enableReasoning: agent.enable_reasoning,
                 version: agent.version,
             };
         });
@@ -928,7 +986,7 @@ export class AiAgentModel {
                 `${AiThreadTableName}.ai_thread_uuid`,
                 `${AiPromptTableName}.ai_thread_uuid`,
             )
-            .join(
+            .leftJoin(
                 UserTableName,
                 `${AiPromptTableName}.created_by_user_uuid`,
                 `${UserTableName}.user_uuid`,
@@ -961,10 +1019,10 @@ export class AiAgentModel {
                     | 'title'
                     | 'title_generated_at'
                 > &
-                    Pick<DbAiPrompt, 'prompt' | 'ai_prompt_uuid'> &
-                    Pick<DbUser, 'user_uuid'> &
-                    Pick<DbAiSlackThread, 'slack_user_id'> & {
-                        user_name: string;
+                    Pick<DbAiPrompt, 'prompt' | 'ai_prompt_uuid'> & {
+                        user_uuid: DbUser['user_uuid'] | null;
+                    } & Pick<DbAiSlackThread, 'slack_user_id'> & {
+                        user_name: string | null;
                     })[]
             >(
                 `${AiThreadTableName}.ai_thread_uuid`,
@@ -977,7 +1035,7 @@ export class AiAgentModel {
                 `${AiPromptTableName}.ai_prompt_uuid`,
                 `${UserTableName}.user_uuid`,
                 this.database.raw(
-                    `CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name) as user_name`,
+                    `COALESCE(NULLIF(TRIM(CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name)), ''), 'Unknown user') as user_name`,
                 ),
                 `${AiSlackThreadTableName}.slack_user_id`,
             )
@@ -1017,8 +1075,8 @@ export class AiAgentModel {
                 message: row.prompt,
             },
             user: {
-                uuid: row.user_uuid,
-                name: row.user_name,
+                uuid: row.user_uuid ?? '',
+                name: row.user_name || 'Unknown user',
                 slackUserId: row.slack_user_id,
             },
         }));
@@ -1068,9 +1126,9 @@ export class AiAgentModel {
                     title: DbAiThread['title'];
                     title_generated_at: DbAiThread['title_generated_at'];
                     first_prompt: DbAiPrompt['prompt'];
-                    user_uuid: DbUser['user_uuid'];
-                    user_name: string;
-                    user_email: DbEmail['email'];
+                    user_uuid: DbUser['user_uuid'] | null;
+                    user_name: string | null;
+                    user_email: DbEmail['email'] | null;
                     slack_user_id: DbAiSlackThread['slack_user_id'];
                     slack_channel_id: DbAiSlackThread['slack_channel_id'];
                     slack_thread_ts: DbAiSlackThread['slack_thread_ts'];
@@ -1099,7 +1157,7 @@ export class AiAgentModel {
                 `${AiPromptTableName}.prompt as first_prompt`,
                 `${UserTableName}.user_uuid`,
                 this.database.raw(
-                    `CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name) as user_name`,
+                    `COALESCE(NULLIF(TRIM(CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name)), ''), ${EmailTableName}.email, 'Unknown user') as user_name`,
                 ),
                 `${EmailTableName}.email as user_email`,
                 `${AiSlackThreadTableName}.slack_user_id`,
@@ -1125,18 +1183,18 @@ export class AiAgentModel {
                 `${AiThreadTableName}.ai_thread_uuid`,
                 `${AiPromptTableName}.ai_thread_uuid`,
             )
-            .join(
+            .leftJoin(
                 UserTableName,
                 `${AiPromptTableName}.created_by_user_uuid`,
                 `${UserTableName}.user_uuid`,
             )
-            .leftJoin(
-                EmailTableName,
-                `${EmailTableName}.user_id`,
-                '=',
-                `${UserTableName}.user_id`,
-            )
-            .andWhere(`${EmailTableName}.is_primary`, true)
+            .leftJoin(EmailTableName, function joinEmails() {
+                this.on(
+                    `${EmailTableName}.user_id`,
+                    '=',
+                    `${UserTableName}.user_id`,
+                ).andOnVal(`${EmailTableName}.is_primary`, '=', true);
+            })
             .join(
                 AiAgentTableName,
                 `${AiThreadTableName}.agent_uuid`,
@@ -1280,8 +1338,8 @@ export class AiAgentModel {
                 createdFrom: row.created_from,
                 title: row.title || row.first_prompt,
                 user: {
-                    uuid: row.user_uuid,
-                    name: row.user_name,
+                    uuid: row.user_uuid ?? '',
+                    name: row.user_name || 'Unknown user',
                     slackUserId: row.slack_user_id,
                     email: row.user_email,
                 },
@@ -1406,7 +1464,7 @@ export class AiAgentModel {
                 `${AiSlackPromptTableName}.slack_user_id`,
                 `${AiWebAppPromptTableName}.user_uuid`,
                 this.database.raw(
-                    `CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name) as user_name`,
+                    `COALESCE(NULLIF(TRIM(CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name)), ''), 'Unknown user') as user_name`,
                 ),
             )
             .leftJoin(
@@ -1432,6 +1490,7 @@ export class AiAgentModel {
         const referencedArtifactsMap = await this.findThreadReferencedArtifacts(
             { promptUuids },
         );
+        const contextMap = await this.getContextForPromptUuids(promptUuids);
 
         const messagesPromises = promptRows.map(async (row) => {
             const messages: AiAgentMessage<{
@@ -1451,6 +1510,7 @@ export class AiAgentModel {
                     name: row.user_name,
                     slackUserId: row.slack_user_id,
                 },
+                context: contextMap.get(row.ai_prompt_uuid) ?? [],
             });
 
             const toolCalls = await this.getToolCallsForPrompt(
@@ -1914,7 +1974,11 @@ export class AiAgentModel {
                     'ai_artifact_version_uuid' | 'chart_config'
                 > &
                     Pick<DbAiArtifact, 'artifact_type'>)[]
-            >(`${AiArtifactVersionsTableName}.ai_artifact_version_uuid`, `${AiArtifactVersionsTableName}.chart_config`, `${AiArtifactsTableName}.artifact_type`)
+            >(
+                `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
+                `${AiArtifactVersionsTableName}.chart_config`,
+                `${AiArtifactsTableName}.artifact_type`,
+            )
             .whereIn(
                 `${AiArtifactVersionsTableName}.ai_artifact_version_uuid`,
                 artifactVersionUuids,
@@ -2027,7 +2091,7 @@ export class AiAgentModel {
                 `${AiSlackPromptTableName}.slack_user_id`,
                 `${AiWebAppPromptTableName}.user_uuid`,
                 this.database.raw(
-                    `CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name) as user_name`,
+                    `COALESCE(NULLIF(TRIM(CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name)), ''), 'Unknown user') as user_name`,
                 ),
             )
             .join(
@@ -2115,6 +2179,12 @@ export class AiAgentModel {
                         uuid: row.user_uuid,
                         name: row.user_name,
                     },
+                    context:
+                        (
+                            await this.getContextForPromptUuids([
+                                row.ai_prompt_uuid,
+                            ])
+                        ).get(row.ai_prompt_uuid) ?? [],
                 } satisfies AiAgentMessageUser;
             case 'assistant':
                 const toolCalls = await this.getToolCallsForPrompt(
@@ -2267,7 +2337,7 @@ export class AiAgentModel {
                 `${AiPromptTableName}.ai_prompt_uuid`,
                 `${UserTableName}.user_uuid`,
                 this.database.raw(
-                    `CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name) as user_name`,
+                    `COALESCE(NULLIF(TRIM(CONCAT(${UserTableName}.first_name, ' ', ${UserTableName}.last_name)), ''), 'Unknown user') as user_name`,
                 ),
             )
             .orderBy(`${AiThreadTableName}.created_at`, 'desc');
@@ -2315,6 +2385,36 @@ export class AiAgentModel {
                 organizationUuid,
             )
             .orderBy(`${AiPromptTableName}.created_at`, 'asc');
+    }
+
+    async findPromptContext(
+        promptUuid: string,
+    ): Promise<
+        | Pick<
+              AiWebAppPrompt,
+              | 'organizationUuid'
+              | 'projectUuid'
+              | 'agentUuid'
+              | 'promptUuid'
+              | 'threadUuid'
+          >
+        | undefined
+    > {
+        return this.database(AiPromptTableName)
+            .join(
+                AiThreadTableName,
+                `${AiPromptTableName}.ai_thread_uuid`,
+                `${AiThreadTableName}.ai_thread_uuid`,
+            )
+            .select({
+                organizationUuid: `${AiThreadTableName}.organization_uuid`,
+                projectUuid: `${AiThreadTableName}.project_uuid`,
+                agentUuid: `${AiThreadTableName}.agent_uuid`,
+                promptUuid: `${AiPromptTableName}.ai_prompt_uuid`,
+                threadUuid: `${AiPromptTableName}.ai_thread_uuid`,
+            })
+            .where(`${AiPromptTableName}.ai_prompt_uuid`, promptUuid)
+            .first();
     }
 
     async findSlackPrompt(
@@ -2702,8 +2802,214 @@ export class AiAgentModel {
                 user_uuid: data.createdByUserUuid,
             });
 
+            if (data.context && data.context.length > 0) {
+                await AiAgentModel.insertPromptContext(
+                    trx,
+                    row.ai_prompt_uuid,
+                    data.context,
+                );
+            }
+
             return row.ai_prompt_uuid;
         });
+    }
+
+    private static async insertPromptContext(
+        trx: Knex.Transaction,
+        promptUuid: string,
+        context: AiPromptContextInput,
+    ): Promise<void> {
+        const chartUuids = context.flatMap((c) =>
+            c.type === 'chart' ? [c.chartUuid] : [],
+        );
+        const dashboardUuids = context.flatMap((c) =>
+            c.type === 'dashboard' ? [c.dashboardUuid] : [],
+        );
+
+        const chartLookup = new Map(
+            (
+                await trx(SavedChartsTableName)
+                    .leftJoin(
+                        SavedChartVersionsTableName,
+                        `${SavedChartsTableName}.saved_query_id`,
+                        `${SavedChartVersionsTableName}.saved_query_id`,
+                    )
+                    .whereIn(
+                        `${SavedChartsTableName}.saved_query_uuid`,
+                        chartUuids,
+                    )
+                    .whereNull(`${SavedChartsTableName}.deleted_at`)
+                    .distinctOn(`${SavedChartsTableName}.saved_query_uuid`)
+                    .orderBy([
+                        {
+                            column: `${SavedChartsTableName}.saved_query_uuid`,
+                        },
+                        {
+                            column: `${SavedChartVersionsTableName}.created_at`,
+                            order: 'desc',
+                            nulls: 'last',
+                        },
+                    ])
+                    .select<
+                        {
+                            saved_query_uuid: string;
+                            name: string;
+                            saved_queries_version_uuid: string | null;
+                        }[]
+                    >({
+                        saved_query_uuid: `${SavedChartsTableName}.saved_query_uuid`,
+                        name: `${SavedChartsTableName}.name`,
+                        saved_queries_version_uuid: `${SavedChartVersionsTableName}.saved_queries_version_uuid`,
+                    })
+            ).map((r) => [r.saved_query_uuid, r] as const),
+        );
+
+        const dashboardLookup = new Map(
+            (
+                await trx(DashboardsTableName)
+                    .leftJoin(
+                        DashboardVersionsTableName,
+                        `${DashboardsTableName}.dashboard_id`,
+                        `${DashboardVersionsTableName}.dashboard_id`,
+                    )
+                    .whereIn(
+                        `${DashboardsTableName}.dashboard_uuid`,
+                        dashboardUuids,
+                    )
+                    .whereNull(`${DashboardsTableName}.deleted_at`)
+                    .distinctOn(`${DashboardsTableName}.dashboard_uuid`)
+                    .orderBy([
+                        {
+                            column: `${DashboardsTableName}.dashboard_uuid`,
+                        },
+                        {
+                            column: `${DashboardVersionsTableName}.created_at`,
+                            order: 'desc',
+                            nulls: 'last',
+                        },
+                    ])
+                    .select<
+                        {
+                            dashboard_uuid: string;
+                            name: string;
+                            dashboard_version_uuid: string | null;
+                        }[]
+                    >({
+                        dashboard_uuid: `${DashboardsTableName}.dashboard_uuid`,
+                        name: `${DashboardsTableName}.name`,
+                        dashboard_version_uuid: `${DashboardVersionsTableName}.dashboard_version_uuid`,
+                    })
+            ).map((r) => [r.dashboard_uuid, r] as const),
+        );
+
+        const rows = context.map((ctx) => {
+            switch (ctx.type) {
+                case 'chart': {
+                    const chart = chartLookup.get(ctx.chartUuid);
+                    return {
+                        ai_prompt_uuid: promptUuid,
+                        entity_type: 'chart' as AiPromptContextEntityType,
+                        entity_uuid: ctx.chartUuid,
+                        pinned_version_uuid:
+                            chart?.saved_queries_version_uuid ?? null,
+                        display_name: chart?.name ?? null,
+                        runtime_overrides: ctx.runtimeOverrides ?? null,
+                    };
+                }
+                case 'dashboard': {
+                    const dashboard = dashboardLookup.get(ctx.dashboardUuid);
+                    return {
+                        ai_prompt_uuid: promptUuid,
+                        entity_type: 'dashboard' as AiPromptContextEntityType,
+                        entity_uuid: ctx.dashboardUuid,
+                        pinned_version_uuid:
+                            dashboard?.dashboard_version_uuid ?? null,
+                        display_name: dashboard?.name ?? null,
+                    };
+                }
+                default:
+                    return assertUnreachable(
+                        ctx,
+                        'Unknown AiPromptContextInput type',
+                    );
+            }
+        });
+
+        await trx(AiPromptContextTableName).insert(rows);
+    }
+
+    async getContextForPromptUuids(
+        promptUuids: string[],
+    ): Promise<Map<string, AiPromptContext>> {
+        const grouped = new Map<string, AiPromptContext>();
+        if (promptUuids.length === 0) return grouped;
+
+        const rows = await this.database(AiPromptContextTableName)
+            .whereIn('ai_prompt_uuid', promptUuids)
+            .orderBy('created_at', 'asc')
+            .select<DbAiPromptContext[]>('*');
+
+        const chartUuids = rows
+            .filter((r) => r.entity_type === 'chart')
+            .map((r) => r.entity_uuid);
+        const chartKindByUuid = new Map(
+            (
+                await this.database(SavedChartsTableName)
+                    .whereIn('saved_query_uuid', chartUuids)
+                    .whereNull('deleted_at')
+                    .select<
+                        {
+                            saved_query_uuid: string;
+                            last_version_chart_kind: string | null;
+                        }[]
+                    >('saved_query_uuid', 'last_version_chart_kind')
+            ).map(
+                (r) =>
+                    [
+                        r.saved_query_uuid,
+                        (r.last_version_chart_kind as ChartKind | null) ?? null,
+                    ] as const,
+            ),
+        );
+
+        for (const row of rows) {
+            const existing = grouped.get(row.ai_prompt_uuid) ?? [];
+            existing.push(
+                AiAgentModel.toAiPromptContextItem(row, chartKindByUuid),
+            );
+            grouped.set(row.ai_prompt_uuid, existing);
+        }
+
+        return grouped;
+    }
+
+    private static toAiPromptContextItem(
+        row: DbAiPromptContext,
+        chartKindByUuid: Map<string, ChartKind | null>,
+    ): AiPromptContextItem {
+        switch (row.entity_type) {
+            case 'chart':
+                return {
+                    type: 'chart',
+                    chartUuid: row.entity_uuid,
+                    pinnedVersionUuid: row.pinned_version_uuid,
+                    displayName: row.display_name,
+                    runtimeOverrides: row.runtime_overrides,
+                    chartKind: chartKindByUuid.get(row.entity_uuid) ?? null,
+                };
+            case 'dashboard':
+                return {
+                    type: 'dashboard',
+                    dashboardUuid: row.entity_uuid,
+                    pinnedVersionUuid: row.pinned_version_uuid,
+                    displayName: row.display_name,
+                };
+            default:
+                return assertUnreachable(
+                    row.entity_type,
+                    `Unknown ai_prompt_context.entity_type`,
+                );
+        }
     }
 
     async existsSlackPromptsByChannelAndTimestamps(
@@ -2936,9 +3242,15 @@ export class AiAgentModel {
         promptUuid: string,
     ): Promise<AiAgentToolResult[]> {
         const rows = await this.database(AiAgentToolResultTableName)
-            .select<
-                DbAiAgentToolResult[]
-            >('ai_agent_tool_result_uuid', 'ai_prompt_uuid', 'tool_call_id', 'tool_name', 'result', 'metadata', 'created_at')
+            .select<DbAiAgentToolResult[]>(
+                'ai_agent_tool_result_uuid',
+                'ai_prompt_uuid',
+                'tool_call_id',
+                'tool_name',
+                'result',
+                'metadata',
+                'created_at',
+            )
             .where('ai_prompt_uuid', promptUuid)
             .orderBy('created_at', 'asc');
 

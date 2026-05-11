@@ -1,27 +1,27 @@
 import {
+    assertUnreachable,
+    DEFAULT_RESULTS_PAGE_SIZE,
+    DownloadFileType,
+    FeatureFlags,
+    MAX_SAFE_INTEGER,
+    ParameterError,
+    QueryExecutionContext,
+    QueryHistoryStatus,
+    sleep,
     type ApiError,
     type ApiExecuteAsyncMetricQueryResults,
     type ApiGetAsyncQueryResults,
     type ApiJobScheduledResponse,
     type ApiSuccessEmpty,
-    assertUnreachable,
     type DateGranularity,
-    DEFAULT_RESULTS_PAGE_SIZE,
-    DownloadFileType,
     type DownloadOptions,
     type ExecuteAsyncMetricQueryRequestParams,
     type ExecuteAsyncSavedChartRequestParams,
-    FeatureFlags,
-    MAX_SAFE_INTEGER,
     type MetricQuery,
-    ParameterError,
     type ParametersValuesMap,
     type PivotConfiguration,
-    QueryExecutionContext,
-    QueryHistoryStatus,
     type ReadyQueryResultsPage,
     type ResultRow,
-    sleep,
 } from '@lightdash/common';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -38,9 +38,10 @@ export type QueryResultsProps = {
     csvLimit?: number | null; //giving null returns all results (no limit)
     chartUuid?: string;
     chartVersionUuid?: string;
-    dateZoomGranularity?: DateGranularity;
+    dateZoomGranularity?: DateGranularity | string;
     context?: QueryExecutionContext;
     invalidateCache?: boolean;
+    usePreAggregateCache?: boolean;
     parameters?: ParametersValuesMap;
     pivotConfiguration?: PivotConfiguration;
     pivotResults?: boolean;
@@ -163,7 +164,8 @@ const executeAsyncQuery = (
                           }
                         : undefined,
                 },
-                invalidateCache: true, // Note: do not cache explore queries
+                invalidateCache: data.invalidateCache,
+                usePreAggregateCache: data.usePreAggregateCache,
                 parameters: data.parameters,
                 pivotConfiguration: data.pivotConfiguration,
             },
@@ -182,7 +184,10 @@ export const executeQueryAndWaitForResults = async (
 
     const results = await pollForResults(data.projectUuid, query.queryUuid);
 
-    if (results.status === QueryHistoryStatus.ERROR) {
+    if (
+        results.status === QueryHistoryStatus.ERROR ||
+        results.status === QueryHistoryStatus.EXPIRED
+    ) {
         throw new Error(results.error || 'Error executing SQL query');
     }
 
@@ -281,11 +286,7 @@ const getResultsPage = async (
 export type InfiniteQueryResults = Partial<
     Pick<
         ReadyQueryResultsPage,
-        | 'queryUuid'
-        | 'totalResults'
-        | 'initialQueryExecutionMs'
-        | 'pivotDetails'
-        | 'columns'
+        'queryUuid' | 'totalResults' | 'metadata' | 'pivotDetails' | 'columns'
     >
 > & {
     projectUuid?: string;
@@ -408,14 +409,15 @@ export const useInfiniteQueryResults = (
             const clientFetchTimeMs = performance.now() - startTime;
 
             switch (status) {
-                case QueryHistoryStatus.ERROR: {
+                case QueryHistoryStatus.ERROR:
+                case QueryHistoryStatus.EXPIRED: {
                     backoffRef.current = 250;
                     throw <ApiError>{
                         status: 'error',
                         error: {
                             name: 'Error',
                             statusCode: 500,
-                            message: results.error ?? 'Query failed',
+                            message: results.error || 'Query failed',
                             data: {},
                         },
                     };
@@ -432,7 +434,9 @@ export const useInfiniteQueryResults = (
                         },
                     };
                 }
-                case QueryHistoryStatus.PENDING: {
+                case QueryHistoryStatus.PENDING:
+                case QueryHistoryStatus.QUEUED:
+                case QueryHistoryStatus.EXECUTING: {
                     // Invalidate page. Note we can't use refetch as it bypasses the "enabled" check: https://github.com/TanStack/query/issues/1965
                     void sleep(backoffRef.current).then(() =>
                         queryClient.invalidateQueries([
@@ -477,7 +481,19 @@ export const useInfiniteQueryResults = (
     useEffect(() => {
         const pageData = nextPage.data;
         if (pageData?.status === QueryHistoryStatus.READY) {
-            setFetchedPages((prevState) => [...prevState, pageData]);
+            setFetchedPages((prevState) => {
+                // Deduplicate: avoid appending a page that was already fetched.
+                // This can happen when React Query re-delivers the same READY
+                // result after an invalidation or re-render, creating a new
+                // object reference even though the contents are identical.
+                const alreadyHasPage = prevState.some(
+                    (p) =>
+                        p.queryUuid === pageData.queryUuid &&
+                        p.page === pageData.page,
+                );
+                if (alreadyHasPage) return prevState;
+                return [...prevState, pageData];
+            });
         }
     }, [nextPage.data]);
 
@@ -526,7 +542,7 @@ export const useInfiniteQueryResults = (
 
         return (
             totalPagesFetchTime +
-            (fetchedPages[0]?.initialQueryExecutionMs ?? 0) // Add the time it took to execute the initial query
+            (fetchedPages[0]?.metadata.performance.initialQueryExecutionMs ?? 0) // Add the time it took to execute the initial query
         );
     }, [fetchAll, fetchedPages]);
 
@@ -540,7 +556,7 @@ export const useInfiniteQueryResults = (
             queryUuid,
             queryStatus: dependenciesChanged ? undefined : nextPageData?.status, // show latest status
             totalResults: fetchedPages[0]?.totalResults,
-            initialQueryExecutionMs: fetchedPages[0]?.initialQueryExecutionMs,
+            metadata: fetchedPages[0]?.metadata,
             pivotDetails: fetchedPages[0]?.pivotDetails,
             columns: fetchedPages[0]?.columns,
             hasFetchedAllRows,

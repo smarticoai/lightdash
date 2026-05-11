@@ -3,8 +3,8 @@ import { type DbtColumnLightdashMetric } from './dbt';
 import { NotImplementedError, ParameterError } from './errors';
 import {
     FilterOperator,
-    UnitOfTime,
     isDateFilterRule,
+    UnitOfTime,
     type DateFilterSettings,
     type MetricFilterRule,
 } from './filter';
@@ -86,6 +86,7 @@ const convertFilterOperatorToDbt = (filter: MetricFilterRule): string[] => {
         case FilterOperator.NOT_IN_THE_PAST:
         case FilterOperator.NOT_IN_THE_CURRENT:
         case FilterOperator.NOT_IN_BETWEEN:
+        case FilterOperator.IN_PERIOD_TO_DATE:
             throw new NotImplementedError(
                 `No function implemented to convert custom metric filter to dbt: ${operator}`,
             );

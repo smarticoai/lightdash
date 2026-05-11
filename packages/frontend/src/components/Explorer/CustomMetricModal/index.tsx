@@ -1,8 +1,6 @@
 import {
-    CustomFormatType,
-    MetricType,
-    NumberSeparator,
     canApplyFormattingToCustomMetric,
+    CustomFormatType,
     friendlyName,
     getFilterableDimensionsFromItemsMap,
     getItemId,
@@ -10,6 +8,9 @@ import {
     isAdditionalMetric,
     isCustomDimension,
     isDimension,
+    isNonAggregateMetricType,
+    MetricType,
+    NumberSeparator,
     type AdditionalMetric,
     type CustomFormat,
     type Dimension,
@@ -327,6 +328,25 @@ export const CustomMetricModal = memo(() => {
                         placeholder="Enter custom metric label"
                         {...form.getInputProps('customMetricLabel')}
                     />
+                    {customMetricType && (
+                        <TextInput
+                            label="Type"
+                            value={friendlyName(customMetricType)}
+                            readOnly
+                            description="Metric type"
+                        />
+                    )}
+                    {isEditing &&
+                        isAdditionalMetric(item) &&
+                        item.sql &&
+                        isNonAggregateMetricType(item.type) && (
+                            <TextInput
+                                label="SQL"
+                                value={item.sql}
+                                readOnly
+                                description="SQL"
+                            />
+                        )}
                     {customMetricType === MetricType.PERCENTILE && (
                         <NumberInput
                             w={100}

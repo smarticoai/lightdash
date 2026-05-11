@@ -72,6 +72,8 @@ const TransferItemsModal = <R extends ResourceViewItem, T extends Array<R>>({
             case ResourceViewItemType.CHART:
             case ResourceViewItemType.DASHBOARD:
                 return item.data.spaceUuid;
+            case ResourceViewItemType.DATA_APP:
+                return item.data.spaceUuid ?? undefined;
             default:
                 return assertUnreachable(item, 'Invalid item type');
         }
@@ -97,6 +99,8 @@ const TransferItemsModal = <R extends ResourceViewItem, T extends Array<R>>({
         handleCreateNewSpace,
         openCreateSpaceForm,
         closeCreateSpaceForm,
+        inheritanceValue,
+        setInheritanceValue,
     } = useSpaceManagement({
         projectUuid,
         defaultSpaceUuid,
@@ -181,6 +185,8 @@ const TransferItemsModal = <R extends ResourceViewItem, T extends Array<R>>({
                     onCancel={closeCreateSpaceForm}
                     isLoading={createSpaceMutation.isLoading}
                     parentSpaceName={selectedSpaceLabel}
+                    inheritanceValue={inheritanceValue ?? undefined}
+                    onInheritanceChange={setInheritanceValue}
                 />
             ) : (
                 <>

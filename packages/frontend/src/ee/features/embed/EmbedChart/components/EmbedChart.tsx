@@ -1,25 +1,18 @@
-import { Box, MantineProvider, type MantineThemeOverride } from '@mantine/core';
+import { Box } from '@mantine/core';
 import { IconUnlink } from '@tabler/icons-react';
 import { memo, useMemo, type FC } from 'react';
+import SuboptimalState from '../../../../../components/common/SuboptimalState/SuboptimalState';
 import LightdashVisualization from '../../../../../components/LightdashVisualization';
 import VisualizationProvider from '../../../../../components/LightdashVisualization/VisualizationProvider';
-import SuboptimalState from '../../../../../components/common/SuboptimalState/SuboptimalState';
 import {
     selectSavedChart,
     useExplorerSelector,
 } from '../../../../../features/explorer/store';
 import { useExplorerQuery } from '../../../../../hooks/useExplorerQuery';
+import { useProjectUuid } from '../../../../../hooks/useProjectUuid';
 import { useSavedQuery } from '../../../../../hooks/useSavedQuery';
 import MinimalSavedExplorer from '../../../../../pages/MinimalSavedExplorer';
 import useApp from '../../../../../providers/App/useApp';
-
-const themeOverride: MantineThemeOverride = {
-    globalStyles: () => ({
-        'html, body': {
-            backgroundColor: 'white',
-        },
-    }),
-};
 
 const MinimalChartContent = memo(() => {
     const { health } = useApp();
@@ -32,6 +25,7 @@ const MinimalChartContent = memo(() => {
             ...queryResults,
             metricQuery: query.data?.metricQuery,
             fields: query.data?.fields,
+            resolvedTimezone: query.data?.resolvedTimezone ?? undefined,
         }),
         [queryResults, query.data],
     );
@@ -59,14 +53,12 @@ const MinimalChartContent = memo(() => {
             colorPalette={savedChart.colorPalette}
             parameters={query.data?.usedParametersValues}
         >
-            <MantineProvider inherit theme={themeOverride}>
-                <Box mih="inherit" h="100%">
-                    <LightdashVisualization
-                        className="sentry-block ph-no-capture"
-                        data-testid="visualization"
-                    />
-                </Box>
-            </MantineProvider>
+            <Box mih="inherit" h="100%">
+                <LightdashVisualization
+                    className="sentry-block ph-no-capture"
+                    data-testid="visualization"
+                />
+            </Box>
         </VisualizationProvider>
     );
 });
@@ -79,8 +71,10 @@ type Props = {
 };
 
 const EmbedChart: FC<Props> = ({ containerStyles, savedQueryUuid }) => {
+    const projectUuid = useProjectUuid();
     const { data, isInitialLoading, isError, error } = useSavedQuery({
-        id: savedQueryUuid,
+        uuidOrSlug: savedQueryUuid,
+        projectUuid,
     });
 
     if (isInitialLoading) {

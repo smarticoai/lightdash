@@ -1,9 +1,12 @@
 import { SupportedDbtAdapter } from '../types/dbt';
 import { CompileError } from '../types/errors';
 import { DimensionType, FieldType, friendlyName } from '../types/field';
+import { FilterOperator } from '../types/filter';
 import {
     ExploreCompiler,
     parseAllReferences,
+    sqlAggregationWrapsReferences,
+    sqlContainsAggregation,
     type UncompiledExplore,
 } from './exploreCompiler';
 import {
@@ -21,6 +24,7 @@ import {
     compiledSimpleJoinedExplore,
     compiledSimpleJoinedExploreWithAlwaysTrue,
     compiledSimpleJoinedExploreWithBaseTableDescription,
+    createExploreWithRequiredFilters,
     customSqlDimensionWithNoReferences,
     customSqlDimensionWithReferences,
     expectedCompiledCustomSqlDimensionWithNoReferences,
@@ -48,6 +52,10 @@ import {
     exploreWithJoinWithFieldsAndGroups,
     exploreWithMetricNumber,
     exploreWithMetricNumberCompiled,
+    exploreWithMixedDimensionAndMetricReferences,
+    exploreWithMixedDimensionAndMetricReferencesCompiled,
+    exploreWithNonAggregateMetricWithAggregationInSql,
+    exploreWithNonAggregateMetricWithAggregationInSqlCompiled,
     exploreWithParameters,
     exploreWithRequiredAttributes,
     exploreWithRequiredAttributesCompiled,
@@ -67,6 +75,60 @@ import {
 } from './exploreCompiler.mock';
 
 const compiler = new ExploreCompiler(warehouseClientMock);
+
+test('Should throw when required/default filters reference a hidden dimension', () => {
+    const exploreWithHiddenRequiredFilter = createExploreWithRequiredFilters([
+        {
+            id: 'hidden-filter',
+            target: { fieldRef: 'credit_card_amount' },
+            operator: FilterOperator.GREATER_THAN_OR_EQUAL,
+            values: [0],
+            required: true,
+        },
+        {
+            id: 'visible-filter',
+            target: { fieldRef: 'has_credit_card_payment' },
+            operator: FilterOperator.EQUALS,
+            values: ['true'],
+            required: true,
+        },
+    ]);
+
+    const compileExplore = () =>
+        compiler.compileExplore(exploreWithHiddenRequiredFilter);
+
+    expect(compileExplore).toThrowError(
+        /Hidden fields can't be used in default_filters or required_filters/,
+    );
+    expect(compileExplore).toThrowError(/credit_card_amount/);
+});
+
+test('Should allow required/default filters on visible additional dimensions', () => {
+    const exploreWithVisibleAdditionalRequiredFilter =
+        createExploreWithRequiredFilters([
+            {
+                id: 'visible-filter',
+                target: { fieldRef: 'has_credit_card_payment' },
+                operator: FilterOperator.EQUALS,
+                values: ['true'],
+                required: true,
+            },
+        ]);
+
+    const compiledExplore = compiler.compileExplore(
+        exploreWithVisibleAdditionalRequiredFilter,
+    );
+
+    expect(compiledExplore.tables.orders.requiredFilters).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                target: expect.objectContaining({
+                    fieldRef: 'has_credit_card_payment',
+                }),
+            }),
+        ]),
+    );
+});
 
 test('Should compile empty table', () => {
     expect(compiler.compileExplore(exploreOneEmptyTable)).toStrictEqual(
@@ -135,6 +197,27 @@ test('Should compile with a reference to a metric in a non-aggregate metric', ()
     expect(compiler.compileExplore(exploreWithMetricNumber)).toStrictEqual(
         exploreWithMetricNumberCompiled,
     );
+});
+
+test('Should compile non-aggregate metrics with aggregation in SQL referencing dimensions', () => {
+    // This tests the pattern where type:number metrics have aggregation
+    // functions in their SQL (e.g., "count(distinct ${user_id})").
+    // These should be allowed to reference dimensions.
+    expect(
+        compiler.compileExplore(
+            exploreWithNonAggregateMetricWithAggregationInSql,
+        ),
+    ).toStrictEqual(exploreWithNonAggregateMetricWithAggregationInSqlCompiled);
+});
+
+test('Should compile non-aggregate metrics with aggregation in SQL referencing BOTH dimensions AND metrics', () => {
+    // This tests the pattern where type:number metrics have aggregation
+    // and reference both dimensions and other metrics in the same SQL.
+    // For example: "sum(${amount}) / ${user_count}" where amount is a dimension
+    // and user_count is a metric.
+    expect(
+        compiler.compileExplore(exploreWithMixedDimensionAndMetricReferences),
+    ).toStrictEqual(exploreWithMixedDimensionAndMetricReferencesCompiled);
 });
 
 describe('Explores with a base table and joined table', () => {
@@ -214,6 +297,39 @@ describe('Explores with a base table and joined table', () => {
         ).toStrictEqual(compiledJoinedExploreOverridingJoinDescription);
     });
 });
+describe('Case sensitivity with project defaults', () => {
+    test('should use project defaults when explore caseSensitive is not set', () => {
+        const exploreWithProjectDefaults: UncompiledExplore = {
+            ...exploreOneEmptyTable,
+            projectDefaults: {
+                case_sensitive: false,
+            },
+        };
+        const compiled = compiler.compileExplore(exploreWithProjectDefaults);
+        expect(compiled.caseSensitive).toBe(false);
+    });
+
+    test('should use explore caseSensitive over project defaults', () => {
+        const exploreWithBothSettings: UncompiledExplore = {
+            ...exploreOneEmptyTable,
+            caseSensitive: true, // Explore level setting
+            projectDefaults: {
+                case_sensitive: false, // Project level setting
+            },
+        };
+        const compiled = compiler.compileExplore(exploreWithBothSettings);
+        expect(compiled.caseSensitive).toBe(true);
+    });
+
+    test('should not set caseSensitive when neither explore nor project defaults are set', () => {
+        const exploreWithNoSettings: UncompiledExplore = {
+            ...exploreOneEmptyTable,
+        };
+        const compiled = compiler.compileExplore(exploreWithNoSettings);
+        expect(compiled.caseSensitive).toBeUndefined();
+    });
+});
+
 describe('Default field labels render correctly for various input formats', () => {
     test('should handle uppercase field names', () => {
         expect(friendlyName('MYFIELDID')).toEqual('Myfieldid');
@@ -340,7 +456,7 @@ describe('Compile metrics with filters', () => {
                 [],
             ).compiledSql,
         ).toStrictEqual(
-            `MAX(CASE WHEN (LOWER("table1".shared) LIKE LOWER('%foo%')) THEN ("table1".number_column) ELSE NULL END)`,
+            `MAX(CASE WHEN (("table1".shared) LIKE '%foo%') THEN ("table1".number_column) ELSE NULL END)`,
         );
     });
     test('should show filters as columns metric2', () => {
@@ -363,7 +479,7 @@ describe('Compile metrics with filters', () => {
                 [],
             ).compiledSql,
         ).toStrictEqual(
-            `MAX(CASE WHEN (LOWER("table1".shared) LIKE LOWER('%foo%')) THEN (CASE WHEN "table1".number_column THEN 1 ELSE 0 END) ELSE NULL END)`,
+            `MAX(CASE WHEN (("table1".shared) LIKE '%foo%') THEN (CASE WHEN "table1".number_column THEN 1 ELSE 0 END) ELSE NULL END)`,
         );
     });
 });
@@ -515,6 +631,87 @@ describe('Explore compilation with model-level parameters', () => {
             expect(() =>
                 compiler.compileExplore(exploreWithInvalidParameterReference),
             ).toThrow('Missing parameters: b.nonexistent_param');
+        });
+
+        test('should hint the model name prefix when a short-form parameter reference matches a model-level parameter', () => {
+            // Reproduces PROD-6943: a short-form reference like
+            // `${lightdash.parameters.active_status}` doesn't match the
+            // model-prefixed available parameter `b.active_status`.
+            const exploreWithShortFormParameterReference = {
+                ...exploreWithParameters,
+                joinedTables: [
+                    {
+                        table: 'b',
+                        sqlOn: "${a.dim1} = ${b.dim1} AND ${ld.parameters.active_status} = 'active'",
+                    },
+                ],
+            };
+
+            expect(() =>
+                compiler.compileExplore(exploreWithShortFormParameterReference),
+            ).toThrow(
+                /Missing parameters: active_status\..*Hint:.*"active_status" is a model-level parameter.*\${lightdash\.parameters\.b\.active_status}/,
+            );
+        });
+    });
+
+    describe('Partial compilation surfaces field-level errors clearly', () => {
+        const partialCompiler = new ExploreCompiler(warehouseClientMock, {
+            allowPartialCompilation: true,
+        });
+
+        test('should produce a warning that names the failing dimension and hints the model prefix', () => {
+            // Reproduces PROD-6943: a dimension referencing a model-level
+            // parameter via the short form silently compiles to NULL. The
+            // warning surfaced to the user must name the dimension and
+            // explain how to fix the reference.
+            const exploreWithBadDimension: UncompiledExplore = {
+                ...exploreWithParameters,
+                joinedTables: [],
+                tables: {
+                    ...exploreWithParameters.tables,
+                    a: {
+                        ...exploreWithParameters.tables.a,
+                        dimensions: {
+                            ...exploreWithParameters.tables.a.dimensions,
+                            selected_team: {
+                                ...exploreWithParameters.tables.a.dimensions
+                                    .dim1,
+                                name: 'selected_team',
+                                label: 'selected_team',
+                                sql: "CASE WHEN ${lightdash.parameters.region} = 'US' THEN 1 ELSE 0 END",
+                            },
+                        },
+                    },
+                },
+            };
+
+            const result = partialCompiler.compileExplore(
+                exploreWithBadDimension,
+            );
+
+            expect(result.warnings).toBeDefined();
+            const warningMessages = (result.warnings ?? []).map(
+                (w) => w.message,
+            );
+            const dimWarning = warningMessages.find((m) =>
+                m.includes('selected_team'),
+            );
+            expect(dimWarning).toBeDefined();
+            expect(dimWarning).toContain(
+                'Dimension "selected_team" failed to compile',
+            );
+            expect(dimWarning).toContain('Missing parameters: region');
+            expect(dimWarning).toContain('${lightdash.parameters.a.region}');
+            // Confirm the placeholder NULL compiledSql is still present so
+            // the rest of the explore still ships.
+            expect(result.tables.a.dimensions.selected_team.compiledSql).toBe(
+                'NULL',
+            );
+            expect(
+                result.tables.a.dimensions.selected_team.compilationError
+                    ?.message,
+            ).toContain('selected_team');
         });
     });
 
@@ -969,5 +1166,170 @@ describe('Explore compilation with model-level parameters', () => {
                 /Set "nonexistent_set" not found/,
             );
         });
+    });
+});
+
+describe('sqlContainsAggregation', () => {
+    describe('should detect common aggregation functions', () => {
+        test.each([
+            ['count(${field})', true],
+            ['count(distinct ${field})', true],
+            ['COUNT(DISTINCT ${field})', true],
+            ['sum(${amount})', true],
+            ['SUM(${amount})', true],
+            ['avg(${amount})', true],
+            ['average(${amount})', true],
+            ['min(${amount})', true],
+            ['max(${amount})', true],
+            ['median(${amount})', true],
+            ['stddev(${amount})', true],
+            ['stddev_pop(${amount})', true],
+            ['stddev_samp(${amount})', true],
+            ['variance(${amount})', true],
+            ['var_pop(${amount})', true],
+            ['var_samp(${amount})', true],
+            ['percentile(${amount}, 90)', true],
+            ['percentile_cont(0.5)', true],
+            ['percentile_disc(0.5)', true],
+            ['approx_count_distinct(${field})', true],
+            ['any_value(${field})', true],
+            ['array_agg(${field})', true],
+            ['string_agg(${field}, ",")', true],
+            ['group_concat(${field})', true],
+            ['listagg(${field})', true],
+            ['corr(${x}, ${y})', true],
+            ['covar_pop(${x}, ${y})', true],
+            ['covar_samp(${x}, ${y})', true],
+            ['mode(${field})', true],
+            ['approx_percentile(${field}, 0.5)', true],
+            ["COUNT_IF(${field} <> 'n/a')", true],
+            ['countif(${field} > 0)', true],
+            ['max_by(${field}, ${date})', true],
+            ['MAX_BY(${field}, ${date})', true],
+            ['min_by(${field}, ${date})', true],
+            ['MIN_BY(${field}, ${date})', true],
+        ])('"%s" should return %s', (sql, expected) => {
+            expect(sqlContainsAggregation(sql)).toBe(expected);
+        });
+    });
+
+    describe('should detect aggregation in complex SQL', () => {
+        test.each([
+            ['CASE WHEN x THEN count(${field}) ELSE 0 END', true],
+            ['COALESCE(sum(${amount}), 0)', true],
+            ['sum(${amount}) * 1.1', true],
+            ['2 + count(distinct ${user_id})', true],
+            ['ROUND(avg(${amount}), 2)', true],
+        ])('"%s" should return true', (sql) => {
+            expect(sqlContainsAggregation(sql)).toBe(true);
+        });
+    });
+
+    describe('should not detect aggregation in non-aggregate SQL', () => {
+        test.each([
+            ['${field} * 2', false],
+            ['${field1} + ${field2}', false],
+            ['${summary_field}', false], // 'summary' contains 'sum' but is not sum()
+            ['${count_field}', false], // 'count_field' contains 'count' but is not count()
+            ['COALESCE(${amount}, 0)', false],
+            ["CASE WHEN ${status} = 'active' THEN 1 ELSE 0 END", false],
+            ['UPPER(${name})', false],
+            ['CONCAT(${first_name}, ${last_name})', false],
+            ['max_bytes(${field})', false],
+        ])('"%s" should return false', (sql) => {
+            expect(sqlContainsAggregation(sql)).toBe(false);
+        });
+    });
+
+    describe('should handle edge cases', () => {
+        test('should return false for empty string', () => {
+            expect(sqlContainsAggregation('')).toBe(false);
+        });
+
+        test('should return false for undefined', () => {
+            expect(sqlContainsAggregation(undefined)).toBe(false);
+        });
+
+        test('should return false for null', () => {
+            expect(sqlContainsAggregation(null)).toBe(false);
+        });
+    });
+});
+
+describe('sqlAggregationWrapsReferences', () => {
+    test('should return true when aggregation wraps a metric reference', () => {
+        expect(
+            sqlAggregationWrapsReferences('sum(${max_value})', ['max_value']),
+        ).toBe(true);
+    });
+
+    test('should return true for count(distinct ${metric})', () => {
+        expect(
+            sqlAggregationWrapsReferences('count(distinct ${max_value})', [
+                'max_value',
+            ]),
+        ).toBe(true);
+    });
+
+    test('should return true when one of multiple refs is inside aggregation', () => {
+        expect(
+            sqlAggregationWrapsReferences(
+                'sum(${max_value}) / NULLIF(${count_records}, 0)',
+                ['max_value'],
+            ),
+        ).toBe(true);
+    });
+
+    test('should return false when ref is outside aggregation (sibling aggregates)', () => {
+        expect(
+            sqlAggregationWrapsReferences(
+                'sum(${TABLE}.value) / NULLIF(${count_records}, 0)',
+                ['count_records'],
+            ),
+        ).toBe(false);
+    });
+
+    test('should return false when aggregation wraps raw column, not metric ref', () => {
+        expect(
+            sqlAggregationWrapsReferences('sum(raw_col) / ${count_records}', [
+                'count_records',
+            ]),
+        ).toBe(false);
+    });
+
+    test('should return false for empty refs', () => {
+        expect(sqlAggregationWrapsReferences('sum(${max_value})', [])).toBe(
+            false,
+        );
+    });
+
+    test('should return false for empty sql', () => {
+        expect(sqlAggregationWrapsReferences('', ['max_value'])).toBe(false);
+    });
+
+    test('should handle nested parentheses correctly', () => {
+        expect(
+            sqlAggregationWrapsReferences(
+                'sum(case when ${max_value} > 100 then ${max_value} else 0 end)',
+                ['max_value'],
+            ),
+        ).toBe(true);
+    });
+
+    test('should handle cross-table references', () => {
+        expect(
+            sqlAggregationWrapsReferences('sum(${other_table.max_value})', [
+                'other_table.max_value',
+            ]),
+        ).toBe(true);
+    });
+
+    test('should return true when max_by wraps a metric reference', () => {
+        expect(
+            sqlAggregationWrapsReferences(
+                'max_by(${active_customers}, ${updated_on})',
+                ['active_customers'],
+            ),
+        ).toBe(true);
     });
 });

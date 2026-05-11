@@ -5,13 +5,13 @@ import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { useMount, useUnmount } from 'react-use';
+import ErrorState from '../components/common/ErrorState';
+import MantineIcon from '../components/common/MantineIcon';
+import Page from '../components/common/Page/Page';
 import {
     resetChartState,
     setChartConfig,
 } from '../components/DataViz/store/actions/commonChartActions';
-import ErrorState from '../components/common/ErrorState';
-import MantineIcon from '../components/common/MantineIcon';
-import Page from '../components/common/Page/Page';
 import { Sidebar } from '../features/sqlRunner';
 import { ContentPanel } from '../features/sqlRunner/components/ContentPanel';
 import { Header } from '../features/sqlRunner/components/Header';
@@ -26,6 +26,7 @@ import {
     resetState,
     setFetchResultsOnLoad,
     setMode,
+    setParameterValues,
     setProjectUuid,
     setQuoteChar,
     setSavedChartData,
@@ -107,6 +108,12 @@ const SqlRunner = ({
             const sql = virtualViewState.sql.replace(/^[()]+|[()]+$/g, '');
             dispatch(setSql(sql));
             dispatch(setMode('virtualView'));
+            // Restore saved parameter values when editing a virtual view
+            if (virtualViewState.savedParameterValues) {
+                dispatch(
+                    setParameterValues(virtualViewState.savedParameterValues),
+                );
+            }
         }
     });
 

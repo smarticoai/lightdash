@@ -1,12 +1,18 @@
-import { MapChartLocation, MapChartType } from '@lightdash/common';
-import { Box, Divider, Stack, Text, UnstyledButton } from '@mantine/core';
-import { useClipboard } from '@mantine/hooks';
-import { IconCopy, IconMap } from '@tabler/icons-react';
+import {
+    MapChartLocation,
+    MapChartType,
+    MapTileBackground,
+} from '@lightdash/common';
+import { useDisclosure } from '@mantine/hooks';
+import { captureException } from '@sentry/react';
+import { IconMap } from '@tabler/icons-react';
 import { scaleSqrt } from 'd3-scale';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
+    lazy,
     memo,
+    Suspense,
     useCallback,
     useEffect,
     useMemo,
@@ -20,7 +26,6 @@ import {
     CircleMarker,
     GeoJSON,
     MapContainer,
-    Popup,
     TileLayer,
     Tooltip,
     useMap,
@@ -35,15 +40,20 @@ import useLeafletMapConfig, {
     type ScatterPoint,
     type TooltipFieldInfo,
 } from '../../hooks/leaflet/useLeafletMapConfig';
-import useToaster from '../../hooks/toaster/useToaster';
+import { useTileFallback } from '../../hooks/leaflet/useTileFallback';
+import { useContextMenuPermissions } from '../../hooks/useContextMenuPermissions';
 import { createMultiColorScale } from '../../utils/colorUtils';
+import Callout from '../common/Callout';
+import LoadingChart from '../common/LoadingChart';
+import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
 import { isMapVisualizationConfig } from '../LightdashVisualization/types';
 import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
-import LoadingChart from '../common/LoadingChart';
-import MantineIcon from '../common/MantineIcon';
-import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
 import HeatmapLayer from './HeatmapLayer';
+import { MAX_HEXBIN_POINTS } from './hexbin/hexbinUtils';
+import MapContextMenu from './MapContextMenu';
 import MapLegend from './MapLegend';
+
+const HexbinLayer = lazy(() => import('./hexbin/HexbinLayer'));
 
 // Types for Leaflet internals used in the monkey-patch below
 interface LeafletMapPrototype {
@@ -55,11 +65,18 @@ interface LeafletAugmentedContainer extends HTMLElement {
     _leaflet_map?: L.Map;
 }
 
-// Monkey-patch Leaflet to handle "Map container is already initialized" error
-// that occurs with React 18 StrictMode's double-mounting behavior.
-// Instead of throwing, we remove the existing map and allow re-initialization.
+// Monkey-patch Leaflet to work around two React lifecycle issues:
+// 1. "Map container is already initialized" — React 18 StrictMode double-mounts,
+//    so we remove the existing map and allow re-initialization.
+// 2. "Cannot read properties of undefined (reading '_leaflet_pos')" — zoom
+//    transition callbacks can fire after React unmounts and destroys the DOM.
 (() => {
-    const MapPrototype = L.Map.prototype as unknown as LeafletMapPrototype;
+    const MapPrototype = L.Map.prototype as unknown as LeafletMapPrototype & {
+        _getMapPanePos: () => L.Point;
+        _mapPane: HTMLElement | undefined;
+    };
+
+    // Fix 1: Handle double-initialization
     const originalMapInitialize = MapPrototype.initialize;
     MapPrototype.initialize = function (
         this: L.Map,
@@ -69,27 +86,34 @@ interface LeafletAugmentedContainer extends HTMLElement {
         const container: LeafletAugmentedContainer | null =
             typeof id === 'string' ? document.getElementById(id) : id;
         if (container && container._leaflet_id) {
-            // Container already has a map - properly remove it first
-            // The map instance stores itself on the container as _leaflet_map
             const existingMap = container._leaflet_map;
             if (existingMap) {
                 existingMap.remove();
             } else {
-                // Fallback: just clear the ID if we can't find the map instance
                 delete container._leaflet_id;
             }
         }
-        // Store reference to this map on the container for future cleanup
         const result = originalMapInitialize.call(this, id, options);
         if (container) {
             container._leaflet_map = this;
         }
         return result;
     };
+
+    // Fix 2: Guard against destroyed map pane
+    const originalGetMapPanePos = MapPrototype._getMapPanePos;
+    MapPrototype._getMapPanePos = function (
+        this: typeof MapPrototype,
+    ): L.Point {
+        if (!this._mapPane) {
+            return new L.Point(0, 0);
+        }
+        return originalGetMapPanePos.call(this);
+    };
 })();
+import { MAP_FILL_NO_BASE_MAP_OPACITY } from './constants';
 // eslint-disable-next-line css-modules/no-unused-class
 import classes from './SimpleMap.module.css';
-import { MAP_FILL_NO_BASE_MAP_OPACITY } from './constants';
 
 // Helper to get formatted value from row data
 const getFormattedValue = (
@@ -172,88 +196,34 @@ const MapTooltipContent: FC<MapTooltipContentProps> = ({
     );
 };
 
-type MapPopupContentProps = MapContentBaseProps & {
-    onCopy?: () => void;
-};
-
-const MapPopupContent: FC<MapPopupContentProps> = ({
-    tooltipFields,
-    rowData,
-    lat,
-    lon,
-    onCopy,
-    noData,
-}) => {
-    const visibleFields = tooltipFields.filter((f) => f.visible);
-    const hasMultipleFields = visibleFields.length > 1;
-
-    // Show "no data" popup for regions without matching data
-    if (noData) {
-        return (
-            <Box mt="xl" c="dark.9">
-                <Text size="sm">
-                    <strong>{noData.locationLabel}:</strong>{' '}
-                    {noData.locationValue}
-                </Text>
-                <Text size="sm" c="gray.6" fs="italic">
-                    No data
-                </Text>
-            </Box>
-        );
-    }
-
-    // Build copy value - CSV format for multiple fields, single value otherwise
-    const copyValue =
-        visibleFields.length > 0
-            ? hasMultipleFields
-                ? visibleFields
-                      .map((field) => getFormattedValue(rowData, field.fieldId))
-                      .join(', ')
-                : getFormattedValue(rowData, visibleFields[0].fieldId)
-            : '';
-
-    return (
-        // Force light mode colors since Leaflet popups always have white background
-        <Box mt="xl" c="dark.9">
-            <Stack spacing={2}>
-                {visibleFields.map((field) => (
-                    <Text key={field.fieldId} size="sm">
-                        <strong>{field.label}:</strong>{' '}
-                        {getFormattedValue(rowData, field.fieldId)}
-                    </Text>
-                ))}
-            </Stack>
-            {lat !== undefined && lon !== undefined && (
-                <Text size="xs" c="gray.6" mt="sm" mb="md">
-                    Lat: {lat.toFixed(4)}, Lon: {lon.toFixed(4)}
-                </Text>
-            )}
-            {copyValue && (
-                <>
-                    <Divider my="xs" c="gray.3" />
-                    <UnstyledButton
-                        onClick={onCopy}
-                        data-copy-value={copyValue}
-                        className={classes.popupActionButton}
-                    >
-                        <MantineIcon icon={IconCopy} />
-                        <Text size="sm">
-                            {hasMultipleFields ? 'Copy values' : 'Copy value'}
-                        </Text>
-                    </UnstyledButton>
-                </>
-            )}
-        </Box>
-    );
-};
-
-// MapMarker component for scatter points with tooltip/popup behavior
+// MapMarker component for scatter points with tooltip/context menu behavior
 type MapMarkerProps = {
     point: ScatterPoint;
     radius: number;
     color: string;
     fillOpacity: number;
     tooltipFields: TooltipFieldInfo[];
+    hideTooltip?: boolean;
+    onClick?: (
+        e: L.LeafletMouseEvent,
+        rowData: Record<string, any>,
+        copyValue: string,
+        lat: number,
+        lon: number,
+    ) => void;
+};
+
+const getCopyValue = (
+    tooltipFields: TooltipFieldInfo[],
+    rowData: Record<string, any>,
+): string => {
+    const visibleFields = tooltipFields.filter((f) => f.visible);
+    if (visibleFields.length === 0) return '';
+    if (visibleFields.length === 1)
+        return getFormattedValue(rowData, visibleFields[0].fieldId);
+    return visibleFields
+        .map((field) => getFormattedValue(rowData, field.fieldId))
+        .join(', ');
 };
 
 const MapMarker: FC<MapMarkerProps> = ({
@@ -262,26 +232,16 @@ const MapMarker: FC<MapMarkerProps> = ({
     color,
     fillOpacity,
     tooltipFields,
+    hideTooltip,
+    onClick,
 }) => {
-    const [isPopupOpen, setIsPopupOpen] = useState(false);
-    const clipboard = useClipboard({ timeout: 200 });
-    const { showToastSuccess } = useToaster();
-
-    const handleCopy = useCallback(() => {
-        const visibleFields = tooltipFields.filter((f) => f.visible);
-        const copyValue =
-            visibleFields.length > 0
-                ? visibleFields.length > 1
-                    ? visibleFields
-                          .map((field) =>
-                              getFormattedValue(point.rowData, field.fieldId),
-                          )
-                          .join(', ')
-                    : getFormattedValue(point.rowData, visibleFields[0].fieldId)
-                : '';
-        clipboard.copy(copyValue);
-        showToastSuccess({ title: 'Copied to clipboard!' });
-    }, [clipboard, tooltipFields, point.rowData, showToastSuccess]);
+    const handleClick = useCallback(
+        (e: L.LeafletMouseEvent) => {
+            const copyValue = getCopyValue(tooltipFields, point.rowData);
+            onClick?.(e, point.rowData, copyValue, point.lat, point.lon);
+        },
+        [onClick, point.rowData, point.lat, point.lon, tooltipFields],
+    );
 
     return (
         <CircleMarker
@@ -294,11 +254,11 @@ const MapMarker: FC<MapMarkerProps> = ({
                 weight: 1,
             }}
             eventHandlers={{
-                popupopen: () => setIsPopupOpen(true),
-                popupclose: () => setIsPopupOpen(false),
+                click: handleClick,
+                contextmenu: handleClick,
             }}
         >
-            {!isPopupOpen && (
+            {!hideTooltip && (
                 <Tooltip>
                     <MapTooltipContent
                         tooltipFields={tooltipFields}
@@ -308,15 +268,6 @@ const MapMarker: FC<MapMarkerProps> = ({
                     />
                 </Tooltip>
             )}
-            <Popup>
-                <MapPopupContent
-                    tooltipFields={tooltipFields}
-                    rowData={point.rowData}
-                    lat={point.lat}
-                    lon={point.lon}
-                    onCopy={handleCopy}
-                />
-            </Popup>
         </CircleMarker>
     );
 };
@@ -497,11 +448,85 @@ type SimpleMapProps = {
 
 const SimpleMap: FC<SimpleMapProps> = memo(
     ({ onScreenshotReady, onScreenshotError, ...props }) => {
-        const { isLoading, visualizationConfig, resultsData, leafletMapRef } =
-            useVisualizationContext();
+        const {
+            isLoading,
+            visualizationConfig,
+            resultsData,
+            leafletMapRef,
+            minimal,
+            colorPalette,
+        } = useVisualizationContext();
         const mapConfig = useLeafletMapConfig({
             isInDashboard: props.isInDashboard,
         });
+        const { activeTile, tileLayerEventHandlers } = useTileFallback(
+            mapConfig?.tile ?? { url: null, attribution: '' },
+            mapConfig?.tileBackground ?? MapTileBackground.OPENSTREETMAP,
+            useCallback((event) => {
+                captureException(
+                    new Error(
+                        `Map tile provider fallback: ${event.from} → ${event.to}`,
+                    ),
+                    {
+                        tags: {
+                            component: 'SimpleMap',
+                            tileProviderFrom: event.from,
+                            tileProviderTo: event.to,
+                        },
+                        extra: {
+                            errorCount: event.errorCount,
+                            successCount: event.successCount,
+                        },
+                    },
+                );
+            }, []),
+        );
+        const { shouldShowMenu } = useContextMenuPermissions({ minimal });
+
+        // Context menu state
+        const [
+            contextMenuOpened,
+            { open: openContextMenu, close: closeContextMenu },
+        ] = useDisclosure();
+        const [contextMenuProps, setContextMenuProps] = useState<{
+            position: { left: number; top: number };
+            rowData: Record<string, any>;
+            copyValue: string;
+            lat?: number;
+            lon?: number;
+            noData?: { locationLabel: string; locationValue: string };
+        }>();
+
+        const handleMapContextMenu = useCallback(
+            (
+                e: L.LeafletMouseEvent,
+                rowData: Record<string, any>,
+                copyValue: string,
+                lat?: number,
+                lon?: number,
+                noData?: { locationLabel: string; locationValue: string },
+            ) => {
+                e.originalEvent.preventDefault();
+                setContextMenuProps({
+                    position: {
+                        left: e.originalEvent.pageX,
+                        top: e.originalEvent.pageY,
+                    },
+                    rowData,
+                    copyValue,
+                    lat,
+                    lon,
+                    noData,
+                });
+                openContextMenu();
+            },
+            [openContextMenu],
+        );
+
+        const handleCloseContextMenu = useCallback(() => {
+            setContextMenuProps(undefined);
+            closeContextMenu();
+        }, [closeContextMenu]);
 
         // Use mapConfig.extent directly - it has the correct values from the saved chart
         // via the visualization context
@@ -687,6 +712,21 @@ const SimpleMap: FC<SimpleMapProps> = memo(
             );
         }, [mapConfig, scatterValueRange.min, scatterValueRange.max]);
 
+        // Categorical color map for string-valued color fields
+        const categoricalColorMap = useMemo(() => {
+            if (!mapConfig?.isCategoricalColor || !mapConfig.uniqueStringValues)
+                return null;
+            const map = new Map<string, string>();
+            mapConfig.uniqueStringValues.forEach((val, idx) => {
+                map.set(
+                    val,
+                    mapConfig.colorOverrides[val] ??
+                        colorPalette[idx % colorPalette.length],
+                );
+            });
+            return map;
+        }, [mapConfig, colorPalette]);
+
         const heatmapPoints = useMemo((): [number, number, number][] => {
             const { min, max } = scatterValueRange;
             return scatterData.map((point) => {
@@ -712,27 +752,16 @@ const SimpleMap: FC<SimpleMapProps> = memo(
         }, [mapConfig]);
 
         const isHeatmap = mapConfig?.locationType === MapChartType.HEATMAP;
+        const isHexbin = mapConfig?.locationType === MapChartType.HEXBIN;
 
-        // Shared copy handler for popup buttons
-        const clipboard = useClipboard({ timeout: 200 });
-        const { showToastSuccess } = useToaster();
+        const [hexbinTruncated, setHexbinTruncated] = useState<{
+            totalPoints: number;
+        } | null>(null);
 
-        const handlePopupCopyClick = useCallback(
-            (e: MouseEvent) => {
-                const target = e.target as HTMLElement;
-                const button = target.closest(
-                    '[data-copy-value]',
-                ) as HTMLElement | null;
-                if (button) {
-                    const value = button.dataset.copyValue;
-                    if (value) {
-                        clipboard.copy(value);
-                        showToastSuccess({ title: 'Copied to clipboard!' });
-                    }
-                }
-            },
-            [clipboard, showToastSuccess],
-        );
+        // Reset when leaving hex layer
+        useEffect(() => {
+            if (!isHexbin) setHexbinTruncated(null);
+        }, [isHexbin]);
 
         // Memoize choropleth/area mode calculations
         const regionData = useMemo(
@@ -743,11 +772,16 @@ const SimpleMap: FC<SimpleMapProps> = memo(
         const regionDataMap = useMemo(() => {
             const dataMap = new Map<
                 string,
-                { value: number; rowData?: Record<string, any> }
+                {
+                    value: number;
+                    stringValue: string | null;
+                    rowData?: Record<string, any>;
+                }
             >();
             regionData.forEach((d) => {
                 dataMap.set(d.name.toLowerCase(), {
                     value: d.value,
+                    stringValue: d.stringValue,
                     rowData: d.rowData,
                 });
             });
@@ -807,8 +841,17 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                     .toLowerCase();
                 const regionEntry = regionDataMap.get(propertyValue);
 
-                if (regionEntry !== undefined && regionColorScale) {
-                    const fillColor = regionColorScale(regionEntry.value);
+                if (regionEntry !== undefined) {
+                    let fillColor: string;
+                    if (categoricalColorMap && regionEntry.stringValue) {
+                        fillColor =
+                            categoricalColorMap.get(regionEntry.stringValue) ??
+                            noDataColor;
+                    } else if (regionColorScale) {
+                        fillColor = regionColorScale(regionEntry.value);
+                    } else {
+                        fillColor = noDataColor;
+                    }
                     return {
                         fillColor,
                         weight: 1,
@@ -830,6 +873,7 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                 mapConfig,
                 regionDataMap,
                 regionColorScale,
+                categoricalColorMap,
                 noDataColor,
                 fillOpacityNoData,
                 fillOpacityWithData,
@@ -869,19 +913,9 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                         noData={noData}
                     />,
                 );
-                // eslint-disable-next-line testing-library/render-result-naming-convention
-                const popupHtml = renderToString(
-                    <MapPopupContent
-                        tooltipFields={mapConfig?.tooltipFields || []}
-                        rowData={rowData}
-                        noData={noData}
-                    />,
-                );
 
                 if (layer instanceof L.Path) {
-                    // Bind both tooltip (hover) and popup (click)
                     layer.bindTooltip(tooltipHtml);
-                    layer.bindPopup(popupHtml);
 
                     // Determine the correct base and hover opacity for this region
                     const baseOpacity = regionEntry
@@ -889,7 +923,27 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                         : fillOpacityNoData;
                     const hoverOpacity = hasBaseMap ? 0.9 : 1;
 
+                    const handleRegionClick = (e: L.LeafletMouseEvent) => {
+                        layer.closeTooltip();
+                        const copyValue = regionEntry?.rowData
+                            ? getCopyValue(
+                                  mapConfig?.tooltipFields || [],
+                                  regionEntry.rowData,
+                              )
+                            : '';
+                        handleMapContextMenu(
+                            e,
+                            rowData,
+                            copyValue,
+                            undefined,
+                            undefined,
+                            noData,
+                        );
+                    };
+
                     layer.on({
+                        click: handleRegionClick,
+                        contextmenu: handleRegionClick,
                         mouseover: () => {
                             layer.setStyle({
                                 weight: 2,
@@ -902,27 +956,6 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                                 fillOpacity: baseOpacity,
                             });
                         },
-                        popupopen: (e) => {
-                            // Hide tooltip when popup is open
-                            layer.closeTooltip();
-                            layer.unbindTooltip();
-                            // Add click handler for copy button
-                            const popupElement = e.popup.getElement();
-                            popupElement?.addEventListener(
-                                'click',
-                                handlePopupCopyClick,
-                            );
-                        },
-                        popupclose: (e) => {
-                            // Remove click handler to prevent memory leak
-                            const popupElement = e.popup.getElement();
-                            popupElement?.removeEventListener(
-                                'click',
-                                handlePopupCopyClick,
-                            );
-                            // Re-bind tooltip when popup is closed
-                            layer.bindTooltip(tooltipHtml);
-                        },
                     });
                 }
             },
@@ -931,7 +964,7 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                 mapConfig?.geoJsonPropertyKey,
                 mapConfig?.tooltipFields,
                 mapConfig?.locationFieldId,
-                handlePopupCopyClick,
+                handleMapContextMenu,
                 hasBaseMap,
                 fillOpacityWithData,
                 fillOpacityNoData,
@@ -986,13 +1019,43 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                             geoJsonUrl={null}
                             hasSavedExtent={mapConfig.hasSavedExtent}
                         />
-                        {mapConfig.tile.url && (
+                        {activeTile.url && (
                             <TileLayer
-                                attribution={mapConfig.tile.attribution}
-                                url={mapConfig.tile.url}
+                                key={activeTile.url}
+                                attribution={activeTile.attribution}
+                                url={activeTile.url}
+                                eventHandlers={tileLayerEventHandlers}
                             />
                         )}
-                        {isHeatmap ? (
+                        {isHexbin ? (
+                            <Suspense fallback={null}>
+                                <HexbinLayer
+                                    points={scatterData}
+                                    colorScale={mapConfig.colors.scale}
+                                    opacity={mapConfig.hexbinConfig.opacity}
+                                    valueFieldLabel={mapConfig.valueFieldLabel}
+                                    sizingMode={
+                                        mapConfig.hexbinConfig.sizingMode
+                                    }
+                                    fixedResolution={
+                                        mapConfig.hexbinConfig.fixedResolution
+                                    }
+                                    valueBasis={
+                                        mapConfig.hexbinConfig.valueBasis
+                                    }
+                                    aggregation={
+                                        mapConfig.hexbinConfig.aggregation
+                                    }
+                                    showEmptyBins={
+                                        mapConfig.hexbinConfig.showEmptyBins
+                                    }
+                                    emptyBinColor={
+                                        mapConfig.hexbinConfig.emptyBinColor
+                                    }
+                                    onTruncated={setHexbinTruncated}
+                                />
+                            </Suspense>
+                        ) : isHeatmap ? (
                             <HeatmapLayer
                                 points={heatmapPoints}
                                 options={{
@@ -1004,19 +1067,19 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                             />
                         ) : (
                             sizeScale &&
-                            scatterColorScale &&
+                            (categoricalColorMap || scatterColorScale) &&
                             scatterData.map((point, idx) => {
                                 const radius = sizeScale(point.sizeValue);
-                                // Use interpolated color for numeric values, middle of scale for non-numeric
+                                // Use categorical color for string values, gradient for numeric, noDataColor for neither
                                 const color =
-                                    point.value !== null
-                                        ? scatterColorScale(point.value)
-                                        : mapConfig.colors.scale[
-                                              Math.floor(
-                                                  mapConfig.colors.scale
-                                                      .length / 2,
-                                              )
-                                          ];
+                                    categoricalColorMap && point.stringValue
+                                        ? (categoricalColorMap.get(
+                                              point.stringValue,
+                                          ) ?? mapConfig.noDataColor)
+                                        : point.value !== null &&
+                                            scatterColorScale
+                                          ? scatterColorScale(point.value)
+                                          : mapConfig.noDataColor;
 
                                 return (
                                     <MapMarker
@@ -1026,18 +1089,92 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                                         color={color}
                                         fillOpacity={fillOpacityWithData}
                                         tooltipFields={mapConfig.tooltipFields}
+                                        hideTooltip={contextMenuOpened}
+                                        onClick={handleMapContextMenu}
                                     />
                                 );
                             })
                         )}
                     </MapContainer>
-                    {mapConfig.showLegend && mapConfig.valueRange && (
-                        <MapLegend
-                            colors={mapConfig.colors.scale}
-                            formattedMin={mapConfig.valueRange.formattedMin}
-                            formattedMax={mapConfig.valueRange.formattedMax}
-                            label={mapConfig.valueFieldLabel ?? undefined}
-                            opacity={fillOpacityWithData}
+                    {isHexbin && hexbinTruncated && (
+                        <Callout variant="warning" mt="xs">
+                            Showing hex bins for the first{' '}
+                            {MAX_HEXBIN_POINTS.toLocaleString()} points of{' '}
+                            {hexbinTruncated.totalPoints.toLocaleString()}.
+                            Reduce the result set for accurate binning.
+                        </Callout>
+                    )}
+                    {mapConfig.showLegend &&
+                        (mapConfig.valueRange ||
+                            mapConfig.sizeRange ||
+                            (mapConfig.isCategoricalColor &&
+                                categoricalColorMap)) && (
+                            <MapLegend
+                                color={
+                                    !mapConfig.isCategoricalColor &&
+                                    mapConfig.valueRange
+                                        ? {
+                                              colors: mapConfig.colors.scale,
+                                              formattedMin:
+                                                  mapConfig.valueRange
+                                                      .formattedMin,
+                                              formattedMax:
+                                                  mapConfig.valueRange
+                                                      .formattedMax,
+                                              label:
+                                                  mapConfig.valueFieldLabel ??
+                                                  undefined,
+                                              opacity: fillOpacityWithData,
+                                          }
+                                        : undefined
+                                }
+                                categoricalColor={
+                                    mapConfig.isCategoricalColor &&
+                                    categoricalColorMap
+                                        ? {
+                                              entries: Array.from(
+                                                  categoricalColorMap.entries(),
+                                              ).map(([value, cColor]) => ({
+                                                  value,
+                                                  color: cColor,
+                                              })),
+                                              label:
+                                                  mapConfig.valueFieldLabel ??
+                                                  undefined,
+                                              opacity: fillOpacityWithData,
+                                          }
+                                        : undefined
+                                }
+                                bubbleSize={
+                                    mapConfig.sizeRange
+                                        ? {
+                                              minSize: mapConfig.minBubbleSize,
+                                              maxSize: mapConfig.maxBubbleSize,
+                                              formattedMin:
+                                                  mapConfig.sizeRange
+                                                      .formattedMin,
+                                              formattedMax:
+                                                  mapConfig.sizeRange
+                                                      .formattedMax,
+                                              label:
+                                                  mapConfig.sizeFieldLabel ??
+                                                  undefined,
+                                          }
+                                        : undefined
+                                }
+                            />
+                        )}
+                    {shouldShowMenu && (
+                        <MapContextMenu
+                            menuPosition={contextMenuProps?.position}
+                            rowData={contextMenuProps?.rowData}
+                            copyValue={contextMenuProps?.copyValue}
+                            tooltipFields={mapConfig.tooltipFields}
+                            lat={contextMenuProps?.lat}
+                            lon={contextMenuProps?.lon}
+                            noData={contextMenuProps?.noData}
+                            opened={contextMenuOpened}
+                            onClose={handleCloseContextMenu}
                         />
                     )}
                 </div>
@@ -1084,10 +1221,12 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                             geoJsonUrl={mapConfig.geoJsonUrl}
                             hasSavedExtent={mapConfig.hasSavedExtent}
                         />
-                        {mapConfig.tile.url && (
+                        {activeTile.url && (
                             <TileLayer
-                                attribution={mapConfig.tile.attribution}
-                                url={mapConfig.tile.url}
+                                key={activeTile.url}
+                                attribution={activeTile.attribution}
+                                url={activeTile.url}
+                                eventHandlers={tileLayerEventHandlers}
                             />
                         )}
                         {geoJsonData?.features &&
@@ -1100,13 +1239,59 @@ const SimpleMap: FC<SimpleMapProps> = memo(
                                 />
                             )}
                     </MapContainer>
-                    {mapConfig.showLegend && mapConfig.valueRange && (
-                        <MapLegend
-                            colors={mapConfig.colors.scale}
-                            formattedMin={mapConfig.valueRange.formattedMin}
-                            formattedMax={mapConfig.valueRange.formattedMax}
-                            label={mapConfig.valueFieldLabel ?? undefined}
-                            opacity={fillOpacityWithData}
+                    {mapConfig.showLegend &&
+                        (mapConfig.valueRange ||
+                            (mapConfig.isCategoricalColor &&
+                                categoricalColorMap)) && (
+                            <MapLegend
+                                color={
+                                    !mapConfig.isCategoricalColor &&
+                                    mapConfig.valueRange
+                                        ? {
+                                              colors: mapConfig.colors.scale,
+                                              formattedMin:
+                                                  mapConfig.valueRange
+                                                      .formattedMin,
+                                              formattedMax:
+                                                  mapConfig.valueRange
+                                                      .formattedMax,
+                                              label:
+                                                  mapConfig.valueFieldLabel ??
+                                                  undefined,
+                                              opacity: fillOpacityWithData,
+                                          }
+                                        : undefined
+                                }
+                                categoricalColor={
+                                    mapConfig.isCategoricalColor &&
+                                    categoricalColorMap
+                                        ? {
+                                              entries: Array.from(
+                                                  categoricalColorMap.entries(),
+                                              ).map(([value, cColor]) => ({
+                                                  value,
+                                                  color: cColor,
+                                              })),
+                                              label:
+                                                  mapConfig.valueFieldLabel ??
+                                                  undefined,
+                                              opacity: fillOpacityWithData,
+                                          }
+                                        : undefined
+                                }
+                            />
+                        )}
+                    {shouldShowMenu && (
+                        <MapContextMenu
+                            menuPosition={contextMenuProps?.position}
+                            rowData={contextMenuProps?.rowData}
+                            copyValue={contextMenuProps?.copyValue}
+                            tooltipFields={mapConfig.tooltipFields}
+                            lat={contextMenuProps?.lat}
+                            lon={contextMenuProps?.lon}
+                            noData={contextMenuProps?.noData}
+                            opened={contextMenuOpened}
+                            onClose={handleCloseContextMenu}
                         />
                     )}
                 </div>

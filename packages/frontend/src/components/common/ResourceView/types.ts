@@ -1,6 +1,7 @@
 import {
     type ResourceViewChartItem,
     type ResourceViewDashboardItem,
+    type ResourceViewDataAppItem,
     type ResourceViewItem,
     type ResourceViewSpaceItem,
 } from '@lightdash/common';
@@ -15,6 +16,7 @@ export enum ResourceViewItemAction {
     CREATE_SPACE,
     PIN_TO_HOMEPAGE,
     TRANSFER_TO_SPACE,
+    SHARE,
 }
 
 export enum ResourceViewType {
@@ -60,7 +62,12 @@ export type ResourceViewItemActionState =
           item:
               | ResourceViewChartItem
               | ResourceViewDashboardItem
-              | ResourceViewSpaceItem;
+              | ResourceViewSpaceItem
+              | ResourceViewDataAppItem;
+      }
+    | {
+          type: ResourceViewItemAction.SHARE;
+          item: ResourceViewSpaceItem;
       };
 
 type TabType = {
@@ -70,6 +77,8 @@ type TabType = {
     infoTooltipText?: string;
     sort?: (a: ResourceViewItem, b: ResourceViewItem) => number;
     filter?: (item: ResourceViewItem, index: number) => boolean;
+    emptyStateProps?: ResourceEmptyStateProps;
+    hasReorder?: boolean;
 };
 
 interface ResourceHeaderProps {

@@ -1,3 +1,5 @@
+import { type AppVersionStatus } from '../ee/apps/types';
+import { type ContentVerificationInfo } from './contentVerification';
 import type { KnexPaginatedData } from './knex-paginate';
 import { type ChartKind } from './savedCharts';
 import { type SessionUser } from './user';
@@ -6,6 +8,7 @@ export enum ContentType {
     CHART = 'chart',
     DASHBOARD = 'dashboard',
     SPACE = 'space',
+    DATA_APP = 'data_app',
 }
 
 export interface Content {
@@ -43,6 +46,7 @@ export interface Content {
     } | null;
     views: number;
     firstViewedAt: Date | null;
+    verification: ContentVerificationInfo | null;
 }
 
 export enum ContentSortByColumns {
@@ -74,12 +78,25 @@ export interface DashboardContent extends Content {
     contentType: ContentType.DASHBOARD;
 }
 
-export interface SpaceContent extends Content {
+// Data App types
+
+export interface DataAppContent extends Content {
+    contentType: ContentType.DATA_APP;
+    latestVersionNumber: number | null;
+    latestVersionStatus: AppVersionStatus | null;
+    pinnedList: {
+        uuid: string;
+        order: number;
+    } | null;
+}
+
+export interface SpaceContentBase extends Content {
     contentType: ContentType.SPACE;
-    isPrivate: boolean;
-    access: string[];
+    inheritParentPermissions: boolean;
     dashboardCount: number;
     chartCount: number;
+    childSpaceCount: number;
+    appCount: number;
     pinnedList: {
         uuid: string;
         order: number;
@@ -88,9 +105,25 @@ export interface SpaceContent extends Content {
     path: string;
 }
 
+export interface SpaceContent extends SpaceContentBase {
+    access: string[];
+}
+
 // Group types
 
-export type SummaryContent = ChartContent | DashboardContent | SpaceContent; // Note: more types will be added.
+// What the model returns (spaces without access data)
+export type SummaryContentBase =
+    | ChartContent
+    | DashboardContent
+    | SpaceContentBase
+    | DataAppContent;
+
+// What the API returns (spaces enriched with access data)
+export type SummaryContent =
+    | ChartContent
+    | DashboardContent
+    | SpaceContent
+    | DataAppContent;
 
 // API types
 
@@ -126,6 +159,10 @@ type ItemPayload =
     | {
           uuid: string;
           contentType: ContentType.SPACE;
+      }
+    | {
+          uuid: string;
+          contentType: ContentType.DATA_APP;
       };
 
 export type ContentAction = ContentActionMove | ContentActionDelete;

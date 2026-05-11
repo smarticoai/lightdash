@@ -1,4 +1,5 @@
 import type {
+    AuthType,
     ExecuteAsyncQueryRequestParams,
     ItemsMap,
     MetricQuery,
@@ -17,6 +18,7 @@ export type DbQueryHistory = {
     created_at: Date;
     created_by_user_uuid: string | null;
     created_by_account: string | null;
+    created_by_actor_type: AuthType | null;
     project_uuid: string | null;
     organization_uuid: string;
     context: QueryExecutionContext;
@@ -30,6 +32,7 @@ export type DbQueryHistory = {
     total_row_count: number | null;
     warehouse_execution_time_ms: number | null;
     error: string | null;
+    errored_at: Date | null;
     status: QueryHistoryStatus;
     cache_key: string;
     pivot_configuration: PivotConfiguration | null;
@@ -42,18 +45,23 @@ export type DbQueryHistory = {
     columns: ResultColumns | null; // result columns with or without pivoting
     original_columns: ResultColumns | null; // columns from original SQL, before pivoting
     smr_warehouse_response_meta: SmrWarehouseResponseMeta | null;
+    pre_aggregate_compiled_sql: string | null; // DuckDB SQL for pre-aggregate execution path
+    processing_started_at: Date | null; // when the NATS worker picked up the job
 };
 
 export type DbQueryHistoryIn = Omit<
     DbQueryHistory,
-    'query_uuid' | 'created_at'
->;
+    'query_uuid' | 'created_at' | 'created_by_actor_type'
+> & {
+    created_by_actor_type: AuthType;
+};
 
 export type DbQueryHistoryUpdate = Partial<
     Pick<
         DbQueryHistory,
         | 'status'
         | 'error'
+        | 'errored_at'
         | 'warehouse_execution_time_ms'
         | 'total_row_count'
         | 'warehouse_query_id'
@@ -69,6 +77,8 @@ export type DbQueryHistoryUpdate = Partial<
         | 'columns'
         | 'original_columns'
         | 'smr_warehouse_response_meta'
+        | 'pre_aggregate_compiled_sql'
+        | 'processing_started_at'
     >
 >;
 

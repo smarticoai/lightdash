@@ -1,0 +1,12 @@
+{
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "tsx build-sandbox.ts",
+        "test": "tsx test-generate.ts"
+    },
+    "dependencies": {
+        "e2b": "2.15.0",
+        "tsx": "4.0.0"
+    }
+}

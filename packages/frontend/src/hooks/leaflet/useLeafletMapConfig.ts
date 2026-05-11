@@ -1,11 +1,15 @@
 import {
     getItemLabelWithoutTableName,
+    isNumericItem,
     MapChartLocation,
     MapChartType,
+    MapHexbinAggregation,
+    MapHexbinSizingMode,
+    MapHexbinValueBasis,
     MapTileBackground,
     type MapFieldConfig,
 } from '@lightdash/common';
-import { useMantineTheme } from '@mantine/core';
+import { useMantineColorScheme, useMantineTheme } from '@mantine/core';
 import { useMemo } from 'react';
 import { isMapVisualizationConfig } from '../../components/LightdashVisualization/types';
 import { useVisualizationContext } from '../../components/LightdashVisualization/useVisualizationContext';
@@ -19,6 +23,7 @@ export type ScatterPoint = {
     lat: number;
     lon: number;
     value: number | null;
+    stringValue: string | null;
     displayValue: string | number;
     sizeValue: number;
     rowData: Record<string, any>;
@@ -27,6 +32,7 @@ export type ScatterPoint = {
 export type RegionData = {
     name: string;
     value: number;
+    stringValue: string | null;
     rowData: Record<string, any>;
 };
 
@@ -61,13 +67,31 @@ export type LeafletMapConfig = {
     };
     minBubbleSize: number;
     maxBubbleSize: number;
-    sizeRange: { min: number; max: number } | null;
+    sizeRange: {
+        min: number;
+        max: number;
+        formattedMin: string;
+        formattedMax: string;
+    } | null;
+    sizeFieldLabel: string | null;
     heatmapConfig: {
         radius: number;
         blur: number;
         opacity: number;
     };
+    hexbinConfig: {
+        opacity: number;
+        sizingMode: MapHexbinSizingMode;
+        /** Resolution to use when sizingMode === FIXED. */
+        fixedResolution: number;
+        valueBasis: MapHexbinValueBasis;
+        aggregation: MapHexbinAggregation;
+        showEmptyBins: boolean;
+        /** Hex6 or hex8 color string for empty-bin fill, or null = outline only. */
+        emptyBinColor: string | null;
+    };
     tile: TileConfig;
+    tileBackground: MapTileBackground;
     backgroundColor: string | null;
     // Color for regions with no matching data (area maps)
     noDataColor: string;
@@ -86,6 +110,10 @@ export type LeafletMapConfig = {
     locationFieldId: string | null;
     // Field configuration for tooltips
     tooltipFields: TooltipFieldInfo[];
+    // Categorical color support
+    isCategoricalColor: boolean;
+    uniqueStringValues: string[] | null;
+    colorOverrides: Record<string, string>;
 };
 
 const getGeoJsonUrl = (
@@ -139,12 +167,14 @@ const getMapZoom = (mapType: MapChartLocation): number => {
     }
 };
 
-const getTileConfig = (
+const CARTO_ATTRIBUTION =
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+export const getTileConfig = (
     background: MapTileBackground | undefined,
 ): TileConfig => {
     switch (background) {
         case MapTileBackground.NONE:
-            // No base map tiles. Useful for overlays-only views or custom rendering.
             return {
                 url: null,
                 attribution: '',
@@ -160,11 +190,25 @@ const getTileConfig = (
             };
 
         case MapTileBackground.LIGHT:
-        default:
+            return {
+                url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+                attribution: CARTO_ATTRIBUTION,
+            };
+
+        case MapTileBackground.DARK:
+            return {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+                attribution: CARTO_ATTRIBUTION,
+            };
+
+        case MapTileBackground.VOYAGER:
+            return {
+                url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+                attribution: CARTO_ATTRIBUTION,
+            };
+
         case MapTileBackground.OPENSTREETMAP:
-            // OpenStreetMap standard tiles.
-            // Community-run, attribution-only, fair-use. Suitable for low–moderate traffic.
-            // Not intended for heavy commercial usage or guaranteed SLA.
+        default:
             return {
                 url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                 attribution:
@@ -179,6 +223,7 @@ const useLeafletMapConfig = ({
     const { visualizationConfig, resultsData, itemsMap } =
         useVisualizationContext();
     const theme = useMantineTheme();
+    const { colorScheme } = useMantineColorScheme();
 
     const chartConfig = useMemo(() => {
         if (!isMapVisualizationConfig(visualizationConfig)) return null;
@@ -205,11 +250,14 @@ const useLeafletMapConfig = ({
             maxBubbleSize,
             sizeFieldId,
             heatmapConfig,
+            hexbinConfig,
             tileBackground,
+            darkModeTileBackground,
             backgroundColor,
             noDataColor,
             dataLayerOpacity,
             showLegend,
+            colorOverrides: configColorOverrides,
             fieldConfig,
         } = chartConfig.validConfig || {};
 
@@ -252,7 +300,8 @@ const useLeafletMapConfig = ({
         const isLatLong =
             !locationType ||
             locationType === MapChartType.SCATTER ||
-            locationType === MapChartType.HEATMAP;
+            locationType === MapChartType.HEATMAP ||
+            locationType === MapChartType.HEXBIN;
 
         let scatterData: ScatterPoint[] | null = null;
         let regionData: RegionData[] | null = null;
@@ -272,7 +321,12 @@ const useLeafletMapConfig = ({
                             ? row[valueFieldId]?.value.raw
                             : 1;
                         const numericValue = Number(rawValue);
-                        const isNumeric = !isNaN(numericValue);
+                        // Check for null/undefined/empty explicitly since Number(null) = 0, Number('') = 0
+                        const isNumeric =
+                            rawValue !== null &&
+                            rawValue !== undefined &&
+                            rawValue !== '' &&
+                            !isNaN(numericValue);
                         const value = isNumeric ? numericValue : null;
                         const displayValue = valueFieldId
                             ? (row[valueFieldId]?.value.formatted ??
@@ -291,6 +345,13 @@ const useLeafletMapConfig = ({
                             lat,
                             lon,
                             value,
+                            stringValue:
+                                !isNumeric &&
+                                rawValue !== null &&
+                                rawValue !== undefined &&
+                                rawValue !== ''
+                                    ? String(rawValue)
+                                    : null,
                             displayValue,
                             sizeValue: isNaN(sizeValue) ? 1 : sizeValue,
                             rowData: row as Record<string, any>,
@@ -307,15 +368,30 @@ const useLeafletMapConfig = ({
                         const locationName = String(
                             row[locationFieldId]?.value.raw || '',
                         );
-                        const value = valueFieldId
-                            ? Number(row[valueFieldId]?.value.raw)
+                        const rawRegionValue = valueFieldId
+                            ? row[valueFieldId]?.value.raw
                             : 1;
+                        const numericRegionValue = Number(rawRegionValue);
+                        const isRegionValueNumeric =
+                            rawRegionValue !== null &&
+                            rawRegionValue !== undefined &&
+                            rawRegionValue !== '' &&
+                            !isNaN(numericRegionValue);
 
                         if (!locationName) return null;
 
                         return {
                             name: locationName,
-                            value: isNaN(value) ? 0 : value,
+                            value: isRegionValueNumeric
+                                ? numericRegionValue
+                                : 0,
+                            stringValue:
+                                !isRegionValueNumeric &&
+                                rawRegionValue !== null &&
+                                rawRegionValue !== undefined &&
+                                rawRegionValue !== ''
+                                    ? String(rawRegionValue)
+                                    : null,
                             rowData: row as Record<string, any>,
                         };
                     })
@@ -340,18 +416,25 @@ const useLeafletMapConfig = ({
             formattedMin: string;
             formattedMax: string;
         } | null = null;
-        let sizeRange: { min: number; max: number } | null = null;
+        let sizeRange: {
+            min: number;
+            max: number;
+            formattedMin: string;
+            formattedMax: string;
+        } | null = null;
         if (scatterData && scatterData.length > 0) {
             // Single pass to find min/max for both value and size
             let minPoint: (ScatterPoint & { value: number }) | null = null;
             let maxPoint: (ScatterPoint & { value: number }) | null = null;
-            let minSize = scatterData[0].sizeValue;
-            let maxSize = scatterData[0].sizeValue;
+            let minSizePoint = scatterData[0];
+            let maxSizePoint = scatterData[0];
 
             for (const point of scatterData) {
-                // Track size range
-                if (point.sizeValue < minSize) minSize = point.sizeValue;
-                if (point.sizeValue > maxSize) maxSize = point.sizeValue;
+                // Track size range (keep the point reference for formatted values)
+                if (point.sizeValue < minSizePoint.sizeValue)
+                    minSizePoint = point;
+                if (point.sizeValue > maxSizePoint.sizeValue)
+                    maxSizePoint = point;
 
                 // Track value range (only for numeric values)
                 if (point.value !== null) {
@@ -375,10 +458,21 @@ const useLeafletMapConfig = ({
                 };
             }
 
-            sizeRange = {
-                min: Math.min(minSize, 0),
-                max: Math.max(maxSize, 1),
-            };
+            // Only set sizeRange when sizeFieldId is set
+            if (sizeFieldId) {
+                const formattedMinSize =
+                    minSizePoint.rowData[sizeFieldId]?.value?.formatted ??
+                    String(minSizePoint.sizeValue);
+                const formattedMaxSize =
+                    maxSizePoint.rowData[sizeFieldId]?.value?.formatted ??
+                    String(maxSizePoint.sizeValue);
+                sizeRange = {
+                    min: Math.min(minSizePoint.sizeValue, 0),
+                    max: Math.max(maxSizePoint.sizeValue, 1),
+                    formattedMin: formattedMinSize,
+                    formattedMax: formattedMaxSize,
+                };
+            }
         } else if (regionData && regionData.length > 0 && valueFieldId) {
             // Single pass to find min/max values and their regions
             let minRegion = regionData[0];
@@ -399,16 +493,50 @@ const useLeafletMapConfig = ({
             };
         }
 
-        // Get value field label for tooltips
+        // Get value field label for legend (use custom label from fieldConfig if set)
         let valueFieldLabel: string | null = null;
         if (valueFieldId && itemsMap?.[valueFieldId]) {
-            const valueItem = itemsMap[valueFieldId];
-            if ('label' in valueItem) {
-                valueFieldLabel = valueItem.label;
-            } else if ('name' in valueItem) {
-                valueFieldLabel = (valueItem as { name: string }).name;
+            const customLabel = fieldConfig?.[valueFieldId]?.label;
+            if (customLabel) {
+                valueFieldLabel = customLabel;
+            } else {
+                valueFieldLabel = getItemLabelWithoutTableName(
+                    itemsMap[valueFieldId],
+                );
             }
         }
+
+        // Get size field label for legend (use custom label from fieldConfig if set)
+        let sizeFieldLabel: string | null = null;
+        if (sizeFieldId && itemsMap?.[sizeFieldId]) {
+            const customLabel = fieldConfig?.[sizeFieldId]?.label;
+            if (customLabel) {
+                sizeFieldLabel = customLabel;
+            } else {
+                sizeFieldLabel = getItemLabelWithoutTableName(
+                    itemsMap[sizeFieldId],
+                );
+            }
+        }
+
+        // Determine if color field is categorical (non-numeric)
+        const valueItem = valueFieldId ? itemsMap?.[valueFieldId] : undefined;
+        const isCategoricalColor = !!valueItem && !isNumericItem(valueItem);
+
+        // Compute all unique string values for categorical coloring
+        let uniqueStringValues: string[] | null = null;
+        if (isCategoricalColor) {
+            const seen = new Set<string>();
+            const data = scatterData ?? regionData ?? [];
+            for (const point of data) {
+                if (point.stringValue && !seen.has(point.stringValue)) {
+                    seen.add(point.stringValue);
+                }
+            }
+            uniqueStringValues = Array.from(seen).sort();
+        }
+
+        const colorOverrides = configColorOverrides ?? {};
 
         return {
             scatterData,
@@ -467,12 +595,33 @@ const useLeafletMapConfig = ({
             minBubbleSize: minBubbleSize ?? 2,
             maxBubbleSize: maxBubbleSize ?? 8,
             sizeRange,
+            sizeFieldLabel,
             heatmapConfig: {
                 radius: heatmapConfig?.radius ?? 25,
                 blur: heatmapConfig?.blur ?? 15,
                 opacity: heatmapConfig?.opacity ?? 0.6,
             },
-            tile: getTileConfig(tileBackground),
+            hexbinConfig: {
+                opacity: hexbinConfig?.opacity ?? 0.7,
+                sizingMode:
+                    hexbinConfig?.sizingMode ?? MapHexbinSizingMode.DYNAMIC,
+                fixedResolution: hexbinConfig?.fixedResolution ?? 4,
+                valueBasis:
+                    hexbinConfig?.valueBasis ?? MapHexbinValueBasis.COUNT,
+                aggregation:
+                    hexbinConfig?.aggregation ?? MapHexbinAggregation.SUM,
+                showEmptyBins: hexbinConfig?.showEmptyBins ?? false,
+                emptyBinColor: hexbinConfig?.emptyBinColor ?? null,
+            },
+            tile: getTileConfig(
+                colorScheme === 'dark'
+                    ? (darkModeTileBackground ?? MapTileBackground.DARK)
+                    : tileBackground,
+            ),
+            tileBackground:
+                colorScheme === 'dark'
+                    ? (darkModeTileBackground ?? MapTileBackground.DARK)
+                    : (tileBackground ?? MapTileBackground.OPENSTREETMAP),
             backgroundColor: backgroundColor ?? null,
             noDataColor: noDataColor ?? '#f3f3f3',
             dataLayerOpacity: dataLayerOpacity ?? 0.7,
@@ -481,8 +630,11 @@ const useLeafletMapConfig = ({
             valueFieldLabel,
             locationFieldId: locationFieldId ?? null,
             tooltipFields,
+            isCategoricalColor,
+            uniqueStringValues,
+            colorOverrides,
         };
-    }, [chartConfig, resultsData, theme, itemsMap]);
+    }, [chartConfig, resultsData, theme, itemsMap, colorScheme]);
 };
 
 export default useLeafletMapConfig;

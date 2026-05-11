@@ -11,7 +11,7 @@ import {
     type ResultValue,
     type TableCalculation,
 } from '@lightdash/common';
-import { Box, Menu, Tooltip } from '@mantine/core';
+import { Box, Menu, Tooltip } from '@mantine-8/core';
 import { IconExclamationCircle, IconLink } from '@tabler/icons-react';
 import { type Cell } from '@tanstack/react-table';
 import { useMemo, type FC } from 'react';
@@ -89,7 +89,7 @@ const UrlMenuItem: FC<{
         >
             <Box>
                 <Menu.Item
-                    icon={<MantineIcon icon={IconLink} />}
+                    leftSection={<MantineIcon icon={IconLink} />}
                     rightSection={
                         error && (
                             <Box ml="sm">
@@ -123,20 +123,21 @@ const UrlMenuItems: FC<{
         const itemIds: string[] = [];
         const row = cell.row
             .getAllCells()
-            .reduce<
-                Record<string, Record<string, ResultValue>>
-            >((acc, rowCell) => {
-                const item = rowCell.column.columnDef.meta?.item;
-                const rowCellValue = (rowCell.getValue() as ResultRow[0])
-                    ?.value;
-                if (item && isField(item) && rowCellValue) {
-                    itemIds.push(getItemId(item));
-                    acc[item.table] = acc[item.table] || {};
-                    acc[item.table][item.name] = rowCellValue;
+            .reduce<Record<string, Record<string, ResultValue>>>(
+                (acc, rowCell) => {
+                    const item = rowCell.column.columnDef.meta?.item;
+                    const rowCellValue = (rowCell.getValue() as ResultRow[0])
+                        ?.value;
+                    if (item && isField(item) && rowCellValue) {
+                        itemIds.push(getItemId(item));
+                        acc[item.table] = acc[item.table] || {};
+                        acc[item.table][item.name] = rowCellValue;
+                        return acc;
+                    }
                     return acc;
-                }
-                return acc;
-            }, {});
+                },
+                {},
+            );
         return [itemIds, row];
     }, [cell]);
 

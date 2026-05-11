@@ -1,7 +1,8 @@
-import { ActionIcon, CopyButton, Flex, Tooltip } from '@mantine/core';
+import { ActionIcon, CopyButton, Group, Tooltip } from '@mantine-8/core';
 import {
     IconCheck,
     IconClipboard,
+    IconCode,
     IconTextWrap,
     IconTextWrapDisabled,
 } from '@tabler/icons-react';
@@ -12,15 +13,21 @@ export const SqlEditorActions: FC<{
     isSoftWrapEnabled: boolean;
     clipboardContent?: string | undefined;
     onToggleSoftWrap: () => void;
-}> = ({ isSoftWrapEnabled, onToggleSoftWrap, clipboardContent }) => {
+    onFormat?: () => void;
+}> = ({ isSoftWrapEnabled, onToggleSoftWrap, clipboardContent, onFormat }) => {
     return (
-        <Flex
-            pos="absolute"
-            bottom={0}
-            right={0}
-            // Avoids potential collision with ScrollArea scrollbar:
-            mr={5}
-        >
+        <Group pos="absolute" bottom={5} right={12} gap="xxs">
+            {onFormat && (
+                <Tooltip label="Format SQL" withArrow position="left">
+                    <ActionIcon
+                        onClick={onFormat}
+                        color="ldLight"
+                        variant="outline"
+                    >
+                        <MantineIcon icon={IconCode} />
+                    </ActionIcon>
+                </Tooltip>
+            )}
             <Tooltip
                 label={
                     isSoftWrapEnabled
@@ -30,7 +37,11 @@ export const SqlEditorActions: FC<{
                 withArrow
                 position="left"
             >
-                <ActionIcon onClick={onToggleSoftWrap} color="gray">
+                <ActionIcon
+                    onClick={onToggleSoftWrap}
+                    color="ldLight"
+                    variant="outline"
+                >
                     {isSoftWrapEnabled ? (
                         <MantineIcon icon={IconTextWrapDisabled} />
                     ) : (
@@ -47,8 +58,9 @@ export const SqlEditorActions: FC<{
                         color={copied ? 'green' : 'dark'}
                     >
                         <ActionIcon
-                            color={copied ? 'teal' : 'gray'}
+                            color={copied ? 'teal' : 'ldLight'}
                             onClick={copy}
+                            variant="outline"
                         >
                             {copied ? (
                                 <IconCheck size="1rem" />
@@ -59,6 +71,6 @@ export const SqlEditorActions: FC<{
                     </Tooltip>
                 )}
             </CopyButton>
-        </Flex>
+        </Group>
     );
 };

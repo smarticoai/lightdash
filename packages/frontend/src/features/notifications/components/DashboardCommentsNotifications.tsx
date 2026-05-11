@@ -1,5 +1,6 @@
 import { type Notification } from '@lightdash/common';
-import { Menu, Text, Tooltip, useMantineTheme } from '@mantine/core';
+import { Menu } from '@mantine-8/core';
+import { Text, Tooltip, useMantineTheme } from '@mantine/core';
 import { IconCircleFilled } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useCallback, type FC } from 'react';
@@ -9,6 +10,7 @@ import { useTimeAgo } from '../../../hooks/useTimeAgo';
 import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
 import { useUpdateNotification } from '../hooks/useNotifications';
+import classes from './DashboardCommentsNotifications.module.css';
 
 type Props = {
     projectUuid: string;
@@ -28,7 +30,12 @@ const NotificationTime: FC<{ createdAt: Date }> = ({ createdAt }) => {
                 </Text>
             }
         >
-            <Text ta="right" mb="one" fw={500} color="ldGray.5">
+            <Text
+                ta="right"
+                mb="one"
+                fw={500}
+                className={classes.notificationTime}
+            >
                 {date}
             </Text>
         </Tooltip>
@@ -80,7 +87,7 @@ export const DashboardCommentsNotifications: FC<Props> = ({
                 <Menu.Item
                     p="xs"
                     key={notification.notificationId}
-                    icon={
+                    leftSection={
                         <MantineIcon
                             size={10}
                             icon={IconCircleFilled}
@@ -96,7 +103,9 @@ export const DashboardCommentsNotifications: FC<Props> = ({
                 >
                     <>
                         <NotificationTime createdAt={notification.createdAt} />
-                        <Text c="ldGray.3">{notification.message} </Text>
+                        <Text className={classes.notificationMessage}>
+                            {notification.message}
+                        </Text>
                     </>
                 </Menu.Item>
             ))}

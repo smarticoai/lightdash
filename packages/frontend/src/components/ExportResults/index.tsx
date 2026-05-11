@@ -7,18 +7,18 @@ import {
 } from '@lightdash/common';
 import {
     Alert,
-    Box,
     Button,
+    Group,
     NumberInput,
+    Paper,
     SegmentedControl,
     Stack,
     Text,
-} from '@mantine/core';
+} from '@mantine-8/core';
 import { notifications } from '@mantine/notifications';
-import { IconTableExport } from '@tabler/icons-react';
+import { IconInfoCircle, IconTableExport } from '@tabler/icons-react';
 import { useMutation } from '@tanstack/react-query';
 import { memo, useState, type FC, type ReactNode } from 'react';
-
 import { pollJobStatus } from '../../features/scheduler/hooks/useScheduler';
 import useHealth from '../../hooks/health/useHealth';
 import useToaster from '../../hooks/toaster/useToaster';
@@ -52,6 +52,7 @@ export type ExportResultsProps = {
     chartName?: string;
     pivotConfig?: PivotConfig;
     hideLimitSelection?: boolean;
+    forceShowLimitSelection?: boolean;
     renderDialogActions?: (renderProps: ExportCsvRenderProps) => ReactNode;
 };
 
@@ -69,6 +70,7 @@ const ExportResults: FC<ExportResultsProps> = memo(
         chartName,
         pivotConfig,
         hideLimitSelection = false,
+        forceShowLimitSelection = false,
         renderDialogActions,
     }) => {
         const { showToastError, showToastInfo, showToastWarning } =
@@ -126,7 +128,6 @@ const ExportResults: FC<ExportResultsProps> = memo(
                         });
                     },
                     onSuccess: (response) => {
-                        // Download file
                         pollJobStatus(response.jobId)
                             .then(async (details) => {
                                 const link = document.createElement('a');
@@ -139,21 +140,21 @@ const ExportResults: FC<ExportResultsProps> = memo(
                                 );
                                 document.body.appendChild(link);
                                 link.click();
-                                link.remove(); // Remove the link from the DOM
-                                // Hide toast
+                                link.remove();
                                 notifications.hide(TOAST_KEY);
 
                                 if (details?.truncated) {
                                     showToastWarning({
-                                        title: `The results in this export have been limited.`,
-                                        subtitle: `The export was truncated due to size constraints.`,
+                                        title: 'The results in this export have been limited.',
+                                        subtitle:
+                                            'The export was truncated due to size constraints.',
                                     });
                                 }
                             })
                             .catch((error: Error) => {
                                 notifications.hide(TOAST_KEY);
                                 showToastError({
-                                    title: `Unable to download results`,
+                                    title: 'Unable to download results',
                                     subtitle: error.message,
                                 });
                             });
@@ -162,7 +163,7 @@ const ExportResults: FC<ExportResultsProps> = memo(
                         notifications.hide(TOAST_KEY);
 
                         showToastError({
-                            title: `Unable to download results`,
+                            title: 'Unable to download results',
                             subtitle: error?.error?.message,
                         });
                     },
@@ -173,21 +174,82 @@ const ExportResults: FC<ExportResultsProps> = memo(
             return <Alert color="gray">No data to export</Alert>;
         }
 
-        // Calculate pivot table specific limits
         const csvCellsLimit = health.data?.query?.csvCellsLimit || 100000;
         const maxColumnLimit = health.data?.pivotTable?.maxColumnLimit || 60;
-
-        // For pivot tables, calculate conservative row limits
         const isPivotTable = !!pivotConfig;
+        const isDialog = !!renderDialogActions;
+        const showLimitNote =
+            isPivotTable ||
+            (fileType === DownloadFileType.XLSX &&
+                (limit === Limit.ALL || limit === Limit.CUSTOM) &&
+                !isPivotTable);
+
+        const limitSelection = (
+            <Stack gap="sm">
+                <SegmentedControl
+                    size="sm"
+                    fullWidth
+                    value={limit}
+                    onChange={(value) => setLimit(value as Limit)}
+                    data={[
+                        {
+                            label: 'Table rows',
+                            value: Limit.TABLE,
+                        },
+                        {
+                            label: 'All results',
+                            value: Limit.ALL,
+                        },
+                        {
+                            label: 'Custom',
+                            value: Limit.CUSTOM,
+                        },
+                    ]}
+                />
+                {limit === Limit.CUSTOM && (
+                    <NumberInput
+                        label="Rows to export"
+                        size="sm"
+                        min={1}
+                        allowDecimal={false}
+                        required
+                        value={customLimit}
+                        onChange={(value) => setCustomLimit(Number(value))}
+                        maw={160}
+                    />
+                )}
+            </Stack>
+        );
 
         return (
-            <Box>
-                <Stack spacing={0} miw={300}>
-                    <Stack p={renderDialogActions ? 'md' : 0}>
-                        <Stack spacing="xs">
-                            <Text fw={500}>File format</Text>
+            <Stack gap="md" miw="20rem">
+                {isDialog && (
+                    <Stack gap="xs">
+                        <Text fz="xs" fw={700} tt="uppercase" c="dimmed">
+                            Export configuration
+                        </Text>
+                        <Text fz="sm" c="dimmed">
+                            Choose the file type, value format, and result scope
+                            for this export.
+                        </Text>
+                    </Stack>
+                )}
+
+                <Paper withBorder p="md">
+                    <Stack gap="lg">
+                        <Stack gap="sm">
+                            <Stack gap={4}>
+                                <Text fw={600} fz="sm">
+                                    File format
+                                </Text>
+                                <Text fz="xs" c="dimmed">
+                                    CSV is best for pipelines. XLSX is ready for
+                                    spreadsheet tools.
+                                </Text>
+                            </Stack>
                             <SegmentedControl
-                                size={'xs'}
+                                size="sm"
+                                fullWidth
                                 value={fileType}
                                 onChange={(value) =>
                                     setFileType(value as DownloadFileType)
@@ -205,10 +267,19 @@ const ExportResults: FC<ExportResultsProps> = memo(
                             />
                         </Stack>
 
-                        <Stack spacing="xs">
-                            <Text fw={500}>Values</Text>
+                        <Stack gap="sm">
+                            <Stack gap={4}>
+                                <Text fw={600} fz="sm">
+                                    Values
+                                </Text>
+                                <Text fz="xs" c="dimmed">
+                                    Formatted keeps table presentation. Raw uses
+                                    the underlying values.
+                                </Text>
+                            </Stack>
                             <SegmentedControl
-                                size={'xs'}
+                                size="sm"
+                                fullWidth
                                 value={format}
                                 onChange={(value) => setFormat(value)}
                                 data={[
@@ -220,104 +291,112 @@ const ExportResults: FC<ExportResultsProps> = memo(
                                 ]}
                             />
                         </Stack>
-                        <Stack spacing="xs">
-                            <Can
-                                I="manage"
-                                this={subject('ChangeCsvResults', {
-                                    organizationUuid:
-                                        user.data?.organizationUuid,
-                                    projectUuid: projectUuid,
-                                })}
-                            >
-                                {!hideLimitSelection ? (
-                                    <Stack spacing="xs">
-                                        <Text fw={500}>Limit</Text>
-                                        <SegmentedControl
-                                            size={'xs'}
-                                            value={limit}
-                                            onChange={(value) =>
-                                                setLimit(value as Limit)
-                                            }
-                                            data={[
-                                                {
-                                                    label: 'Results in Table',
-                                                    value: Limit.TABLE,
-                                                },
-                                                {
-                                                    label: 'All Results',
-                                                    value: Limit.ALL,
-                                                },
-                                                {
-                                                    label: 'Custom...',
-                                                    value: Limit.CUSTOM,
-                                                },
-                                            ]}
-                                        />
-                                    </Stack>
-                                ) : null}
-                            </Can>
 
-                            {limit === Limit.CUSTOM && (
-                                <NumberInput
-                                    w="100%"
-                                    size="xs"
-                                    min={1}
-                                    precision={0}
-                                    required
-                                    value={customLimit}
-                                    onChange={(value) =>
-                                        setCustomLimit(Number(value))
-                                    }
-                                />
-                            )}
-                            {/* Pivot table specific warnings */}
-                            {isPivotTable && (
-                                <Alert color="gray" p="xs">
-                                    <Text size="xs">
-                                        Pivot exports are limited to{' '}
-                                        {csvCellsLimit.toLocaleString()} cells
-                                        and {maxColumnLimit} columns.
-                                    </Text>
-                                </Alert>
-                            )}
-
-                            {/* Excel row limit warning */}
-                            {fileType === DownloadFileType.XLSX &&
-                                (limit === Limit.ALL ||
-                                    limit === Limit.CUSTOM) &&
-                                !isPivotTable && (
-                                    <Alert color="ldGray.9" p="xs">
-                                        <Text size="xs">
-                                            Excel exports are limited to
-                                            1,000,000 rows.
+                        {!hideLimitSelection &&
+                            (forceShowLimitSelection ? (
+                                <Stack gap="sm">
+                                    <Stack gap={4}>
+                                        <Text fw={600} fz="sm">
+                                            Result scope
                                         </Text>
-                                    </Alert>
-                                )}
-                        </Stack>
+                                        <Text fz="xs" c="dimmed">
+                                            Export only the visible table rows
+                                            or expand the result set.
+                                        </Text>
+                                    </Stack>
+                                    {limitSelection}
+                                </Stack>
+                            ) : (
+                                <Can
+                                    I="manage"
+                                    this={subject('ChangeCsvResults', {
+                                        organizationUuid:
+                                            user.data?.organizationUuid,
+                                        projectUuid: projectUuid,
+                                    })}
+                                >
+                                    <Stack gap="sm">
+                                        <Stack gap={4}>
+                                            <Text fw={600} fz="sm">
+                                                Result scope
+                                            </Text>
+                                            <Text fz="xs" c="dimmed">
+                                                Export only the visible table
+                                                rows or expand the result set.
+                                            </Text>
+                                        </Stack>
+                                        {limitSelection}
+                                    </Stack>
+                                </Can>
+                            ))}
                     </Stack>
+                </Paper>
 
-                    {!renderDialogActions ? (
-                        <Button
-                            loading={isExporting}
-                            sx={{
-                                alignSelf: 'end',
-                            }}
-                            size="xs"
-                            mt="sm"
-                            leftIcon={<MantineIcon icon={IconTableExport} />}
-                            onClick={exportMutation}
-                            data-testid="chart-export-results-button"
-                        >
-                            Download
-                        </Button>
-                    ) : (
-                        renderDialogActions({
+                {showLimitNote && (
+                    <Stack gap="xs">
+                        {isPivotTable && (
+                            <Group gap="xs" wrap="nowrap" align="flex-start">
+                                <MantineIcon
+                                    icon={IconInfoCircle}
+                                    size="sm"
+                                    color="ldGray.6"
+                                />
+                                <Text size="xs" c="dimmed">
+                                    <Text span fw={500} c="foreground">
+                                        Pivot export limit.
+                                    </Text>{' '}
+                                    Pivot exports are limited to{' '}
+                                    {csvCellsLimit.toLocaleString()} cells and{' '}
+                                    {maxColumnLimit} columns.
+                                </Text>
+                            </Group>
+                        )}
+
+                        {fileType === DownloadFileType.XLSX &&
+                            (limit === Limit.ALL || limit === Limit.CUSTOM) &&
+                            !isPivotTable && (
+                                <Group
+                                    gap="xs"
+                                    wrap="nowrap"
+                                    align="flex-start"
+                                >
+                                    <MantineIcon
+                                        icon={IconInfoCircle}
+                                        size="sm"
+                                        color="ldGray.6"
+                                    />
+                                    <Text size="xs" c="dimmed">
+                                        <Text span fw={500} c="foreground">
+                                            Excel row limit.
+                                        </Text>{' '}
+                                        Excel exports are limited to 1,000,000
+                                        rows.
+                                    </Text>
+                                </Group>
+                            )}
+                    </Stack>
+                )}
+
+                {!renderDialogActions ? (
+                    <Button
+                        loading={isExporting}
+                        size="sm"
+                        leftSection={<MantineIcon icon={IconTableExport} />}
+                        onClick={() => exportMutation()}
+                        data-testid="chart-export-results-button"
+                        ml="auto"
+                    >
+                        Download
+                    </Button>
+                ) : (
+                    <Stack gap="sm">
+                        {renderDialogActions({
                             onExport: exportMutation,
                             isExporting,
-                        })
-                    )}
-                </Stack>
-            </Box>
+                        })}
+                    </Stack>
+                )}
+            </Stack>
         );
     },
 );

@@ -1,19 +1,21 @@
+import { subject } from '@casl/ability';
+import { ProjectType } from '@lightdash/common';
+import { Stack } from '@mantine-8/core';
 import { type FC } from 'react';
 import { useParams } from 'react-router';
 import { useUnmount } from 'react-use';
-import ForbiddenPanel from '../components/ForbiddenPanel';
-import LandingPanel from '../components/Home/LandingPanel';
-import { MostPopularAndRecentlyUpdatedPanel } from '../components/Home/MostPopularAndRecentlyUpdatedPanel';
-import OnboardingPanel from '../components/Home/OnboardingPanel/index';
-import PageSpinner from '../components/PageSpinner';
-import PinnedItemsPanel from '../components/PinnedItemsPanel';
 import ErrorState from '../components/common/ErrorState';
 import Page from '../components/common/Page/Page';
+import ForbiddenPanel from '../components/ForbiddenPanel';
+import { HomepageContentPanel } from '../components/Home/HomepageContentPanel';
+import LandingPanel from '../components/Home/LandingPanel';
+import OnboardingPanel from '../components/Home/OnboardingPanel/index';
+import PageSpinner from '../components/PageSpinner';
+import PinnedAndFavoritesSection from '../components/PinnedAndFavoritesSection';
 import AiSearchBox from '../ee/components/Home/AiSearchBox';
-
-import { subject } from '@casl/ability';
-import { Stack } from '@mantine-8/core';
 import { useAiAgentButtonVisibility } from '../ee/features/aiCopilot/hooks/useAiAgentsButtonVisibility';
+import { ManagedAgentHomeCard } from '../ee/features/managedAgent/ManagedAgentHomeCard';
+import { useFavorites } from '../hooks/favorites/useFavorites';
 import { usePinnedItems } from '../hooks/pinning/usePinnedItems';
 import { useOnboardingStatus } from '../hooks/useOnboardingStatus';
 import {
@@ -21,6 +23,7 @@ import {
     useProject,
 } from '../hooks/useProject';
 import useApp from '../providers/App/useApp';
+import { FavoritesProvider } from '../providers/Favorites/FavoritesProvider';
 import { PinnedItemsProvider } from '../providers/PinnedItems/PinnedItemsProvider';
 
 const Home: FC = () => {
@@ -32,6 +35,7 @@ const Home: FC = () => {
         selectedProjectUuid,
         project.data?.pinnedListUuid,
     );
+    const favorites = useFavorites(selectedProjectUuid);
     const {
         data: mostPopularAndRecentlyUpdated,
         isInitialLoading: isMostPopularAndRecentlyUpdatedLoading,
@@ -44,7 +48,8 @@ const Home: FC = () => {
         onboarding.isInitialLoading ||
         project.isInitialLoading ||
         isMostPopularAndRecentlyUpdatedLoading ||
-        pinnedItems.isInitialLoading;
+        pinnedItems.isInitialLoading ||
+        favorites.isInitialLoading;
 
     const error = onboarding.error || project.error;
 
@@ -75,11 +80,16 @@ const Home: FC = () => {
                         userName={user.data?.firstName}
                     />
                 ) : (
-                    <>
+                    <FavoritesProvider projectUuid={project.data.projectUuid}>
                         <LandingPanel
                             userName={user.data?.firstName}
                             projectUuid={project.data.projectUuid}
                         />
+                        {project.data.type !== ProjectType.PREVIEW && (
+                            <ManagedAgentHomeCard
+                                projectUuid={project.data.projectUuid}
+                            />
+                        )}
                         {isAiAgentsEnabled && (
                             <AiSearchBox
                                 projectUuid={project.data.projectUuid}
@@ -91,21 +101,22 @@ const Home: FC = () => {
                             pinnedListUuid={project.data.pinnedListUuid || ''}
                             allowDelete={false}
                         >
-                            <PinnedItemsPanel
+                            <PinnedAndFavoritesSection
                                 pinnedItems={pinnedItems.data ?? []}
-                                isEnabled={Boolean(
+                                favoriteItems={favorites.data ?? []}
+                                pinnedIsEnabled={Boolean(
                                     mostPopularAndRecentlyUpdated?.mostPopular
                                         .length ||
-                                        mostPopularAndRecentlyUpdated
-                                            ?.recentlyUpdated.length,
+                                    mostPopularAndRecentlyUpdated
+                                        ?.recentlyUpdated.length,
                                 )}
                             />
                         </PinnedItemsProvider>
-                        <MostPopularAndRecentlyUpdatedPanel
+                        <HomepageContentPanel
                             data={mostPopularAndRecentlyUpdated}
                             projectUuid={project.data.projectUuid}
                         />
-                    </>
+                    </FavoritesProvider>
                 )}
             </Stack>
         </Page>

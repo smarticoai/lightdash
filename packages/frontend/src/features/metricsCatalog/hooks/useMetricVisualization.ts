@@ -258,7 +258,6 @@ type UseMetricVisualizationProps = {
 /**
  * Hook that fetches metric data, executes the query, and builds visualization config
  *
- * This is the single source of truth for MetricExploreModalV2's data layer:
  * 1. Fetches metric field metadata
  * 2. Fetches explore schema (for ItemsMap)
  * 3. Builds and executes MetricQuery
@@ -386,8 +385,14 @@ export function useMetricVisualization({
             ...queryResults,
             metricQuery: executedMetricQuery,
             fields,
+            resolvedTimezone: createQuery.data?.resolvedTimezone ?? undefined,
         };
-    }, [queryResults, executedMetricQuery, createQuery.data?.fields]);
+    }, [
+        queryResults,
+        executedMetricQuery,
+        createQuery.data?.fields,
+        createQuery.data?.resolvedTimezone,
+    ]);
 
     const columnOrder = useMemo(() => {
         if (!executedMetricQuery) return [];
@@ -431,14 +436,23 @@ export function useMetricVisualization({
             itemsMap: createQuery.data?.fields ?? {},
         });
 
+        const pivotKeys = segmentDimensionId ? [segmentDimensionId] : undefined;
+        const sortedByPivot =
+            !!pivotKeys?.length &&
+            !!executedMetricQuery?.sorts?.some((sort) =>
+                pivotKeys.includes(sort.fieldId),
+            );
+
         return mergeExistingAndExpectedSeries({
             expectedSeriesMap,
             existingSeries: chartConfig.config.eChartsConfig.series ?? [],
+            sortedByPivot,
         });
     }, [
         chartConfig,
         queryResults,
         executedMetricQuery?.dimensions,
+        executedMetricQuery?.sorts,
         segmentDimensionId,
         createQuery.data?.fields,
     ]);
@@ -469,10 +483,10 @@ export function useMetricVisualization({
 
     const hasData = Boolean(
         tableName &&
-            exploreQuery.data &&
-            metricQuery &&
-            createQuery.data?.fields &&
-            queryResults.rows.length > 0,
+        exploreQuery.data &&
+        metricQuery &&
+        createQuery.data?.fields &&
+        queryResults.rows.length > 0,
     );
 
     const error =

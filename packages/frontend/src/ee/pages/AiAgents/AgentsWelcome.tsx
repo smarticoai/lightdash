@@ -67,13 +67,16 @@ const AiPageLoading = () => (
 
 const AgentsWelcome = () => {
     const { projectUuid } = useParams();
-    const canCreateAgent = useAiAgentPermission({ action: 'manage' });
-    const organizationSettingsQuery = useAiOrganizationSettings();
+    const canCreateAgent = useAiAgentPermission({
+        action: 'manage',
+        projectUuid,
+    });
+    const aiOrganizationSettingsQuery = useAiOrganizationSettings();
 
     const isAiCopilotEnabledOrTrial =
-        (organizationSettingsQuery.isSuccess &&
-            organizationSettingsQuery.data?.isCopilotEnabled) ||
-        organizationSettingsQuery.data?.isTrial;
+        aiOrganizationSettingsQuery.isSuccess &&
+        (aiOrganizationSettingsQuery.data.isCopilotEnabled ||
+            aiOrganizationSettingsQuery.data.isTrial);
 
     const agentsQuery = useProjectAiAgents({
         projectUuid,
@@ -86,7 +89,7 @@ const AgentsWelcome = () => {
         enabled: isAiCopilotEnabledOrTrial,
     });
 
-    if (organizationSettingsQuery.isLoading) {
+    if (aiOrganizationSettingsQuery.isLoading) {
         return <AiPageLoading />;
     }
     if (!isAiCopilotEnabledOrTrial) {
@@ -181,13 +184,12 @@ const AgentsWelcome = () => {
                         </Stack>
                     </Paper>
                     <Paper
+                        variant="dotted"
                         p="xl"
                         shadow="subtle"
                         component={Stack}
                         gap="xxs"
                         align="center"
-                        withBorder
-                        style={{ borderStyle: 'dashed' }}
                     >
                         <Title order={5}>Ready to get started?</Title>
                         <Text size="sm" c="dimmed">

@@ -17,7 +17,12 @@ dashboardRouter.get(
                 status: 'ok',
                 results: await req.services
                     .getDashboardService()
-                    .getByIdOrSlug(req.user!, req.params.dashboardUuidOrSlug),
+                    .getByIdOrSlug(req.user!, req.params.dashboardUuidOrSlug, {
+                        projectUuid:
+                            typeof req.query.projectUuid === 'string'
+                                ? req.query.projectUuid
+                                : undefined,
+                    }),
             });
         } catch (e) {
             next(e);
@@ -157,12 +162,21 @@ dashboardRouter.post(
     isAuthenticated,
     async (req, res, next) => {
         try {
+            const { selectedTabs } = req.body;
+            const validatedSelectedTabs =
+                Array.isArray(selectedTabs) &&
+                selectedTabs.length > 0 &&
+                selectedTabs.every((t: unknown) => typeof t === 'string')
+                    ? (selectedTabs as string[])
+                    : null;
+
             const results = await req.services
                 .getCsvService()
                 .scheduleExportCsvDashboard(
-                    req.user!,
+                    req.account!,
                     req.params.dashboardUuid,
                     req.body.filters,
+                    validatedSelectedTabs,
                     req.body.dateZoomGranularity,
                 );
 

@@ -118,14 +118,11 @@ const AssistantBubbleContent: FC<{
         <>
             {shouldShowRetry && (
                 <Paper
-                    withBorder
+                    variant="dotted"
                     radius="md"
                     pr="md"
                     shadow="none"
                     bg="ldGray.0"
-                    style={{
-                        borderStyle: 'dashed',
-                    }}
                 >
                     <Group gap="xs" align="center" justify="space-between">
                         <Alert
@@ -138,6 +135,8 @@ const AssistantBubbleContent: FC<{
                             }
                             color="ldGray.0"
                             variant="outline"
+                            radius="md"
+                            w="80%"
                         >
                             <Stack gap={4}>
                                 <Text size="sm" fw={500} c="dimmed">

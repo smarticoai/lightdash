@@ -11,8 +11,8 @@ import { IconInfoCircle, IconUsers, IconUsersGroup } from '@tabler/icons-react';
 import { type FC } from 'react';
 import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import useApp from '../../../providers/App/useApp';
-import ForbiddenPanel from '../../ForbiddenPanel';
 import MantineIcon from '../../common/MantineIcon';
+import ForbiddenPanel from '../../ForbiddenPanel';
 import GroupsView from './GroupsView';
 import classes from './UsersAndGroupsPanel.module.css';
 import UsersView from './UsersView';
@@ -29,14 +29,8 @@ const UsersAndGroupsPanel: FC = () => {
         return <ForbiddenPanel />;
     }
 
-    if (userGroupsFeatureFlagQuery.isError) {
-        console.error(userGroupsFeatureFlagQuery.error);
-        throw new Error('Error fetching user groups feature flag');
-    }
-
     const isGroupManagementEnabled =
-        userGroupsFeatureFlagQuery.isSuccess &&
-        userGroupsFeatureFlagQuery.data.enabled;
+        userGroupsFeatureFlagQuery.data?.enabled ?? false;
 
     return (
         <Stack gap="sm">

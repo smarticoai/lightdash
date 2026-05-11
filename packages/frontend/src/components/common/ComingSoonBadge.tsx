@@ -1,4 +1,4 @@
-import { Badge, Tooltip } from '@mantine/core';
+import { Badge, Tooltip } from '@mantine-8/core';
 import { IconSparkles } from '@tabler/icons-react';
 import type { FC } from 'react';
 import MantineIcon from './MantineIcon';
@@ -12,6 +12,7 @@ type Props = {
  * @param tooltipLabel - The label to display in the tooltip
  * @returns A badge that displays a coming soon label and a tooltip when hovered.
  */
+// ts-unused-exports:disable-next-line
 export const ComingSoonBadge: FC<Props> = ({
     tooltipLabel = 'This feature is coming soon. Contact us if you are interested!',
 }) => {

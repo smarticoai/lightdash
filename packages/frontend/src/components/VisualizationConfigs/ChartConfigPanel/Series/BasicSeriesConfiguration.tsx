@@ -9,8 +9,10 @@ import {
 } from '@lightdash/common';
 import { Box, Group } from '@mantine/core';
 import { useDebouncedState } from '@mantine/hooks';
+import { IconPalette } from '@tabler/icons-react';
 import { type FC } from 'react';
 import type useCartesianChartConfig from '../../../../hooks/cartesianChartConfig/useCartesianChartConfig';
+import MantineIcon from '../../../common/MantineIcon';
 import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
 import ColorSelector from '../../ColorSelector';
 import { Config } from '../../common/Config';
@@ -24,6 +26,8 @@ type BasicSeriesConfigurationProps = {
     series: Series;
     item: Field | TableCalculation | CustomDimension;
     dragHandleProps?: DraggableProvidedDragHandleProps | null;
+    isDragDisabled?: boolean;
+    showColorPickerIcon?: boolean;
 } & Pick<
     ReturnType<typeof useCartesianChartConfig>,
     'updateSingleSeries' | 'getSingleSeries'
@@ -37,6 +41,8 @@ const BasicSeriesConfiguration: FC<BasicSeriesConfigurationProps> = ({
     getSingleSeries,
     updateSingleSeries,
     dragHandleProps,
+    isDragDisabled,
+    showColorPickerIcon,
 }) => {
     const { colorPalette, getSeriesColor } = useVisualizationContext();
     const [value, setValue] = useDebouncedState(
@@ -48,19 +54,27 @@ const BasicSeriesConfiguration: FC<BasicSeriesConfigurationProps> = ({
         <Config>
             <Config.Section>
                 <Group noWrap spacing="two">
-                    <GrabIcon dragHandleProps={dragHandleProps} />
-
-                    <ColorSelector
-                        color={getSeriesColor(series)}
-                        swatches={colorPalette}
-                        withAlpha
-                        onColorChange={(color) => {
-                            updateSingleSeries({
-                                ...series,
-                                color,
-                            });
-                        }}
+                    <GrabIcon
+                        dragHandleProps={dragHandleProps}
+                        disabled={isDragDisabled}
+                        disabledTooltip="Series order is automatically determined by the sort applied to the grouped dimension"
                     />
+
+                    {showColorPickerIcon ? (
+                        <MantineIcon size="sm" icon={IconPalette} />
+                    ) : (
+                        <ColorSelector
+                            color={getSeriesColor(series)}
+                            swatches={colorPalette}
+                            withAlpha
+                            onColorChange={(color) => {
+                                updateSingleSeries({
+                                    ...series,
+                                    color,
+                                });
+                            }}
+                        />
+                    )}
                     {isSingle ? (
                         <Config.Heading>
                             {getItemLabelWithoutTableName(item)}

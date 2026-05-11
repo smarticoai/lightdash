@@ -98,6 +98,20 @@ export class ParameterError extends LightdashError {
     }
 }
 
+export class PayloadTooLargeError extends LightdashError {
+    constructor(
+        message: string = 'Request payload exceeds the maximum allowed size',
+        data: Record<string, AnyType> = {},
+    ) {
+        super({
+            message,
+            name: 'PayloadTooLargeError',
+            statusCode: 413,
+            data,
+        });
+    }
+}
+
 export class NonCompiledModelError extends LightdashError {
     constructor(message: string, data: { [key: string]: AnyType } = {}) {
         super({
@@ -414,6 +428,20 @@ export class MsTeamsError extends LightdashError {
     }
 }
 
+export class GoogleChatError extends LightdashError {
+    constructor(
+        message: string = 'Google Chat API error occurred',
+        data: { [key: string]: AnyType } = {},
+    ) {
+        super({
+            message,
+            name: 'GoogleChatError',
+            statusCode: 400,
+            data,
+        });
+    }
+}
+
 export class UnexpectedGoogleSheetsError extends LightdashError {
     constructor(
         message = 'Unexpected error in Google sheets client',
@@ -423,6 +451,23 @@ export class UnexpectedGoogleSheetsError extends LightdashError {
             message,
             name: 'UnexpectedGoogleSheetsError',
             statusCode: 400,
+            data,
+        });
+    }
+}
+
+/* This specific error will be used in the frontend
+to show a "Re-authenticate" button in the UI for Google Sheets scope issues
+*/
+export class GoogleSheetsScopeError extends LightdashError {
+    constructor(
+        message = 'Unable to validate Google Sheets file. Please re-authenticate with Google to grant the required permissions.',
+        data: { [key: string]: AnyType } = {},
+    ) {
+        super({
+            message,
+            name: 'GoogleSheetsScopeError',
+            statusCode: 403,
             data,
         });
     }
@@ -441,6 +486,20 @@ export class GoogleSheetsTransientError extends LightdashError {
         });
     }
 }
+
+export class GoogleSheetsQuotaError extends LightdashError {
+    constructor(
+        message = 'Google Sheets API quota exceeded. The sync will be retried automatically.',
+        data: { [key: string]: AnyType } = {},
+    ) {
+        super({
+            message,
+            name: 'GoogleSheetsQuotaError',
+            statusCode: 429,
+            data,
+        });
+    }
+}
 export class NotImplementedError extends LightdashError {
     constructor(message = 'Not implemented') {
         super({
@@ -451,8 +510,10 @@ export class NotImplementedError extends LightdashError {
         });
     }
 }
-export const getErrorMessage = (e: unknown) =>
-    e instanceof Error ? e.message : `Unknown ${typeof e} error`;
+export const getErrorMessage = (e: unknown) => {
+    if (e instanceof Error && e.message) return e.message;
+    return `Unknown ${typeof e} error`;
+};
 
 export class ScreenshotError extends LightdashError {
     constructor(
@@ -513,6 +574,20 @@ export class ResultsExpiredError extends LightdashError {
             name: 'ResultsExpiredError',
             statusCode: 404,
             data: {},
+        });
+    }
+}
+
+export class ExpiredQueryError extends LightdashError {
+    constructor(
+        message = 'Your query expired while waiting in the queue. Please try again.',
+        data: { [key: string]: AnyType } = {},
+    ) {
+        super({
+            message,
+            name: 'ExpiredQueryError',
+            statusCode: 408,
+            data,
         });
     }
 }
@@ -580,6 +655,20 @@ export class SnowflakeTokenError extends LightdashError {
         super({
             message,
             name: 'SnowflakeTokenError',
+            statusCode: 401,
+            data: {},
+        });
+    }
+}
+
+/* This specific error will be used in the frontend
+to show a "reauthenticate" button in the UI
+*/
+export class DatabricksTokenError extends LightdashError {
+    constructor(message: string) {
+        super({
+            message,
+            name: 'DatabricksTokenError',
             statusCode: 401,
             data: {},
         });

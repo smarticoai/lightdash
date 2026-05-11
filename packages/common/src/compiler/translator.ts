@@ -1,12 +1,14 @@
 import merge from 'lodash/merge';
+import partition from 'lodash/partition';
 import {
-    SupportedDbtAdapter,
     buildModelGraph,
     convertColumnMetric,
     convertModelMetric,
     convertToAiHints,
     convertToGroups,
     isV9MetricRef,
+    patchPathParts,
+    SupportedDbtAdapter,
     type DbtColumnLightdashDimension,
     type DbtColumnMetadata,
     type DbtExploreLightdashAdditionalDimension,
@@ -22,16 +24,18 @@ import {
 } from '../types/errors';
 import {
     InlineErrorType,
+    isExploreError,
     type Explore,
     type ExploreError,
+    type InlineError,
     type Table,
 } from '../types/explore';
 import {
+    defaultSql,
     DimensionType,
     FieldType,
-    MetricType,
-    defaultSql,
     friendlyName,
+    MetricType,
     parseMetricType,
     type Dimension,
     type Metric,
@@ -41,13 +45,17 @@ import {
     parseFilters,
     parseModelRequiredFilters,
 } from '../types/filterGrammar';
-import { type LightdashProjectConfig } from '../types/lightdashProjectConfig';
+import {
+    type CustomGranularity,
+    type LightdashProjectConfig,
+} from '../types/lightdashProjectConfig';
 import { OrderFieldsByStrategy, type GroupType } from '../types/table';
 import { type TimeFrames } from '../types/timeFrames';
 import { type WarehouseSqlBuilder } from '../types/warehouse';
 import assertUnreachable from '../utils/assertUnreachable';
 import {
     getDefaultTimeFrames,
+    isTimeInterval,
     timeFrameConfigs,
     validateTimeFrames,
     type WeekDay,
@@ -85,9 +93,13 @@ const convertTimezone = (
             // TIMESTAMP WITH TIME ZONE: stored as utc. returns in session tz. convert from session tz to target tz
             // TIMESTAMP WITHOUT TIME ZONE: no tz. assume default_source_tz. convert from default_source_tz to target_tz
             return timestampSql;
+        case SupportedDbtAdapter.DUCKDB:
+            return timestampSql;
         case SupportedDbtAdapter.DATABRICKS:
             return timestampSql;
+        // Athena uses Trino SQL, timestamps return in server timezone
         case SupportedDbtAdapter.TRINO:
+        case SupportedDbtAdapter.ATHENA:
             return timestampSql;
         case SupportedDbtAdapter.CLICKHOUSE:
             // DateTime: stored in server timezone, returns in server timezone
@@ -144,6 +156,7 @@ const convertDimension = (
         timeInterval === undefined && isInterval(type, meta.dimension);
 
     let timeIntervalBaseDimensionName: string | undefined;
+    let timeIntervalBaseDimensionType: DimensionType | undefined;
 
     const groups: string[] = convertToGroups(
         meta.dimension?.groups,
@@ -152,6 +165,7 @@ const convertDimension = (
 
     if (timeInterval) {
         timeIntervalBaseDimensionName = name;
+        timeIntervalBaseDimensionType = type;
         sql = timeFrameConfigs[timeInterval].getSql(
             targetWarehouse,
             timeInterval,
@@ -184,15 +198,27 @@ const convertDimension = (
         source,
         timeInterval,
         timeIntervalBaseDimensionName,
+        timeIntervalBaseDimensionType,
         hidden: !!meta.dimension?.hidden,
         format: meta.dimension?.format,
         round: meta.dimension?.round,
         compact: meta.dimension?.compact,
         requiredAttributes: meta.dimension?.required_attributes,
+        anyAttributes: meta.dimension?.any_attributes,
         colors: meta.dimension?.colors,
         ...(meta.dimension?.urls ? { urls: meta.dimension.urls } : {}),
         ...(meta.dimension?.image ? { image: meta.dimension.image } : {}),
+        ...(meta.dimension?.richText
+            ? { richText: meta.dimension.richText }
+            : {}),
         ...(isAdditionalDimension ? { isAdditionalDimension } : {}),
+        // Polarity flip: YAML reads `convert_timezone: false` (defaults true,
+        // matches dbt convention); in-memory we store the inverse so truthiness
+        // matches the semantic — `if (dim.skipTimezoneConversion)` is correct,
+        // no `=== false` trap, and absent collapses to the default.
+        ...(meta.dimension?.convert_timezone === false
+            ? { skipTimezoneConversion: true }
+            : {}),
         groups,
         isIntervalBase,
         ...(meta.dimension && meta.dimension.tags
@@ -204,6 +230,9 @@ const convertDimension = (
             : {}),
         ...(meta.dimension?.ai_hint
             ? { aiHint: convertToAiHints(meta.dimension.ai_hint) }
+            : {}),
+        ...(meta.dimension?.case_sensitive !== undefined
+            ? { caseSensitive: meta.dimension.case_sensitive }
             : {}),
         ...(meta.dimension?.spotlight?.filter_by === false ||
         meta.dimension?.spotlight?.segment_by === false
@@ -437,41 +466,67 @@ function validateSets(
     allMetrics: Record<string, Metric>,
     model: DbtModelNode,
     meta: DbtModelNode['meta'],
-) {
+    allowPartialCompilation?: boolean,
+): InlineError[] {
+    const warnings: InlineError[] = [];
     const allFieldNames = new Set([
         ...Object.keys(dimensions),
         ...Object.keys(allMetrics),
     ]);
 
-    if (!meta.sets) return;
+    if (!meta.sets) return warnings;
 
     Object.entries(meta.sets).forEach(([setName, setDef]) => {
         // Validate set name doesn't conflict with field names
         if (allFieldNames.has(setName)) {
-            throw new ParseError(
-                `Set name "${setName}" in model "${model.name}" conflicts with an existing field name. Set names must be unique from dimension and metric names.`,
-            );
+            const errorMessage = `Set name "${setName}" in model "${model.name}" conflicts with an existing field name. Set names must be unique from dimension and metric names.`;
+            if (allowPartialCompilation) {
+                warnings.push({
+                    type: InlineErrorType.SET_VALIDATION_ERROR,
+                    message: errorMessage,
+                });
+                return; // Skip this set
+            }
+            throw new ParseError(errorMessage);
         }
 
         // Validate set definition structure
         if (!setDef.fields || !Array.isArray(setDef.fields)) {
-            throw new ParseError(
-                `Set "${setName}" in model "${model.name}" must have a "fields" array`,
-            );
+            const errorMessage = `Set "${setName}" in model "${model.name}" must have a "fields" array`;
+            if (allowPartialCompilation) {
+                warnings.push({
+                    type: InlineErrorType.SET_VALIDATION_ERROR,
+                    message: errorMessage,
+                });
+                return; // Skip this set
+            }
+            throw new ParseError(errorMessage);
         }
 
         if (setDef.fields.length === 0) {
-            throw new ParseError(
-                `Set "${setName}" in model "${model.name}" cannot be empty`,
-            );
+            const errorMessage = `Set "${setName}" in model "${model.name}" cannot be empty`;
+            if (allowPartialCompilation) {
+                warnings.push({
+                    type: InlineErrorType.SET_VALIDATION_ERROR,
+                    message: errorMessage,
+                });
+                return; // Skip this set
+            }
+            throw new ParseError(errorMessage);
         }
 
         // Validate field names don't have invalid characters
         setDef.fields.forEach((field) => {
             if (typeof field !== 'string') {
-                throw new ParseError(
-                    `Set "${setName}" in model "${model.name}" contains non-string field: ${field}`,
-                );
+                const errorMessage = `Set "${setName}" in model "${model.name}" contains non-string field: ${field}`;
+                if (allowPartialCompilation) {
+                    warnings.push({
+                        type: InlineErrorType.SET_VALIDATION_ERROR,
+                        message: errorMessage,
+                    });
+                    return; // Skip this field
+                }
+                throw new ParseError(errorMessage);
             }
 
             // Allow field references ending with * (set references)
@@ -481,9 +536,15 @@ function validateSets(
             // Validate that the clean field name follows the lightdash variable pattern
             // (letters, numbers, underscores, and dots only)
             if (cleanField && !/^[a-zA-Z0-9_.]+$/.test(cleanField)) {
-                throw new ParseError(
-                    `Set "${setName}" in model "${model.name}" contains invalid field name "${field}". Field names must contain only letters, numbers, underscores, and dots.`,
-                );
+                const errorMessage = `Set "${setName}" in model "${model.name}" contains invalid field name "${field}". Field names must contain only letters, numbers, underscores, and dots.`;
+                if (allowPartialCompilation) {
+                    warnings.push({
+                        type: InlineErrorType.SET_VALIDATION_ERROR,
+                        message: errorMessage,
+                    });
+                    return; // Skip this field
+                }
+                throw new ParseError(errorMessage);
             }
 
             const isModelFieldName =
@@ -500,14 +561,26 @@ function validateSets(
                     const allJoinNames = joins.map((j) => j.alias || j.join);
 
                     if (!allJoinNames.includes(joinName)) {
-                        throw new ParseError(
-                            `Set "${setName}" in model "${model.name}" references non-existent join model "${joinName}".`,
-                        );
+                        const errorMessage = `Set "${setName}" in model "${model.name}" references non-existent join model "${joinName}".`;
+                        if (allowPartialCompilation) {
+                            warnings.push({
+                                type: InlineErrorType.SET_VALIDATION_ERROR,
+                                message: errorMessage,
+                            });
+                            return; // Skip this field
+                        }
+                        throw new ParseError(errorMessage);
                     }
                 } else if (!allFieldNames.has(fieldName)) {
-                    throw new ParseError(
-                        `Set "${setName}" in model "${model.name}" references non-existent model field "${field}". Fields must correspond to actual dimensions or metrics in the model.`,
-                    );
+                    const errorMessage = `Set "${setName}" in model "${model.name}" references non-existent model field "${field}". Fields must correspond to actual dimensions or metrics in the model.`;
+                    if (allowPartialCompilation) {
+                        warnings.push({
+                            type: InlineErrorType.SET_VALIDATION_ERROR,
+                            message: errorMessage,
+                        });
+                        return; // Skip this field
+                    }
+                    throw new ParseError(errorMessage);
                 }
             }
 
@@ -518,9 +591,15 @@ function validateSets(
                 depth: number,
             ) => {
                 if (depth > 3) {
-                    throw new ParseError(
-                        `Set "${setName}" in model "${model.name}" exceeds the maximum nesting level of 3.`,
-                    );
+                    const errorMessage = `Set "${setName}" in model "${model.name}" exceeds the maximum nesting level of 3.`;
+                    if (allowPartialCompilation) {
+                        warnings.push({
+                            type: InlineErrorType.SET_VALIDATION_ERROR,
+                            message: errorMessage,
+                        });
+                        return; // Stop checking nesting
+                    }
+                    throw new ParseError(errorMessage);
                 }
 
                 fields.forEach((f) => {
@@ -549,6 +628,8 @@ function validateSets(
             }
         });
     });
+
+    return warnings;
 }
 
 export const convertTable = (
@@ -558,10 +639,13 @@ export const convertTable = (
     spotlightConfig: LightdashProjectConfig['spotlight'],
     startOfWeek?: WeekDay | null,
     disableTimestampConversion?: boolean,
+    customGranularities?: Record<string, CustomGranularity>,
+    allowPartialCompilation?: boolean,
 ): Omit<Table, 'lineageGraph'> => {
     // Config block takes priority, then meta block
     const meta = merge({}, model.meta, model.config?.meta);
     const tableLabel = meta.label || friendlyName(model.name);
+    const tableWarnings: InlineError[] = [];
 
     const [dimensions, metrics]: [
         Record<string, Dimension>,
@@ -589,24 +673,28 @@ export const convertTable = (
                 overrideTimeIntervals: DbtColumnLightdashDimension['time_intervals'],
             ) => {
                 if (dim.isIntervalBase) {
-                    let intervals: TimeFrames[] = [];
+                    let allIntervals: (TimeFrames | string)[] = [];
 
                     if (
                         !dim.isAdditionalDimension &&
                         columnMeta.dimension?.time_intervals &&
                         Array.isArray(columnMeta?.dimension.time_intervals)
                     ) {
-                        intervals = validateTimeFrames(
-                            columnMeta.dimension.time_intervals,
-                        );
+                        allIntervals = columnMeta.dimension.time_intervals;
                     } else if (
                         dim.isAdditionalDimension &&
                         Array.isArray(overrideTimeIntervals)
                     ) {
-                        intervals = validateTimeFrames(overrideTimeIntervals);
+                        allIntervals = overrideTimeIntervals;
                     } else {
-                        intervals = getDefaultTimeFrames(dim.type);
+                        allIntervals = getDefaultTimeFrames(dim.type);
                     }
+
+                    // Split into standard TimeFrames and custom granularity names
+                    const intervals = validateTimeFrames(allIntervals);
+                    const customIntervalNames = allIntervals.filter(
+                        (v) => !isTimeInterval(v.toUpperCase()),
+                    );
 
                     const dimensionMeta = {
                         ...columnMeta.dimension,
@@ -618,7 +706,10 @@ export const convertTable = (
                         hidden: dim.hidden,
                     };
 
-                    return intervals.reduce(
+                    // Generate standard interval dimensions
+                    const standardDims = intervals.reduce<
+                        Record<string, Dimension>
+                    >(
                         (acc, interval) => ({
                             ...acc,
                             [`${dim.name}_${interval.toLowerCase()}`]:
@@ -658,6 +749,68 @@ export const convertTable = (
                         }),
                         {},
                     );
+
+                    // Generate custom granularity dimensions
+                    const customDims = customIntervalNames.reduce<
+                        Record<string, Dimension>
+                    >((acc, customName) => {
+                        const granularity = customGranularities?.[customName];
+                        if (!granularity) {
+                            tableWarnings.push({
+                                type: InlineErrorType.FIELD_ERROR,
+                                message: `Unknown time interval "${customName}" on column "${dim.name}" in model "${model.name}". It is not a standard time frame or a custom granularity defined in lightdash.config.yml.`,
+                            });
+                            return acc;
+                        }
+
+                        const customSql = granularity.sql.replace(
+                            /\$\{COLUMN\}/g,
+                            () => dim.sql,
+                        );
+                        const customType =
+                            granularity.type || DimensionType.DATE;
+                        const customDimName = `${dim.name}_${customName}`;
+
+                        const groups: string[] = [...(dim.groups || [])];
+                        if (!groups.includes(dim.label)) {
+                            groups.push(dim.label);
+                        }
+
+                        return {
+                            ...acc,
+                            [customDimName]: {
+                                index,
+                                fieldType: FieldType.DIMENSION,
+                                name: customDimName,
+                                label: granularity.label,
+                                sql: customSql,
+                                table: model.name,
+                                tableLabel,
+                                type: customType,
+                                description: dim.description,
+                                source: undefined,
+                                timeInterval: undefined,
+                                timeIntervalBaseDimensionName: dim.name,
+                                timeIntervalBaseDimensionType: dim.type,
+                                customTimeInterval: customName,
+                                hidden: dim.hidden,
+                                format: undefined,
+                                round: undefined,
+                                compact: undefined,
+                                requiredAttributes: dim.requiredAttributes,
+                                anyAttributes: dim.anyAttributes,
+                                groups,
+                                isIntervalBase: false,
+                                isAdditionalDimension:
+                                    dim.isAdditionalDimension,
+                                ...(dim.skipTimezoneConversion
+                                    ? { skipTimezoneConversion: true }
+                                    : {}),
+                            } satisfies Dimension,
+                        };
+                    }, {});
+
+                    return { ...standardDims, ...customDims };
                 }
                 return {};
             };
@@ -716,6 +869,7 @@ export const convertTable = (
                             metric,
                             tableLabel,
                             requiredAttributes: dimension.requiredAttributes, // TODO Join dimension required_attributes with metric required_attributes
+                            anyAttributes: dimension.anyAttributes, // TODO Join dimension any_attributes with metric any_attributes
                             spotlightConfig: {
                                 ...spotlightConfig,
                                 default_visibility:
@@ -799,11 +953,13 @@ export const convertTable = (
         Object.keys(dimensions).includes(metric),
     );
     if (duplicatedNames.length > 0) {
-        const message =
-            duplicatedNames.length > 1
-                ? 'Found multiple metrics and a dimensions with the same name:'
-                : 'Found a metric and a dimension with the same name:';
-        throw new ParseError(`${message} ${duplicatedNames}`);
+        duplicatedNames.forEach((name) => {
+            delete allMetrics[name];
+            tableWarnings.push({
+                type: InlineErrorType.DUPLICATE_FIELD_NAME,
+                message: `Skipped metric "${name}" because a dimension with the same name exists. Dimensions take priority.`,
+            });
+        });
     }
 
     const groupDetails: Record<string, GroupType> = {};
@@ -817,7 +973,14 @@ export const convertTable = (
     }
 
     if (meta.sets) {
-        validateSets(dimensions, allMetrics, model, meta);
+        const warnings = validateSets(
+            dimensions,
+            allMetrics,
+            model,
+            meta,
+            allowPartialCompilation,
+        );
+        tableWarnings.push(...warnings);
     }
 
     const sqlTable = meta.sql_from || model.relation_name;
@@ -848,6 +1011,7 @@ export const convertTable = (
             defaultFilters: meta.default_filters,
         }),
         requiredAttributes: meta.required_attributes,
+        anyAttributes: meta.any_attributes,
         groupDetails,
         ...(meta.default_time_dimension
             ? {
@@ -857,9 +1021,16 @@ export const convertTable = (
                   },
               }
             : {}),
+        ...(meta.default_show_underlying_values
+            ? {
+                  defaultShowUnderlyingValues:
+                      meta.default_show_underlying_values,
+              }
+            : {}),
         ...(meta.ai_hint ? { aiHint: convertToAiHints(meta.ai_hint) } : {}),
         ...(meta.parameters ? { parameters: meta.parameters } : {}),
         ...(meta.sets ? { sets: meta.sets } : {}),
+        ...(tableWarnings.length > 0 ? { warnings: tableWarnings } : {}),
     };
 };
 
@@ -906,6 +1077,20 @@ const modelCanUseMetric = (
     return false;
 };
 
+export type ExplorePostProcessor = (
+    compiledExplores: Explore[],
+    context: {
+        model: DbtModelNode;
+        meta: Record<string, unknown>;
+    },
+) => (Explore | ExploreError)[];
+
+export type ConvertExploresOptions = {
+    disableTimestampConversion?: boolean;
+    allowPartialCompilation?: boolean;
+    postProcessors?: ExplorePostProcessor[];
+};
+
 export const convertExplores = async (
     models: DbtModelNode[],
     loadSources: boolean,
@@ -913,9 +1098,13 @@ export const convertExplores = async (
     metrics: DbtMetric[],
     warehouseSqlBuilder: WarehouseSqlBuilder,
     lightdashProjectConfig: LightdashProjectConfig,
-    disableTimestampConversion?: boolean,
-    allowPartialCompilation?: boolean,
+    options?: ConvertExploresOptions,
 ): Promise<(Explore | ExploreError)[]> => {
+    const {
+        disableTimestampConversion,
+        allowPartialCompilation,
+        postProcessors,
+    } = options ?? {};
     const tableLineage = translateDbtModelsToTableLineage(models);
     const [tables, exploreErrors] = models.reduce(
         ([accTables, accErrors], model) => {
@@ -946,6 +1135,8 @@ export const convertExplores = async (
                     lightdashProjectConfig.spotlight,
                     warehouseSqlBuilder.getStartOfWeek(),
                     disableTimestampConversion,
+                    lightdashProjectConfig.custom_granularities,
+                    allowPartialCompilation,
                 );
 
                 // add lineage
@@ -961,6 +1152,9 @@ export const convertExplores = async (
                     label: meta.label || friendlyName(model.name),
                     tags,
                     groupLabel: meta.group_label,
+                    ...(meta.groups && meta.groups.length > 0
+                        ? { groups: meta.groups }
+                        : {}),
                     errors: [
                         {
                             type:
@@ -984,7 +1178,11 @@ export const convertExplores = async (
         {},
     );
     const validModels = models.filter(
-        (model) => tableLookup[model.name] !== undefined,
+        (model) =>
+            tableLookup[model.name] !== undefined &&
+            // Seeds are compiled as tables (for join resolution) but should
+            // not generate standalone explores — they're join targets only.
+            model.resource_type !== 'seed',
     );
 
     const exploreCompiler = new ExploreCompiler(warehouseSqlBuilder, {
@@ -1009,8 +1207,12 @@ export const convertExplores = async (
                 name: model.name,
                 label: meta.label || friendlyName(model.name),
                 groupLabel: meta.group_label,
+                ...(meta.groups && meta.groups.length > 0
+                    ? { groups: meta.groups }
+                    : {}),
                 joins: meta?.joins || [],
                 description: meta.description,
+                caseSensitive: meta.case_sensitive,
                 tables: tableLookup,
             },
             ...(meta.explores
@@ -1057,14 +1259,27 @@ export const convertExplores = async (
                                   friendlyName(exploreName),
                               groupLabel:
                                   exploreConfig.group_label || meta.group_label,
+                              ...((exploreConfig.groups &&
+                                  exploreConfig.groups.length > 0) ||
+                              (meta.groups && meta.groups.length > 0)
+                                  ? {
+                                        groups:
+                                            exploreConfig.groups || meta.groups,
+                                    }
+                                  : {}),
                               // Inherit joins from base model if not specified in explore config
                               joins: exploreConfig.joins || meta?.joins || [],
                               description: exploreConfig.description,
+                              caseSensitive: exploreConfig.case_sensitive,
                               tables: {
                                   ...tableLookup,
                                   // Override the base table with required filters and explore-scoped dimensions
                                   [model.name]: {
                                       ...baseTable,
+                                      sqlWhere:
+                                          exploreConfig.sql_filter ||
+                                          exploreConfig.sql_where ||
+                                          baseTable.sqlWhere,
                                       requiredFilters:
                                           parseModelRequiredFilters({
                                               requiredFilters:
@@ -1088,7 +1303,7 @@ export const convertExplores = async (
         // Multiple explores can be created from a single model. The base explore + additional explores
         // Properties created from `model` are the same across all explores. e.g. all explores will have the same base table & warehouse
         // Properties created from `exploreToCreate` are specific to each explore. e.g. each explore can have a different name, label & joins
-        const newExplores = exploresToCreate.map((exploreToCreate) => {
+        const compiledExplores = exploresToCreate.map((exploreToCreate) => {
             try {
                 return exploreCompiler.compileExplore({
                     name: exploreToCreate.name,
@@ -1096,6 +1311,11 @@ export const convertExplores = async (
                     tags: tags || [],
                     baseTable: model.name,
                     groupLabel: exploreToCreate.groupLabel,
+                    ...(exploreToCreate.groups &&
+                    exploreToCreate.groups.length > 0
+                        ? { groups: exploreToCreate.groups }
+                        : {}),
+                    caseSensitive: exploreToCreate.caseSensitive,
                     joinedTables: exploreToCreate.joins.map((join) => ({
                         table: join.join,
                         sqlOn: join.sql_on,
@@ -1112,7 +1332,9 @@ export const convertExplores = async (
                     targetDatabase: adapterType,
                     warehouse: model.config?.snowflake_warehouse,
                     databricksCompute: model.config?.databricks_compute,
-                    ymlPath: model.patch_path?.split('://')?.[1],
+                    ymlPath: model.patch_path
+                        ? patchPathParts(model.patch_path).path
+                        : undefined,
                     sqlPath: model.path,
                     spotlightConfig: lightdashProjectConfig.spotlight,
                     ...(meta.ai_hint
@@ -1126,12 +1348,17 @@ export const convertExplores = async (
                             : {}),
                     },
                     projectParameters: lightdashProjectConfig.parameters,
+                    projectDefaults: lightdashProjectConfig.defaults,
                 });
             } catch (e: unknown) {
                 return {
                     name: exploreToCreate.name,
                     label: exploreToCreate.label,
                     groupLabel: exploreToCreate.groupLabel,
+                    ...(exploreToCreate.groups &&
+                    exploreToCreate.groups.length > 0
+                        ? { groups: exploreToCreate.groups }
+                        : {}),
                     errors: [
                         {
                             // TODO improve parsing of error type
@@ -1158,7 +1385,28 @@ export const convertExplores = async (
             }
         });
 
-        return [...acc, ...newExplores];
+        // Split compiled explores into successes and errors,
+        // then run post-processors over successful explores only
+        const [compileErrors, successfulExplores] = partition(
+            compiledExplores,
+            isExploreError,
+        );
+
+        const postProcessorContext = {
+            model,
+            meta,
+        };
+        const postProcessedExplores = (postProcessors ?? []).reduce<
+            (Explore | ExploreError)[]
+        >((currentExplores, processor) => {
+            const [errors, successes] = partition(
+                currentExplores,
+                isExploreError,
+            );
+            return [...errors, ...processor(successes, postProcessorContext)];
+        }, successfulExplores);
+
+        return [...acc, ...compileErrors, ...postProcessedExplores];
     }, []);
 
     return [...explores, ...exploreErrors];

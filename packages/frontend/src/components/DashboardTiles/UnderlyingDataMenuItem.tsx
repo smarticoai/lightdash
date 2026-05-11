@@ -1,8 +1,8 @@
 import { subject } from '@casl/ability';
 import { hasCustomBinDimension, type MetricQuery } from '@lightdash/common';
-import { Menu } from '@mantine/core';
+import { Menu } from '@mantine-8/core';
 import { IconStack } from '@tabler/icons-react';
-import { type FC, useCallback } from 'react';
+import { useCallback, type FC } from 'react';
 import { useLocation } from 'react-router';
 import { useProjectUuid } from '../../hooks/useProjectUuid';
 import { useAccount } from '../../hooks/user/useAccount';
@@ -40,7 +40,7 @@ const TrackedItem: FC<{ onClick: () => void }> = ({ onClick }) => {
 
     return (
         <Menu.Item
-            icon={<MantineIcon icon={IconStack} />}
+            leftSection={<MantineIcon icon={IconStack} />}
             onClick={handleClick}
         >
             View underlying data
@@ -75,7 +75,7 @@ export const UnderlyingDataMenuItem: FC<Props> = ({
                 <TrackedItem onClick={onViewUnderlyingData} />
             ) : (
                 <Menu.Item
-                    icon={<MantineIcon icon={IconStack} />}
+                    leftSection={<MantineIcon icon={IconStack} />}
                     onClick={onViewUnderlyingData}
                 >
                     View underlying data

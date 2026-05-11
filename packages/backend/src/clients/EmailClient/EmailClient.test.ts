@@ -20,6 +20,12 @@ jest.mock('nodemailer', () => ({
     })),
 }));
 
+jest.mock('fs', () => ({
+    ...jest.requireActual('fs'),
+    readdirSync: jest.fn(() => []),
+    readFileSync: jest.fn(() => ''),
+}));
+
 // Mock the SMTPError interface to allow for code property
 class MockNodeMailerSmtpError
     extends Error

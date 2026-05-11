@@ -8,7 +8,7 @@ import {
 } from '@lightdash/common';
 import * as Sentry from '@sentry/node';
 import { Request, RequestHandler } from 'express';
-import { Issuer, UserinfoResponse, generators } from 'openid-client';
+import { generators, Issuer, UserinfoResponse } from 'openid-client';
 import { Strategy } from 'passport-strategy';
 import { URL } from 'url';
 import { lightdashConfig } from '../../../config/lightdashConfig';
@@ -141,7 +141,16 @@ export class OpenIDClientOktaStrategy extends Strategy {
                 if (openIdUser) {
                     const user = await req.services
                         .getUserService()
-                        .loginWithOpenId(openIdUser, req.user, inviteCode);
+                        .loginWithOpenId(
+                            openIdUser,
+                            req.user,
+                            inviteCode,
+                            undefined,
+                            {
+                                ip: req.ip,
+                                userAgent: req.get('user-agent'),
+                            },
+                        );
                     return this.success(user);
                 }
 

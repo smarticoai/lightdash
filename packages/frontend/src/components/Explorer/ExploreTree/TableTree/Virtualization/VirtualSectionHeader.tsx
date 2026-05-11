@@ -11,12 +11,12 @@ import {
     useExplorerSelector,
 } from '../../../../../features/explorer/store';
 import { useProjectUuid } from '../../../../../hooks/useProjectUuid';
-import { useClientFeatureFlag } from '../../../../../hooks/useServerOrClientFeatureFlag';
+import { useServerFeatureFlag } from '../../../../../hooks/useServerOrClientFeatureFlag';
 import useApp from '../../../../../providers/App/useApp';
 import useTracking from '../../../../../providers/Tracking/useTracking';
 import { EventName } from '../../../../../types/Events';
-import DocumentationHelpButton from '../../../../DocumentationHelpButton';
 import MantineIcon from '../../../../common/MantineIcon';
+import DocumentationHelpButton from '../../../../DocumentationHelpButton';
 import { TreeSection, type SectionHeaderItem } from './types';
 
 interface VirtualSectionHeaderProps {
@@ -41,25 +41,33 @@ const VirtualSectionHeaderComponent: FC<VirtualSectionHeaderProps> = ({
     const allCustomDimensions = useExplorerSelector(selectCustomDimensions);
 
     // Feature flag for bin dimensions write-back
-    const isWriteBackCustomBinDimensionsEnabled = useClientFeatureFlag(
+    const { data: writeBackCustomBinDimensionsFlag } = useServerFeatureFlag(
         FeatureFlags.WriteBackCustomBinDimensions,
     );
+    const isWriteBackCustomBinDimensionsEnabled =
+        writeBackCustomBinDimensionsFlag?.enabled ?? false;
 
-    // Filter custom dimensions based on feature flag
-    const customDimensionsToWriteBack = useMemo(() => {
-        if (!allCustomDimensions) return [];
-        return isWriteBackCustomBinDimensionsEnabled
-            ? allCustomDimensions
-            : allCustomDimensions.filter(isCustomSqlDimension);
-    }, [allCustomDimensions, isWriteBackCustomBinDimensionsEnabled]);
-
-    const canManageCustomSql = user.data?.ability?.can(
+    const canManageCustomFields = user.data?.ability?.can(
         'manage',
-        subject('CustomSql', {
+        subject('CustomFields', {
             organizationUuid: user.data.organizationUuid,
             projectUuid,
         }),
     );
+
+    const customDimensionsToWriteBack = useMemo(() => {
+        if (!allCustomDimensions) return [];
+        const baseList = isWriteBackCustomBinDimensionsEnabled
+            ? allCustomDimensions
+            : allCustomDimensions.filter(isCustomSqlDimension);
+        return canManageCustomFields
+            ? baseList
+            : baseList.filter((dim) => !isCustomSqlDimension(dim));
+    }, [
+        allCustomDimensions,
+        isWriteBackCustomBinDimensionsEnabled,
+        canManageCustomFields,
+    ]);
 
     const handleAddCustomDimension = useCallback(() => {
         dispatch(
@@ -119,7 +127,7 @@ const VirtualSectionHeaderComponent: FC<VirtualSectionHeaderProps> = ({
     }, [depth]);
 
     const showAddButton =
-        treeSection === TreeSection.Dimensions && canManageCustomSql;
+        treeSection === TreeSection.Dimensions && canManageCustomFields;
 
     const showWriteBackCustomMetrics =
         treeSection === TreeSection.CustomMetrics &&

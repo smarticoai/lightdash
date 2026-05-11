@@ -1,0 +1,334 @@
+import { type FieldId, type MetricType } from './field';
+import { type MetricFilterRule } from './filter';
+import { type KnexPaginatedData } from './knex-paginate';
+import { type MetricQuery } from './metricQuery';
+import { type ResultColumns } from './results';
+import { type PreAggregateMaterializationTrigger } from './scheduler';
+import { type TimeFrames } from './timeFrames';
+import { type UserAttributeValueMap } from './userAttributes';
+
+export type MaterializationMetricComponent = {
+    componentFieldId: string;
+    aggregation: MetricType.SUM | MetricType.MIN | MetricType.MAX;
+};
+
+export type MaterializationMetricQueryPayload = {
+    metricQuery: MetricQuery;
+    metricComponents: Record<string, MaterializationMetricComponent[]>;
+    timeDimensionFieldId: string | null;
+    resolvedMaxRows: number | null;
+};
+
+export type PreAggregateMaterializationStatus =
+    | 'in_progress'
+    | 'active'
+    | 'superseded'
+    | 'failed';
+
+export type ActiveMaterializationDetails = {
+    materializationUuid: string;
+    queryUuid: string;
+    materializationUri: string;
+    format: 'jsonl' | 'parquet';
+    columns: ResultColumns | null;
+    materializedAt: Date;
+    totalBytes: number | null;
+};
+
+export type PreAggregateMaterializationRole = {
+    email: string;
+    attributes: UserAttributeValueMap;
+};
+
+export type PreAggregateDef = {
+    name: string;
+    dimensions: string[];
+    metrics: string[];
+    filters?: MetricFilterRule[];
+    // Parser validation enforces that timeDimension and granularity are provided together
+    timeDimension?: string;
+    granularity?: TimeFrames;
+    maxRows?: number;
+    refresh?: {
+        cron?: string;
+    };
+    materializationRole?: PreAggregateMaterializationRole;
+};
+
+export enum PreAggregateMissReason {
+    NO_PRE_AGGREGATES_DEFINED = 'no_pre_aggregates_defined',
+    DIMENSION_NOT_IN_PRE_AGGREGATE = 'dimension_not_in_pre_aggregate',
+    METRIC_NOT_IN_PRE_AGGREGATE = 'metric_not_in_pre_aggregate',
+    NON_ADDITIVE_METRIC = 'non_additive_metric',
+    CUSTOM_SQL_METRIC = 'custom_sql_metric',
+    FILTER_DIMENSION_NOT_IN_PRE_AGGREGATE = 'filter_dimension_not_in_pre_aggregate',
+    PRE_AGGREGATE_FILTER_NOT_SATISFIED = 'pre_aggregate_filter_not_satisfied',
+    GRANULARITY_TOO_FINE = 'granularity_too_fine',
+    CUSTOM_DIMENSION_PRESENT = 'custom_dimension_present',
+    CUSTOM_METRIC_PRESENT = 'custom_metric_present',
+    TABLE_CALCULATION_PRESENT = 'table_calculation_present',
+    USER_BYPASS = 'user_bypass',
+    EXPLORE_RESOLUTION_ERROR = 'explore_resolution_error',
+    NO_ACTIVE_MATERIALIZATION = 'no_active_materialization',
+}
+
+export type PreAggregateMatchMiss =
+    | {
+          reason: PreAggregateMissReason.NO_PRE_AGGREGATES_DEFINED;
+      }
+    | {
+          reason: PreAggregateMissReason.DIMENSION_NOT_IN_PRE_AGGREGATE;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.METRIC_NOT_IN_PRE_AGGREGATE;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.NON_ADDITIVE_METRIC;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.CUSTOM_SQL_METRIC;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.FILTER_DIMENSION_NOT_IN_PRE_AGGREGATE;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.PRE_AGGREGATE_FILTER_NOT_SATISFIED;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.GRANULARITY_TOO_FINE;
+          fieldId: FieldId;
+          queryGranularity: TimeFrames;
+          preAggregateGranularity: TimeFrames;
+          preAggregateTimeDimension: string;
+      }
+    | {
+          reason: PreAggregateMissReason.CUSTOM_DIMENSION_PRESENT;
+      }
+    | {
+          reason: PreAggregateMissReason.CUSTOM_METRIC_PRESENT;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.TABLE_CALCULATION_PRESENT;
+          fieldId: FieldId;
+      }
+    | {
+          reason: PreAggregateMissReason.USER_BYPASS;
+          preAggregateName: string;
+      }
+    | {
+          reason: PreAggregateMissReason.EXPLORE_RESOLUTION_ERROR;
+      }
+    | {
+          reason: PreAggregateMissReason.NO_ACTIVE_MATERIALIZATION;
+      };
+
+export type PreAggregateCheckResult =
+    | {
+          hit: true;
+          preAggregateName: string;
+          preAggregateExploreName: string;
+      }
+    | {
+          hit: false;
+          reason: PreAggregateMatchMiss;
+      };
+
+export type PreAggregateDefinition = {
+    preAggregateDefinitionUuid: string;
+    projectUuid: string;
+    sourceCachedExploreUuid: string;
+    preAggCachedExploreUuid: string;
+    preAggregateDefinition: PreAggregateDef;
+    materializationMetricQuery: MaterializationMetricQueryPayload | null;
+    materializationQueryError: string | null;
+    refreshCron: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+};
+
+export type PreAggregateDefinitionWithExploreName = PreAggregateDefinition & {
+    preAggExploreName: string;
+};
+
+export type PreAggregateMaterialization = {
+    materializationUuid: string;
+    projectUuid: string;
+    preAggregateDefinitionUuid: string;
+    status: PreAggregateMaterializationStatus;
+    trigger: PreAggregateMaterializationTrigger;
+    queryUuid: string | null;
+    materializationUri: string | null;
+    materializedAt: Date | null;
+    rowCount: number | null;
+    columns: ResultColumns | null;
+    errorMessage: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+};
+
+export const preAggregateMissReasonLabels: Record<
+    PreAggregateMissReason,
+    string
+> = {
+    [PreAggregateMissReason.NO_PRE_AGGREGATES_DEFINED]:
+        'No pre-aggregates defined',
+    [PreAggregateMissReason.DIMENSION_NOT_IN_PRE_AGGREGATE]:
+        'Dimension not in pre-aggregate',
+    [PreAggregateMissReason.METRIC_NOT_IN_PRE_AGGREGATE]:
+        'Metric not in pre-aggregate',
+    [PreAggregateMissReason.NON_ADDITIVE_METRIC]: 'Non-additive metric',
+    [PreAggregateMissReason.CUSTOM_SQL_METRIC]: 'Custom SQL metric',
+    [PreAggregateMissReason.FILTER_DIMENSION_NOT_IN_PRE_AGGREGATE]:
+        'Filter dimension not in pre-aggregate',
+    [PreAggregateMissReason.PRE_AGGREGATE_FILTER_NOT_SATISFIED]:
+        'Pre-aggregate filter not satisfied',
+    [PreAggregateMissReason.GRANULARITY_TOO_FINE]: 'Granularity too fine',
+    [PreAggregateMissReason.CUSTOM_DIMENSION_PRESENT]:
+        'Custom dimension detected',
+    [PreAggregateMissReason.CUSTOM_METRIC_PRESENT]: 'Custom metric detected',
+    [PreAggregateMissReason.TABLE_CALCULATION_PRESENT]:
+        'SQL Table calculation detected',
+    [PreAggregateMissReason.USER_BYPASS]: 'Bypassed by user',
+    [PreAggregateMissReason.EXPLORE_RESOLUTION_ERROR]:
+        'Materialized explore not found',
+    [PreAggregateMissReason.NO_ACTIVE_MATERIALIZATION]:
+        'No active materialization',
+};
+
+export const PRE_AGGREGATE_ROW_COUNT_WARNING_THRESHOLD = 1_000_000;
+
+export type PreAggregateMaterializationWarning =
+    | {
+          type: 'row_count_exceeded';
+          message: string;
+          rowCount: number;
+          threshold: number;
+      }
+    | {
+          type: 'max_rows_applied';
+          message: string;
+          maxRows: number;
+      };
+
+export const computePreAggregateWarnings = (
+    materialization: {
+        rowCount: number | null;
+    } | null,
+    options: {
+        rowCountThreshold?: number;
+        materializationMaxRows?: number | null;
+    } = {},
+): PreAggregateMaterializationWarning[] => {
+    const {
+        rowCountThreshold = PRE_AGGREGATE_ROW_COUNT_WARNING_THRESHOLD,
+        materializationMaxRows = null,
+    } = options;
+    const warnings: PreAggregateMaterializationWarning[] = [];
+
+    const rowCount = materialization?.rowCount;
+    if (
+        materializationMaxRows != null &&
+        rowCount != null &&
+        rowCount >= materializationMaxRows
+    ) {
+        warnings.push({
+            type: 'max_rows_applied',
+            message: `This pre-aggregate was capped at ${materializationMaxRows.toLocaleString()} rows. Results may be incomplete.`,
+            maxRows: materializationMaxRows,
+        });
+    }
+
+    if (rowCount != null && rowCount > rowCountThreshold) {
+        warnings.push({
+            type: 'row_count_exceeded',
+            message: `This pre-aggregate has ${rowCount.toLocaleString()} rows, which exceeds the recommended threshold of ${rowCountThreshold.toLocaleString()} rows. Large pre-aggregates may take longer to build and consume more storage.`,
+            rowCount,
+            threshold: rowCountThreshold,
+        });
+    }
+
+    return warnings;
+};
+
+export type PreAggregateMaterializationSummary = {
+    preAggregateDefinitionUuid: string;
+    preAggregateName: string;
+    preAggExploreName: string;
+    sourceExploreName: string;
+    materializationRole: PreAggregateMaterializationRole | null;
+    dimensions: string[];
+    metrics: string[];
+    filters: MetricFilterRule[];
+    timeDimension: string | null;
+    granularity: TimeFrames | null;
+    refreshCron: string | null;
+    definitionError: string | null;
+    resolvedMaxRows: number | null;
+    warnings: PreAggregateMaterializationWarning[];
+    materialization: {
+        materializationUuid: string;
+        status: PreAggregateMaterializationStatus;
+        materializedAt: Date | null;
+        durationMs: number | null;
+        rowCount: number | null;
+        columns: ResultColumns | null;
+        totalBytes: number | null;
+        errorMessage: string | null;
+        trigger: PreAggregateMaterializationTrigger;
+    } | null;
+};
+
+export type ApiPreAggregateMaterializationsResults = {
+    materializations: PreAggregateMaterializationSummary[];
+};
+
+export type ApiGetPreAggregateMaterializationsResponse = {
+    status: 'ok';
+    results: KnexPaginatedData<ApiPreAggregateMaterializationsResults>;
+};
+
+export type PreAggregateSchedulerDetails = {
+    projectUuid: string;
+    organizationUuid: string;
+    createdByUserUuid: string | null;
+    schedulerTimezone: string;
+    preAggregateDefinitionUuid: string;
+    preAggExploreName: string;
+    refreshCron: string;
+};
+
+export type PreAggregateDailyStatResult = {
+    exploreName: string;
+    date: string;
+    chartUuid: string | null;
+    chartName: string | null;
+    dashboardUuid: string | null;
+    dashboardName: string | null;
+    queryContext: string;
+    hitCount: number;
+    missCount: number;
+    missReason: string | null;
+    preAggregateName: string | null;
+    updatedAt: string;
+};
+
+export type ApiPreAggregateStatsResults = {
+    stats: PreAggregateDailyStatResult[];
+};
+
+export type ApiGetPreAggregateStatsResponse = {
+    status: 'ok';
+    results: KnexPaginatedData<ApiPreAggregateStatsResults>;
+};
+
+export type ApiPreAggregateCheckResponse = {
+    status: 'ok';
+    results: PreAggregateCheckResult;
+};

@@ -40,10 +40,10 @@ import {
     useDeleteAccessToken,
     useRotateAccessToken,
 } from '../../../hooks/useAccessToken';
-import DocumentationHelpButton from '../../DocumentationHelpButton';
 import Callout from '../../common/Callout';
 import MantineIcon from '../../common/MantineIcon';
 import MantineModal from '../../common/MantineModal';
+import DocumentationHelpButton from '../../DocumentationHelpButton';
 import { useExpireOptions } from './useExpireOptions';
 
 const TokenItem: FC<{
@@ -58,7 +58,9 @@ const TokenItem: FC<{
         <>
             <Table.Tr>
                 <Table.Td>
-                    <Text fw={500}>{description}</Text>
+                    <Text fw={500} size="sm">
+                        {description}
+                    </Text>
                 </Table.Td>
                 <Table.Td>
                     <Group align="center" justify="flex-start" gap="xs">

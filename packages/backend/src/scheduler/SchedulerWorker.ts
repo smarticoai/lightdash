@@ -12,6 +12,7 @@ import {
     parseCronItems,
     run as runGraphileWorker,
     Runner,
+    type CronItem,
 } from 'graphile-worker';
 import moment from 'moment';
 import { DEFAULT_DB_MAX_CONNECTIONS } from '../knexfile';
@@ -70,53 +71,67 @@ export class SchedulerWorker extends SchedulerTask {
             logger: workerLogger,
             concurrency: this.lightdashConfig.scheduler.concurrency,
             noHandleSignals: true,
-            pollInterval: 1000,
+            pollInterval: this.lightdashConfig.scheduler.pollInterval,
             maxPoolSize,
-            parsedCronItems: parseCronItems([
-                {
-                    task: 'generateDailyJobs',
-                    pattern: '0 0 * * *',
-                    options: {
-                        backfillPeriod: 12 * 3600 * 1000, // 12 hours in ms
-                        maxAttempts: 3,
-                    },
-                },
-                {
-                    task: SCHEDULER_TASKS.CLEAN_QUERY_HISTORY,
-                    pattern:
-                        this.lightdashConfig.scheduler.queryHistory.cleanup
-                            .schedule,
-                    options: {
-                        backfillPeriod: 24 * 3600 * 1000, // 24 hours in ms
-                        maxAttempts: 3,
-                    },
-                },
-                {
-                    task: SCHEDULER_TASKS.GENERATE_SLACK_CHANNEL_SYNC_JOBS,
-                    pattern: '0 6 * * *', // 6am UTC daily
-                    options: {
-                        backfillPeriod: 24 * 3600 * 1000, // 24 hours in ms
-                        maxAttempts: 3,
-                    },
-                },
-                {
-                    task: SCHEDULER_TASKS.CHECK_FOR_STUCK_JOBS,
-                    pattern: '*/30 * * * *', // Every 30 minutes
-                    options: {
-                        backfillPeriod: 24 * 3600 * 1000, // 24 hours in ms
-                        maxAttempts: 3,
-                    },
-                },
-            ]),
+            parsedCronItems: parseCronItems(this.getCronItems()),
             taskList: traceTasks(this.getTaskList()),
             events: schedulerWorkerEventEmitter,
         });
 
         this.isRunning = true;
         // Don't await this! This promise will never resolve, as the worker will keep running until the process is killed
-        this.runner.promise.finally(() => {
+        void this.runner.promise.finally(() => {
             this.isRunning = false;
         });
+    }
+
+    protected getCronItems(): CronItem[] {
+        return [
+            {
+                task: 'generateDailyJobs',
+                pattern: '0 0 * * *',
+                options: {
+                    backfillPeriod: 12 * 3600 * 1000, // 12 hours in ms
+                    maxAttempts: 3,
+                },
+            },
+            {
+                task: SCHEDULER_TASKS.CLEAN_QUERY_HISTORY,
+                pattern:
+                    this.lightdashConfig.scheduler.queryHistory.cleanup
+                        .schedule,
+                options: {
+                    backfillPeriod: 24 * 3600 * 1000, // 24 hours in ms
+                    maxAttempts: 3,
+                },
+            },
+            {
+                task: SCHEDULER_TASKS.GENERATE_SLACK_CHANNEL_SYNC_JOBS,
+                pattern: '0 6 * * *', // 6am UTC daily
+                options: {
+                    backfillPeriod: 24 * 3600 * 1000, // 24 hours in ms
+                    maxAttempts: 3,
+                },
+            },
+            {
+                task: SCHEDULER_TASKS.CHECK_FOR_STUCK_JOBS,
+                pattern: '*/30 * * * *', // Every 30 minutes
+                options: {
+                    backfillPeriod: 24 * 3600 * 1000, // 24 hours in ms
+                    maxAttempts: 3,
+                },
+            },
+            {
+                task: SCHEDULER_TASKS.CLEAN_DEPLOY_SESSIONS,
+                pattern: '0 * * * *', // Every hour
+                options: {
+                    backfillPeriod: 2 * 3600 * 1000, // 2 hours in ms
+                    maxAttempts: 3,
+                },
+            },
+            // Managed agent heartbeat is self-scheduling (not a static cron).
+            // See SchedulerClient.scheduleManagedAgentHeartbeat().
+        ];
     }
 
     protected getTaskList(): Partial<TypedTaskList> {
@@ -147,7 +162,7 @@ export class SchedulerWorker extends SchedulerTask {
                                 scheduler.schedulerUuid,
                             );
                         const { organizationUuid, projectUuid } =
-                            await this.schedulerService.getCreateSchedulerResource(
+                            await this.schedulerService.getSchedulerProjectContext(
                                 scheduler,
                             );
 
@@ -198,6 +213,17 @@ export class SchedulerWorker extends SchedulerTask {
                         );
                     }
                 });
+
+                try {
+                    await this.generateDailyPreAggregateMaterializationJobs(
+                        currentDateStartOfDay,
+                    );
+                } catch (error) {
+                    Logger.error(
+                        'Failed to generate pre-aggregate daily materialization jobs',
+                        error,
+                    );
+                }
 
                 // Only throw if all schedulers failed
                 if (failed.length > 0 && successful.length === 0) {
@@ -308,6 +334,44 @@ export class SchedulerWorker extends SchedulerTask {
                             scheduledTime: job.run_at,
                             jobGroup: payload.jobGroup,
                             targetType: 'msteams',
+                            status: SchedulerJobStatus.ERROR,
+                            details: {
+                                error: getErrorMessage(e),
+                                projectUuid: payload.projectUuid,
+                                organizationUuid: payload.organizationUuid,
+                                createdByUserUuid: payload.userUuid,
+                            },
+                        });
+                    },
+                );
+            },
+            [SCHEDULER_TASKS.SEND_GOOGLE_CHAT_NOTIFICATION]: async (
+                payload,
+                helpers,
+            ) => {
+                await tryJobOrTimeout(
+                    SchedulerClient.processJob(
+                        SCHEDULER_TASKS.SEND_GOOGLE_CHAT_NOTIFICATION,
+                        helpers.job.id,
+                        helpers.job.run_at,
+                        payload,
+                        async () => {
+                            await this.sendGoogleChatNotification(
+                                helpers.job.id,
+                                payload,
+                            );
+                        },
+                    ),
+                    helpers.job,
+                    this.lightdashConfig.scheduler.jobTimeout,
+                    async (job, e) => {
+                        await this.schedulerService.logSchedulerJob({
+                            task: SCHEDULER_TASKS.SEND_GOOGLE_CHAT_NOTIFICATION,
+                            schedulerUuid: payload.schedulerUuid,
+                            jobId: job.id,
+                            scheduledTime: job.run_at,
+                            jobGroup: payload.jobGroup,
+                            targetType: 'googlechat',
                             status: SchedulerJobStatus.ERROR,
                             details: {
                                 error: getErrorMessage(e),
@@ -472,6 +536,44 @@ export class SchedulerWorker extends SchedulerTask {
                     },
                 );
             },
+            [SCHEDULER_TASKS.SEND_GOOGLE_CHAT_BATCH_NOTIFICATION]: async (
+                payload,
+                helpers,
+            ) => {
+                await tryJobOrTimeout(
+                    SchedulerClient.processJob(
+                        SCHEDULER_TASKS.SEND_GOOGLE_CHAT_BATCH_NOTIFICATION,
+                        helpers.job.id,
+                        helpers.job.run_at,
+                        payload,
+                        async () => {
+                            await this.sendGoogleChatBatchNotification(
+                                helpers.job.id,
+                                payload,
+                            );
+                        },
+                    ),
+                    helpers.job,
+                    this.lightdashConfig.scheduler.jobTimeout,
+                    async (job, e) => {
+                        await this.schedulerService.logSchedulerJob({
+                            task: SCHEDULER_TASKS.SEND_GOOGLE_CHAT_BATCH_NOTIFICATION,
+                            schedulerUuid: payload.schedulerUuid,
+                            jobId: job.id,
+                            scheduledTime: job.run_at,
+                            jobGroup: payload.jobGroup,
+                            targetType: 'googlechat',
+                            status: SchedulerJobStatus.ERROR,
+                            details: {
+                                error: getErrorMessage(e),
+                                projectUuid: payload.projectUuid,
+                                organizationUuid: payload.organizationUuid,
+                                createdByUserUuid: payload.userUuid,
+                            },
+                        });
+                    },
+                );
+            },
             [SCHEDULER_TASKS.UPLOAD_GSHEETS]: async (payload, helpers) => {
                 await tryJobOrTimeout(
                     SchedulerClient.processJob(
@@ -499,39 +601,6 @@ export class SchedulerWorker extends SchedulerTask {
                                 projectUuid: payload.projectUuid,
                                 organizationUuid: payload.organizationUuid,
                                 createdByUserUuid: payload.userUuid,
-                            },
-                        });
-                    },
-                );
-            },
-            [SCHEDULER_TASKS.DOWNLOAD_CSV]: async (payload, helpers) => {
-                await tryJobOrTimeout(
-                    SchedulerClient.processJob(
-                        SCHEDULER_TASKS.DOWNLOAD_CSV,
-                        helpers.job.id,
-                        helpers.job.run_at,
-                        payload,
-                        async () => {
-                            await this.downloadCsv(
-                                helpers.job.id,
-                                helpers.job.run_at,
-                                payload,
-                            );
-                        },
-                    ),
-                    helpers.job,
-                    this.lightdashConfig.scheduler.jobTimeout,
-                    async (job, e) => {
-                        await this.schedulerService.logSchedulerJob({
-                            task: SCHEDULER_TASKS.DOWNLOAD_CSV,
-                            jobId: job.id,
-                            scheduledTime: job.run_at,
-                            status: SchedulerJobStatus.ERROR,
-                            details: {
-                                createdByUserUuid: payload.userUuid,
-                                error: getErrorMessage(e),
-                                projectUuid: payload.projectUuid,
-                                organizationUuid: payload.organizationUuid,
                             },
                         });
                     },
@@ -603,6 +672,45 @@ export class SchedulerWorker extends SchedulerTask {
                             helpers.job.run_at,
                             payload,
                         );
+                    },
+                );
+            },
+            [SCHEDULER_TASKS.MATERIALIZE_PRE_AGGREGATE]: async (
+                payload,
+                helpers,
+            ) => {
+                await tryJobOrTimeout(
+                    SchedulerClient.processJob(
+                        SCHEDULER_TASKS.MATERIALIZE_PRE_AGGREGATE,
+                        helpers.job.id,
+                        helpers.job.run_at,
+                        payload,
+                        async () => {
+                            await this.materializePreAggregate(
+                                helpers.job.id,
+                                helpers.job.run_at,
+                                payload,
+                            );
+                        },
+                    ),
+                    helpers.job,
+                    this.lightdashConfig.scheduler.jobTimeout,
+                    async (job, e) => {
+                        await this.schedulerService.logSchedulerJob({
+                            task: SCHEDULER_TASKS.MATERIALIZE_PRE_AGGREGATE,
+                            jobId: job.id,
+                            scheduledTime: job.run_at,
+                            status: SchedulerJobStatus.ERROR,
+                            details: {
+                                createdByUserUuid: payload.userUuid,
+                                error: getErrorMessage(e),
+                                projectUuid: payload.projectUuid,
+                                organizationUuid: payload.organizationUuid,
+                                preAggregateDefinitionUuid:
+                                    payload.preAggregateDefinitionUuid,
+                                trigger: payload.trigger,
+                            },
+                        });
                     },
                 );
             },
@@ -884,6 +992,38 @@ export class SchedulerWorker extends SchedulerTask {
                     Logger.error('Error during query history cleanup:', error);
                     throw error;
                 }
+
+                // Also clean up pre-aggregate daily stats (3-day retention)
+                try {
+                    const preAggDeleted =
+                        await this.asyncQueryService.cleanupPreAggregateDailyStats(
+                            3,
+                        );
+                    Logger.info(
+                        `Pre-aggregate daily stats cleanup completed. Records deleted: ${preAggDeleted}`,
+                    );
+                } catch (error) {
+                    Logger.error(
+                        'Error during pre-aggregate daily stats cleanup:',
+                        error,
+                    );
+                    // Don't throw - this is secondary cleanup, don't fail the job
+                }
+            },
+            [SCHEDULER_TASKS.CLEAN_DEPLOY_SESSIONS]: async () => {
+                Logger.info('Starting deploy sessions cleanup job');
+
+                try {
+                    await this.deployService.cleanupOldSessions();
+
+                    Logger.info(`Deploy sessions cleanup completed.`);
+                } catch (error) {
+                    Logger.error(
+                        'Error during deploy sessions cleanup:',
+                        error,
+                    );
+                    throw error;
+                }
             },
             [SCHEDULER_TASKS.DOWNLOAD_ASYNC_QUERY_RESULTS]: async (
                 payload,
@@ -993,6 +1133,9 @@ export class SchedulerWorker extends SchedulerTask {
             },
             [SCHEDULER_TASKS.CHECK_FOR_STUCK_JOBS]: async () => {
                 await this.schedulerService.checkForStuckJobs();
+            },
+            [SCHEDULER_TASKS.MANAGED_AGENT_HEARTBEAT]: async () => {
+                // EE-only: implemented in CommercialSchedulerWorker
             },
         };
     }

@@ -15,6 +15,7 @@ import { type EChartsOption, type TreemapSeriesOption } from 'echarts';
 import { useMemo } from 'react';
 import { isTreemapVisualizationConfig } from '../../components/LightdashVisualization/types';
 import { useVisualizationContext } from '../../components/LightdashVisualization/useVisualizationContext';
+import { sanitizeEchartsFontFamily } from '../../utils/sanitizeEchartsFontFamily';
 
 const EchartsTreemapType = 'treemap';
 
@@ -25,6 +26,8 @@ const useEchartsTreemapConfig = (isInDashboard: boolean) => {
         colorPalette,
         parameters,
         isTouchDevice,
+        minimal,
+        resolvedTimezone,
     } = useVisualizationContext();
     const theme = useMantineTheme();
 
@@ -49,6 +52,7 @@ const useEchartsTreemapConfig = (isInDashboard: boolean) => {
                 value,
                 false,
                 parameters,
+                resolvedTimezone,
             );
         };
 
@@ -189,26 +193,36 @@ const useEchartsTreemapConfig = (isInDashboard: boolean) => {
             ],
             data: data || [],
         };
-    }, [chartConfig, theme, itemsMap, colorPalette, parameters]);
+    }, [
+        chartConfig,
+        theme,
+        itemsMap,
+        colorPalette,
+        parameters,
+        resolvedTimezone,
+    ]);
 
     const eChartsOption: EChartsOption | undefined = useMemo(() => {
         if (!chartConfig || !treemapSeriesOption) return;
 
         return {
             textStyle: {
-                fontFamily: theme?.other?.chartFont as string | undefined,
+                fontFamily: sanitizeEchartsFontFamily(
+                    theme?.other?.chartFont as string | undefined,
+                ),
             },
             tooltip: {
                 ...getTooltipStyle({ appendToBody: !isTouchDevice }),
                 trigger: 'item' as const, //Even though this is the default, tooltips will not show up if this is not set.
             },
             series: [treemapSeriesOption],
-            animation: !isInDashboard,
+            animation: !(isInDashboard || minimal),
         };
     }, [
         chartConfig,
         treemapSeriesOption,
         isInDashboard,
+        minimal,
         theme?.other?.chartFont,
         isTouchDevice,
     ]);

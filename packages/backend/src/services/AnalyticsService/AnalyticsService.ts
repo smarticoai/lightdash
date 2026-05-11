@@ -1,20 +1,16 @@
-import {
-    Account,
-    AnyType,
-    ApiDownloadCsv,
-    ForbiddenError,
-    isUserWithOrg,
-    SchedulerJobStatus,
-    SessionUser,
-    UnusedContent,
-    UserActivity,
-} from '@lightdash/common';
-
 import { subject } from '@casl/ability';
+import {
+    AnyType,
+    assertIsAccountWithOrg,
+    ForbiddenError,
+    NotFoundError,
+    SchedulerJobStatus,
+    UserActivity,
+    type Account,
+} from '@lightdash/common';
 import { stringify } from 'csv-stringify/sync';
 import { nanoid } from 'nanoid';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
-import { S3Client } from '../../clients/Aws/S3Client';
 import { AnalyticsModel } from '../../models/AnalyticsModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { BaseService } from '../BaseService';
@@ -50,19 +46,20 @@ export class AnalyticsService extends BaseService {
 
     async getUserActivity(
         projectUuid: string,
-        user: SessionUser,
+        account: Account,
     ): Promise<UserActivity> {
-        if (!isUserWithOrg(user)) {
-            throw new ForbiddenError('User is not part of an organization');
-        }
-        const { organizationUuid } = await this.projectModel.get(projectUuid);
+        assertIsAccountWithOrg(account);
+        const { organizationUuid, name: projectName } =
+            await this.projectModel.get(projectUuid);
 
+        const auditedAbility = this.createAuditedAbility(account);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'view',
                 subject('Analytics', {
                     organizationUuid,
                     projectUuid,
+                    metadata: { projectUuid, projectName },
                 }),
             )
         ) {
@@ -71,34 +68,35 @@ export class AnalyticsService extends BaseService {
 
         this.analytics.track({
             event: 'usage_analytics.dashboard_viewed',
-            userId: user.userUuid,
+            userId: account.user.id,
             properties: {
                 projectId: projectUuid,
-                organizationId: user.organizationUuid,
+                organizationId: account.organization.organizationUuid,
                 dashboardType: 'user_activity',
             },
         });
 
         return this.analyticsModel.getUserActivity(
             projectUuid,
-            user.organizationUuid,
+            account.organization.organizationUuid,
         );
     }
 
     async exportUserActivityRawCsv(
         projectUuid: string,
-        user: SessionUser,
+        account: Account,
     ): Promise<string> {
-        if (!isUserWithOrg(user)) {
-            throw new ForbiddenError('User is not part of an organization');
-        }
-        const { organizationUuid } = await this.projectModel.get(projectUuid);
+        assertIsAccountWithOrg(account);
+        const { organizationUuid, name: projectName } =
+            await this.projectModel.get(projectUuid);
+        const auditedAbility = this.createAuditedAbility(account);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'view',
                 subject('Analytics', {
                     organizationUuid,
                     projectUuid,
+                    metadata: { projectUuid, projectName },
                 }),
             )
         ) {
@@ -107,15 +105,19 @@ export class AnalyticsService extends BaseService {
 
         this.analytics.track({
             event: 'usage_analytics.csv_download',
-            userId: user.userUuid,
+            userId: account.user.id,
             properties: {
                 projectId: projectUuid,
-                organizationId: user.organizationUuid,
+                organizationId: account.organization.organizationUuid,
                 dashboardType: 'user_activity',
             },
         });
 
         const results = await this.analyticsModel.getViewsRawData(projectUuid);
+        if (results.length === 0) {
+            throw new NotFoundError('No user activity data found');
+        }
+
         const fileName = `lightdash raw usage analytics.csv`;
         const csvHeader = Object.keys(results[0]);
         const csvBody = stringify(results, {
@@ -128,38 +130,9 @@ export class AnalyticsService extends BaseService {
             csvContent: csvBody,
             fileName,
             projectUuid,
+            organizationUuid,
+            createdByUserUuid: account.user.id,
         });
         return upload.path;
-    }
-
-    async getUnusedContent(
-        projectUuid: string,
-        account: Account,
-    ): Promise<UnusedContent> {
-        const { organizationUuid } = await this.projectModel.get(projectUuid);
-
-        if (
-            account.user.ability.cannot(
-                'view',
-                subject('Analytics', {
-                    organizationUuid,
-                    projectUuid,
-                }),
-            )
-        ) {
-            throw new ForbiddenError();
-        }
-
-        this.analytics.track({
-            event: 'usage_analytics.dashboard_viewed',
-            userId: account.user.id,
-            properties: {
-                projectId: projectUuid,
-                organizationId: organizationUuid!,
-                dashboardType: 'user_activity',
-            },
-        });
-
-        return this.analyticsModel.getUnusedContent(projectUuid);
     }
 }

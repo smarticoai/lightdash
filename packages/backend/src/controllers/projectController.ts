@@ -12,28 +12,30 @@ import {
     ApiGetProjectGroupAccesses,
     ApiGetProjectMemberResponse,
     ApiProjectAccessListResponse,
+    ApiProjectColorPaletteResponse,
     ApiProjectResponse,
     ApiSpaceSummaryListResponse,
     ApiSqlChartAsCodeListResponse,
     ApiSqlChartAsCodeUpsertResponse,
     ApiSqlQueryResults,
     ApiSuccessEmpty,
-    AuthorizationError,
+    assertRegisteredAccount,
     CalculateTotalFromQuery,
     ChartAsCode,
     CreateProjectMember,
     DashboardAsCode,
     DbtExposure,
     DbtProjectEnvironmentVariable,
+    getRequestMethod,
+    isDuplicateDashboardParams,
     LightdashRequestMethodHeader,
     ParameterError,
     RequestMethod,
     SqlChartAsCode,
+    UpdateDefaultUserSpaces,
     UpdateMetadata,
     UpdateProjectMember,
     UserWarehouseCredentials,
-    getRequestMethod,
-    isDuplicateDashboardParams,
     type ApiCalculateSubtotalsResponse,
     type ApiCreateDashboardResponse,
     type ApiCreateDashboardWithChartsResponse,
@@ -42,13 +44,16 @@ import {
     type ApiGetTagsResponse,
     type ApiRefreshResults,
     type ApiSuccess,
+    type ApiTableGroupsResults,
     type ApiUpdateDashboardsResponse,
+    type ApiVerifiedContentListResponse,
     type CalculateSubtotalsFromQuery,
     type CreateDashboard,
     type CreateDashboardWithCharts,
     type DuplicateDashboardParams,
     type Tag,
     type UpdateMultipleDashboards,
+    type UpdateQueryTimezoneSettings,
     type UpdateSchedulerSettings,
 } from '@lightdash/common';
 import {
@@ -71,6 +76,7 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
+import { toSessionUser } from '../auth/account';
 import type { DbTagUpdate } from '../database/entities/tags';
 import {
     allowApiKeyAuthentication,
@@ -118,12 +124,13 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiChartListResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getProjectService()
-                .getCharts(req.user!, projectUuid),
+                .getCharts(toSessionUser(req.account), projectUuid),
         };
     }
 
@@ -144,13 +151,14 @@ export class ProjectController extends BaseController {
         @Request() req: express.Request,
         @Query() excludeChartsSavedInDashboard?: boolean,
     ): Promise<ApiChartSummaryListResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getProjectService()
                 .getChartSummaries(
-                    req.user!,
+                    toSessionUser(req.account),
                     projectUuid,
                     excludeChartsSavedInDashboard,
                 ),
@@ -171,15 +179,13 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSpaceSummaryListResponse> {
-        if (!req.user) {
-            throw new AuthorizationError('User session not found');
-        }
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getProjectService()
-                .getSpaces(req.user, projectUuid),
+                .getSpaces(toSessionUser(req.account), projectUuid),
         };
     }
 
@@ -197,10 +203,11 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiProjectAccessListResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         const results = await this.services
             .getProjectService()
-            .getProjectAccess(req.user!, projectUuid);
+            .getProjectAccess(toSessionUser(req.account), projectUuid);
         return {
             status: 'ok',
             results,
@@ -226,9 +233,14 @@ export class ProjectController extends BaseController {
         @Path() userUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiGetProjectMemberResponse> {
+        assertRegisteredAccount(req.account);
         const results = await this.services
             .getProjectService()
-            .getProjectMemberAccess(req.user!, projectUuid, userUuid);
+            .getProjectMemberAccess(
+                toSessionUser(req.account),
+                projectUuid,
+                userUuid,
+            );
         this.setStatus(200);
         return {
             status: 'ok',
@@ -254,10 +266,11 @@ export class ProjectController extends BaseController {
         @Body() body: CreateProjectMember,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         await this.services
             .getProjectService()
-            .createProjectAccess(req.user!, projectUuid, body);
+            .createProjectAccess(toSessionUser(req.account), projectUuid, body);
         return {
             status: 'ok',
             results: undefined,
@@ -284,10 +297,16 @@ export class ProjectController extends BaseController {
         @Body() body: UpdateProjectMember,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         await this.services
             .getProjectService()
-            .updateProjectAccess(req.user!, projectUuid, userUuid, body);
+            .updateProjectAccess(
+                toSessionUser(req.account),
+                projectUuid,
+                userUuid,
+                body,
+            );
         return {
             status: 'ok',
             results: undefined,
@@ -313,10 +332,15 @@ export class ProjectController extends BaseController {
         @Path() userUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         await this.services
             .getProjectService()
-            .deleteProjectAccess(req.user!, projectUuid, userUuid);
+            .deleteProjectAccess(
+                toSessionUser(req.account),
+                projectUuid,
+                userUuid,
+            );
         return {
             status: 'ok',
             results: undefined,
@@ -335,10 +359,11 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiGetProjectGroupAccesses> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         const results = await this.services
             .getProjectService()
-            .getProjectGroupAccesses(req.user!, projectUuid);
+            .getProjectGroupAccesses(toSessionUser(req.account), projectUuid);
         return {
             status: 'ok',
             results,
@@ -368,12 +393,13 @@ export class ProjectController extends BaseController {
         @Body() body: { sql: string },
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: ApiSqlQueryResults }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getProjectService()
-                .runSqlQuery(req.user!, projectUuid, body.sql),
+                .runSqlQuery(toSessionUser(req.account), projectUuid, body.sql),
         };
     }
 
@@ -395,7 +421,7 @@ export class ProjectController extends BaseController {
     ): Promise<ApiCalculateTotalResponse> {
         this.setStatus(200);
         const totalResult = await this.services
-            .getProjectService()
+            .getAsyncQueryService()
             .calculateTotalFromQuery(req.account!, projectUuid, body);
         return {
             status: 'ok',
@@ -418,7 +444,7 @@ export class ProjectController extends BaseController {
     ): Promise<ApiCalculateSubtotalsResponse> {
         this.setStatus(200);
         const subtotalsResult = await this.services
-            .getProjectService()
+            .getAsyncQueryService()
             .calculateSubtotalsFromQuery(req.account!, projectUuid, body);
         return {
             status: 'ok',
@@ -439,10 +465,11 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: Record<string, DbtExposure> }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         const exposures = await this.services
             .getProjectService()
-            .getDbtExposures(req.user!, projectUuid);
+            .getDbtExposures(toSessionUser(req.account), projectUuid);
         return {
             status: 'ok',
             results: exposures,
@@ -464,12 +491,44 @@ export class ProjectController extends BaseController {
         status: 'ok';
         results: UserWarehouseCredentials | undefined;
     }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getProjectService()
-                .getProjectCredentialsPreference(req.user!, projectUuid),
+                .getProjectCredentialsPreference(
+                    toSessionUser(req.account),
+                    projectUuid,
+                ),
+        };
+    }
+
+    /**
+     * Get user warehouse credentials available for a project
+     * @summary List project user warehouse credentials
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('{projectUuid}/user-warehouse-credentials')
+    @OperationId('getProjectUserWarehouseCredentials')
+    async getProjectUserWarehouseCredentials(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+    ): Promise<{
+        status: 'ok';
+        results: UserWarehouseCredentials[];
+    }> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getProjectService()
+                .getProjectUserWarehouseCredentials(
+                    toSessionUser(req.account),
+                    projectUuid,
+                ),
         };
     }
 
@@ -486,11 +545,12 @@ export class ProjectController extends BaseController {
         @Path() userWarehouseCredentialsUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         await this.services
             .getProjectService()
             .upsertProjectCredentialsPreference(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 userWarehouseCredentialsUuid,
             );
@@ -522,12 +582,13 @@ export class ProjectController extends BaseController {
             chartUrl: string;
         }[];
     }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getProjectService()
-                .getCustomMetrics(req.user!, projectUuid),
+                .getCustomMetrics(toSessionUser(req.account), projectUuid),
         };
     }
 
@@ -549,10 +610,136 @@ export class ProjectController extends BaseController {
         @Body() body: UpdateMetadata,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         await this.services
             .getProjectService()
-            .updateMetadata(req.user!, projectUuid, body);
+            .updateMetadata(toSessionUser(req.account), projectUuid, body);
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Toggle default user spaces for a project.
+     * When enabled, creates personal spaces for all eligible users.
+     * @summary Update default user spaces setting
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Patch('{projectUuid}/hasDefaultUserSpaces')
+    @OperationId('updateDefaultUserSpaces')
+    async updateDefaultUserSpaces(
+        @Path() projectUuid: string,
+        @Body() body: UpdateDefaultUserSpaces,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        await this.services
+            .getProjectService()
+            .updateDefaultUserSpaces(
+                toSessionUser(req.account),
+                projectUuid,
+                body,
+            );
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Get the resolved color palette for a project, walking the
+     * chart -> dashboard -> space -> project -> organization fallback chain
+     * (matches saved-chart resolution). The optional UUIDs let unsaved
+     * renderers (Explore, AI viz, sql runner) opt into deeper layers as
+     * they become available.
+     * @summary Get project color palette
+     */
+    /**
+     * Project-level table-group definitions (label & description for each
+     * group key referenced by models in their `meta.groups` array). Sourced
+     * from `table_groups` in lightdash.config.yml.
+     * @summary Get project table groups
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('{projectUuid}/table-groups')
+    @OperationId('getProjectTableGroups')
+    async getProjectTableGroups(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccess<ApiTableGroupsResults>> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        const tableGroups = await this.services
+            .getProjectService()
+            .getTableGroups(req.account, projectUuid);
+        return {
+            status: 'ok',
+            results: tableGroups,
+        };
+    }
+
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('{projectUuid}/colorPalette')
+    @OperationId('getProjectColorPalette')
+    async getProjectColorPalette(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+        @Query() spaceUuid?: string,
+        @Query() dashboardUuid?: string,
+        @Query() chartUuid?: string,
+    ): Promise<ApiProjectColorPaletteResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        const palette = await this.services
+            .getProjectService()
+            .getResolvedColorPalette(toSessionUser(req.account), projectUuid, {
+                spaceUuid,
+                dashboardUuid,
+                chartUuid,
+            });
+        return {
+            status: 'ok',
+            results: palette,
+        };
+    }
+
+    /**
+     * Set the project's color palette to one of its organization's palettes,
+     * or null to inherit from the organization's active palette.
+     * @summary Update project color palette
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Patch('{projectUuid}/colorPalette')
+    @OperationId('updateProjectColorPalette')
+    async updateProjectColorPalette(
+        @Path() projectUuid: string,
+        @Body() body: { colorPaletteUuid: string | null },
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        await this.services
+            .getProjectService()
+            .updateColorPalette(
+                toSessionUser(req.account),
+                projectUuid,
+                body.colorPaletteUuid,
+            );
         return {
             status: 'ok',
             results: undefined,
@@ -571,6 +758,7 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiGetDashboardsResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const chartUuid: string | undefined =
@@ -582,7 +770,12 @@ export class ProjectController extends BaseController {
 
         const results = await this.services
             .getDashboardService()
-            .getAllByProject(req.user!, projectUuid, chartUuid, includePrivate);
+            .getAllByProject(
+                toSessionUser(req.account),
+                projectUuid,
+                chartUuid,
+                includePrivate,
+            );
 
         return {
             status: 'ok',
@@ -608,6 +801,7 @@ export class ProjectController extends BaseController {
         @Request() req: express.Request,
         @Query() duplicateFrom?: string,
     ): Promise<ApiCreateDashboardResponse> {
+        assertRegisteredAccount(req.account);
         const dashboardService = this.services.getDashboardService();
         this.setStatus(201);
 
@@ -621,7 +815,7 @@ export class ProjectController extends BaseController {
             }
 
             results = await dashboardService.duplicate(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 duplicateFrom.toString(),
                 body,
@@ -634,7 +828,7 @@ export class ProjectController extends BaseController {
             }
 
             results = await dashboardService.create(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 body,
             );
@@ -663,11 +857,12 @@ export class ProjectController extends BaseController {
         @Body() body: CreateDashboardWithCharts,
         @Request() req: express.Request,
     ): Promise<ApiCreateDashboardWithChartsResponse> {
+        assertRegisteredAccount(req.account);
         const dashboardService = this.services.getDashboardService();
         this.setStatus(201);
 
         const results = await dashboardService.createDashboardWithCharts(
-            req.user!,
+            toSessionUser(req.account),
             projectUuid,
             body,
         );
@@ -695,11 +890,12 @@ export class ProjectController extends BaseController {
         @Body() body: UpdateMultipleDashboards[],
         @Request() req: express.Request,
     ): Promise<ApiUpdateDashboardsResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getDashboardService()
-            .updateMultiple(req.user!, projectUuid, body);
+            .updateMultiple(toSessionUser(req.account), projectUuid, body);
 
         return {
             status: 'ok',
@@ -734,11 +930,17 @@ export class ProjectController extends BaseController {
         },
         @Request() req: express.Request,
     ): Promise<{ status: 'ok'; results: ApiCreatePreviewResults }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getProjectService()
-            .createPreview(req.user!, projectUuid, body, RequestMethod.WEB_APP);
+            .createPreview(
+                toSessionUser(req.account),
+                projectUuid,
+                body,
+                RequestMethod.WEB_APP,
+            );
 
         return {
             status: 'ok',
@@ -763,17 +965,18 @@ export class ProjectController extends BaseController {
         @Body() body: UpdateSchedulerSettings,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const { schedulerTimezone: oldDefaultProjectTimezone } =
             await this.services
                 .getProjectService()
-                .getProject(projectUuid, req.account!);
+                .getProject(projectUuid, req.account);
 
         await this.services
             .getProjectService()
             .updateDefaultSchedulerTimezone(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 body.schedulerTimezone,
             );
@@ -781,22 +984,60 @@ export class ProjectController extends BaseController {
         try {
             await this.services
                 .getSchedulerService()
-                .updateSchedulersWithDefaultTimezone(req.user!, projectUuid, {
-                    oldDefaultProjectTimezone,
-                    newDefaultProjectTimezone: body.schedulerTimezone,
-                });
+                .updateSchedulersWithDefaultTimezone(
+                    toSessionUser(req.account),
+                    projectUuid,
+                    {
+                        oldDefaultProjectTimezone,
+                        newDefaultProjectTimezone: body.schedulerTimezone,
+                    },
+                );
         } catch (e) {
             // reset the old timezone when it fails to set the hours
             await this.services
                 .getProjectService()
                 .updateDefaultSchedulerTimezone(
-                    req.user!,
+                    toSessionUser(req.account),
                     projectUuid,
                     oldDefaultProjectTimezone,
                 );
 
             throw e;
         }
+
+        return {
+            status: 'ok',
+            results: undefined,
+        };
+    }
+
+    /**
+     * Update query timezone settings for a project
+     * @summary Update query timezone settings
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Updated')
+    @Patch('{projectUuid}/queryTimezoneSettings')
+    @OperationId('updateQueryTimezoneSettings')
+    async updateQueryTimezoneSettings(
+        @Path() projectUuid: string,
+        @Body() body: UpdateQueryTimezoneSettings,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+
+        await this.services
+            .getProjectService()
+            .updateQueryTimezone(
+                toSessionUser(req.account),
+                projectUuid,
+                body.queryTimezone,
+            );
 
         return {
             status: 'ok',
@@ -821,9 +1062,10 @@ export class ProjectController extends BaseController {
         @Body() body: Pick<Tag, 'name' | 'color'>,
         @Request() req: express.Request,
     ): Promise<ApiCreateTagResponse> {
+        assertRegisteredAccount(req.account);
         const { tagUuid } = await this.services
             .getProjectService()
-            .createTag(req.user!, {
+            .createTag(toSessionUser(req.account), {
                 ...body,
                 projectUuid,
             });
@@ -852,7 +1094,10 @@ export class ProjectController extends BaseController {
         @Path() tagUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
-        await this.services.getProjectService().deleteTag(req.user!, tagUuid);
+        assertRegisteredAccount(req.account);
+        await this.services
+            .getProjectService()
+            .deleteTag(toSessionUser(req.account), tagUuid);
 
         this.setStatus(200);
 
@@ -879,9 +1124,10 @@ export class ProjectController extends BaseController {
         @Body() body: DbTagUpdate,
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getProjectService()
-            .updateTag(req.user!, tagUuid, body);
+            .updateTag(toSessionUser(req.account), tagUuid, body);
 
         this.setStatus(200);
 
@@ -907,9 +1153,10 @@ export class ProjectController extends BaseController {
         })[],
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getProjectService()
-            .replaceYamlTags(req.user!, projectUuid, body);
+            .replaceYamlTags(toSessionUser(req.account), projectUuid, body);
 
         return {
             status: 'ok',
@@ -933,11 +1180,12 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiGetTagsResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
 
         const results = await this.services
             .getProjectService()
-            .getTags(req.user!, projectUuid);
+            .getTags(toSessionUser(req.account), projectUuid);
 
         return {
             status: 'ok',
@@ -960,12 +1208,19 @@ export class ProjectController extends BaseController {
         @Query() offset?: number,
         @Query() languageMap?: boolean,
     ): Promise<ApiChartAsCodeListResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getCoderService()
-                .getCharts(req.user!, projectUuid, ids, offset, languageMap),
+                .getCharts(
+                    toSessionUser(req.account),
+                    projectUuid,
+                    ids,
+                    offset,
+                    languageMap,
+                ),
         };
     }
 
@@ -984,13 +1239,14 @@ export class ProjectController extends BaseController {
         @Query() offset?: number,
         @Query() languageMap?: boolean,
     ): Promise<ApiDashboardAsCodeListResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getCoderService()
                 .getDashboards(
-                    req.user!,
+                    toSessionUser(req.account),
                     projectUuid,
                     ids,
                     offset,
@@ -1014,16 +1270,19 @@ export class ProjectController extends BaseController {
         chart: Omit<ChartAsCode, 'chartConfig' | 'description'> & {
             skipSpaceCreate?: boolean;
             publicSpaceCreate?: boolean;
+            force?: boolean;
+            spaceNames?: Record<string, string>;
             chartConfig: AnyType;
             description?: string | null; // Allow both undefined and null
         },
         @Request() req: express.Request,
     ): Promise<ApiChartAsCodeUpsertResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services.getCoderService().upsertChart(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 slug,
                 {
@@ -1032,6 +1291,8 @@ export class ProjectController extends BaseController {
                 },
                 chart.skipSpaceCreate,
                 chart.publicSpaceCreate,
+                chart.force,
+                chart.spaceNames,
             ),
         };
     }
@@ -1050,12 +1311,18 @@ export class ProjectController extends BaseController {
         @Query() ids?: string[],
         @Query() offset?: number,
     ): Promise<ApiSqlChartAsCodeListResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getCoderService()
-                .getSqlCharts(req.user!, projectUuid, ids, offset),
+                .getSqlCharts(
+                    toSessionUser(req.account),
+                    projectUuid,
+                    ids,
+                    offset,
+                ),
         };
     }
 
@@ -1074,16 +1341,19 @@ export class ProjectController extends BaseController {
         sqlChart: Omit<SqlChartAsCode, 'config' | 'description'> & {
             skipSpaceCreate?: boolean;
             publicSpaceCreate?: boolean;
+            force?: boolean;
+            spaceNames?: Record<string, string>;
             config: AnyType;
             description?: string | null;
         },
         @Request() req: express.Request,
     ): Promise<ApiSqlChartAsCodeUpsertResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services.getCoderService().upsertSqlChart(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 slug,
                 {
@@ -1092,6 +1362,8 @@ export class ProjectController extends BaseController {
                 },
                 sqlChart.skipSpaceCreate,
                 sqlChart.publicSpaceCreate,
+                sqlChart.force,
+                sqlChart.spaceNames,
             ),
         };
     }
@@ -1111,16 +1383,19 @@ export class ProjectController extends BaseController {
         dashboard: Omit<DashboardAsCode, 'tiles' | 'description'> & {
             skipSpaceCreate?: boolean;
             publicSpaceCreate?: boolean;
+            force?: boolean;
+            spaceNames?: Record<string, string>;
             tiles: AnyType;
             description?: string | null; // Allow both undefined and null
         }, // Simplify filter type for tsoa
         @Request() req: express.Request,
     ): Promise<ApiDashboardAsCodeUpsertResponse> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services.getCoderService().upsertDashboard(
-                req.user!,
+                toSessionUser(req.account),
                 projectUuid,
                 slug,
                 {
@@ -1129,6 +1404,8 @@ export class ProjectController extends BaseController {
                 },
                 dashboard.skipSpaceCreate,
                 dashboard.publicSpaceCreate,
+                dashboard.force,
+                dashboard.spaceNames,
             ),
         };
     }
@@ -1179,16 +1456,102 @@ export class ProjectController extends BaseController {
         @Path() projectUuid: string,
         @Request() req: express.Request,
     ): Promise<ApiSuccess<ApiRefreshResults>> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         const context = getRequestMethod(
             req.header(LightdashRequestMethodHeader),
         );
         const results = await this.services
             .getProjectService()
-            .scheduleCompileProject(req.user!, projectUuid, context);
+            .scheduleCompileProject(
+                toSessionUser(req.account),
+                projectUuid,
+                context,
+            );
         return {
             status: 'ok',
             results,
+        };
+    }
+
+    /**
+     * Refresh all pre-aggregates in a project
+     * @summary Refresh project pre-aggregates
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post('{projectUuid}/pre-aggregates/refresh')
+    @OperationId('refreshProjectPreAggregates')
+    async refreshPreAggregates(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccess<{ jobIds: string[] }>> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getProjectService()
+                .refreshPreAggregates(toSessionUser(req.account), projectUuid),
+        };
+    }
+
+    /**
+     * Refresh a single pre-aggregate by its definition name
+     * @summary Refresh pre-aggregate by definition name
+     */
+    @Middlewares([
+        allowApiKeyAuthentication,
+        isAuthenticated,
+        unauthorisedInDemo,
+    ])
+    @SuccessResponse('200', 'Success')
+    @Post(
+        '{projectUuid}/pre-aggregates/definitions/{preAggregateDefinitionName}/refresh',
+    )
+    @OperationId('refreshProjectPreAggregateByDefinitionName')
+    async refreshPreAggregateByDefinitionName(
+        @Path() projectUuid: string,
+        @Path() preAggregateDefinitionName: string,
+        @Request() req: express.Request,
+    ): Promise<ApiSuccess<{ jobIds: string[] }>> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getProjectService()
+                .refreshPreAggregateByDefinitionName(
+                    toSessionUser(req.account),
+                    projectUuid,
+                    preAggregateDefinitionName,
+                ),
+        };
+    }
+
+    /**
+     * List all verified content (charts and dashboards) in a project
+     * @summary List verified content
+     */
+    @Middlewares([allowApiKeyAuthentication, isAuthenticated])
+    @SuccessResponse('200', 'Success')
+    @Get('{projectUuid}/content-verification')
+    @OperationId('listVerifiedContent')
+    async listVerifiedContent(
+        @Path() projectUuid: string,
+        @Request() req: express.Request,
+    ): Promise<ApiVerifiedContentListResponse> {
+        assertRegisteredAccount(req.account);
+        this.setStatus(200);
+        return {
+            status: 'ok',
+            results: await this.services
+                .getContentVerificationService()
+                .listVerifiedContent(toSessionUser(req.account), projectUuid),
         };
     }
 }

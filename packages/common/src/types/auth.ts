@@ -11,6 +11,7 @@ import {
     type IntrinsicUserAttributes,
     type LightdashSessionUser,
     type LightdashUser,
+    type SessionUser,
 } from './user';
 import { type UserAttributeValueMap } from './userAttributes';
 
@@ -46,6 +47,8 @@ export type JwtAuth = {
 export type ServiceAccountAuth = {
     type: 'service-account';
     source: string; // The service account token
+    serviceAccountUuid: string;
+    serviceAccountDescription: string;
 };
 
 export type OauthAuth = {
@@ -130,12 +133,23 @@ export type AccountOrganization = Partial<
 >;
 
 /**
+ * Per-request metadata captured by the auth middleware. Used by the audit log
+ * to record the IP, user agent and request id alongside permission checks.
+ */
+export type AccountRequestContext = {
+    ip?: string;
+    userAgent?: string;
+    requestId?: string;
+};
+
+/**
  * Base account interface that all account types extend
  */
 export type BaseAccount = {
     organization: AccountOrganization;
     authentication: Authentication;
     user: AccountUser;
+    requestContext?: AccountRequestContext;
 };
 
 type BaseAccountWithHelpers = BaseAccount & AccountHelpers;
@@ -182,6 +196,8 @@ export type Account =
     | ServiceAcctAccount
     | OauthAccount;
 
+export type RegisteredAccount = Exclude<Account, AnonymousAccount>;
+
 export type AccountWithoutHelpers<T extends Account> = Omit<
     T,
     keyof AccountHelpers
@@ -205,6 +221,23 @@ export function assertSessionAuth(
             `${account?.authentication.type} Account is not session auth`,
         );
     }
+}
+
+export function assertRegisteredAccount(
+    account: Account | undefined,
+): asserts account is RegisteredAccount {
+    if (!account) {
+        throw new ForbiddenError('Account is required');
+    }
+    if (account.user.type !== 'registered') {
+        throw new ForbiddenError('Account is not a registered user');
+    }
+}
+
+export function isAccount(
+    accountOrUser: Account | SessionUser,
+): accountOrUser is Account {
+    return 'authentication' in accountOrUser;
 }
 
 export function isJwtUser(account?: Account): account is AnonymousAccount {

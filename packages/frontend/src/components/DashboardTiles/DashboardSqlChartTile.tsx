@@ -6,7 +6,7 @@ import {
     isVizTableConfig,
     type DashboardSqlChartTile,
 } from '@lightdash/common';
-import { Box, Menu } from '@mantine/core';
+import { Box, Menu } from '@mantine-8/core';
 import {
     IconAlertCircle,
     IconFilePencil,
@@ -29,19 +29,19 @@ import { useSqlChartTileCaptureSnapshot } from '../../hooks/dashboard/SMRuseTile
 import useSearchParams from '../../hooks/useSearchParams';
 import useApp from '../../providers/App/useApp';
 import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
-import ChartView from '../DataViz/visualizations/ChartView';
-import { Table } from '../DataViz/visualizations/Table';
+import useDashboardTileStatusContext from '../../providers/Dashboard/useDashboardTileStatusContext';
 import LinkMenuItem from '../common/LinkMenuItem';
 import MantineIcon from '../common/MantineIcon';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
+import ChartView from '../DataViz/visualizations/ChartView';
+import { Table } from '../DataViz/visualizations/Table';
 import ExportDataModal from './ExportDataModal';
 import TileBase from './TileBase';
 
-interface Props
-    extends Pick<
-        React.ComponentProps<typeof TileBase>,
-        'tile' | 'onEdit' | 'onDelete' | 'isEditMode'
-    > {
+interface Props extends Pick<
+    React.ComponentProps<typeof TileBase>,
+    'tile' | 'onEdit' | 'onDelete' | 'isEditMode'
+> {
     tile: DashboardSqlChartTile;
     minimal?: boolean;
 }
@@ -62,7 +62,7 @@ const DashboardOptions = memo(
         slug: string;
     }) => (
         <LinkMenuItem
-            icon={<MantineIcon icon={IconFilePencil} />}
+            leftSection={<MantineIcon icon={IconFilePencil} />}
             href={`/projects/${projectUuid}/sql-runner/${slug}/edit`}
             disabled={isEditMode}
             target="_blank"
@@ -88,14 +88,14 @@ const SqlChartTile: FC<Props> = ({ tile, isEditMode, ...rest }) => {
             projectUuid,
         }),
     );
-    const updateSqlChartTilesMetadata = useDashboardContext(
+    const updateSqlChartTilesMetadata = useDashboardTileStatusContext(
         (c) => c.updateSqlChartTilesMetadata,
     );
     const parameters = useDashboardContext((c) => c.parameterValues);
-    const markTileScreenshotReady = useDashboardContext(
+    const markTileScreenshotReady = useDashboardTileStatusContext(
         (c) => c.markTileScreenshotReady,
     );
-    const markTileScreenshotErrored = useDashboardContext(
+    const markTileScreenshotErrored = useDashboardTileStatusContext(
         (c) => c.markTileScreenshotErrored,
     );
     const dashboardFilters = useDashboardFiltersForTile(tile.uuid);
@@ -258,7 +258,7 @@ const SqlChartTile: FC<Props> = ({ tile, isEditMode, ...rest }) => {
                         title={tile.properties.chartName}
                         description={
                             chartResultsError?.error?.message ||
-                            'No data available'
+                            'Error running query'
                         }
                     />
                 )}
@@ -289,7 +289,7 @@ const SqlChartTile: FC<Props> = ({ tile, isEditMode, ...rest }) => {
                             />
                         )}
                         <Menu.Item
-                            icon={<MantineIcon icon={IconTableExport} />}
+                            leftSection={<MantineIcon icon={IconTableExport} />}
                             disabled={isEditMode}
                             onClick={() => setIsDataExportModalOpen(true)}
                         >

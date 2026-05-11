@@ -1,30 +1,40 @@
 import {
     AlreadyExistsError,
     AnyType,
+    AthenaAuthenticationType,
     BigqueryAuthenticationType,
     ChangesetUtils,
     CompiledTable,
     CreateProject,
     CreateProjectOptionalCredentials,
     CreateSnowflakeCredentials,
+    createVirtualView,
     CreateVirtualViewPayload,
     CreateWarehouseCredentials,
     DbtProjectConfig,
+    DEFAULT_USER_SPACES_PARENT_NAME,
     Explore,
     ExploreError,
     ExploreType,
+    getLtreePathFromSlug,
+    GroupType,
     IdContentMapping,
+    isExploreError,
     NotFoundError,
     OrganizationProject,
     ParameterError,
     PreviewContentMapping,
     Project,
+    ProjectDefaults,
     ProjectGroupAccess,
     ProjectMemberProfile,
     ProjectMemberRole,
     ProjectSummary,
     ProjectType,
+    sensitiveCredentialsFieldNames,
+    sensitiveDbtCredentialsFieldNames,
     SnowflakeAuthenticationType,
+    SpaceMemberRole,
     SpaceSummary,
     SupportedDbtVersions,
     TablesConfiguration,
@@ -35,11 +45,6 @@ import {
     WarehouseClient,
     WarehouseCredentials,
     WarehouseTypes,
-    createVirtualView,
-    getLtreePathFromSlug,
-    isExploreError,
-    sensitiveCredentialsFieldNames,
-    sensitiveDbtCredentialsFieldNames,
     type SummaryExplore,
 } from '@lightdash/common';
 import {
@@ -52,6 +57,7 @@ import { DatabaseError } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { LightdashConfig } from '../../config/parseConfig';
 import {
+    DashboardsTableName,
     DashboardTabsTableName,
     DashboardViewsTableName,
     DbDashboard,
@@ -70,8 +76,8 @@ import {
     ProjectMembershipsTableName,
 } from '../../database/entities/projectMemberships';
 import {
-    CachedExploreTableName,
     CachedExploresTableName,
+    CachedExploreTableName,
     CachedWarehouseTableName,
     DbCachedWarehouse,
     DbProject,
@@ -82,10 +88,19 @@ import {
     DbSavedChart,
     InsertChart,
     SavedChartCustomSqlDimensionsTableName,
+    SavedChartsTableName,
 } from '../../database/entities/savedCharts';
-import { DbSavedSql, InsertSql } from '../../database/entities/savedSql';
-import { DbSpace, SpaceTableName } from '../../database/entities/spaces';
-import { DbUser } from '../../database/entities/users';
+import {
+    DbSavedSql,
+    InsertSql,
+    SavedSqlTableName,
+} from '../../database/entities/savedSql';
+import {
+    DbSpace,
+    SpaceTableName,
+    SpaceUserAccessTableName,
+} from '../../database/entities/spaces';
+import { DbUser, UserTableName } from '../../database/entities/users';
 import { WarehouseCredentialTableName } from '../../database/entities/warehouseCredentials';
 import {
     AiAgentGroupAccessTableName,
@@ -101,7 +116,6 @@ import { wrapSentryTransaction, wrapSentryTransactionSync } from '../../utils';
 import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
 import { generateUniqueSpaceSlug } from '../../utils/SlugUtils';
 import { ChangesetModel } from '../ChangesetModel';
-import { ExploreCache } from './ExploreCache';
 import Transaction = Knex.Transaction;
 
 export type ProjectModelArguments = {
@@ -122,12 +136,31 @@ const warehouseCredentialsCache =
           })
         : undefined;
 
+const INSERT_BATCH_SIZE = 1000;
+
+async function chunkedInsertReturning<T extends Record<string, unknown>>(
+    trx: Transaction,
+    tableName: string,
+    rows: Record<string, unknown>[],
+): Promise<T[]> {
+    const results: T[] = [];
+    for (let i = 0; i < rows.length; i += INSERT_BATCH_SIZE) {
+        const batch = rows.slice(i, i + INSERT_BATCH_SIZE);
+        // eslint-disable-next-line no-await-in-loop -- chunked inserts must run sequentially to bound payload size
+        const inserted = await trx(tableName).insert(batch).returning('*');
+        results.push(...(inserted as T[]));
+    }
+    return results;
+}
+
 type RawSummaryRow = {
     name: Explore['name'];
     label: Explore['label'];
     tags: Explore['tags'];
     groupLabel: Explore['groupLabel'] | null;
+    groups: Explore['groups'] | null;
     type: Explore['type'] | null;
+    preAggregateSource: Explore['preAggregateSource'] | null;
     errors: ExploreError['errors'] | null; // Fatal errors from ExploreError
     warnings: Explore['warnings'] | null; // Non-fatal warnings from partial compilation
     baseTable: Explore['baseTable'];
@@ -137,6 +170,7 @@ type RawSummaryRow = {
     baseTableRequiredAttributes:
         | Explore['tables'][string]['requiredAttributes']
         | null;
+    baseTableAnyAttributes: Explore['tables'][string]['anyAttributes'] | null;
     aiHint: Explore['aiHint'] | null;
 };
 
@@ -149,14 +183,11 @@ export class ProjectModel {
 
     private encryptionUtil: EncryptionUtil;
 
-    private readonly exploreCache: ExploreCache;
-
     constructor(args: ProjectModelArguments) {
         this.database = args.database;
         this.lightdashConfig = args.lightdashConfig;
         this.changesetModel = args.changesetModel;
         this.encryptionUtil = args.encryptionUtil;
-        this.exploreCache = new ExploreCache();
     }
 
     static mergeMissingDbtConfigSecrets(
@@ -192,7 +223,11 @@ export class ProjectModel {
             // BigQuery ADC authentication does not require credentials to be set
             (incompleteConfig.type === WarehouseTypes.BIGQUERY &&
                 incompleteConfig.authenticationType ===
-                    BigqueryAuthenticationType.ADC)
+                    BigqueryAuthenticationType.ADC) ||
+            // Athena IAM role authentication should not merge old access keys
+            (incompleteConfig.type === WarehouseTypes.ATHENA &&
+                incompleteConfig.authenticationType ===
+                    AthenaAuthenticationType.IAM_ROLE)
         ) {
             return incompleteConfig;
         }
@@ -315,6 +350,11 @@ export class ProjectModel {
                 'projects.project_id',
                 `${WarehouseCredentialTableName}.project_id`,
             )
+            .leftJoin(
+                'users',
+                'projects.created_by_user_uuid',
+                'users.user_uuid',
+            )
             .select(
                 'projects.project_uuid',
                 'projects.name',
@@ -323,6 +363,9 @@ export class ProjectModel {
                 `projects.copied_from_project_uuid`,
                 `projects.created_by_user_uuid`,
                 `${WarehouseCredentialTableName}.warehouse_type`,
+                this.database.raw(
+                    "TRIM(CONCAT(users.first_name, ' ', users.last_name)) as created_by_user_name",
+                ),
                 this.database.raw(
                     '(agg_project_group_access_counts.member_count + agg_project_membership_counts.member_count) as member_count',
                 ),
@@ -356,6 +399,7 @@ export class ProjectModel {
                 project_type,
                 created_at,
                 created_by_user_uuid,
+                created_by_user_name,
                 copied_from_project_uuid,
                 warehouse_type,
             }) => ({
@@ -363,6 +407,7 @@ export class ProjectModel {
                 projectUuid: project_uuid,
                 type: project_type,
                 createdByUserUuid: created_by_user_uuid,
+                createdByUserName: created_by_user_name ?? null,
                 createdAt: created_at,
                 upstreamProjectUuid: copied_from_project_uuid,
                 warehouseType:
@@ -407,6 +452,14 @@ export class ProjectModel {
     async getDefaultProjectUuids(): Promise<string[]> {
         const projects = await this.database('projects')
             .where('project_type', ProjectType.DEFAULT)
+            .select('project_uuid');
+        return projects.map((project) => project.project_uuid);
+    }
+
+    async getDefaultProjectUuidsByName(name: string): Promise<string[]> {
+        const projects = await this.database('projects')
+            .where('project_type', ProjectType.DEFAULT)
+            .where('name', name)
             .select('project_uuid');
         return projects.map((project) => project.project_uuid);
     }
@@ -480,6 +533,7 @@ export class ProjectModel {
                         ? {
                               scheduler_timezone:
                                   copiedProjects[0].scheduler_timezone,
+                              query_timezone: copiedProjects[0].query_timezone,
                           }
                         : {}),
                     created_by_user_uuid: userUuid,
@@ -510,16 +564,61 @@ export class ProjectModel {
                 await trx(SpaceTableName).insert({
                     project_id: project.project_id,
                     name: 'Shared',
-                    is_private: false,
                     slug,
                     parent_space_uuid: null,
                     path,
                     inherit_parent_permissions: true,
+                    is_default_user_space: false,
                 });
             }
 
             return project.project_uuid;
         });
+    }
+
+    async updateProjectDefaults(
+        projectUuid: string,
+        projectDefaults: ProjectDefaults,
+    ): Promise<void> {
+        await this.database('projects')
+            .update({
+                project_defaults: projectDefaults,
+            })
+            .where('project_uuid', projectUuid);
+    }
+
+    async updateColorPalette(
+        projectUuid: string,
+        colorPaletteUuid: string | null,
+    ): Promise<void> {
+        await this.database('projects')
+            .update({
+                color_palette_uuid: colorPaletteUuid,
+            })
+            .where('project_uuid', projectUuid);
+    }
+
+    async getTableGroups(
+        projectUuid: string,
+    ): Promise<Record<string, GroupType>> {
+        const [row] = await this.database(ProjectTableName)
+            .select('table_groups')
+            .where('project_uuid', projectUuid);
+        return row?.table_groups ?? {};
+    }
+
+    async setTableGroups(
+        projectUuid: string,
+        tableGroups: Record<string, GroupType> | undefined,
+    ): Promise<void> {
+        await this.database(ProjectTableName)
+            .update({
+                table_groups:
+                    tableGroups && Object.keys(tableGroups).length > 0
+                        ? tableGroups
+                        : null,
+            })
+            .where('project_uuid', projectUuid);
     }
 
     async update(projectUuid: string, data: UpdateProject): Promise<void> {
@@ -544,6 +643,7 @@ export class ProjectModel {
                     dbt_version: data.dbtVersion,
                     organization_warehouse_credentials_uuid:
                         data.organizationWarehouseCredentialsUuid,
+                    project_defaults: data.projectDefaults ?? null,
                 })
                 .where('project_uuid', projectUuid)
                 .returning('*');
@@ -589,7 +689,7 @@ export class ProjectModel {
 
             // Deleting spaces will also delete dashboards and charts in cascade,
             // At the same time, charts and dashboards will delete analytic_views, schedulers, pinned content, and more.
-            await trx('spaces').where('project_id', projectId).delete();
+            await trx(SpaceTableName).where('project_id', projectId).delete();
 
             await trx('jobs').where('project_uuid', projectUuid).delete();
 
@@ -613,8 +713,12 @@ export class ProjectModel {
                   dbt_version: SupportedDbtVersions;
                   copied_from_project_uuid?: string;
                   scheduler_timezone: string;
+                  query_timezone: string | null;
                   created_by_user_uuid: string | null;
                   organization_warehouse_credentials_uuid: string | null;
+                  has_default_user_spaces: boolean;
+                  project_defaults: ProjectDefaults | null;
+                  color_palette_uuid: string | null;
               }
             | {
                   name: string;
@@ -627,8 +731,12 @@ export class ProjectModel {
                   dbt_version: SupportedDbtVersions;
                   copied_from_project_uuid?: string;
                   scheduler_timezone: string;
+                  query_timezone: string | null;
                   created_by_user_uuid: string | null;
                   organization_warehouse_credentials_uuid: string | null;
+                  has_default_user_spaces: boolean;
+                  project_defaults: ProjectDefaults | null;
+                  color_palette_uuid: string | null;
               }
         )[];
         return wrapSentryTransaction(
@@ -681,10 +789,22 @@ export class ProjectModel {
                             .ref('scheduler_timezone')
                             .withSchema(ProjectTableName),
                         this.database
+                            .ref('query_timezone')
+                            .withSchema(ProjectTableName),
+                        this.database
                             .ref('created_by_user_uuid')
                             .withSchema(ProjectTableName),
                         this.database
                             .ref('organization_warehouse_credentials_uuid')
+                            .withSchema(ProjectTableName),
+                        this.database
+                            .ref('has_default_user_spaces')
+                            .withSchema(ProjectTableName),
+                        this.database
+                            .ref('project_defaults')
+                            .withSchema(ProjectTableName),
+                        this.database
+                            .ref('color_palette_uuid')
                             .withSchema(ProjectTableName),
                     ])
                     .select<QueryResult>()
@@ -721,10 +841,14 @@ export class ProjectModel {
                     dbtVersion: project.dbt_version,
                     upstreamProjectUuid: project.copied_from_project_uuid,
                     schedulerTimezone: project.scheduler_timezone,
+                    queryTimezone: project.query_timezone,
                     createdByUserUuid: project.created_by_user_uuid,
                     organizationWarehouseCredentialsUuid:
                         project.organization_warehouse_credentials_uuid ??
                         undefined,
+                    hasDefaultUserSpaces: project.has_default_user_spaces,
+                    projectDefaults: project.project_defaults ?? undefined,
+                    colorPaletteUuid: project.color_palette_uuid ?? null,
                 };
 
                 // If project uses organization warehouse credentials, load them
@@ -921,9 +1045,12 @@ export class ProjectModel {
             dbtVersion: project.dbtVersion,
             upstreamProjectUuid: project.upstreamProjectUuid || undefined,
             schedulerTimezone: project.schedulerTimezone,
+            queryTimezone: project.queryTimezone,
             createdByUserUuid: project.createdByUserUuid ?? null,
             organizationWarehouseCredentialsUuid:
                 project.organizationWarehouseCredentialsUuid,
+            hasDefaultUserSpaces: project.hasDefaultUserSpaces,
+            colorPaletteUuid: project.colorPaletteUuid ?? null,
         };
     }
 
@@ -1016,19 +1143,6 @@ export class ProjectModel {
                         projectUuid,
                     );
 
-                // Try to get from cache first
-                const cachedExplores = this.exploreCache?.getExplores(
-                    projectUuid,
-                    exploreNames,
-                    applyChangeset ? changeset?.updatedAt : undefined,
-                );
-                // NOTE: Explores are cached with the name key, so we don't need to return the cached explores if the key is uuid
-                if (cachedExplores && key === 'name') {
-                    span.setAttribute('cacheHit', true);
-                    // Return cached explores
-                    return cachedExplores;
-                }
-                // If not in cache, get from database
                 const query = this.database(CachedExploreTableName)
                     .select('explore', 'cached_explore_uuid')
                     .where('project_uuid', projectUuid);
@@ -1064,13 +1178,6 @@ export class ProjectModel {
                         finalExplores,
                     );
                 }
-
-                this.exploreCache?.setExplores(
-                    projectUuid,
-                    exploreNames,
-                    applyChangeset ? changeset?.updatedAt : undefined,
-                    finalExplores,
-                );
 
                 return finalExplores;
             },
@@ -1125,6 +1232,7 @@ export class ProjectModel {
         Array<
             SummaryExplore & {
                 baseTableRequiredAttributes: Explore['tables'][string]['requiredAttributes'];
+                baseTableAnyAttributes: Explore['tables'][string]['anyAttributes'];
             }
         >
     > {
@@ -1135,7 +1243,9 @@ export class ProjectModel {
                     explore->'label' as label,
                     explore->'tags' as tags,
                     explore->'groupLabel' as "groupLabel",
+                    explore->'groups' as "groups",
                     explore->'type' as type,
+                    explore->'preAggregateSource' as "preAggregateSource",
                     explore->'errors' as errors,
                     explore->'warnings' as warnings,
                     explore->'baseTable' as "baseTable",
@@ -1143,6 +1253,7 @@ export class ProjectModel {
                     explore->'tables'->(explore->>'baseTable')->>'schema' as "baseTableSchema",
                     explore->'tables'->(explore->>'baseTable')->>'description' as "baseTableDescription",
                     explore->'tables'->(explore->>'baseTable')->'requiredAttributes' as "baseTableRequiredAttributes",
+                    explore->'tables'->(explore->>'baseTable')->'anyAttributes' as "baseTableAnyAttributes",
                     explore->'aiHint' as "aiHint"
                 `),
             )
@@ -1153,13 +1264,16 @@ export class ProjectModel {
             label: row.label,
             tags: row.tags,
             groupLabel: row.groupLabel ?? undefined,
+            groups: row.groups ?? undefined,
             databaseName: row.baseTableDatabase,
             schemaName: row.baseTableSchema,
             description: row.baseTableDescription ?? undefined,
             aiHint: row.aiHint ?? undefined,
             type: row.type ?? undefined,
+            preAggregateSource: row.preAggregateSource ?? undefined,
             baseTableRequiredAttributes:
                 row.baseTableRequiredAttributes ?? undefined,
+            baseTableAnyAttributes: row.baseTableAnyAttributes ?? undefined,
             ...(row.errors ? { errors: row.errors } : {}), // Fatal errors from ExploreError
             ...(row.warnings ? { warnings: row.warnings } : {}), // Non-fatal warnings from partial compilation
         }));
@@ -1464,6 +1578,9 @@ export class ProjectModel {
                 )
                 .select('users.user_id')
                 .where('email', email)
+                // Defence: SAs have no email row so this is empty for them,
+                // but the explicit guard documents intent.
+                .andWhere('users.is_internal', false)
                 .andWhere(
                     `${OrganizationMembershipsTableName}.organization_id`,
                     project.organization_id,
@@ -1498,10 +1615,12 @@ export class ProjectModel {
         userUuid: string,
         role: ProjectMemberRole,
     ): Promise<void> {
+        // Clear role_uuid when switching to a system role so that stale FK
+        // references don't prevent custom role deletion later (see #20690).
         await this.database.raw<(DbProjectMembership & DbProject & DbUser)[]>(
             `
                 UPDATE project_memberships AS m
-                SET role = :role FROM projects AS p, users AS u
+                SET role = :role, role_uuid = NULL FROM projects AS p, users AS u
                 WHERE p.project_id = m.project_id
                   AND u.user_id = m.user_id
                   AND user_uuid = :userUuid
@@ -1521,6 +1640,173 @@ export class ProjectModel {
                 copied_from_project_uuid: data.upstreamProjectUuid, // if upstreamProjectUuid is undefined, it will do nothing, if it is null, it will be unset
             })
             .where('project_uuid', projectUuid);
+    }
+
+    async updateDefaultUserSpaces(
+        projectUuid: string,
+        hasDefaultUserSpaces: boolean,
+    ): Promise<void> {
+        if (!hasDefaultUserSpaces) {
+            await this.database(ProjectTableName)
+                .update({ has_default_user_spaces: false })
+                .where('project_uuid', projectUuid);
+            return;
+        }
+
+        await this.database.transaction(async (trx) => {
+            // 1. Set has_default_user_spaces = true and get project details
+            const [project] = await trx(ProjectTableName)
+                .update({ has_default_user_spaces: true })
+                .where('project_uuid', projectUuid)
+                .returning(['project_id', 'organization_id']);
+
+            if (!project) {
+                throw new NotFoundError(
+                    `Project with uuid ${projectUuid} not found`,
+                );
+            }
+
+            // 2. Find or create the "Default User Spaces" parent folder
+            let parentSpace = await trx(SpaceTableName)
+                .select('space_uuid', 'path')
+                .where('project_id', project.project_id)
+                .where('name', DEFAULT_USER_SPACES_PARENT_NAME)
+                .whereNull('parent_space_uuid')
+                .whereNull('deleted_at')
+                .first();
+
+            if (!parentSpace) {
+                const parentSlug = await generateUniqueSpaceSlug(
+                    DEFAULT_USER_SPACES_PARENT_NAME,
+                    project.project_id,
+                    { trx },
+                );
+                const parentPath = getLtreePathFromSlug(parentSlug);
+
+                [parentSpace] = await trx(SpaceTableName)
+                    .insert({
+                        project_id: project.project_id,
+                        name: DEFAULT_USER_SPACES_PARENT_NAME,
+                        inherit_parent_permissions: true,
+                        slug: parentSlug,
+                        parent_space_uuid: null,
+                        path: parentPath,
+                        is_default_user_space: false,
+                    })
+                    .returning(['space_uuid', 'path']);
+            }
+
+            if (!parentSpace) {
+                throw new UnexpectedServerError(
+                    'Failed to find or create Default User Spaces folder',
+                );
+            }
+        });
+    }
+
+    async getProjectsWithDefaultUserSpaces(organizationUuid: string): Promise<
+        {
+            projectId: number;
+            projectUuid: string;
+            parentSpaceUuid: string;
+            parentPath: string;
+        }[]
+    > {
+        const rows = await this.database(ProjectTableName)
+            .innerJoin(
+                OrganizationTableName,
+                `${OrganizationTableName}.organization_id`,
+                `${ProjectTableName}.organization_id`,
+            )
+            .innerJoin(
+                SpaceTableName,
+                `${SpaceTableName}.project_id`,
+                `${ProjectTableName}.project_id`,
+            )
+            .where(
+                `${OrganizationTableName}.organization_uuid`,
+                organizationUuid,
+            )
+            .where(`${ProjectTableName}.has_default_user_spaces`, true)
+            .where(`${SpaceTableName}.name`, DEFAULT_USER_SPACES_PARENT_NAME)
+            .whereNull(`${SpaceTableName}.parent_space_uuid`)
+            .whereNull(`${SpaceTableName}.deleted_at`)
+            .select(
+                `${ProjectTableName}.project_id as project_id`,
+                `${ProjectTableName}.project_uuid as project_uuid`,
+                `${SpaceTableName}.space_uuid as parent_space_uuid`,
+                `${SpaceTableName}.path as parent_path`,
+            );
+
+        return rows.map((row) => ({
+            projectId: row.project_id,
+            projectUuid: row.project_uuid,
+            parentSpaceUuid: row.parent_space_uuid,
+            parentPath: row.parent_path,
+        }));
+    }
+
+    async ensureDefaultUserSpace(
+        projectId: number,
+        parentSpaceUuid: string,
+        parentPath: string,
+        user: {
+            userId: number;
+            userUuid: string;
+            firstName: string;
+            lastName: string;
+        },
+    ): Promise<void> {
+        const existing = await this.database(SpaceTableName)
+            .where('is_default_user_space', true)
+            .where('created_by_user_id', user.userId)
+            .where('project_id', projectId)
+            .whereNull('deleted_at')
+            .first('space_uuid');
+
+        if (existing) return;
+
+        const spaceName =
+            user.firstName || user.lastName
+                ? `${user.firstName} ${user.lastName}`.trim()
+                : `User ${user.userUuid.slice(0, 8)}`;
+
+        await this.database.transaction(async (trx) => {
+            const slug = await generateUniqueSpaceSlug(spaceName, projectId, {
+                trx,
+            });
+            const path = `${parentPath}.${getLtreePathFromSlug(slug)}`;
+
+            const insertedSpaces = await trx(SpaceTableName)
+                .insert({
+                    project_id: projectId,
+                    name: spaceName,
+                    inherit_parent_permissions: false,
+                    slug,
+                    parent_space_uuid: parentSpaceUuid,
+                    path,
+                    is_default_user_space: true,
+                    created_by_user_id: user.userId,
+                })
+                .onConflict(
+                    trx.raw(
+                        '(project_id, created_by_user_id) WHERE is_default_user_space = true AND deleted_at IS NULL',
+                    ),
+                )
+                .ignore()
+                .returning('space_uuid');
+
+            if (insertedSpaces.length === 0) return;
+
+            await trx(SpaceUserAccessTableName)
+                .insert({
+                    space_uuid: insertedSpaces[0].space_uuid,
+                    user_uuid: user.userUuid,
+                    space_role: SpaceMemberRole.ADMIN,
+                })
+                .onConflict(['user_uuid', 'space_uuid'])
+                .merge();
+        });
     }
 
     async deleteProjectAccess(
@@ -1621,6 +1907,65 @@ export class ProjectModel {
         }
     }
 
+    /** Compare-and-swap on the credential's stored refreshToken. Invalidates the warehouse credentials cache on swap. */
+    async rotateRefreshToken(
+        projectUuid: string,
+        expectedOldRefreshToken: string,
+        newRefreshToken: string,
+    ): Promise<boolean> {
+        const swapped = await this.database.transaction(async (trx) => {
+            const row = await trx('warehouse_credentials')
+                .innerJoin(
+                    'projects',
+                    'warehouse_credentials.project_id',
+                    'projects.project_id',
+                )
+                .where('projects.project_uuid', projectUuid)
+                .select<
+                    { project_id: number; encrypted_credentials: Buffer }[]
+                >([
+                    'warehouse_credentials.project_id',
+                    'warehouse_credentials.encrypted_credentials',
+                ])
+                .forUpdate()
+                .first();
+            if (!row) {
+                return false;
+            }
+
+            let credentials: CreateWarehouseCredentials;
+            try {
+                credentials = JSON.parse(
+                    this.encryptionUtil.decrypt(row.encrypted_credentials),
+                ) as CreateWarehouseCredentials;
+            } catch {
+                return false;
+            }
+
+            const stored = (credentials as Partial<{ refreshToken: string }>)
+                .refreshToken;
+            if (stored !== expectedOldRefreshToken) {
+                return false;
+            }
+
+            (credentials as { refreshToken: string }).refreshToken =
+                newRefreshToken;
+            const encryptedCredentials = this.encryptionUtil.encrypt(
+                JSON.stringify(credentials),
+            );
+            await trx('warehouse_credentials')
+                .update({ encrypted_credentials: encryptedCredentials })
+                .where('project_id', row.project_id);
+            return true;
+        });
+
+        if (swapped) {
+            warehouseCredentialsCache?.del(projectUuid);
+        }
+
+        return swapped;
+    }
+
     async duplicateContent(
         projectUuid: string,
         previewProjectUuid: string,
@@ -1641,7 +1986,7 @@ export class ProjectModel {
                 .select('project_id');
             const projectId = project.project_id;
 
-            const dbSpaces = await trx('spaces').whereIn(
+            const dbSpaces = await trx(SpaceTableName).whereIn(
                 'space_uuid',
                 spaces.map((s) => s.uuid),
             );
@@ -1654,7 +1999,7 @@ export class ProjectModel {
 
             const newSpaces =
                 spaces.length > 0
-                    ? await trx('spaces')
+                    ? await trx(SpaceTableName)
                           .insert(
                               dbSpaces.map((d) => {
                                   type CloneSpace = Omit<
@@ -1689,9 +2034,9 @@ export class ProjectModel {
             // fix parent_space_uuid based on path for the spaces
             await trx.raw(
                 `
-                UPDATE spaces AS child
+                UPDATE ${SpaceTableName} AS child
                 SET parent_space_uuid = parent.space_uuid
-                FROM spaces AS parent
+                FROM ${SpaceTableName} AS parent
                 WHERE
                     child.project_id = ?
                     AND parent.project_id = ?
@@ -1780,11 +2125,16 @@ export class ProjectModel {
             // 8bodP' dP""""Yb    YP    888888 8888Y"      8bodP'  `"YoYo 88ood8
 
             // Get all the saved SQLs
-            const savedSQLs = await trx('saved_sql')
-                .leftJoin('spaces', 'saved_sql.space_uuid', 'spaces.space_uuid')
-                .whereIn('saved_sql.space_uuid', spaceUuids)
-                .andWhere('spaces.project_id', projectId)
-                .select<DbSavedSql[]>('saved_sql.*');
+            const savedSQLs = await trx(SavedSqlTableName)
+                .leftJoin(
+                    SpaceTableName,
+                    `${SavedSqlTableName}.space_uuid`,
+                    `${SpaceTableName}.space_uuid`,
+                )
+                .whereIn(`${SavedSqlTableName}.space_uuid`, spaceUuids)
+                .andWhere(`${SpaceTableName}.project_id`, projectId)
+                .whereNull(`${SavedSqlTableName}.deleted_at`)
+                .select<DbSavedSql[]>(`${SavedSqlTableName}.*`);
 
             Logger.info(
                 `Copying ${savedSQLs.length} SQL queries on ${previewProjectUuid}`,
@@ -1811,7 +2161,7 @@ export class ProjectModel {
                     // Generate the slug asynchronously
                     // const uniqueSlug = await generateUniqueSlug(
                     //     trx,
-                    //     'saved_sql',
+                    //     SavedSqlTableName,
                     //     d.slug, // using the existing slug as a base - preventing naming duplicates
                     // );
                     // Map the saved SQL to the new saved SQL
@@ -1833,7 +2183,7 @@ export class ProjectModel {
                     mappedSavedSQLsPromises,
                 );
                 // Insert all the saved SQLs after they have been mapped and return the result
-                const newSavedSQLs = await trx('saved_sql')
+                const newSavedSQLs = await trx(SavedSqlTableName)
                     .insert(mappedSavedSQLs)
                     .returning('*');
                 return newSavedSQLs;
@@ -1843,16 +2193,27 @@ export class ProjectModel {
             const newSavedSQLs = await createSavedSQLs(savedSQLs);
 
             // Create a mapping of the old saved SQLs to the new saved SQLs
-            const savedSQLInDashboards = await trx('saved_sql')
+            const savedSQLInDashboards = await trx(SavedSqlTableName)
                 .leftJoin(
-                    'dashboards',
-                    'saved_sql.dashboard_uuid',
-                    'dashboards.dashboard_uuid',
+                    DashboardsTableName,
+                    function nonDeletedDashboardJoin() {
+                        this.on(
+                            `${SavedSqlTableName}.dashboard_uuid`,
+                            '=',
+                            `${DashboardsTableName}.dashboard_uuid`,
+                        ).andOnNull(`${DashboardsTableName}.deleted_at`);
+                    },
                 )
-                .leftJoin('spaces', 'dashboards.space_id', 'spaces.space_id')
-                .where('spaces.project_id', projectId)
-                .andWhere('saved_sql.space_uuid', null)
-                .select<DbSavedSql[]>('saved_sql.*');
+                .leftJoin(
+                    SpaceTableName,
+                    `${DashboardsTableName}.space_id`,
+                    `${SpaceTableName}.space_id`,
+                )
+                .where(`${SpaceTableName}.project_id`, projectId)
+                .whereNull(`${SpaceTableName}.deleted_at`)
+                .andWhere(`${SavedSqlTableName}.space_uuid`, null)
+                .whereNull(`${SavedSqlTableName}.deleted_at`)
+                .select<DbSavedSql[]>(`${SavedSqlTableName}.*`);
 
             Logger.info(
                 `Copying ${savedSQLInDashboards.length} charts in dashboards on ${previewProjectUuid}`,
@@ -1861,7 +2222,7 @@ export class ProjectModel {
             // Create the saved SQLs in the dashboards
             const newSavedSQLInDashboards =
                 savedSQLInDashboards.length > 0
-                    ? await trx('saved_sql')
+                    ? await trx(SavedSqlTableName)
                           .insert(
                               savedSQLInDashboards.map((d) => {
                                   if (!d.dashboard_uuid) {
@@ -1951,11 +2312,17 @@ export class ProjectModel {
             // dP   `" 88  88   dPYb   88__dP   88   `Ybo."
             // Yb      888888  dP__Yb  88"Yb    88   o.`Y8b
             //  YboodP 88  88 dP""""Yb 88  Yb   88   8bodP'
-            const charts = await trx('saved_queries')
-                .leftJoin('spaces', 'saved_queries.space_id', 'spaces.space_id')
-                .whereIn('saved_queries.space_id', spaceIds)
-                .andWhere('spaces.project_id', projectId)
-                .select<DbSavedChart[]>('saved_queries.*');
+            const charts = await trx(SavedChartsTableName)
+                .leftJoin(
+                    SpaceTableName,
+                    `${SavedChartsTableName}.space_id`,
+                    `${SpaceTableName}.space_id`,
+                )
+                .whereIn(`${SpaceTableName}.space_id`, spaceIds)
+                .andWhere(`${SpaceTableName}.project_id`, projectId)
+                .whereNull(`${SpaceTableName}.deleted_at`)
+                .whereNull(`${SavedChartsTableName}.deleted_at`)
+                .select<DbSavedChart[]>(`${SavedChartsTableName}.*`);
 
             Logger.info(
                 `Copying ${charts.length} charts on ${previewProjectUuid}`,
@@ -1968,41 +2335,53 @@ export class ProjectModel {
 
             const newCharts =
                 charts.length > 0
-                    ? await trx('saved_queries')
-                          .insert(
-                              charts.map((d) => {
-                                  if (!d.space_id) {
-                                      throw new Error(
-                                          `Chart ${d.saved_query_id} has no space_id`,
-                                      );
-                                  }
-                                  const createChart: CloneChart = {
-                                      ...d,
-                                      search_vector: undefined,
-                                      saved_query_id: undefined,
-                                      saved_query_uuid: undefined,
-                                      space_id: getNewSpaceId(d.space_id),
-                                      dashboard_uuid: null,
-                                  };
-                                  delete createChart.search_vector;
-                                  delete createChart.saved_query_id;
-                                  delete createChart.saved_query_uuid;
-                                  return createChart;
-                              }),
-                          )
-                          .returning('*')
+                    ? await chunkedInsertReturning<DbSavedChart>(
+                          trx,
+                          SavedChartsTableName,
+                          charts.map((d) => {
+                              if (!d.space_id) {
+                                  throw new Error(
+                                      `Chart ${d.saved_query_id} has no space_id`,
+                                  );
+                              }
+                              const createChart: CloneChart = {
+                                  ...d,
+                                  search_vector: undefined,
+                                  saved_query_id: undefined,
+                                  saved_query_uuid: undefined,
+                                  space_id: getNewSpaceId(d.space_id),
+                                  dashboard_uuid: null,
+                              };
+                              delete createChart.search_vector;
+                              delete createChart.saved_query_id;
+                              delete createChart.saved_query_uuid;
+                              return createChart;
+                          }),
+                      )
                     : [];
 
-            const chartsInDashboards = await trx('saved_queries')
+            const chartsInDashboards = await trx(SavedChartsTableName)
                 .leftJoin(
-                    'dashboards',
-                    'saved_queries.dashboard_uuid',
-                    'dashboards.dashboard_uuid',
+                    DashboardsTableName,
+                    function nonDeletedDashboardJoin() {
+                        this.on(
+                            `${SavedChartsTableName}.dashboard_uuid`,
+                            '=',
+                            `${DashboardsTableName}.dashboard_uuid`,
+                        ).andOnNull(`${DashboardsTableName}.deleted_at`);
+                    },
                 )
-                .leftJoin('spaces', 'dashboards.space_id', 'spaces.space_id')
-                .where('spaces.project_id', projectId)
-                .andWhere('saved_queries.space_id', null)
-                .select<DbSavedChart[]>('saved_queries.*');
+                .leftJoin(
+                    SpaceTableName,
+                    `${DashboardsTableName}.space_id`,
+                    `${SpaceTableName}.space_id`,
+                )
+                .where(`${SpaceTableName}.project_id`, projectId)
+                .whereNull(`${SpaceTableName}.deleted_at`)
+                .whereNull(`${SavedChartsTableName}.deleted_at`)
+                .andWhere(`${SavedChartsTableName}.space_id`, null)
+                .whereNull(`${SavedChartsTableName}.deleted_at`)
+                .select<DbSavedChart[]>(`${SavedChartsTableName}.*`);
 
             Logger.info(
                 `Copying ${chartsInDashboards.length} charts in dashboards on ${previewProjectUuid}`,
@@ -2011,28 +2390,28 @@ export class ProjectModel {
             // We also copy charts in dashboards, we will replace the dashboard_uuid later
             const newChartsInDashboards =
                 chartsInDashboards.length > 0
-                    ? await trx('saved_queries')
-                          .insert(
-                              chartsInDashboards.map((d) => {
-                                  if (!d.dashboard_uuid) {
-                                      throw new Error(
-                                          `Chart in dashboard ${d.saved_query_id} has no dashboard_uuid`,
-                                      );
-                                  }
-                                  const createChart: CloneChart = {
-                                      ...d,
-                                      search_vector: undefined,
-                                      space_id: null,
-                                      dashboard_uuid: d.dashboard_uuid, // we'll update this later
-                                  };
-                                  delete createChart.search_vector;
-                                  delete createChart.saved_query_id;
-                                  delete createChart.saved_query_uuid;
+                    ? await chunkedInsertReturning<DbSavedChart>(
+                          trx,
+                          SavedChartsTableName,
+                          chartsInDashboards.map((d) => {
+                              if (!d.dashboard_uuid) {
+                                  throw new Error(
+                                      `Chart in dashboard ${d.saved_query_id} has no dashboard_uuid`,
+                                  );
+                              }
+                              const createChart: CloneChart = {
+                                  ...d,
+                                  search_vector: undefined,
+                                  space_id: null,
+                                  dashboard_uuid: d.dashboard_uuid,
+                              };
+                              delete createChart.search_vector;
+                              delete createChart.saved_query_id;
+                              delete createChart.saved_query_uuid;
 
-                                  return createChart;
-                              }),
-                          )
-                          .returning('*')
+                              return createChart;
+                          }),
+                      )
                     : [];
             const chartInSpacesMapping = charts.map((c, i) => ({
                 id: c.saved_query_id,
@@ -2069,30 +2448,32 @@ export class ProjectModel {
 
             const newChartVersions =
                 chartVersions.length > 0
-                    ? await trx('saved_queries_versions')
-                          .insert(
-                              chartVersions.map((d) => {
-                                  const newSavedQueryId = chartMapping.find(
-                                      (m) => m.id === d.saved_query_id,
-                                  )?.newId;
-                                  if (!newSavedQueryId) {
-                                      throw new Error(
-                                          `Cannot find new chart id for ${d.saved_query_id}`,
-                                      );
-                                  }
-                                  const createChartVersion = {
-                                      ...d,
-                                      saved_queries_version_id: undefined,
-                                      saved_queries_version_uuid: undefined,
-                                      saved_query_id: newSavedQueryId,
-                                  };
-                                  delete createChartVersion.saved_queries_version_id;
-                                  delete createChartVersion.saved_queries_version_uuid;
+                    ? await chunkedInsertReturning<
+                          (typeof chartVersions)[number]
+                      >(
+                          trx,
+                          'saved_queries_versions',
+                          chartVersions.map((d) => {
+                              const newSavedQueryId = chartMapping.find(
+                                  (m) => m.id === d.saved_query_id,
+                              )?.newId;
+                              if (!newSavedQueryId) {
+                                  throw new Error(
+                                      `Cannot find new chart id for ${d.saved_query_id}`,
+                                  );
+                              }
+                              const createChartVersion = {
+                                  ...d,
+                                  saved_queries_version_id: undefined,
+                                  saved_queries_version_uuid: undefined,
+                                  saved_query_id: newSavedQueryId,
+                              };
+                              delete createChartVersion.saved_queries_version_id;
+                              delete createChartVersion.saved_queries_version_uuid;
 
-                                  return createChartVersion;
-                              }),
-                          )
-                          .returning('*')
+                              return createChartVersion;
+                          }),
+                      )
                     : [];
 
             const chartVersionMapping = chartVersions.map((c, i) => ({
@@ -2175,11 +2556,17 @@ export class ProjectModel {
             //  8I  Yb   dPYb   `Ybo." 88  88 88__dP dP   Yb   dPYb   88__dP  8I  Yb `Ybo."
             //  8I  dY  dP__Yb  o.`Y8b 888888 88""Yb Yb   dP  dP__Yb  88"Yb   8I  dY o.`Y8b
             // 8888Y"  dP""""Yb 8bodP' 88  88 88oodP  YbodP  dP""""Yb 88  Yb 8888Y"  8bodP'
-            const dashboards = await trx('dashboards')
-                .leftJoin('spaces', 'dashboards.space_id', 'spaces.space_id')
-                .whereIn('dashboards.space_id', spaceIds)
-                .andWhere('spaces.project_id', projectId)
-                .select<DbDashboard[]>('dashboards.*');
+            const dashboards = await trx(DashboardsTableName)
+                .leftJoin(
+                    SpaceTableName,
+                    `${DashboardsTableName}.space_id`,
+                    `${SpaceTableName}.space_id`,
+                )
+                .whereIn(`${DashboardsTableName}.space_id`, spaceIds)
+                .andWhere(`${SpaceTableName}.project_id`, projectId)
+                .whereNull(`${DashboardsTableName}.deleted_at`)
+                .whereNull(`${SpaceTableName}.deleted_at`)
+                .select<DbDashboard[]>(`${DashboardsTableName}.*`);
 
             const dashboardIds = dashboards.map((d) => d.dashboard_id);
 
@@ -2189,7 +2576,7 @@ export class ProjectModel {
 
             const newDashboards =
                 dashboards.length > 0
-                    ? await trx('dashboards')
+                    ? await trx(DashboardsTableName)
                           .insert(
                               dashboards.map((d) => {
                                   type CloneDashboard = Omit<
@@ -2247,11 +2634,13 @@ export class ProjectModel {
                                   const createDashboardVersion = {
                                       ...d,
                                       dashboard_version_id: undefined,
+                                      dashboard_version_uuid: undefined,
                                       dashboard_id: dashboardMapping.find(
                                           (m) => m.id === d.dashboard_id,
                                       )?.newId!,
                                   };
                                   delete createDashboardVersion.dashboard_version_id;
+                                  delete createDashboardVersion.dashboard_version_uuid;
                                   return createDashboardVersion;
                               }),
                           )
@@ -2341,11 +2730,11 @@ export class ProjectModel {
                     if (!newDashboardUuid) {
                         // The dashboard was not copied, perhaps becuase it belongs to a space the user doesn't have access to
                         // We delete this chart in dashboard
-                        return trx('saved_queries')
+                        return trx(SavedChartsTableName)
                             .where('saved_query_id', chart.saved_query_id)
                             .delete();
                     }
-                    return trx('saved_queries')
+                    return trx(SavedChartsTableName)
                         .update({
                             dashboard_uuid: newDashboardUuid,
                         })
@@ -2364,15 +2753,16 @@ export class ProjectModel {
                     if (!newDashboardUuid) {
                         // The dashboard was not copied, perhaps becuase it belongs to a space the user doesn't have access to
                         // We delete this chart in dashboard
-                        return trx('saved_sql')
+                        return trx(SavedSqlTableName)
                             .where('saved_sql_uuid', chart.saved_sql_uuid)
                             .delete();
                     }
-                    return trx('saved_sql')
+                    return trx(SavedSqlTableName)
                         .update({
                             dashboard_uuid: newDashboardUuid,
                         })
-                        .where('saved_sql_uuid', chart.saved_sql_uuid);
+                        .where('saved_sql_uuid', chart.saved_sql_uuid)
+                        .whereNull('deleted_at');
                 },
             );
             await Promise.all(updateSavedSQLInDashboards);
@@ -2445,6 +2835,7 @@ export class ProjectModel {
             await copyDashboardTileContent('dashboard_tile_looms');
             await copyDashboardTileContent('dashboard_tile_markdowns');
             await copyDashboardTileContent('dashboard_tile_sql_charts');
+            await copyDashboardTileContent('dashboard_tile_headings');
 
             // Get AI Agents from the source project
             // Note: AI agents are an Enterprise Edition feature. The table may not exist
@@ -2646,7 +3037,7 @@ export class ProjectModel {
 
     async createVirtualView(
         projectUuid: string,
-        { name, sql, columns }: CreateVirtualViewPayload,
+        { name, sql, columns, parameterValues }: CreateVirtualViewPayload,
         warehouseClient: WarehouseClient,
     ): Promise<Explore> {
         const virtualView = createVirtualView(
@@ -2654,6 +3045,8 @@ export class ProjectModel {
             sql,
             columns,
             warehouseClient,
+            undefined, // label
+            parameterValues,
         );
 
         // insert virtual view into cached_explore
@@ -2702,6 +3095,7 @@ export class ProjectModel {
             payload.columns,
             warehouseClient,
             payload.name, // label
+            payload.parameterValues,
         );
 
         // insert into cached_explore
@@ -2790,6 +3184,40 @@ export class ProjectModel {
             })
             .where('project_uuid', projectUuid)
             .returning('*');
+
+        return updatedProject;
+    }
+
+    async getQueryTimezone(projectUuid: string): Promise<string | null> {
+        const [project] = await this.database(ProjectTableName)
+            .select('query_timezone')
+            .where('project_uuid', projectUuid);
+
+        if (!project) {
+            throw new NotFoundError(
+                `Cannot find project with id: ${projectUuid}`,
+            );
+        }
+
+        return project.query_timezone;
+    }
+
+    async updateQueryTimezone(
+        projectUuid: string,
+        timezone: string | null,
+    ): Promise<DbProject> {
+        const [updatedProject] = await this.database(ProjectTableName)
+            .update({
+                query_timezone: timezone,
+            })
+            .where('project_uuid', projectUuid)
+            .returning('*');
+
+        if (!updatedProject) {
+            throw new NotFoundError(
+                `Cannot find project with id: ${projectUuid}`,
+            );
+        }
 
         return updatedProject;
     }

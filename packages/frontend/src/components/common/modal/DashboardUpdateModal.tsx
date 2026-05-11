@@ -2,18 +2,23 @@ import { type Dashboard } from '@lightdash/common';
 import {
     Button,
     Stack,
-    TextInput,
     Textarea,
+    TextInput,
     type ModalProps,
 } from '@mantine-8/core';
 import { useForm } from '@mantine/form';
 import { IconLayoutDashboard } from '@tabler/icons-react';
 import { useEffect, type FC } from 'react';
+import { useColorPalettes } from '../../../hooks/appearance/useOrganizationAppearance';
 import {
     useDashboardQuery,
     useUpdateDashboard,
 } from '../../../hooks/dashboard/useDashboard';
+import useHealth from '../../../hooks/health/useHealth';
+import { useProjectUuid } from '../../../hooks/useProjectUuid';
+import Callout from '../Callout';
 import MantineModal from '../MantineModal';
+import { PalettePicker } from '../PalettePicker/PalettePicker';
 
 interface DashboardUpdateModalProps {
     opened: ModalProps['opened'];
@@ -22,20 +27,32 @@ interface DashboardUpdateModalProps {
     onConfirm?: () => void;
 }
 
-type FormState = Pick<Dashboard, 'name' | 'description'>;
+type FormState = Pick<Dashboard, 'name' | 'description'> & {
+    colorPaletteUuid: string | null;
+};
 
 const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
     uuid,
     onConfirm,
     ...modalProps
 }) => {
-    const { data: dashboard, isInitialLoading } = useDashboardQuery(uuid);
-    const { mutateAsync, isLoading: isUpdating } = useUpdateDashboard(uuid);
+    const projectUuid = useProjectUuid();
+    const { data: dashboard, isInitialLoading } = useDashboardQuery({
+        uuidOrSlug: uuid,
+        projectUuid,
+    });
+    const { data: palettes = [] } = useColorPalettes();
+    const { data: health } = useHealth();
+    const { mutateAsync, isLoading: isUpdating } = useUpdateDashboard(
+        uuid,
+        projectUuid,
+    );
 
     const form = useForm<FormState>({
         initialValues: {
             name: '',
             description: '',
+            colorPaletteUuid: null,
         },
     });
 
@@ -47,6 +64,7 @@ const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
         setValues({
             name: dashboard.name,
             description: dashboard.description ?? '',
+            colorPaletteUuid: dashboard.colorPaletteUuid ?? null,
         });
     }, [dashboard, setValues]);
 
@@ -54,10 +72,15 @@ const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
         return null;
     }
 
+    const overrideActive =
+        !!health?.appearance.overrideColorPalette &&
+        health.appearance.overrideColorPalette.length > 0;
+
     const handleConfirm = form.onSubmit(async (data) => {
         await mutateAsync({
             name: data.name,
             description: data.description,
+            colorPaletteUuid: data.colorPaletteUuid,
         });
         onConfirm?.();
     });
@@ -99,6 +122,26 @@ const DashboardUpdateModal: FC<DashboardUpdateModalProps> = ({
                         autosize
                         maxRows={3}
                         {...form.getInputProps('description')}
+                    />
+
+                    {overrideActive && (
+                        <Callout variant="info">
+                            A color palette override is set in your instance
+                            configuration. Dashboard-level selection is disabled
+                            while the override is active.
+                        </Callout>
+                    )}
+
+                    <PalettePicker
+                        label="Color palette"
+                        size="sm"
+                        value={form.values.colorPaletteUuid}
+                        onChange={(next) =>
+                            form.setFieldValue('colorPaletteUuid', next)
+                        }
+                        palettes={palettes}
+                        parentLabel={dashboard.spaceName}
+                        disabled={overrideActive || isUpdating}
                     />
                 </Stack>
             </form>

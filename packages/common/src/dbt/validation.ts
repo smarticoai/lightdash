@@ -12,20 +12,20 @@ import {
 } from '../types/dbt';
 import { ParseError } from '../types/errors';
 import lightdashMetadataSchema from './schemas/lightdashMetadata.json';
+import lightdashSchemaV7 from './schemas/lightdashV7.json';
+import lightdashSchemaV8 from './schemas/lightdashV8.json';
+import lightdashSchemaV9 from './schemas/lightdashV9.json';
 import lightdashSchemaV10 from './schemas/lightdashV10.json';
 import lightdashSchemaV11 from './schemas/lightdashV11.json';
 import lightdashSchemaV12 from './schemas/lightdashV12.json';
 import lightdashSchemaV20 from './schemas/lightdashV20.json';
-import lightdashSchemaV7 from './schemas/lightdashV7.json';
-import lightdashSchemaV8 from './schemas/lightdashV8.json';
-import lightdashSchemaV9 from './schemas/lightdashV9.json';
+import dbtManifestSchemaV7 from './schemas/manifestV7.json';
+import dbtManifestSchemaV8 from './schemas/manifestV8.json';
+import dbtManifestSchemaV9 from './schemas/manifestV9.json';
 import dbtManifestSchemaV10 from './schemas/manifestV10.json';
 import dbtManifestSchemaV11 from './schemas/manifestV11.json';
 import dbtManifestSchemaV12 from './schemas/manifestV12.json';
 import dbtManifestSchemaV20 from './schemas/manifestV20.json';
-import dbtManifestSchemaV7 from './schemas/manifestV7.json';
-import dbtManifestSchemaV8 from './schemas/manifestV8.json';
-import dbtManifestSchemaV9 from './schemas/manifestV9.json';
 
 const ajv = new Ajv2020();
 ajv.addMetaSchema(draft7MetaSchema); // add backward compatibility with draft-07
@@ -87,6 +87,12 @@ export class ManifestValidator {
     isModelValid = (
         model: DbtRawModelNode,
     ): [true, undefined] | [false, string] => {
+        // Seeds are only used as join targets and don't need full model
+        // schema validation (which enforces resource_type: "model").
+        // They just need valid Lightdash metadata and columns.
+        if (model.resource_type === 'seed') {
+            return [true, undefined];
+        }
         const validator = ManifestValidator.getValidator<DbtModelNode>(
             `${this.lightdashSchemaId}#/definitions/LightdashCompiledModelNode`,
         );

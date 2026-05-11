@@ -3,6 +3,8 @@ import { type SdkFilter } from '../../features/embed/EmbedDashboard/types';
 
 export const EMBED_KEY = 'lightdash-embed';
 
+export type EmbedTheme = 'light' | 'dark';
+
 export type InMemoryEmbed = {
     projectUuid?: string;
     token?: string;
@@ -17,6 +19,8 @@ export interface EmbedContext {
     filters?: SdkFilter[];
     // The project UUID of the project the JWT user is embedded in
     projectUuid?: string;
+    // An optional org palette override for SDK dashboards
+    paletteUuid?: string;
     // Powers localization of the dashboard
     languageMap?: LanguageMap;
     // The function to call when the user clicks "Explore from here"
@@ -31,4 +35,8 @@ export interface EmbedContext {
     savedQueryUuid?: string;
     // The mode of the embed: 'sdk' when embedded via SDK (no URL sync), 'direct' when navigating directly to /embed (sync URL)
     mode: EmbedMode;
+    // Theme color scheme for the embed, set via ?theme=light|dark URL param
+    theme: EmbedTheme;
+    // Custom background color for the embed, set via ?backgroundColor=<css-color> URL param
+    backgroundColor: string | null;
 }

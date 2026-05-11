@@ -5,6 +5,10 @@ import { type OpenIdIdentityIssuerType } from './openIdIdentity';
 import { type OrganizationMemberRole } from './organizationMemberProfile';
 
 export type AccountUser = {
+    /**
+     * @deprecated Use `userUuid` for registered users. This field should only
+     * be used for anonymous users (where no `userUuid` exists).
+     */
     id: string;
     email: string | undefined;
     /* Whether the user can login */
@@ -53,6 +57,8 @@ export interface LightdashSessionUser extends AccountUser {
     updatedAt: Date;
     /* Whether the user doesn't have an authentication method (password or openId) */
     isPending?: boolean;
+    /* Set only when an admin is impersonating this user via session auth */
+    impersonation?: ImpersonationContext;
 }
 
 export interface ExternalUser extends AccountUser {
@@ -75,6 +81,37 @@ export interface LightdashUserWithAbilityRules extends LightdashUser {
 
 export interface SessionUser extends LightdashUserWithAbilityRules {
     ability: MemberAbility;
+    /**
+     * Per-request metadata (IP, user agent, request id) populated by the auth
+     * middleware. Used by the audit log; intentionally not persisted in the
+     * session store.
+     */
+    requestContext?: {
+        ip?: string;
+        userAgent?: string;
+        requestId?: string;
+    };
+    /* Set only when an admin is impersonating this user via session auth */
+    impersonation?: ImpersonationContext;
+    /**
+     * Set only when the request was authenticated via a service-account token.
+     * `req.user` is loaded from the SA's dedicated `users` row (linked via
+     * `service_accounts.service_account_user_uuid`), so writes attribute the
+     * service account itself. This field carries the SA identity for code
+     * paths that receive `SessionUser` rather than `Account`.
+     */
+    serviceAccount?: {
+        uuid: string;
+        description?: string;
+    };
+}
+
+export interface ImpersonationContext {
+    adminId: string;
+    adminEmail: string;
+    adminFirstName?: string;
+    adminLastName?: string;
+    adminRole: string;
 }
 
 export interface UpdatedByUser {
@@ -124,7 +161,7 @@ export type ApiUserAllowedOrganizationsResponse = {
  */
 export type ApiGetAuthenticatedUserResponse = {
     status: 'ok';
-    results: LightdashUser;
+    results: LightdashUser & { impersonation: ImpersonationInfo | null };
 };
 
 export type ApiRegisterUserResponse = {
@@ -148,6 +185,26 @@ export type LoginOptions = {
 export type ApiGetLoginOptionsResponse = {
     status: 'ok';
     results: LoginOptions;
+};
+
+export interface ImpersonationInfo {
+    adminUserUuid: string;
+    adminName: string;
+    impersonatedUserUuid: string;
+}
+
+export type ApiStartImpersonationRequest = {
+    targetUserUuid: string;
+};
+
+export type ApiStartImpersonationResponse = {
+    status: 'ok';
+    results: null;
+};
+
+export type ApiStopImpersonationResponse = {
+    status: 'ok';
+    results: null;
 };
 
 export type IntrinsicUserAttributes = {

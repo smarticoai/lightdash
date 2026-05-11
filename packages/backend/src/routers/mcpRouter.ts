@@ -1,10 +1,3 @@
-// eslint-disable-next-line import/extensions
-import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-// eslint-disable-next-line import/extensions
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import express, { type Router } from 'express';
-import { IncomingMessage } from 'http';
-
 import {
     ApiKeyAccount,
     ForbiddenError,
@@ -15,10 +8,13 @@ import {
     ServiceAcctAccount,
     UserAttributeValueMap,
 } from '@lightdash/common';
-import {
-    allowApiKeyAuthentication,
-    allowOauthAuthentication,
-} from '../controllers/authentication';
+// eslint-disable-next-line import/extensions
+import { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+// eslint-disable-next-line import/extensions
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import express, { type Router } from 'express';
+import { IncomingMessage } from 'http';
+import { allowApiKeyAuthentication } from '../controllers/authentication';
 import { ExtraContext, McpService } from '../ee/services/McpService/McpService';
 import Logger from '../logging/logger';
 import { userAttributeOverridesSchema } from '../services/UserAttributesService/UserAttributeUtils';
@@ -72,7 +68,7 @@ function extractUserAttributesFromHeader(
 
 /*
 MCP servers MUST use the HTTP header WWW-Authenticate when returning a 401 Unauthorized to indicate
-the location of the resource server metadata URL as described in RFC9728 Section 5.1 “WWW-Authenticate Response”.
+the location of the resource server metadata URL as described in RFC9728 Section 5.1 "WWW-Authenticate Response".
 https://www.rfc-editor.org/rfc/rfc9728#section-5.1
 */
 const returnHeaderIfUnauthenticated = (
@@ -83,6 +79,10 @@ const returnHeaderIfUnauthenticated = (
     if (req.account?.isAuthenticated()) {
         next();
     } else {
+        const authHeaderPresent = !!req.headers.authorization;
+        Logger.warn(
+            `[MCP] Auth failed — header present: ${authHeaderPresent}, account: ${req.account?.authentication?.type ?? 'none'}`,
+        );
         const oauthService = req.services.getOauthService();
         const baseUrl = oauthService.getSiteUrl();
         res.set(
@@ -100,11 +100,16 @@ const returnHeaderIfUnauthenticated = (
 // - It follows the same pattern as other protocol-specific endpoints (OAuth)
 mcpRouter.all(
     '/',
-    allowOauthAuthentication,
     allowApiKeyAuthentication,
     returnHeaderIfUnauthenticated,
     async (req, res) => {
         try {
+            const authType = req.account?.authentication?.type ?? 'none';
+            const userEmail = req.user?.email ?? 'unknown';
+            Logger.info(
+                `[MCP] ${req.method} request — auth: ${authType}, user: ${userEmail}`,
+            );
+
             const mcpService = getMcpService(req);
 
             // Check if MCP is enabled (either via config or AI Copilot flag)
@@ -112,8 +117,6 @@ mcpRouter.all(
             if (!isEnabled) {
                 throw new ForbiddenError('MCP is not enabled');
             }
-
-            const mcpServer = mcpService.getServer();
 
             if (req.method === 'GET') {
                 // Handle SSE transport for MCP
@@ -141,7 +144,10 @@ mcpRouter.all(
             }
 
             if (req.method === 'POST') {
-                // Handle Streamable HTTP transport
+                // SDK 1.26.0 requires a new server+transport per request in stateless mode
+                // to prevent cross-client response data leaks (CVE-2026-25536)
+                // See: https://github.com/advisories/GHSA-345p-7cg4-v4c7
+                const mcpServer = mcpService.createServer();
                 const transport = new StreamableHTTPServerTransport({
                     enableJsonResponse: true,
                     sessionIdGenerator: undefined,
@@ -153,7 +159,7 @@ mcpRouter.all(
                     extractUserAttributesFromHeader(req);
 
                 // Add auth info to request for the transport
-                // The token details is loaded on the authentication middleware allowOauthAuthentication
+                // The token details is loaded on the authentication middleware allowApiKeyAuthentication
                 const authReq: IncomingMessage & {
                     auth?: AuthInfo;
                 } = req;

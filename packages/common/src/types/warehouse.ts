@@ -106,6 +106,7 @@ export interface WarehouseSqlBuilder {
     getEscapeStringQuoteChar: () => string;
     getFieldQuoteChar: () => string;
     getFloatingType: () => string;
+    getNullSafeEqualSql: (left: string, right: string) => string;
     getMetricSql: (sql: string, metric: Metric) => string;
     concatString: (...args: string[]) => string;
     escapeString: (value: string) => string;
@@ -117,6 +118,9 @@ export interface WarehouseSqlBuilder {
         endTimestampSql: string,
     ) => string;
     getMedianSql: (valueSql: string) => string;
+    // Array construction methods for table calculations
+    buildArray: (elements: string[]) => string;
+    buildArrayAgg: (expression: string, orderBy?: string) => string;
 }
 
 export interface WarehouseClient extends WarehouseSqlBuilder {

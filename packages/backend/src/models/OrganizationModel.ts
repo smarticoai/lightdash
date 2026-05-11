@@ -410,6 +410,20 @@ export class OrganizationModel {
         );
     }
 
+    async findColorPalette(
+        organizationUuid: string,
+        colorPaletteUuid: string,
+    ): Promise<OrganizationColorPalette | undefined> {
+        const palette = await this.database(OrganizationColorPaletteTableName)
+            .where('organization_uuid', organizationUuid)
+            .andWhere('color_palette_uuid', colorPaletteUuid)
+            .first();
+
+        return palette
+            ? OrganizationModel.mapDBColorPalette(palette)
+            : undefined;
+    }
+
     async updateColorPalette(
         organizationUuid: string,
         colorPaletteUuid: string,
@@ -488,6 +502,24 @@ export class OrganizationModel {
             darkColors: palette.dark_colors,
             createdAt: palette.created_at,
         };
+    }
+
+    async getImpersonationEnabled(organizationUuid: string): Promise<boolean> {
+        const row = await this.database(OrganizationTableName)
+            .where('organization_uuid', organizationUuid)
+            .select('impersonation_enabled')
+            .first();
+
+        return row?.impersonation_enabled ?? false;
+    }
+
+    async updateImpersonationEnabled(
+        organizationUuid: string,
+        enabled: boolean,
+    ): Promise<void> {
+        await this.database(OrganizationTableName)
+            .where('organization_uuid', organizationUuid)
+            .update({ impersonation_enabled: enabled });
     }
 
     private static mapDBColorPaletteWithIsActive(

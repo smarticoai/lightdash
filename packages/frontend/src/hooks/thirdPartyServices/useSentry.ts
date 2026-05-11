@@ -25,20 +25,25 @@ import {
 const sentrySpotlightEnabled =
     import.meta.env.DEV && import.meta.env.VITE_SENTRY_SPOTLIGHT;
 
+// Dummy DSN for Spotlight-only mode (no real Sentry account needed)
+const SPOTLIGHT_DUMMY_DSN = 'https://0@o0.ingest.sentry.io/0';
+
 const useSentry = (
     sentryConfig: HealthState['sentry'] | undefined,
     user: LightdashUser | undefined,
+    disableDashboardTracing?: boolean,
 ) => {
     const [isSentryLoaded, setIsSentryLoaded] = useState(false);
     useEffect(() => {
-
         if (smrMode()) {
             return;
         }
-
-        if (sentryConfig && !isSentryLoaded && sentryConfig.frontend.dsn) {
+        const dsn =
+            sentryConfig?.frontend.dsn ||
+            (sentrySpotlightEnabled ? SPOTLIGHT_DUMMY_DSN : '');
+        if (sentryConfig && !isSentryLoaded && dsn) {
             init({
-                dsn: sentryConfig.frontend.dsn,
+                dsn,
                 release: sentryConfig.release,
                 environment: sentryConfig.environment,
                 integrations: [
@@ -62,6 +67,20 @@ const useSentry = (
                 tracesSampler(samplingContext) {
                     if (sentrySpotlightEnabled) {
                         return 1.0;
+                    }
+
+                    // Skip tracing on dashboard pages — Sentry's timer
+                    // wrapping causes significant main thread blocking
+                    // when dashboards unmount/mount many tiles at once.
+                    // Controlled by LIGHTDASH_DASHBOARD_DISABLE_SENTRY_TRACKING=true
+                    if (disableDashboardTracing) {
+                        const name =
+                            samplingContext.name ||
+                            samplingContext.transactionContext?.name ||
+                            window.location.pathname;
+                        if (name.includes('/dashboards/')) {
+                            return 0;
+                        }
                     }
 
                     if (samplingContext.parentSampled !== undefined) {
@@ -112,15 +131,27 @@ const useSentry = (
                 'organization.uuid': user.organizationUuid,
             });
         }
-    }, [isSentryLoaded, setIsSentryLoaded, sentryConfig, user]);
+    }, [
+        isSentryLoaded,
+        setIsSentryLoaded,
+        sentryConfig,
+        user,
+        disableDashboardTracing,
+    ]);
 
-    const { projectUuid } = useParams<{ projectUuid?: string }>();
+    const { projectUuid, dashboardUuid } = useParams<{
+        projectUuid?: string;
+        dashboardUuid?: string;
+    }>();
     const location = useLocation();
     useEffect(() => {
         if (projectUuid) {
             setTag('project.uuid', projectUuid);
         }
-    }, [location, projectUuid]);
+        if (dashboardUuid) {
+            setTag('dashboard.uuid', dashboardUuid);
+        }
+    }, [location, projectUuid, dashboardUuid]);
 };
 
 export default useSentry;

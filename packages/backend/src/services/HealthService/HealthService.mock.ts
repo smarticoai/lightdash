@@ -81,10 +81,15 @@ export const BaseResponse: HealthState = {
         maxLimit: 5000,
         maxPageSize: 2500,
         defaultLimit: 500,
+        retryQueryOnTransientErrors: true,
     },
     dashboard: {
         maxTilesPerTab: 50,
         maxTabsPerDashboard: 20,
+        versionHistory: {
+            daysLimit: 0,
+        },
+        disableSentryTracking: false,
     },
     rudder: {
         dataPlaneUrl: '',
@@ -100,12 +105,15 @@ export const BaseResponse: HealthState = {
         profilesSampleRate: 0,
     },
     hasCacheAutocompleResults: false,
+    hasResultsCaching: false,
     appearance: {
         overrideColorPalette: undefined,
         overrideColorPaletteName: undefined,
     },
     isServiceAccountEnabled: false,
     isOrganizationWarehouseCredentialsEnabled: false,
+    isAthenaWarehouseIamRoleAuthEnabled: false,
+    isSaveCredentialsFormEnabled: false,
     isCustomRolesEnabled: false,
     embedding: { enabled: false, events: undefined },
     ai: {
@@ -118,6 +126,20 @@ export const BaseResponse: HealthState = {
     },
     funnelBuilder: {
         enabled: false,
+    },
+    softDelete: {
+        enabled: false,
+        retentionDays: 30,
+    },
+    dashboardComments: {
+        enabled: true,
+    },
+    preAggregates: {
+        enabled: false,
+    },
+    dataApps: {
+        enabled: false,
+        previewOrigin: null,
     },
 };
 

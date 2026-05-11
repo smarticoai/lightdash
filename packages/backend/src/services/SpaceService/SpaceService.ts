@@ -4,119 +4,187 @@ import {
     BulkActionable,
     CreateSpace,
     ForbiddenError,
+    getHighestSpaceRole,
     NotFoundError,
     ParameterError,
     SessionUser,
     Space,
+    SpaceDeleteImpact,
     SpaceMemberRole,
     SpaceShare,
     SpaceSummary,
     UpdateSpace,
+    type SpaceAccess,
 } from '@lightdash/common';
 import { Knex } from 'knex';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
+import { LightdashConfig } from '../../config/parseConfig';
+import type { AppGenerateService } from '../../ee/services/AppGenerateService/AppGenerateService';
+import { OrganizationModel } from '../../models/OrganizationModel';
 import { PinnedListModel } from '../../models/PinnedListModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { SpaceModel } from '../../models/SpaceModel';
 import { BaseService } from '../BaseService';
+import type { DashboardService } from '../DashboardService/DashboardService';
+import type { SavedChartService } from '../SavedChartsService/SavedChartService';
+import type {
+    SoftDeletableService,
+    SoftDeleteOptions,
+} from '../SoftDeletableService';
+import { SpacePermissionService } from './SpacePermissionService';
 
 type SpaceServiceArguments = {
     analytics: LightdashAnalytics;
+    lightdashConfig: LightdashConfig;
     projectModel: ProjectModel;
     spaceModel: SpaceModel;
+    organizationModel: OrganizationModel;
     pinnedListModel: PinnedListModel;
+    spacePermissionService: SpacePermissionService;
+    savedChartService: SavedChartService;
+    dashboardService: DashboardService;
+    // EE-only. When the license isn't active the repository leaves this
+    // undefined and the cascade skips data apps (there are none to delete).
+    appGenerateService: AppGenerateService | undefined;
 };
 
 export const hasDirectAccessToSpace = (
     user: SessionUser,
-    space: Pick<SpaceSummary | Space, 'isPrivate' | 'access'>,
+    space: {
+        inheritsFromOrgOrProject: boolean;
+        access: SpaceAccess[];
+    },
 ): boolean => {
-    const userUuidsWithDirectAccess = (
-        space.access as Array<string | SpaceShare>
-    ).reduce<string[]>((acc, access) => {
-        if (typeof access === 'string') {
-            return [...acc, access];
-        }
-        if (access.hasDirectAccess) {
-            return [...acc, access.userUuid];
-        }
-        return acc;
-    }, []);
-
-    const hasAccess =
-        !space.isPrivate || userUuidsWithDirectAccess?.includes(user.userUuid);
-
-    return hasAccess;
-};
-
-export const hasViewAccessToSpace = (
-    user: SessionUser,
-    space: Pick<
-        Space | SpaceSummary,
-        'projectUuid' | 'organizationUuid' | 'isPrivate'
-    >,
-    access: SpaceShare[],
-): boolean =>
-    user.ability.can(
-        'view',
-        subject('Space', {
-            organizationUuid: space.organizationUuid,
-            projectUuid: space.projectUuid,
-            isPrivate: space.isPrivate,
-            access,
-        }),
+    const userUuidsWithDirectAccess = space.access.reduce<string[]>(
+        (acc, access) => {
+            if (typeof access === 'string') {
+                return [...acc, access];
+            }
+            if (access.hasDirectAccess) {
+                return [...acc, access.userUuid];
+            }
+            return acc;
+        },
+        [],
     );
 
-export class SpaceService extends BaseService implements BulkActionable<Knex> {
+    return (
+        space.inheritsFromOrgOrProject ||
+        userUuidsWithDirectAccess?.includes(user.userUuid)
+    );
+};
+
+export class SpaceService
+    extends BaseService
+    implements BulkActionable<Knex>, SoftDeletableService
+{
     private readonly analytics: LightdashAnalytics;
+
+    private readonly lightdashConfig: LightdashConfig;
 
     private readonly projectModel: ProjectModel;
 
     private readonly spaceModel: SpaceModel;
 
+    private readonly organizationModel: OrganizationModel;
+
     private readonly pinnedListModel: PinnedListModel;
+
+    private readonly spacePermissionService: SpacePermissionService;
+
+    private readonly savedChartService: SavedChartService;
+
+    private readonly dashboardService: DashboardService;
+
+    private readonly appGenerateService: AppGenerateService | undefined;
 
     constructor(args: SpaceServiceArguments) {
         super();
         this.analytics = args.analytics;
+        this.lightdashConfig = args.lightdashConfig;
         this.projectModel = args.projectModel;
         this.spaceModel = args.spaceModel;
+        this.organizationModel = args.organizationModel;
         this.pinnedListModel = args.pinnedListModel;
+        this.spacePermissionService = args.spacePermissionService;
+        this.savedChartService = args.savedChartService;
+        this.dashboardService = args.dashboardService;
+        this.appGenerateService = args.appGenerateService;
     }
 
     /** @internal For unit testing only */
     async _userCanActionSpace(
         user: Pick<SessionUser, 'ability' | 'userUuid'>,
         contentType: 'Space' | 'Dashboard' | 'Chart',
-        space: Pick<
-            SpaceSummary,
-            'organizationUuid' | 'projectUuid' | 'isPrivate' | 'uuid'
-        >,
+        space: Pick<SpaceSummary, 'uuid'>,
         action: AbilityAction,
-        logDiagnostics: boolean = false,
     ): Promise<boolean> {
-        const userAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            space.uuid,
-        );
-        const ss = subject(contentType, {
-            organizationUuid: space.organizationUuid,
-            projectUuid: space.projectUuid,
-            isPrivate: space.isPrivate,
-            access: userAccess,
-        });
-        if (logDiagnostics) {
-            const rule = user.ability.relevantRuleFor(action, ss);
-            console.log('action 👇');
-            console.log(action);
-            console.log('subject 👇');
-            console.log(ss);
-            console.log('rule 👇');
-            console.log(rule);
-            console.log(rule?.conditions);
-        }
+        const spaceCtx =
+            await this.spacePermissionService.getSpaceAccessContext(
+                user.userUuid,
+                space.uuid,
+            );
+        // eslint-disable-next-line no-direct-ability-check -- test-only method exercises raw CASL abilities
+        return user.ability.can(action, subject(contentType, spaceCtx));
+    }
 
-        return user.ability.can(action, ss);
+    /**
+     * Assembles a full Space object by combining core space data with
+     * access info from SpacePermissionService and user metadata.
+     */
+    private async assembleFullSpace(
+        spaceUuid: string,
+        user: SessionUser,
+    ): Promise<Space> {
+        const space = await this.spaceModel.get(spaceUuid);
+        const [ctx, groupsAccess, rawBreadcrumbs] = await Promise.all([
+            this.spacePermissionService.getAllSpaceAccessContext(spaceUuid),
+            this.spacePermissionService.getGroupAccess(spaceUuid),
+            this.spaceModel.getSpaceBreadcrumbs(spaceUuid, space.projectUuid),
+        ]);
+
+        // Enrich breadcrumbs with user access info
+        const ancestorUuids = rawBreadcrumbs.map((b) => b.uuid);
+        const accessibleUuids = new Set(
+            await this.spacePermissionService.getAccessibleSpaceUuids(
+                'view',
+                user,
+                ancestorUuids,
+            ),
+        );
+        const breadcrumbs = rawBreadcrumbs.map((b) => ({
+            ...b,
+            hasAccess: accessibleUuids.has(b.uuid),
+        }));
+
+        const userInfoMap =
+            await this.spacePermissionService.getUserMetadataByUuids(
+                ctx.access.map((a) => a.userUuid),
+            );
+
+        const access: SpaceShare[] = ctx.access.map((a) => ({
+            ...a,
+            firstName: userInfoMap[a.userUuid]?.firstName ?? '',
+            lastName: userInfoMap[a.userUuid]?.lastName ?? '',
+            email: userInfoMap[a.userUuid]?.email ?? '',
+        }));
+
+        const [queries, dashboards, childSpaces] = await Promise.all([
+            this.spaceModel.getSpaceQueries([spaceUuid]),
+            this.spaceModel.getSpaceDashboards([spaceUuid]),
+            this.spaceModel.find({ parentSpaceUuid: spaceUuid }),
+        ]);
+
+        return {
+            ...space,
+            inheritsFromOrgOrProject: ctx.inheritsFromOrgOrProject,
+            queries,
+            dashboards,
+            childSpaces,
+            access,
+            groupsAccess,
+            breadcrumbs,
+        };
     }
 
     async getSpace(
@@ -124,23 +192,11 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         user: SessionUser,
         spaceUuid: string,
     ): Promise<Space> {
-        const space = await this.spaceModel.getFullSpace(spaceUuid);
-
-        if (
-            user.ability.cannot(
-                'view',
-                subject('Space', {
-                    organizationUuid: space.organizationUuid,
-                    projectUuid,
-                    isPrivate: space.isPrivate,
-                    access: space.access,
-                }),
-            ) // admins can also view private spaces
-        ) {
+        if (!(await this.spacePermissionService.can('view', user, spaceUuid))) {
             throw new ForbiddenError();
         }
 
-        return space;
+        return this.assembleFullSpace(spaceUuid, user);
     }
 
     async createSpace(
@@ -151,10 +207,15 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         const { organizationUuid } =
             await this.projectModel.getSummary(projectUuid);
 
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'create',
-                subject('Space', { organizationUuid, projectUuid }),
+                subject('Space', {
+                    organizationUuid,
+                    projectUuid,
+                    metadata: { spaceName: space.name },
+                }),
             )
         ) {
             throw new ForbiddenError();
@@ -170,10 +231,19 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
             }
         }
 
+        let inheritParentPermissions: boolean;
+        if (space.inheritParentPermissions !== undefined) {
+            inheritParentPermissions = space.inheritParentPermissions;
+        } else if (space.parentSpaceUuid) {
+            inheritParentPermissions = true;
+        } else {
+            inheritParentPermissions = false;
+        }
+
         const newSpace = await this.spaceModel.createSpace(
             {
                 name: space.name,
-                isPrivate: space.isPrivate !== false,
+                inheritParentPermissions,
                 parentSpaceUuid: space.parentSpaceUuid ?? null,
             },
             {
@@ -205,12 +275,12 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
                 name: space.name,
                 spaceId: newSpace.uuid,
                 projectId: projectUuid,
-                isPrivate: newSpace.isPrivate,
+                inheritParentPermissions,
                 userAccessCount: space.access?.length ?? 0,
                 isNested: !!space.parentSpaceUuid,
             },
         });
-        return newSpace;
+        return this.assembleFullSpace(newSpace.uuid, user);
     }
 
     async updateSpace(
@@ -218,32 +288,88 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         spaceUuid: string,
         updateSpace: UpdateSpace,
     ): Promise<Space> {
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const userSpaceAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            spaceUuid,
-        );
-        // Nested Spaces MVP - disables nested spaces' access changes
-        const isNested = !(await this.spaceModel.isRootSpace(spaceUuid));
-        if (isNested && 'isPrivate' in updateSpace) {
-            throw new ForbiddenError(`Can't change privacy for a nested space`);
-        }
         if (
-            user.ability.cannot(
-                'manage',
-                subject('Space', {
-                    ...space,
-                    access: userSpaceAccess,
-                }),
-            )
+            !(await this.spacePermissionService.can('manage', user, spaceUuid))
         ) {
             throw new ForbiddenError();
         }
 
-        const updatedSpace = await this.spaceModel.update(
-            spaceUuid,
-            updateSpace,
-        );
+        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
+
+        if (updateSpace.colorPaletteUuid) {
+            const palette = await this.organizationModel.findColorPalette(
+                space.organizationUuid,
+                updateSpace.colorPaletteUuid,
+            );
+            if (!palette) {
+                throw new ParameterError(
+                    'Color palette does not belong to this organization',
+                );
+            }
+        }
+
+        const { inheritParentPermissions } = updateSpace;
+
+        // When switching from inherit to not-inherit, copy inherited permissions
+        // as direct access entries so users don't lose access.
+        const turnInheritOff =
+            space.inheritParentPermissions === true &&
+            inheritParentPermissions === false;
+
+        if (turnInheritOff) {
+            const ctx = await this.spacePermissionService.getSpaceAccessContext(
+                user.userUuid,
+                spaceUuid,
+            );
+            const userAccess = ctx.access.find(
+                (a) => a.userUuid === user.userUuid,
+            );
+
+            const { userAccessEntries, groupAccessEntries } =
+                await this.spacePermissionService.getInheritedPermissionsToCopy(
+                    spaceUuid,
+                );
+
+            if (userAccess && !userAccess.hasDirectAccess) {
+                const existingIdx = userAccessEntries.findIndex(
+                    (e) => e.userUuid === user.userUuid,
+                );
+                if (existingIdx >= 0) {
+                    // User already inherited from an ancestor — keep highest role
+                    const highest = getHighestSpaceRole([
+                        userAccessEntries[existingIdx].role,
+                        userAccess.role,
+                    ]);
+                    if (highest !== undefined) {
+                        userAccessEntries[existingIdx].role = highest;
+                    }
+                } else {
+                    userAccessEntries.push({
+                        userUuid: user.userUuid,
+                        role: userAccess.role,
+                    });
+                }
+            }
+            await this.spaceModel.updateWithCopiedPermissions(
+                spaceUuid,
+                { ...updateSpace, inheritParentPermissions },
+                userAccessEntries,
+                groupAccessEntries,
+            );
+        } else {
+            await this.spaceModel.update(spaceUuid, {
+                ...updateSpace,
+                inheritParentPermissions,
+            });
+        }
+
+        const updatedSpace = await this.assembleFullSpace(spaceUuid, user);
+        const directAccessCount = updatedSpace.access.filter(
+            (a) => a.hasDirectAccess,
+        ).length;
+
+        const isNested = !!space.parentSpaceUuid;
+
         this.analytics.track({
             event: 'space.updated',
             userId: user.userUuid,
@@ -251,11 +377,13 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
                 name: space.name,
                 spaceId: spaceUuid,
                 projectId: space.projectUuid,
-                isPrivate: space.isPrivate,
-                userAccessCount: space.access.length,
+                inheritParentPermissions: updatedSpace.inheritParentPermissions,
                 isNested,
+                // This used to rely on summary.access.length, which only contained direct user access and ignored direct group access
+                userAccessCount: directAccessCount,
             },
         });
+
         return updatedSpace;
     }
 
@@ -270,49 +398,26 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
             targetSpaceUuid?: string;
         },
     ) {
-        const space = await this.spaceModel.getSpaceSummary(resource.spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            actor.user.userUuid,
-            space.parentSpaceUuid ?? resource.spaceUuid,
-        );
-
-        const isActorAllowedToPerformAction = actor.user.ability.can(
-            action,
-            subject('Space', {
-                organizationUuid: actor.user.organizationUuid,
-                projectUuid: actor.projectUuid,
-                isPrivate: space.isPrivate,
-                access: spaceAccess,
-            }),
-        );
-
-        if (!isActorAllowedToPerformAction) {
+        if (
+            !(await this.spacePermissionService.can(
+                action,
+                actor.user,
+                resource.spaceUuid,
+            ))
+        ) {
             throw new ForbiddenError(
                 `You don't have access to ${action} this space`,
             );
         }
 
         if (resource.targetSpaceUuid) {
-            const newSpace = await this.spaceModel.getSpaceSummary(
-                resource.targetSpaceUuid,
-            );
-            const newSpaceAccess = await this.spaceModel.getUserSpaceAccess(
-                actor.user.userUuid,
-                resource.targetSpaceUuid,
-            );
-
-            const isActorAllowedToPerformActionInNewSpace =
-                actor.user.ability.can(
+            if (
+                !(await this.spacePermissionService.can(
                     action,
-                    subject('Space', {
-                        organizationUuid: newSpace.organizationUuid,
-                        projectUuid: actor.projectUuid,
-                        isPrivate: newSpace.isPrivate,
-                        access: newSpaceAccess,
-                    }),
-                );
-
-            if (!isActorAllowedToPerformActionInNewSpace) {
+                    actor.user,
+                    resource.targetSpaceUuid,
+                ))
+            ) {
                 throw new ForbiddenError(
                     `You don't have access to ${action} this space in the new parent space`,
                 );
@@ -388,25 +493,41 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         }
     }
 
-    async deleteSpace(user: SessionUser, spaceUuid: string): Promise<void> {
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            spaceUuid,
-        );
-        if (
-            user.ability.cannot(
-                'delete',
-                subject('Space', {
-                    ...space,
-                    access: spaceAccess,
-                }),
-            )
-        ) {
-            throw new ForbiddenError();
+    async delete(
+        user: SessionUser,
+        spaceUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        if (!options?.bypassPermissions) {
+            if (
+                !(await this.spacePermissionService.can(
+                    'delete',
+                    user,
+                    spaceUuid,
+                ))
+            ) {
+                throw new ForbiddenError();
+            }
+        } else {
+            this.logBypassEvent(user, 'delete', {
+                type: 'Space',
+                metadata: { spaceUuid },
+                organizationUuid: user.organizationUuid ?? 'unknown',
+            });
         }
 
-        await this.spaceModel.deleteSpace(spaceUuid);
+        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
+
+        if (this.lightdashConfig.softDelete.enabled) {
+            await this.softDelete(user, spaceUuid, {
+                bypassPermissions: true, // perms checked above
+            });
+        } else {
+            await this.permanentDelete(user, spaceUuid, {
+                bypassPermissions: true, // perms checked above
+            });
+        }
+
         this.analytics.track({
             event: 'space.deleted',
             userId: user.userUuid,
@@ -415,8 +536,299 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
                 spaceId: spaceUuid,
                 projectId: space.projectUuid,
                 isNested: !!space.parentSpaceUuid,
+                softDelete: this.lightdashConfig.softDelete.enabled,
             },
         });
+    }
+
+    async softDelete(
+        user: SessionUser,
+        spaceUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        if (!options?.bypassPermissions) {
+            if (
+                !(await this.spacePermissionService.can(
+                    'delete',
+                    user,
+                    spaceUuid,
+                ))
+            ) {
+                throw new ForbiddenError();
+            }
+        } else {
+            this.logBypassEvent(user, 'delete', {
+                type: 'Space',
+                metadata: { spaceUuid },
+                organizationUuid: user.organizationUuid ?? 'unknown',
+            });
+        }
+
+        // Get all content UUIDs BEFORE soft-deleting
+        const chartUuids =
+            await this.spaceModel.getChartUuidsInSpace(spaceUuid);
+        const dashboardUuids =
+            await this.spaceModel.getDashboardUuidsInSpace(spaceUuid);
+        const childSpaceUuids =
+            await this.spaceModel.getChildSpaceUuids(spaceUuid);
+        const apps = this.appGenerateService
+            ? await this.spaceModel.getAppsInSpace(spaceUuid)
+            : [];
+
+        for (const chartUuid of chartUuids) {
+            // eslint-disable-next-line no-await-in-loop
+            await this.savedChartService.delete(user, chartUuid, {
+                bypassPermissions: true, // space delete authorized above
+            });
+        }
+        for (const dashboardUuid of dashboardUuids) {
+            // eslint-disable-next-line no-await-in-loop
+            await this.dashboardService.delete(user, dashboardUuid, {
+                bypassPermissions: true, // space delete authorized above
+            });
+        }
+        for (const { appUuid, projectUuid } of apps) {
+            // eslint-disable-next-line no-await-in-loop
+            await this.appGenerateService!.deleteApp(
+                user,
+                projectUuid,
+                appUuid,
+                { bypassPermissions: true }, // space delete authorized above
+            );
+        }
+        for (const childSpaceUuid of childSpaceUuids) {
+            // eslint-disable-next-line no-await-in-loop
+            await this.delete(user, childSpaceUuid, {
+                bypassPermissions: true, // space delete authorized above
+            });
+        }
+
+        await this.spaceModel.softDelete(spaceUuid, user.userUuid);
+    }
+
+    async getDeleteImpact(
+        user: SessionUser,
+        spaceUuid: string,
+    ): Promise<SpaceDeleteImpact> {
+        if (
+            !(await this.spacePermissionService.can('delete', user, spaceUuid))
+        ) {
+            throw new ForbiddenError();
+        }
+
+        const descendantUuids =
+            await this.spaceModel.getDescendantSpaceUuids(spaceUuid);
+        const allUuids = [spaceUuid, ...descendantUuids];
+
+        const spaces = await this.spaceModel.find({ spaceUuids: allUuids });
+
+        const [charts, sqlCharts, dashboards, apps] = await Promise.all([
+            this.spaceModel.getSpaceQueries(allUuids),
+            this.spaceModel.getSpaceSqlCharts(allUuids),
+            this.spaceModel.getSpaceDashboards(allUuids),
+            this.spaceModel.getSpaceApps(allUuids),
+        ]);
+
+        const allCharts = [...charts, ...sqlCharts];
+
+        return {
+            spaces: spaces.map((s) => ({
+                uuid: s.uuid,
+                name: s.name,
+                parentSpaceUuid: s.parentSpaceUuid,
+                chartCount: Number(s.chartCount),
+                dashboardCount: Number(s.dashboardCount),
+                appCount: Number(s.appCount),
+            })),
+            charts: allCharts.map((c) => ({
+                uuid: c.uuid,
+                name: c.name,
+                spaceUuid: c.spaceUuid,
+            })),
+            dashboards: dashboards.map((d) => ({
+                uuid: d.uuid,
+                name: d.name,
+                spaceUuid: d.spaceUuid,
+            })),
+            apps: apps.map((a) => ({
+                uuid: a.uuid,
+                spaceUuid: a.spaceUuid,
+            })),
+            chartCount: allCharts.length,
+            dashboardCount: dashboards.length,
+            appCount: apps.length,
+        };
+    }
+
+    async restore(
+        user: SessionUser,
+        spaceUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        const space = await this.spaceModel.getSpaceSummary(spaceUuid, {
+            deleted: true,
+        });
+
+        if (options?.bypassPermissions) {
+            this.logBypassEvent(user, 'manage', {
+                type: 'DeletedContent',
+                metadata: { spaceUuid, spaceName: space.name },
+                organizationUuid: space.organizationUuid,
+                projectUuid: space.projectUuid,
+            });
+        } else {
+            const auditedAbility = this.createAuditedAbility(user);
+            const isAdmin = auditedAbility.can(
+                'manage',
+                subject('DeletedContent', {
+                    organizationUuid: space.organizationUuid,
+                    projectUuid: space.projectUuid,
+                    metadata: { spaceUuid, spaceName: space.name },
+                }),
+            );
+
+            if (!isAdmin) {
+                if (space.deletedBy?.userUuid === user.userUuid) {
+                    this.logBypassEvent(user, 'manage', {
+                        type: 'DeletedContent',
+                        metadata: { spaceUuid, spaceName: space.name },
+                        organizationUuid: space.organizationUuid,
+                        projectUuid: space.projectUuid,
+                    });
+                } else {
+                    throw new ForbiddenError(
+                        'You can only restore content you deleted',
+                    );
+                }
+            }
+        }
+
+        await this.spaceModel.restore(spaceUuid);
+
+        // Cascade: restore children that were cascade-deleted by the same user
+        if (space.deletedBy?.userUuid) {
+            const deletedChartUuids =
+                await this.spaceModel.getChartUuidsInSpace(spaceUuid, {
+                    deleted: true,
+                    deletedByUserUuid: space.deletedBy.userUuid,
+                });
+            for (const chartUuid of deletedChartUuids) {
+                // eslint-disable-next-line no-await-in-loop
+                await this.savedChartService.restore(user, chartUuid, {
+                    bypassPermissions: true, // space restore authorized above
+                });
+            }
+
+            const deletedDashboardUuids =
+                await this.spaceModel.getDashboardUuidsInSpace(spaceUuid, {
+                    deleted: true,
+                    deletedByUserUuid: space.deletedBy.userUuid,
+                });
+            for (const dashboardUuid of deletedDashboardUuids) {
+                // eslint-disable-next-line no-await-in-loop
+                await this.dashboardService.restore(user, dashboardUuid, {
+                    bypassPermissions: true, // space restore authorized above
+                });
+            }
+
+            if (this.appGenerateService) {
+                const deletedApps = await this.spaceModel.getAppsInSpace(
+                    spaceUuid,
+                    {
+                        deleted: true,
+                        deletedByUserUuid: space.deletedBy.userUuid,
+                    },
+                );
+                for (const { appUuid, projectUuid } of deletedApps) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await this.appGenerateService.restoreApp(
+                        user,
+                        projectUuid,
+                        appUuid,
+                        { bypassPermissions: true }, // space restore authorized above
+                    );
+                }
+            }
+
+            const deletedChildSpaceUuids =
+                await this.spaceModel.getChildSpaceUuids(spaceUuid, {
+                    deleted: true,
+                    deletedByUserUuid: space.deletedBy.userUuid,
+                });
+            for (const childSpaceUuid of deletedChildSpaceUuids) {
+                // eslint-disable-next-line no-await-in-loop
+                await this.restore(user, childSpaceUuid, {
+                    bypassPermissions: true, // space restore authorized above
+                });
+            }
+        }
+
+        this.analytics.track({
+            event: 'space.restored',
+            userId: user.userUuid,
+            properties: {
+                name: space.name,
+                spaceId: spaceUuid,
+                projectId: space.projectUuid,
+            },
+        });
+    }
+
+    async permanentDelete(
+        user: SessionUser,
+        spaceUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        if (options?.bypassPermissions) {
+            this.logBypassEvent(user, 'manage', {
+                type: 'DeletedContent',
+                metadata: { spaceUuid },
+                organizationUuid: user.organizationUuid ?? 'unknown',
+            });
+        } else {
+            const space = await this.spaceModel.getSpaceSummary(spaceUuid, {
+                deleted: true,
+            });
+            const auditedAbility = this.createAuditedAbility(user);
+            if (
+                auditedAbility.cannot(
+                    'manage',
+                    subject('DeletedContent', {
+                        organizationUuid: space.organizationUuid,
+                        projectUuid: space.projectUuid,
+                        metadata: { spaceUuid, spaceName: space.name },
+                    }),
+                )
+            ) {
+                throw new ForbiddenError();
+            }
+        }
+
+        // Apps' FK is ON DELETE SET NULL, so DB CASCADE doesn't clean them up.
+        // Permanent-delete them explicitly (sandbox + S3 cleanup). Include
+        // both active and soft-deleted apps: when soft-delete is disabled the
+        // cascade from delete() bypasses the soft-delete step, so apps in the
+        // space are still active at this point.
+        if (this.appGenerateService) {
+            const [deletedApps, activeApps] = await Promise.all([
+                this.spaceModel.getAppsInSpace(spaceUuid, { deleted: true }),
+                this.spaceModel.getAppsInSpace(spaceUuid),
+            ]);
+            for (const { appUuid, projectUuid } of [
+                ...deletedApps,
+                ...activeApps,
+            ]) {
+                // eslint-disable-next-line no-await-in-loop
+                await this.appGenerateService.permanentDeleteApp(
+                    user,
+                    projectUuid,
+                    appUuid,
+                    { bypassPermissions: true },
+                );
+            }
+        }
+
+        await this.spaceModel.permanentDelete(spaceUuid);
     }
 
     async addSpaceUserAccess(
@@ -425,26 +837,8 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         shareWithUserUuid: string,
         spaceRole: SpaceMemberRole,
     ): Promise<void> {
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            spaceUuid,
-        );
-        // Nested Spaces MVP - disables nested spaces' access changes
-        const isNested = !(await this.spaceModel.isRootSpace(spaceUuid));
-        if (isNested) {
-            throw new ForbiddenError(
-                `Can't change user access to a nested space`,
-            );
-        }
         if (
-            user.ability.cannot(
-                'manage',
-                subject('Space', {
-                    ...space,
-                    access: spaceAccess,
-                }),
-            )
+            !(await this.spacePermissionService.can('manage', user, spaceUuid))
         ) {
             throw new ForbiddenError();
         }
@@ -461,26 +855,8 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         spaceUuid: string,
         shareWithUserUuid: string,
     ): Promise<void> {
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            spaceUuid,
-        );
-        // Nested Spaces MVP - disables nested spaces' access changes
-        const isNested = !(await this.spaceModel.isRootSpace(spaceUuid));
-        if (isNested) {
-            throw new ForbiddenError(
-                `Can't change user access to a nested space`,
-            );
-        }
         if (
-            user.ability.cannot(
-                'manage',
-                subject('Space', {
-                    ...space,
-                    access: spaceAccess,
-                }),
-            )
+            !(await this.spacePermissionService.can('manage', user, spaceUuid))
         ) {
             throw new ForbiddenError();
         }
@@ -494,26 +870,8 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         shareWithGroupUuid: string,
         spaceRole: SpaceMemberRole,
     ): Promise<void> {
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            spaceUuid,
-        );
-        // Nested Spaces MVP - disables nested spaces' access changes
-        const isNested = !(await this.spaceModel.isRootSpace(spaceUuid));
-        if (isNested) {
-            throw new ForbiddenError(
-                `Can't change group access to a nested space`,
-            );
-        }
         if (
-            user.ability.cannot(
-                'manage',
-                subject('Space', {
-                    ...space,
-                    access: spaceAccess,
-                }),
-            )
+            !(await this.spacePermissionService.can('manage', user, spaceUuid))
         ) {
             throw new ForbiddenError();
         }
@@ -530,26 +888,8 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         spaceUuid: string,
         shareWithGroupUuid: string,
     ): Promise<void> {
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            spaceUuid,
-        );
-        // Nested Spaces MVP - disables nested spaces' access changes
-        const isNested = !(await this.spaceModel.isRootSpace(spaceUuid));
-        if (isNested) {
-            throw new ForbiddenError(
-                `Can't change group access to a nested space`,
-            );
-        }
         if (
-            user.ability.cannot(
-                'manage',
-                subject('Space', {
-                    ...space,
-                    access: spaceAccess,
-                }),
-            )
+            !(await this.spacePermissionService.can('manage', user, spaceUuid))
         ) {
             throw new ForbiddenError();
         }
@@ -564,10 +904,15 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
         const existingSpace = await this.spaceModel.get(spaceUuid);
         const { projectUuid, organizationUuid, pinnedListUuid } = existingSpace;
 
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
-                subject('PinnedItems', { projectUuid, organizationUuid }),
+                subject('PinnedItems', {
+                    projectUuid,
+                    organizationUuid,
+                    metadata: { spaceUuid, spaceName: existingSpace.name },
+                }),
             )
         ) {
             throw new ForbiddenError();
@@ -623,25 +968,16 @@ export class SpaceService extends BaseService implements BulkActionable<Knex> {
             ...new Set(searchResults.map((item) => item.spaceUuid)),
         ];
 
-        // Fetch space summaries and user access
-        const [spaces, spacesAccess] = await Promise.all([
-            this.spaceModel.find({ spaceUuids }),
-            this.spaceModel.getUserSpacesAccess(user.userUuid, spaceUuids),
-        ]);
-
-        // Filter function to check space access
-        const hasAccessToItem = (item: T) => {
-            const itemSpace = spaces.find((s) => s.uuid === item.spaceUuid);
-            return (
-                itemSpace &&
-                hasViewAccessToSpace(
-                    user,
-                    itemSpace,
-                    spacesAccess[item.spaceUuid] ?? [],
-                )
+        const accessibleSpaceUuids =
+            await this.spacePermissionService.getAccessibleSpaceUuids(
+                'view',
+                user,
+                spaceUuids,
             );
-        };
 
-        return searchResults.filter(hasAccessToItem);
+        const accessibleSet = new Set(accessibleSpaceUuids);
+        return searchResults.filter((item) =>
+            accessibleSet.has(item.spaceUuid),
+        );
     }
 }

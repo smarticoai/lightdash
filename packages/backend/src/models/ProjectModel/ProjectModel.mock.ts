@@ -58,6 +58,8 @@ export const projectMock = {
     organization_uuid: 'organizationUuid',
     dbt_version: DefaultSupportedDbtVersion,
     scheduler_timezone: 'UTC',
+    query_timezone: null,
+    has_default_user_spaces: false,
 };
 
 export const tableSelectionMock: Pick<
@@ -104,7 +106,10 @@ export const expectedProject: Project = {
     } as AnyType as BigqueryCredentials,
     dbtVersion: DefaultSupportedDbtVersion,
     schedulerTimezone: 'UTC',
+    queryTimezone: null,
     createdByUserUuid: null,
+    hasDefaultUserSpaces: false,
+    colorPaletteUuid: null,
 };
 
 const metricFilter: MetricFilterRule = {

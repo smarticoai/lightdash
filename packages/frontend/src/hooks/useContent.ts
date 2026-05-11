@@ -1,12 +1,12 @@
 import {
     assertUnreachable,
+    ContentType,
     type ApiContentActionBody,
     type ApiContentBulkActionBody,
     type ApiContentResponse,
     type ApiError,
     type ApiSuccessEmpty,
     type ContentSortByColumns,
-    type ContentType,
 } from '@lightdash/common';
 import { IconArrowRight } from '@tabler/icons-react';
 import {
@@ -19,6 +19,7 @@ import {
 } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { lightdashApi } from '../api';
+import useApp from '../providers/App/useApp';
 import useToaster from './toaster/useToaster';
 
 export type ContentArgs = {
@@ -31,6 +32,9 @@ export type ContentArgs = {
     sortBy?: ContentSortByColumns;
     sortDirection?: 'asc' | 'desc';
 };
+
+const contentTypeLabel = (contentType: ContentType): string =>
+    contentType === ContentType.DATA_APP ? 'data app' : contentType;
 
 function createQueryString(params: Record<string, any>): string {
     const query = new URLSearchParams();
@@ -111,7 +115,7 @@ const postContentBulkAction = async ({
     });
 };
 
-const invalidateContent = async (
+export const invalidateContent = async (
     queryClient: QueryClient,
     projectUuid: string,
 ) => {
@@ -124,6 +128,7 @@ const invalidateContent = async (
         queryClient.invalidateQueries(['space', projectUuid]),
         queryClient.invalidateQueries(['space']),
         queryClient.invalidateQueries(['spaces']),
+        queryClient.invalidateQueries([projectUuid, 'search']),
     ]);
 };
 
@@ -138,6 +143,8 @@ export const useContentAction = (
     const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
     const navigate = useNavigate();
+    const { health } = useApp();
+    const isSoftDeleteEnabled = health.data?.softDelete.enabled ?? false;
 
     return useMutation<ApiSuccessEmpty, ApiError, ApiContentActionBody>({
         mutationFn: (body) => {
@@ -165,7 +172,9 @@ export const useContentAction = (
             switch (action.type) {
                 case 'move':
                     return showToastSuccess({
-                        title: `Successfully moved ${variables.item.contentType} to a space`,
+                        title: `Successfully moved ${contentTypeLabel(
+                            variables.item.contentType,
+                        )} to a space`,
                         action: {
                             children: 'Go to space',
                             icon: IconArrowRight,
@@ -179,8 +188,21 @@ export const useContentAction = (
                     });
 
                 case 'delete':
+                    await queryClient.invalidateQueries(['deletedContent']);
                     return showToastSuccess({
-                        title: `Successfully deleted ${item.contentType}.`,
+                        title: `Successfully deleted ${contentTypeLabel(
+                            item.contentType,
+                        )}.`,
+                        action: isSoftDeleteEnabled
+                            ? {
+                                  children: 'Go to recently deleted',
+                                  icon: IconArrowRight,
+                                  onClick: () =>
+                                      navigate(
+                                          `/generalSettings/projectManagement/${projectUuid}/recentlyDeleted`,
+                                      ),
+                              }
+                            : undefined,
                     });
 
                 default:
@@ -212,6 +234,8 @@ export const useContentBulkAction = (
     const { showToastSuccess, showToastApiError } = useToaster();
     const queryClient = useQueryClient();
     const navigate = useNavigate();
+    const { health } = useApp();
+    const isSoftDeleteEnabled = health.data?.softDelete.enabled ?? false;
 
     return useMutation<ApiSuccessEmpty, ApiError, ApiContentBulkActionBody>({
         mutationFn: (body) => {
@@ -253,10 +277,21 @@ export const useContentBulkAction = (
                     });
 
                 case 'delete':
+                    await queryClient.invalidateQueries(['deletedContent']);
                     return showToastSuccess({
                         title: `Successfully deleted ${content.length} ${
                             content.length === 1 ? 'item' : 'items'
                         }.`,
+                        action: isSoftDeleteEnabled
+                            ? {
+                                  children: 'Go to recently deleted',
+                                  icon: IconArrowRight,
+                                  onClick: () =>
+                                      navigate(
+                                          `/generalSettings/projectManagement/${projectUuid}/recentlyDeleted`,
+                                      ),
+                              }
+                            : undefined,
                     });
 
                 default:

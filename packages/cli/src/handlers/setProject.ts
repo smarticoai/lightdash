@@ -1,7 +1,8 @@
-import { OrganizationProject } from '@lightdash/common';
+import { OrganizationProject, ProjectType } from '@lightdash/common';
 import inquirer from 'inquirer';
 import { URL } from 'url';
-import { getConfig, setProject } from '../config';
+import { LightdashAnalytics } from '../analytics/analytics';
+import { getConfig, setProject, unsetProject } from '../config';
 import GlobalState from '../globalState';
 import { lightdashApi } from './dbt/apiClient';
 
@@ -11,7 +12,10 @@ type SetProjectOptions = {
     uuid: string;
 };
 
-export const setProjectCommand = async (name?: string, uuid?: string) => {
+export const setProjectCommand = async (
+    name?: string,
+    uuid?: string,
+): Promise<'selected' | 'skipped' | 'empty'> => {
     const projects = await lightdashApi<OrganizationProject[]>({
         method: 'GET',
         url: `/api/v1/org/projects`,
@@ -22,30 +26,57 @@ export const setProjectCommand = async (name?: string, uuid?: string) => {
         `> Set project returned response: ${JSON.stringify(projects)}`,
     );
 
-    if (projects.length === 0) return;
+    // `set-project` configures the default (production) project. Preview
+    // projects are managed separately via `start-preview`/`stop-preview`,
+    // and storing one here causes the download prompt to show the same
+    // project under both "Preview" and "Production" labels.
+    const nonPreviewProjects = projects.filter(
+        (project) => project.type !== ProjectType.PREVIEW,
+    );
+
+    if (projects.length === 0) return 'empty';
 
     let selectedProject: OrganizationProject | undefined;
 
     // --uuid or --name options
     if (uuid !== undefined || name !== undefined) {
-        selectedProject = projects.find(
+        const matchedProject = projects.find(
             (project) => project.name === name || project.projectUuid === uuid,
         );
-
-        // Select project interactively
+        if (matchedProject?.type === ProjectType.PREVIEW) {
+            throw new Error(
+                `Project "${matchedProject.name}" is a preview project and cannot be set as the default project. Use \`lightdash start-preview\` to work with preview projects.`,
+            );
+        }
+        selectedProject = matchedProject;
+    } else if (GlobalState.isNonInteractive()) {
+        GlobalState.debug('> Non-interactive mode: selecting first project');
+        [selectedProject] = nonPreviewProjects;
     } else {
+        const SKIP_VALUE = '__skip__';
         const answers = await inquirer.prompt([
             {
                 type: 'list',
                 name: 'project',
-                choices: projects.map((project) => ({
-                    name: project.name,
-                    value: project.projectUuid,
-                })),
+                choices: [
+                    {
+                        name: "Don't select a project",
+                        value: SKIP_VALUE,
+                    },
+                    ...nonPreviewProjects.map((project) => ({
+                        name: project.name,
+                        value: project.projectUuid,
+                    })),
+                ],
             },
         ]);
 
-        selectedProject = projects.find(
+        if (answers.project === SKIP_VALUE) {
+            await unsetProject();
+            return 'skipped';
+        }
+
+        selectedProject = nonPreviewProjects.find(
             (project) => project.projectUuid === answers.project,
         );
     }
@@ -62,9 +93,9 @@ export const setProjectCommand = async (name?: string, uuid?: string) => {
         console.error(
             `\n  ✅️ Connected to Lightdash project: ${projectUrl || ''}\n`,
         );
-    } else {
-        throw new Error(`Project not found.`);
+        return 'selected';
     }
+    throw new Error(`Project not found.`);
 };
 
 export const setFirstProject = async () => {
@@ -89,6 +120,51 @@ export const setFirstProject = async () => {
 };
 
 export const setProjectHandler = async (options: SetProjectOptions) => {
+    const startTime = Date.now();
+    let success = true;
     GlobalState.setVerbose(options.verbose);
-    return setProjectCommand(options.name, options.uuid);
+    try {
+        const result = await setProjectCommand(options.name, options.uuid);
+        if (result === 'skipped') {
+            console.error(`\n  Project unset.\n`);
+        }
+    } catch (e) {
+        success = false;
+        throw e;
+    } finally {
+        await LightdashAnalytics.track({
+            event: 'command.executed',
+            properties: {
+                command: 'set-project',
+                durationMs: Date.now() - startTime,
+                success,
+            },
+        });
+    }
+};
+
+export const unsetProjectCommand = async () => {
+    await unsetProject();
+    console.error(`\n  Project unset.\n`);
+};
+
+export const unsetProjectHandler = async (options: { verbose: boolean }) => {
+    const startTime = Date.now();
+    let success = true;
+    GlobalState.setVerbose(options.verbose);
+    try {
+        await unsetProjectCommand();
+    } catch (e) {
+        success = false;
+        throw e;
+    } finally {
+        await LightdashAnalytics.track({
+            event: 'command.executed',
+            properties: {
+                command: 'unset-project',
+                durationMs: Date.now() - startTime,
+                success,
+            },
+        });
+    }
 };

@@ -1,4 +1,9 @@
-import { createClient, Row, type ClickHouseClient } from '@clickhouse/client';
+import {
+    createClient,
+    Row,
+    type ClickHouseClient,
+    type ClickHouseSettings,
+} from '@clickhouse/client';
 import {
     AnyType,
     CreateClickhouseCredentials,
@@ -63,14 +68,21 @@ interface TableInfo {
     table: string;
 }
 
-const convertDataTypeToDimensionType = (
+export const convertDataTypeToDimensionType = (
     type: ClickhouseTypes | string,
 ): DimensionType => {
-    // Remove nullable wrapper and low cardinality wrapper
-    const cleanType = type
-        .replace(/^Nullable\((.+)\)$/, '$1')
-        .replace(/^LowCardinality\((.+)\)$/, '$1')
-        .replace(/\(\d+\)/, ''); // Remove precision from decimals and fixed strings
+    // Iteratively unwrap Nullable/LowCardinality wrappers in any nesting order
+    // e.g. LowCardinality(Nullable(Int32)) -> Nullable(Int32) -> Int32
+    let cleanType = type;
+    let prev = '';
+    while (cleanType !== prev) {
+        prev = cleanType;
+        cleanType = cleanType
+            .replace(/^Nullable\((.+)\)$/, '$1')
+            .replace(/^LowCardinality\((.+)\)$/, '$1');
+    }
+    // Strip all parenthesized arguments (handles Decimal(18,2), DateTime64(3,'UTC'), FixedString(N), etc.)
+    cleanType = cleanType.replace(/\(.*\)$/, '');
 
     switch (cleanType) {
         case ClickhouseTypes.BOOL:
@@ -227,20 +239,24 @@ export class ClickhouseWarehouseClient extends WarehouseBaseClient<CreateClickho
         },
     ): Promise<void> {
         try {
-            let alteredQuery = sql;
+            // Build clickhouse_settings with optional timezone and log_comment for query tags
+            const clickhouseSettings: ClickHouseSettings = {};
+            if (options?.timezone) {
+                clickhouseSettings.session_timezone = options.timezone;
+            }
             if (options?.tags) {
-                alteredQuery = `${alteredQuery}\n-- ${JSON.stringify(
-                    options?.tags,
-                )}`;
+                // Use native log_comment setting - persists in system.query_log
+                clickhouseSettings.log_comment = JSON.stringify(options.tags);
             }
 
             const resultSet = await this.client.query({
-                query: alteredQuery,
+                query: sql,
                 format: 'JSONCompactEachRowWithNamesAndTypes',
                 query_params: options?.queryParams,
-                clickhouse_settings: options?.timezone
-                    ? { timezone: options.timezone }
-                    : undefined,
+                clickhouse_settings:
+                    Object.keys(clickhouseSettings).length > 0
+                        ? clickhouseSettings
+                        : undefined,
             });
 
             const columnNames: string[] = [];

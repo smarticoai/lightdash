@@ -1,21 +1,28 @@
 import { defineConfig } from 'cypress';
 import cypressSplit from 'cypress-split';
-import { unlinkSync } from 'fs';
+import { readdirSync, readFileSync, unlinkSync } from 'fs';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { load: loadYaml } = require('js-yaml');
+import { join } from 'path';
 
 // If running natively, we want to use environment variables from the host machine
 // to be added to Cypress.env()
 const env = process.env.RUNTIME === 'native' ? process.env : {};
+
+// Allow configuring retries via environment variable
+const runModeRetries = parseInt(process.env.CYPRESS_RETRIES ?? '2', 10);
 
 export default defineConfig({
     viewportWidth: 1920,
     viewportHeight: 1080,
     defaultCommandTimeout: 10000,
     retries: {
-        runMode: 2,
+        runMode: runModeRetries,
         openMode: 0,
     },
     e2e: {
         specPattern: 'cypress/**/**/*.cy.{js,jsx,ts,tsx}',
+        excludeSpecPattern: ['cypress/e2e/experimental/**/*'],
         baseUrl: 'http://localhost:3000',
         blockHosts: [
             '*.rudderlabs.com',
@@ -28,6 +35,37 @@ export default defineConfig({
         trashAssetsBeforeRuns: true,
         experimentalMemoryManagement: true,
         setupNodeEvents(on, config) {
+            // Count dbt models and read thread count so CLI tests can
+            // scale timeouts dynamically based on parallel execution.
+            const demoDir = join(
+                __dirname,
+                '../../examples/full-jaffle-shop-demo',
+            );
+            const modelsDir = join(demoDir, 'dbt/models');
+            const countSqlFiles = (dir: string): number =>
+                readdirSync(dir, { withFileTypes: true }).reduce(
+                    (count, entry) =>
+                        entry.isDirectory()
+                            ? count +
+                              countSqlFiles(join(dir, entry.name))
+                            : count +
+                              (entry.name.endsWith('.sql') ? 1 : 0),
+                    0,
+                );
+            config.env.MODEL_COUNT = countSqlFiles(modelsDir);
+
+            const DBT_DEFAULT_THREADS = 4;
+            const profilesPath = join(demoDir, 'profiles/profiles.yml');
+            const profiles = loadYaml(
+                readFileSync(profilesPath, 'utf8'),
+            ) as Record<string, any>;
+            const targetName =
+                profiles?.jaffle_shop?.target ?? 'jaffle';
+            const threads =
+                profiles?.jaffle_shop?.outputs?.[targetName]?.threads ??
+                DBT_DEFAULT_THREADS;
+            config.env.DBT_THREADS = threads;
+
             cypressSplit(on, config);
 
             on('before:browser:launch', (browser, launchOptions) => {

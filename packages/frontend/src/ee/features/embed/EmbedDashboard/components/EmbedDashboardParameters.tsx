@@ -1,7 +1,8 @@
-import { Box } from '@mantine/core';
+import { Group } from '@mantine-8/core';
 import { useMemo, type FC } from 'react';
 import { Parameters } from '../../../../../features/parameters';
 import useDashboardContext from '../../../../../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../../../../../providers/Dashboard/useDashboardTileStatusContext';
 
 const EmbedDashboardParameters: FC = () => {
     const parameterValues = useDashboardContext((c) => c.parameterValues);
@@ -13,7 +14,9 @@ const EmbedDashboardParameters: FC = () => {
     const parameterReferences = useDashboardContext(
         (c) => c.dashboardParameterReferences,
     );
-    const areAllChartsLoaded = useDashboardContext((c) => c.areAllChartsLoaded);
+    const areAllChartsLoaded = useDashboardTileStatusContext(
+        (c) => c.areAllChartsLoaded,
+    );
     const missingRequiredParameters = useDashboardContext(
         (c) => c.missingRequiredParameters,
     );
@@ -27,7 +30,7 @@ const EmbedDashboardParameters: FC = () => {
     }, [parameterDefinitions, parameterReferences]);
 
     return (
-        <Box style={{ flexShrink: 0 }}>
+        <Group gap="xs" wrap="wrap" style={{ flexShrink: 0 }}>
             <Parameters
                 isEditMode={false}
                 parameterValues={parameterValues}
@@ -37,7 +40,7 @@ const EmbedDashboardParameters: FC = () => {
                 isLoading={!areAllChartsLoaded}
                 missingRequiredParameters={missingRequiredParameters}
             />
-        </Box>
+        </Group>
     );
 };
 

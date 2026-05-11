@@ -1,9 +1,9 @@
 import flow from 'lodash/flow';
 import { ProjectType } from '../types/projects';
 import {
+    ScopeGroup,
     type Scope,
     type ScopeContext,
-    ScopeGroup,
     type ScopeName,
 } from '../types/scopes';
 import { SpaceMemberRole } from '../types/space';
@@ -11,7 +11,9 @@ import { SpaceMemberRole } from '../types/space';
 /** Context can have either/or organizationUuid or projectUuid. Applies the one we have. */
 const addUuidCondition = (
     context: ScopeContext,
-    modifiers?: { isPrivate: false } | { userUuid: string | boolean },
+    modifiers?:
+        | { inheritsFromOrgOrProject: true }
+        | { userUuid: string | boolean },
 ) => {
     const projectOrOrg = context.organizationUuid
         ? { organizationUuid: context.organizationUuid }
@@ -44,7 +46,7 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.CONTENT,
         getConditions: (context) => [
-            addUuidCondition(context, { isPrivate: false }),
+            addUuidCondition(context, { inheritsFromOrgOrProject: true }),
             addAccessCondition(context),
         ],
     },
@@ -72,7 +74,7 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.CONTENT,
         getConditions: (context) => [
-            addUuidCondition(context, { isPrivate: false }),
+            addUuidCondition(context, { inheritsFromOrgOrProject: true }),
             addAccessCondition(context),
         ],
     },
@@ -100,7 +102,7 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.CONTENT,
         getConditions: (context) => [
-            addUuidCondition(context, { isPrivate: false }),
+            addUuidCondition(context, { inheritsFromOrgOrProject: true }),
             addAccessCondition(context),
         ],
     },
@@ -124,7 +126,7 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.CONTENT,
         getConditions: (context) => [
-            addUuidCondition(context, { isPrivate: false }),
+            addUuidCondition(context, { inheritsFromOrgOrProject: true }),
         ],
     },
     {
@@ -181,6 +183,21 @@ const scopes: Scope[] = [
     {
         name: 'manage:PinnedItems',
         description: 'Pin and unpin items',
+        isEnterprise: false,
+        group: ScopeGroup.CONTENT,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:DeletedContent',
+        description:
+            'Manage soft-deleted content (restore, permanently delete)',
+        isEnterprise: false,
+        group: ScopeGroup.CONTENT,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:ContentVerification',
+        description: 'Verify and unverify charts and dashboards',
         isEnterprise: false,
         group: ScopeGroup.CONTENT,
         getConditions: addDefaultUuidCondition,
@@ -293,6 +310,26 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.PROJECT_MANAGEMENT,
         getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:DeployProject',
+        description: 'Deploy dbt projects via CLI',
+        isEnterprise: false,
+        group: ScopeGroup.PROJECT_MANAGEMENT,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:DeployProject@self',
+        description: 'Deploy to preview projects created by the user',
+        isEnterprise: false,
+        group: ScopeGroup.PROJECT_MANAGEMENT,
+        getConditions: (context) => [
+            {
+                projectUuid: context.projectUuid,
+                createdByUserUuid: context.userUuid || false,
+                type: ProjectType.PREVIEW,
+            },
+        ],
     },
     {
         name: 'manage:Validation',
@@ -429,6 +466,20 @@ const scopes: Scope[] = [
         getConditions: addDefaultUuidCondition,
     },
     {
+        name: 'manage:GitIntegration',
+        description: 'Manage Git integration settings and create repositories',
+        isEnterprise: false,
+        group: ScopeGroup.ORGANIZATION_MANAGEMENT,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'view:OrganizationWarehouseCredentials',
+        description: 'View organization warehouse credentials',
+        isEnterprise: true,
+        group: ScopeGroup.ORGANIZATION_MANAGEMENT,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
         name: 'manage:OrganizationWarehouseCredentials',
         description: 'Manage organization warehouse credentials',
         isEnterprise: true,
@@ -448,6 +499,15 @@ const scopes: Scope[] = [
         isEnterprise: true,
         group: ScopeGroup.ORGANIZATION_MANAGEMENT,
         getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'impersonate:User',
+        description: 'Impersonate other users in the organization',
+        isEnterprise: false,
+        group: ScopeGroup.ORGANIZATION_MANAGEMENT,
+        getConditions: (context) => [
+            { ...addUuidCondition(context), isActive: true },
+        ],
     },
 
     // Data Scopes
@@ -491,14 +551,22 @@ const scopes: Scope[] = [
     },
     {
         name: 'manage:SqlRunner',
-        description: 'Run SQL queries directly',
+        description:
+            'Run SQL queries, execute SQL charts, and browse warehouse schema',
         isEnterprise: false,
         group: ScopeGroup.DATA,
         getConditions: addDefaultUuidCondition,
     },
     {
         name: 'manage:CustomSql',
-        description: 'Create custom SQL queries',
+        description: 'Save SQL charts',
+        isEnterprise: false,
+        group: ScopeGroup.DATA,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:CustomFields',
+        description: 'Create and edit custom dimensions',
         isEnterprise: false,
         group: ScopeGroup.DATA,
         getConditions: addDefaultUuidCondition,
@@ -521,6 +589,13 @@ const scopes: Scope[] = [
         name: 'manage:VirtualView',
         description: 'Create and manage virtual views',
         isEnterprise: false,
+        group: ScopeGroup.DATA,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:PreAggregation',
+        description: 'View and query pre-aggregates in explore',
+        isEnterprise: true,
         group: ScopeGroup.DATA,
         getConditions: addDefaultUuidCondition,
     },
@@ -551,29 +626,6 @@ const scopes: Scope[] = [
         isEnterprise: false,
         group: ScopeGroup.DATA,
         getConditions: addDefaultUuidCondition,
-    },
-
-    // Sharing Scopes
-    {
-        name: 'export:DashboardCsv',
-        description: 'Can export dashboards and charts to CSV',
-        isEnterprise: false,
-        group: ScopeGroup.SHARING,
-        getConditions: () => [],
-    },
-    {
-        name: 'export:DashboardImage',
-        description: 'Can export dashboards and charts to images',
-        isEnterprise: false,
-        group: ScopeGroup.SHARING,
-        getConditions: () => [],
-    },
-    {
-        name: 'export:DashboardPdf',
-        description: 'Can export dashboards and charts to PDF',
-        isEnterprise: false,
-        group: ScopeGroup.SHARING,
-        getConditions: () => [],
     },
 
     // AI Agent
@@ -628,6 +680,67 @@ const scopes: Scope[] = [
         group: ScopeGroup.AI,
         getConditions: (context) => [
             addUuidCondition(context, { userUuid: context.userUuid || false }),
+        ],
+    },
+
+    // Data Apps
+    {
+        name: 'view:DataApp',
+        description: 'View data apps',
+        isEnterprise: false,
+        group: ScopeGroup.AI,
+        getConditions: (context) => [
+            addUuidCondition(context, { inheritsFromOrgOrProject: true }),
+            addAccessCondition(context),
+        ],
+    },
+    {
+        name: 'manage:DataApp',
+        description: 'Create and manage data apps',
+        isEnterprise: false,
+        group: ScopeGroup.AI,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'manage:DataApp@space',
+        description:
+            'Create, edit, and delete data apps in spaces where you have editor or admin access',
+        isEnterprise: false,
+        group: ScopeGroup.AI,
+        getConditions: (context) => [
+            addAccessCondition(context, SpaceMemberRole.EDITOR),
+            addAccessCondition(context, SpaceMemberRole.ADMIN),
+        ],
+    },
+    {
+        name: 'create:DataApp',
+        description: 'Create new data apps',
+        isEnterprise: false,
+        group: ScopeGroup.AI,
+        getConditions: addDefaultUuidCondition,
+    },
+    {
+        name: 'view:DataApp@self',
+        description: 'View own personal data apps',
+        isEnterprise: false,
+        group: ScopeGroup.AI,
+        getConditions: (context) => [
+            {
+                ...addUuidCondition(context),
+                createdByUserUuid: context.userUuid || false,
+            },
+        ],
+    },
+    {
+        name: 'manage:DataApp@self',
+        description: 'Edit and delete own personal data apps',
+        isEnterprise: false,
+        group: ScopeGroup.AI,
+        getConditions: (context) => [
+            {
+                ...addUuidCondition(context),
+                createdByUserUuid: context.userUuid || false,
+            },
         ],
     },
 

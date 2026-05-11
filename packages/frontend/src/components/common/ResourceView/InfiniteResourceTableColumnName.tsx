@@ -1,19 +1,26 @@
 import {
+    FeatureFlags,
+    isResourceViewDataAppItem,
     isResourceViewItemChart,
     isResourceViewItemDashboard,
     isResourceViewSpaceItem,
+    type ContentVerificationInfo,
     type ResourceViewItem,
 } from '@lightdash/common';
-import { Anchor, Box, Group, Stack, Text, Tooltip } from '@mantine/core';
+import { Anchor, Box, Group, Stack, Text, Tooltip } from '@mantine-8/core';
 import {
-    IconAlertTriangleFilled,
+    IconAlertTriangle,
+    IconAppWindow,
     IconChartBar,
+    IconCircleCheckFilled,
+    IconFolder,
     IconLayoutDashboard,
 } from '@tabler/icons-react';
 import { Link } from 'react-router';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
+import MantineIcon from '../MantineIcon';
 import { ResourceIcon, ResourceIndicator } from '../ResourceIcon';
 import { ResourceInfoPopup } from '../ResourceInfoPopup/ResourceInfoPopup';
-import ResourceAccessInfo from './ResourceAccessInfo';
 import AttributeCount from './ResourceAttributeCount';
 import {
     getResourceTypeName,
@@ -26,7 +33,7 @@ type ResourceValidationErrorIndicatorProps = {
     projectUuid: string;
     canUserManageValidation: boolean;
     children: React.ReactNode;
-    validationId?: number;
+    validationUuid?: string;
 };
 
 /**
@@ -37,16 +44,16 @@ const ResourceValidationErrorIndicator = ({
     projectUuid,
     canUserManageValidation,
     children,
-    validationId,
+    validationUuid,
 }: ResourceValidationErrorIndicatorProps) => {
-    if (!validationId) {
+    if (!validationUuid) {
         return children;
     }
 
     return (
         <ResourceIndicator
             iconProps={{
-                icon: IconAlertTriangleFilled,
+                icon: IconAlertTriangle,
                 color: 'red',
             }}
             tooltipProps={{
@@ -66,9 +73,10 @@ const ResourceValidationErrorIndicator = ({
                             fw={600}
                             to={{
                                 pathname: `/generalSettings/projectManagement/${projectUuid}/validator`,
-                                search: `?validationId=${validationId}`,
+                                search: `?validationUuid=${validationUuid}`,
                             }}
                             color="blue.4"
+                            fz="xs"
                         >
                             here
                         </Anchor>
@@ -87,6 +95,43 @@ const ResourceValidationErrorIndicator = ({
     );
 };
 
+type ResourceVerifiedInlineBadgeProps = {
+    verification: ContentVerificationInfo | null;
+};
+
+/**
+ * Inline verified badge rendered next to the resource title (Instagram-style).
+ * Renders nothing when the resource is not verified.
+ */
+const ResourceVerifiedInlineBadge = ({
+    verification,
+}: ResourceVerifiedInlineBadgeProps) => {
+    if (!verification) {
+        return null;
+    }
+
+    const verifiedDate = new Date(verification.verifiedAt).toLocaleDateString();
+
+    return (
+        <Tooltip
+            withinPortal
+            multiline
+            maw={300}
+            position="bottom"
+            label={
+                <>
+                    Verified by {verification.verifiedBy.firstName}{' '}
+                    {verification.verifiedBy.lastName} on {verifiedDate}
+                </>
+            }
+        >
+            <Box component="span" lh={0} c="green.6">
+                <MantineIcon icon={IconCircleCheckFilled} size={16} />
+            </Box>
+        </Tooltip>
+    );
+};
+
 type InfiniteResourceTableColumnNameProps = {
     item: ResourceViewItem;
     projectUuid: string;
@@ -98,53 +143,60 @@ const InfiniteResourceTableColumnName = ({
     projectUuid,
     canUserManageValidation,
 }: InfiniteResourceTableColumnNameProps) => {
+    const dataAppsFlag = useServerFeatureFlag(FeatureFlags.EnableDataApps);
+    const dataAppsEnabled = dataAppsFlag.data?.enabled ?? false;
     const isSpace = isResourceViewSpaceItem(item);
     const isChartOrDashboard =
         isResourceViewItemChart(item) || isResourceViewItemDashboard(item);
+    const showTypeAndViews =
+        isChartOrDashboard || isResourceViewDataAppItem(item);
 
     const hasValidationErrors =
         isChartOrDashboard &&
         item.data.validationErrors &&
         item.data.validationErrors.length > 0;
 
-    const validationId = hasValidationErrors
-        ? item.data.validationErrors![0].validationId
+    const validationUuid = hasValidationErrors
+        ? item.data.validationErrors![0].validationUuid
         : undefined;
+
+    const verification =
+        isChartOrDashboard && !hasValidationErrors
+            ? item.data.verification
+            : null;
 
     return (
         <Anchor
             component={Link}
-            sx={{
-                color: 'unset',
-                ':hover': {
-                    color: 'unset',
-                    textDecoration: 'none',
-                },
-            }}
+            c="unset"
+            underline="never"
             to={getResourceUrl(projectUuid, item)}
             onClick={(e: React.MouseEvent<HTMLAnchorElement>) =>
                 e.stopPropagation()
             }
         >
-            <Group noWrap>
+            <Group wrap="nowrap">
                 <ResourceValidationErrorIndicator
                     item={item}
                     projectUuid={projectUuid}
                     canUserManageValidation={canUserManageValidation}
-                    validationId={validationId}
+                    validationUuid={validationUuid}
                 >
                     <ResourceIcon item={item} />
                 </ResourceValidationErrorIndicator>
 
-                <Stack spacing={2}>
-                    <Group spacing="xs" noWrap>
+                <Stack gap={2}>
+                    <Group gap="xs" wrap="nowrap">
                         <Text
                             fw={600}
                             lineClamp={1}
-                            sx={{ overflowWrap: 'anywhere' }}
+                            style={{ overflowWrap: 'anywhere' }}
                         >
                             {item.data.name}
                         </Text>
+                        <ResourceVerifiedInlineBadge
+                            verification={verification}
+                        />
                         {!isSpace &&
                             // If there is no description, don't show the info icon on dashboards.
                             // For charts we still show it for the dashboard list
@@ -163,8 +215,8 @@ const InfiniteResourceTableColumnName = ({
                                 </Box>
                             )}
                     </Group>
-                    {isChartOrDashboard && (
-                        <Text fz={12} color="ldGray.6">
+                    {showTypeAndViews && (
+                        <Text fz={12} c="ldGray.6">
                             {getResourceTypeName(item)} •{' '}
                             <Tooltip
                                 position="top-start"
@@ -180,15 +232,7 @@ const InfiniteResourceTableColumnName = ({
                         </Text>
                     )}
                     {isSpace && item.data.parentSpaceUuid && (
-                        <Group spacing="xs" noWrap>
-                            <ResourceAccessInfo
-                                item={item}
-                                type="secondary"
-                                withTooltip
-                            />
-                            <Text fz={12} color="ldGray.6">
-                                •
-                            </Text>
+                        <Group gap="xs" wrap="nowrap">
                             <Group>
                                 <AttributeCount
                                     Icon={IconLayoutDashboard}
@@ -199,6 +243,18 @@ const InfiniteResourceTableColumnName = ({
                                     Icon={IconChartBar}
                                     count={item.data.chartCount}
                                     name="Charts"
+                                />
+                                {dataAppsEnabled && (
+                                    <AttributeCount
+                                        Icon={IconAppWindow}
+                                        count={item.data.appCount}
+                                        name="Data apps"
+                                    />
+                                )}
+                                <AttributeCount
+                                    Icon={IconFolder}
+                                    count={item.data.childSpaceCount}
+                                    name="Spaces"
                                 />
                             </Group>
                         </Group>

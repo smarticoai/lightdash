@@ -10,19 +10,20 @@ import {
     SegmentedControl,
     Stack,
     Text,
-} from '@mantine/core';
+} from '@mantine-8/core';
 import { IconChartHistogram, IconTable } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Provider } from 'react-redux';
 import { useParams } from 'react-router';
-import { ChartDataTable } from '../components/DataViz/visualizations/ChartDataTable';
-import ChartView from '../components/DataViz/visualizations/ChartView';
-import { Table } from '../components/DataViz/visualizations/Table';
-import type { EChartsInstance } from '../components/EChartsReactWrapper';
+import { validate as isValidUuid } from 'uuid';
 import { ConditionalVisibility } from '../components/common/ConditionalVisibility';
 import ErrorState from '../components/common/ErrorState';
 import MantineIcon from '../components/common/MantineIcon';
 import Page from '../components/common/Page/Page';
+import { ChartDataTable } from '../components/DataViz/visualizations/ChartDataTable';
+import ChartView from '../components/DataViz/visualizations/ChartView';
+import { Table } from '../components/DataViz/visualizations/Table';
+import type { EChartsInstance } from '../components/EChartsReactWrapper';
 import { Parameters, useParameters } from '../features/parameters';
 import { ChartDownload } from '../features/sqlRunner/components/Download/ChartDownload';
 import ResultsDownloadButton from '../features/sqlRunner/components/Download/ResultsDownloadButton';
@@ -57,6 +58,11 @@ const ViewSqlChart = () => {
     // Parameter state management for SQL Runner context
     const parameterValues = useAppSelector(selectParameterValues);
 
+    // The :slug route param may contain a UUID (e.g. when navigating from
+    // the schedulers settings page which only has the savedSqlUuid).
+    const slugParam = params.slug;
+    const isUuid = slugParam ? isValidUuid(slugParam) : false;
+
     const {
         chartQuery: {
             data: chartData,
@@ -72,7 +78,7 @@ const ViewSqlChart = () => {
         getDownloadQueryUuid,
     } = useSavedSqlChartResults({
         projectUuid: params.projectUuid,
-        slug: params.slug,
+        ...(isUuid ? { savedSqlUuid: slugParam } : { slug: slugParam }),
         parameters: parameterValues,
     });
 
@@ -117,55 +123,48 @@ const ViewSqlChart = () => {
             withFullHeight
             header={<Header mode="view" />}
         >
-            <Paper
-                shadow="none"
-                radius={0}
-                px="md"
-                pb={0}
-                pt="sm"
-                sx={{
-                    flex: 1,
-                }}
-            >
+            <Paper shadow="none" radius={0} px="md" pb={0} pt="sm" flex={1}>
                 <Stack h="100%">
-                    <Group position="apart">
-                        <Group position="apart">
+                    <Group justify="space-between">
+                        <Group justify="space-between">
                             <SegmentedControl
-                                styles={(theme) => ({
-                                    root: {
-                                        backgroundColor: theme.colors.ldGray[2],
-                                    },
-                                })}
-                                size="sm"
+                                color="ldGray.9"
+                                size="xs"
                                 radius="md"
                                 disabled={isChartResultsLoading}
                                 data={[
                                     {
                                         value: TabOption.CHART,
                                         label: (
-                                            <Group spacing="xs" noWrap>
+                                            <Group gap="xs" wrap="nowrap">
                                                 <MantineIcon
                                                     icon={IconChartHistogram}
                                                 />
-                                                <Text>Chart</Text>
+                                                <Text fz="sm" fw={500}>
+                                                    Chart
+                                                </Text>
                                             </Group>
                                         ),
                                     },
                                     {
                                         value: TabOption.RESULTS,
                                         label: (
-                                            <Group spacing="xs" noWrap>
+                                            <Group gap="xs" wrap="nowrap">
                                                 <MantineIcon icon={IconTable} />
-                                                <Text>Results</Text>
+                                                <Text fz="sm" fw={500}>
+                                                    Results
+                                                </Text>
                                             </Group>
                                         ),
                                     },
                                 ]}
                                 value={activeTab}
-                                onChange={(val: TabOption) => setActiveTab(val)}
+                                onChange={(value: string) =>
+                                    setActiveTab(value as TabOption)
+                                }
                             />
                         </Group>
-                        <Group position="apart">
+                        <Group justify="space-between">
                             <Parameters
                                 isEditMode={false}
                                 parameters={projectParameters}
@@ -235,13 +234,7 @@ const ViewSqlChart = () => {
                     )}
 
                     {chartData && !isChartLoading && (
-                        <Box
-                            h="100%"
-                            sx={{
-                                position: 'relative',
-                                flex: 1,
-                            }}
-                        >
+                        <Box h="100%" pos="relative" flex={1}>
                             <ConditionalVisibility
                                 isVisible={activeTab === TabOption.CHART}
                             >

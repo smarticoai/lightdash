@@ -5,6 +5,7 @@ import {
     ContentType,
 } from '@lightdash/common';
 import { Knex } from 'knex';
+import { ContentVerificationTableName } from '../../../database/entities/contentVerification';
 import { DashboardsTableName } from '../../../database/entities/dashboards';
 import { OrganizationTableName } from '../../../database/entities/organizations';
 import {
@@ -13,6 +14,7 @@ import {
 } from '../../../database/entities/pinnedList';
 import { ProjectTableName } from '../../../database/entities/projects';
 import { SavedChartsTableName } from '../../../database/entities/savedCharts';
+import { SchedulerTableName } from '../../../database/entities/scheduler';
 import { SpaceTableName } from '../../../database/entities/spaces';
 import { UserTableName } from '../../../database/entities/users';
 import {
@@ -48,8 +50,13 @@ export const dbtExploreChartContentConfiguration: ContentConfiguration<SelectSav
                 .from(SavedChartsTableName)
                 .leftJoin(
                     DashboardsTableName,
-                    `${DashboardsTableName}.dashboard_uuid`,
-                    `${SavedChartsTableName}.dashboard_uuid`,
+                    function nonDeletedDashboardJoin() {
+                        this.on(
+                            `${DashboardsTableName}.dashboard_uuid`,
+                            '=',
+                            `${SavedChartsTableName}.dashboard_uuid`,
+                        ).andOnNull(`${DashboardsTableName}.deleted_at`);
+                    },
                 )
                 .innerJoin(
                     SpaceTableName,
@@ -80,6 +87,25 @@ export const dbtExploreChartContentConfiguration: ContentConfiguration<SelectSav
                     `${UserTableName} as updatedByUser`,
                     `${SavedChartsTableName}.last_version_updated_by_user_uuid`,
                     `updatedByUser.user_uuid`,
+                )
+                .leftJoin(
+                    ContentVerificationTableName,
+                    function verificationJoin() {
+                        this.on(
+                            `${ContentVerificationTableName}.content_uuid`,
+                            '=',
+                            `${SavedChartsTableName}.saved_query_uuid`,
+                        ).andOn(
+                            `${ContentVerificationTableName}.content_type`,
+                            '=',
+                            knex.raw('?', [ContentType.CHART]),
+                        );
+                    },
+                )
+                .leftJoin(
+                    `${UserTableName} as verifiedByUser`,
+                    `verifiedByUser.user_uuid`,
+                    `${ContentVerificationTableName}.verified_by_user_uuid`,
                 )
                 .select<SelectSavedChart[]>([
                     knex.raw(`'${ContentType.CHART}' as content_type`),
@@ -115,13 +141,52 @@ export const dbtExploreChartContentConfiguration: ContentConfiguration<SelectSav
                     knex.raw(
                         `${SavedChartsTableName}.first_viewed_at::timestamp as first_viewed_at`,
                     ),
+                    knex.raw(
+                        `${SavedChartsTableName}.deleted_at::timestamp as deleted_at`,
+                    ),
+                    `${SavedChartsTableName}.deleted_by_user_uuid as deleted_by_user_uuid`,
+                    knex.raw(
+                        `(SELECT first_name FROM users WHERE user_uuid = ${SavedChartsTableName}.deleted_by_user_uuid) as deleted_by_user_first_name`,
+                    ),
+                    knex.raw(
+                        `(SELECT last_name FROM users WHERE user_uuid = ${SavedChartsTableName}.deleted_by_user_uuid) as deleted_by_user_last_name`,
+                    ),
+                    `${ContentVerificationTableName}.verified_at as verified_at`,
+                    `verifiedByUser.user_uuid as verified_by_user_uuid`,
+                    `verifiedByUser.first_name as verified_by_user_first_name`,
+                    `verifiedByUser.last_name as verified_by_user_last_name`,
                     knex.raw(`json_build_object(
                     'source','${ChartSourceType.DBT_EXPLORE}',
                     'chart_kind', ${SavedChartsTableName}.last_version_chart_kind,
                     'dashboard_uuid', ${DashboardsTableName}.dashboard_uuid,
                     'dashboard_name', ${DashboardsTableName}.name
+                    ${
+                        filters.includeDescendantCounts
+                            ? `, 'schedulerCount', (
+                                SELECT count(*) FROM ${SchedulerTableName} sch
+                                WHERE sch.saved_chart_uuid = ${SavedChartsTableName}.saved_query_uuid
+                            )`
+                            : ''
+                    }
                  ) as metadata`),
                 ])
+                .where((builder) => {
+                    if (filters.deleted) {
+                        void builder.whereNotNull(
+                            `${SavedChartsTableName}.deleted_at`,
+                        );
+                        if (filters.deletedByUserUuids) {
+                            void builder.whereIn(
+                                `${SavedChartsTableName}.deleted_by_user_uuid`,
+                                filters.deletedByUserUuids,
+                            );
+                        }
+                    } else {
+                        void builder.whereNull(
+                            `${SavedChartsTableName}.deleted_at`,
+                        );
+                    }
+                })
                 .where((builder) => {
                     if (filters.projectUuids) {
                         void builder.whereIn(
@@ -142,6 +207,9 @@ export const dbtExploreChartContentConfiguration: ContentConfiguration<SelectSav
                             [`%${filters.search.toLowerCase()}%`],
                         );
                     }
+
+                    // Exclude charts in deleted spaces
+                    void builder.whereNull(`${SpaceTableName}.deleted_at`);
                 }),
         shouldRowBeConverted: (value): value is SelectSavedChart => {
             const contentTypeMatch = value.content_type === ContentType.CHART;
@@ -205,6 +273,20 @@ export const dbtExploreChartContentConfiguration: ContentConfiguration<SelectSav
                     : null,
                 views: value.views,
                 firstViewedAt: value.first_viewed_at,
+                verification:
+                    value.verified_at !== null &&
+                    value.verified_by_user_uuid !== null &&
+                    value.verified_by_user_first_name !== null &&
+                    value.verified_by_user_last_name !== null
+                        ? {
+                              verifiedBy: {
+                                  userUuid: value.verified_by_user_uuid,
+                                  firstName: value.verified_by_user_first_name,
+                                  lastName: value.verified_by_user_last_name,
+                              },
+                              verifiedAt: value.verified_at,
+                          }
+                        : null,
             };
         },
     };

@@ -1,18 +1,26 @@
-import { Box } from '@mantine/core';
+import { Box } from '@mantine-8/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconFilterOff } from '@tabler/icons-react';
 import { type ECElementEvent } from 'echarts';
 import { type EChartsReactProps, type Opts } from 'echarts-for-react/lib/types';
-import { memo, useCallback, useEffect, useRef, useState, type FC } from 'react';
+import {
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    type FC,
+} from 'react';
 import useEchartsFunnelConfig, {
     type FunnelSeriesDataPoint,
 } from '../../hooks/echarts/useEchartsFunnelConfig';
 import { useLegendDoubleClickSelection } from '../../hooks/echarts/useLegendDoubleClickSelection';
 import { useContextMenuPermissions } from '../../hooks/useContextMenuPermissions';
-import EChartsReact from '../EChartsReactWrapper';
-import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
 import LoadingChart from '../common/LoadingChart';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
+import EChartsReact from '../EChartsReactWrapper';
+import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
 import FunnelChartContextMenu, {
     type FunnelChartContextMenuProps,
 } from './FunnelChartContextMenu';
@@ -114,6 +122,15 @@ const FunnelChart: FC<FunnelChartProps> = memo(
             close();
         }, [close]);
 
+        const onEvents = useMemo(
+            () => ({
+                click: handleOpenContextMenu,
+                oncontextmenu: handleOpenContextMenu,
+                legendselectchanged: onLegendChange,
+            }),
+            [handleOpenContextMenu, onLegendChange],
+        );
+
         if (isLoading) return <LoadingChart />;
         if (!funnelChartOptions) return <EmptyChart />;
 
@@ -139,11 +156,7 @@ const FunnelChart: FC<FunnelChartProps> = memo(
                     option={funnelChartOptions}
                     notMerge
                     {...props}
-                    onEvents={{
-                        click: handleOpenContextMenu,
-                        oncontextmenu: handleOpenContextMenu,
-                        legendselectchanged: onLegendChange,
-                    }}
+                    onEvents={onEvents}
                 />
 
                 {shouldShowMenu && (

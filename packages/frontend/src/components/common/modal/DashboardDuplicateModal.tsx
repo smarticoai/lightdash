@@ -2,8 +2,8 @@ import { type Dashboard } from '@lightdash/common';
 import {
     Button,
     Stack,
-    TextInput,
     Textarea,
+    TextInput,
     type ModalProps,
 } from '@mantine-8/core';
 import { useForm } from '@mantine/form';
@@ -13,6 +13,7 @@ import {
     useDashboardQuery,
     useDuplicateDashboardMutation,
 } from '../../../hooks/dashboard/useDashboard';
+import { useProjectUuid } from '../../../hooks/useProjectUuid';
 import MantineModal from '../MantineModal';
 
 interface DashboardDuplicateModalProps extends ModalProps {
@@ -28,11 +29,15 @@ const DashboardDuplicateModal: FC<DashboardDuplicateModalProps> = ({
     uuid,
     onConfirm,
 }) => {
+    const projectUuid = useProjectUuid();
     const { mutateAsync: duplicateDashboard, isLoading: isUpdating } =
         useDuplicateDashboardMutation({
             showRedirectButton: true,
         });
-    const { data: dashboard, isInitialLoading } = useDashboardQuery(uuid);
+    const { data: dashboard, isInitialLoading } = useDashboardQuery({
+        uuidOrSlug: uuid,
+        projectUuid,
+    });
 
     const form = useForm<FormState>();
 

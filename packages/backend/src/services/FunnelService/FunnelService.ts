@@ -1,6 +1,5 @@
 import { subject } from '@casl/ability';
 import {
-    type AdditionalMetric,
     CompiledDimension,
     CompiledField,
     Explore,
@@ -17,6 +16,7 @@ import {
     resolveFunnelDateRange,
     SessionUser,
     TimeIntervalUnit,
+    type AdditionalMetric,
     type WarehouseSqlBuilder,
 } from '@lightdash/common';
 import { warehouseSqlBuilderFromType } from '@lightdash/warehouses';
@@ -73,13 +73,18 @@ export class FunnelService extends BaseService {
             throw new ForbiddenError('Funnel Builder feature is not enabled');
         }
 
-        const { organizationUuid } =
+        const { organizationUuid, name: projectName } =
             await this.projectModel.getSummary(projectUuid);
 
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
-                subject('SqlRunner', { organizationUuid, projectUuid }),
+                subject('SqlRunner', {
+                    organizationUuid,
+                    projectUuid,
+                    metadata: { projectUuid, projectName },
+                }),
             )
         ) {
             throw new ForbiddenError(

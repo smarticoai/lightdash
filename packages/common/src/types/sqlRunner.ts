@@ -19,7 +19,11 @@ import {
     type VizTableConfig,
 } from '../visualizations/types';
 import { type Dashboard } from './dashboard';
-import { type Organization } from './organization';
+import {
+    type Organization,
+    type ResolvedProjectColorPalette,
+} from './organization';
+import { type ParametersValuesMap } from './parameters';
 import { type Project } from './projects';
 import { type RawResultRow } from './results';
 import { type ChartKind } from './savedCharts';
@@ -249,13 +253,20 @@ export type SqlChart = {
         LightdashUser,
         'userUuid' | 'firstName' | 'lastName'
     > | null;
-    space: Pick<SpaceSummary, 'uuid' | 'name' | 'isPrivate' | 'userAccess'>;
+    space: Pick<SpaceSummary, 'uuid' | 'name' | 'userAccess'>;
     dashboard: Pick<Dashboard, 'uuid' | 'name'> | null;
     project: Pick<Project, 'projectUuid'>;
     organization: Pick<Organization, 'organizationUuid'>;
     views: number;
     firstViewedAt: Date;
     lastViewedAt: Date;
+    /**
+     * Fully resolved palette for this SQL chart, computed from the
+     * org → project → space → dashboard hierarchy. SQL charts have no
+     * per-chart override — set the palette via the containing space,
+     * dashboard, project, or organization.
+     */
+    readonly resolvedColorPalette: ResolvedProjectColorPalette;
 };
 
 export type CreateSqlChart = {
@@ -315,6 +326,7 @@ export type CreateVirtualViewPayload = {
     name: string;
     sql: string;
     columns: VizColumn[];
+    parameterValues?: ParametersValuesMap;
 };
 
 export type UpdateVirtualViewPayload = CreateVirtualViewPayload;

@@ -1,0 +1,374 @@
+import { subject } from '@casl/ability';
+import {
+    getHighestSpaceRole,
+    NotFoundError,
+    resolveSpaceAccess,
+    type AbilityAction,
+    type OrganizationSpaceAccess,
+    type ProjectSpaceAccess,
+    type SessionUser,
+    type SpaceAccess,
+    type SpaceAccessUserMetadata,
+    type SpaceGroup,
+} from '@lightdash/common';
+import { SpaceModel } from '../../models/SpaceModel';
+import { SpacePermissionModel } from '../../models/SpacePermissionModel';
+import { BaseService } from '../BaseService';
+
+export type SpaceAccessContextForCasl = {
+    organizationUuid: string;
+    projectUuid: string;
+    inheritsFromOrgOrProject: boolean;
+    access: SpaceAccess[];
+};
+
+export class SpacePermissionService extends BaseService {
+    constructor(
+        private readonly spaceModel: SpaceModel,
+        private readonly spacePermissionModel: SpacePermissionModel,
+    ) {
+        super();
+    }
+
+    /**
+     * Checks if the user has access to all the space uuids
+     * @param action - The action to check permissions for
+     * @param user - The session user to check permissions for
+     * @param spaceUuids - The space uuids to check permissions for
+     * @returns The access context for the given space uuids
+     */
+    async can(
+        action: AbilityAction,
+        user: SessionUser,
+        spaceUuids: string[] | string,
+    ): Promise<boolean> {
+        const spaceUuidsArray = Array.isArray(spaceUuids)
+            ? spaceUuids
+            : [spaceUuids];
+
+        const accessContext = await this.getSpacesCaslContext(spaceUuidsArray, {
+            userUuid: user.userUuid,
+        });
+
+        const auditedAbility = this.createAuditedAbility(user);
+        return Object.values(accessContext).every((access) =>
+            auditedAbility.can(action, subject('Space', access)),
+        );
+    }
+
+    /**
+     * Gets the accessible space uuids for a given action and user
+     * @param action - The action to check permissions for
+     * @param user - The session user to check permissions for
+     * @param spaceUuids - The space uuids to get the accessible space uuids for
+     * @returns The accessible space uuids
+     */
+    async getAccessibleSpaceUuids(
+        action: AbilityAction,
+        user: SessionUser,
+        spaceUuids: string[],
+    ): Promise<string[]> {
+        const accessContext = await this.getSpacesCaslContext(spaceUuids, {
+            userUuid: user.userUuid,
+        });
+
+        const auditedAbility = this.createAuditedAbility(user);
+        return Object.entries(accessContext)
+            .filter(([_, access]) =>
+                auditedAbility.can(action, subject('Space', access)),
+            )
+            .map(([spaceUuid]) => spaceUuid);
+    }
+
+    /**
+     * Returns the CASL context for a space (organizationUuid, projectUuid, inheritsFromOrgOrProject, access)
+     * without performing any permission checks. Callers use this to build their own
+     * `subject(...)` checks when the resource type is not Space.
+     */
+    async getSpaceAccessContext(
+        userUuid: string,
+        spaceUuid: string,
+    ): Promise<SpaceAccessContextForCasl> {
+        const accessContext = await this.getSpacesCaslContext([spaceUuid], {
+            userUuid,
+        });
+        const ctx = accessContext[spaceUuid];
+        if (!ctx) {
+            throw new NotFoundError(
+                `Couldn't find access context for space ${spaceUuid}`,
+            );
+        }
+        return ctx;
+    }
+
+    /**
+     * Gets the access context for a list of space uuids
+     * @param userUuid - The user uuid to get the access context for
+     * @param spaceUuids - The space uuids to get the access context for
+     * @returns The access context for the given space uuids
+     */
+    async getSpacesAccessContext(
+        userUuid: string,
+        spaceUuids: string[],
+    ): Promise<Record<string, SpaceAccessContextForCasl>> {
+        return this.getSpacesCaslContext(spaceUuids, { userUuid });
+    }
+
+    /**
+     * Returns the CASL context for a space with ALL users' resolved access
+     * (not filtered to a single user). Used for access propagation and
+     * building SpaceShare[] for the share modal UI.
+     */
+    async getAllSpaceAccessContext(
+        spaceUuid: string,
+    ): Promise<SpaceAccessContextForCasl> {
+        const accessContext = await this.getSpacesCaslContext([spaceUuid]);
+        const ctx = accessContext[spaceUuid];
+        if (!ctx) {
+            throw new NotFoundError(
+                `Couldn't find access context for space ${spaceUuid}`,
+            );
+        }
+        return ctx;
+    }
+
+    /**
+     * Gets the access context for a list of space uuids so we can check against CASL.
+     *
+     * Chain-aware resolution: walks each space's inheritance chain (up to the
+     * first ancestor with inherit_parent_permissions=false, or the root).
+     * Direct access is aggregated from all spaces in the chain. Project/org
+     * access is only included when the chain reaches a root space that inherits
+     * from the project.
+     *
+     * Uses resolveSpaceAccess ("most permissive wins" across chain).
+     */
+    private async getSpacesCaslContext(
+        spaceUuidsArg: string[],
+        filters?: { userUuid?: string },
+    ): Promise<Record<string, SpaceAccessContextForCasl>> {
+        const uniqueSpaceUuids = [...new Set(spaceUuidsArg)];
+
+        // Get inheritance chains for all spaces in a single batched query
+        const chainMap =
+            await this.spacePermissionModel.getInheritanceChains(
+                uniqueSpaceUuids,
+            );
+        const chains = uniqueSpaceUuids
+            .filter((uuid) => chainMap[uuid] !== undefined)
+            .map((uuid) => ({
+                spaceUuid: uuid,
+                ...chainMap[uuid],
+            }));
+
+        // Collect all unique space UUIDs from all chains (for direct access queries)
+        const allChainSpaceUuids = [
+            ...new Set(
+                chains.flatMap(({ chain }) =>
+                    chain.map((item) => item.spaceUuid),
+                ),
+            ),
+        ];
+
+        // Collect root space UUIDs from ALL chains.
+        // Project/org access is needed for every space — not just those that
+        // inherit — because the resolver uses it to compute highestRole
+        // (admin detection, etc.) even for private spaces with direct access.
+        const allChainsRootSpaceUuids = [
+            ...new Set(
+                chains.map(({ chain }) => chain[chain.length - 1].spaceUuid),
+            ),
+        ];
+
+        // Batch-fetch access data
+        const [directAccessMap, projectAccessMap, orgAccessMap, spaceInfo] =
+            await Promise.all([
+                this.spacePermissionModel.getDirectSpaceAccess(
+                    allChainSpaceUuids,
+                    filters,
+                ),
+                allChainsRootSpaceUuids.length > 0
+                    ? this.spacePermissionModel.getProjectSpaceAccess(
+                          allChainsRootSpaceUuids,
+                          filters,
+                      )
+                    : Promise.resolve(
+                          {} as Record<string, ProjectSpaceAccess[]>,
+                      ),
+                allChainsRootSpaceUuids.length > 0
+                    ? this.spacePermissionModel.getOrganizationSpaceAccess(
+                          allChainsRootSpaceUuids,
+                          filters,
+                      )
+                    : Promise.resolve(
+                          {} as Record<string, OrganizationSpaceAccess[]>,
+                      ),
+                this.spacePermissionModel.getSpaceInfo(uniqueSpaceUuids),
+            ]);
+
+        // For each requested space, aggregate access from its chain
+        const result: Record<string, SpaceAccessContextForCasl> = {};
+        for (const { spaceUuid, chain, inheritsFromOrgOrProject } of chains) {
+            const space = spaceInfo[spaceUuid];
+            if (!space) {
+                throw new NotFoundError(
+                    `Space with uuid ${spaceUuid} not found`,
+                );
+            }
+
+            // Build chain-ordered direct access (preserves leaf-to-root ordering)
+            const chainDirectAccess = chain.map((item) => ({
+                spaceUuid: item.spaceUuid,
+                directAccess: directAccessMap[item.spaceUuid] ?? [],
+            }));
+
+            // Always pass project/org access — the resolver needs it for
+            // highestRole computation (admin detection) even on non-inheriting
+            // spaces. The inheritsFromOrgOrProject flag controls the fallback
+            // path inside the resolver, not whether this data is available.
+            const rootSpaceUuid = chain[chain.length - 1].spaceUuid;
+            const projectAccess = projectAccessMap[rootSpaceUuid] ?? [];
+            const orgAccess = orgAccessMap[rootSpaceUuid] ?? [];
+
+            const access = resolveSpaceAccess({
+                spaceUuid,
+                inheritsFromOrgOrProject,
+                chainDirectAccess,
+                projectAccess,
+                organizationAccess: orgAccess,
+            });
+
+            result[spaceUuid] = {
+                organizationUuid: space.organizationUuid,
+                projectUuid: space.projectUuid,
+                inheritsFromOrgOrProject,
+                access,
+            };
+        }
+        return result;
+    }
+
+    /**
+     * Gets group access for a space.
+     */
+    async getGroupAccess(spaceUuid: string): Promise<SpaceGroup[]> {
+        return this.spacePermissionModel.getGroupAccess(spaceUuid);
+    }
+
+    /**
+     * Returns the UUID of the first root space the user can view in the project.
+     * Uses CASL-based permission checking via getAccessibleSpaceUuids.
+     */
+    async getFirstViewableSpaceUuid(
+        user: SessionUser,
+        projectUuid: string,
+    ): Promise<string> {
+        const allRootSpaceUuids =
+            await this.spaceModel.getRootSpaceUuidsForProject(projectUuid);
+        const accessible = await this.getAccessibleSpaceUuids(
+            'view',
+            user,
+            allRootSpaceUuids,
+        );
+        if (accessible.length === 0) {
+            throw new NotFoundError(
+                `No viewable space found for project ${projectUuid}`,
+            );
+        }
+        return accessible[0];
+    }
+
+    /**
+     * Returns the user UUIDs that have direct access to each space.
+     * Used for populating the `access: string[]` field on SpaceSummary.
+     * Does NOT filter by user — returns all directly-shared user UUIDs.
+     */
+    async getDirectAccessUserUuids(
+        spaceUuids: string[],
+    ): Promise<Record<string, string[]>> {
+        if (spaceUuids.length === 0) return {};
+
+        const uniqueSpaceUuids = [...new Set(spaceUuids)];
+
+        const directAccessMap =
+            await this.spacePermissionModel.getDirectSpaceAccess(
+                uniqueSpaceUuids,
+            );
+
+        return Object.fromEntries(
+            uniqueSpaceUuids.map((spaceUuid) => [
+                spaceUuid,
+                directAccessMap[spaceUuid]?.map((e) => e.userUuid) ?? [],
+            ]),
+        );
+    }
+
+    /**
+     * Copies inherited permissions as direct access entries on a space.
+     * Called when inheritParentPermissions transitions true → false so that
+     * users who had access via parent spaces don't suddenly lose it.
+     *
+     * Returns the user/group entries to insert (caller wraps in transaction
+     * together with the space update via SpaceModel.updateWithCopiedPermissions).
+     */
+    async getInheritedPermissionsToCopy(spaceUuid: string): Promise<{
+        userAccessEntries: { userUuid: string; role: SpaceAccess['role'] }[];
+        groupAccessEntries: {
+            groupUuid: string;
+            role: SpaceGroup['spaceRole'];
+        }[];
+    }> {
+        const chainEntry = await this.spacePermissionModel.getInheritanceChains(
+            [spaceUuid],
+        );
+
+        if (!chainEntry) {
+            throw new NotFoundError(`Space ${spaceUuid} not found`);
+        }
+        const { chain } = chainEntry[spaceUuid];
+        const ancestorUuids = chain
+            .map((item) => item.spaceUuid)
+            .filter((uuid) => uuid !== spaceUuid);
+
+        const ancestorDirectAccess =
+            await this.spacePermissionModel.getDirectSpaceAccess(ancestorUuids);
+
+        // Deduplicate user and group access entries, keeping highest role per user/group
+        const userAccessMap = new Map<string, SpaceAccess['role']>();
+        const groupAccessMap = new Map<string, SpaceGroup['spaceRole']>();
+
+        for (const access of Object.values(ancestorDirectAccess).flat()) {
+            if (access.from === 'user_access') {
+                const existing = userAccessMap.get(access.userUuid);
+                const highest = getHighestSpaceRole([existing, access.role]);
+                if (highest !== undefined) {
+                    userAccessMap.set(access.userUuid, highest);
+                }
+            } else if (
+                access.from === 'group_access' &&
+                access.groupUuid !== null
+            ) {
+                const existing = groupAccessMap.get(access.groupUuid);
+                const highest = getHighestSpaceRole([existing, access.role]);
+                if (highest !== undefined) {
+                    groupAccessMap.set(access.groupUuid, highest);
+                }
+            }
+        }
+
+        const userAccessEntries = [...userAccessMap.entries()].map(
+            ([userUuid, role]) => ({ userUuid, role }),
+        );
+        const groupAccessEntries = [...groupAccessMap.entries()].map(
+            ([groupUuid, role]) => ({ groupUuid, role }),
+        );
+
+        return { userAccessEntries, groupAccessEntries };
+    }
+
+    async getUserMetadataByUuids(
+        userUuids: string[],
+    ): Promise<Record<string, SpaceAccessUserMetadata>> {
+        return this.spacePermissionModel.getUserMetadataByUuids(userUuids);
+    }
+}

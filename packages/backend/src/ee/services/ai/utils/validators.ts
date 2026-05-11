@@ -272,6 +272,8 @@ function validateFilterRule(
                 (string: string) => string.replaceAll('\\', '\\\\'),
                 WeekDay.SUNDAY,
                 SupportedDbtAdapter.BIGQUERY,
+                'UTC',
+                true, // Default to case sensitive for validation
             );
         }
     } catch (e) {
@@ -282,6 +284,64 @@ ${serializeData(filterRule, 'json')}`;
 
         Logger.error(`[AiAgent][Validate Filter Rule] ${errorMessage}`);
 
+        throw new AiAgentValidatorError(errorMessage);
+    }
+}
+
+/**
+ * Validate custom metric filters
+ */
+export function validateCustomMetricFilters(
+    explore: Explore,
+    customMetrics: CustomMetricBaseTransformed[] | null,
+) {
+    if (!customMetrics || customMetrics.length === 0) {
+        return;
+    }
+
+    const exploreFields = getFields(explore);
+    const errors: string[] = [];
+
+    customMetrics.forEach((metric) => {
+        if (!metric.filters || metric.filters.length === 0) {
+            return;
+        }
+
+        metric.filters.forEach((filter) => {
+            // Convert fieldRef (table.field) to fieldId (table_field)
+            const fieldId = filter.target.fieldRef.replace('.', '_');
+            const field = exploreFields.find((f) => getItemId(f) === fieldId);
+
+            if (!field) {
+                errors.push(
+                    `Custom metric "${metric.name}": filter field "${filter.target.fieldRef}" does not exist.`,
+                );
+                return;
+            }
+
+            const filterRule: FilterRule = {
+                id: filter.id,
+                target: { fieldId },
+                operator: filter.operator,
+                values: filter.values,
+                settings: filter.settings,
+            };
+
+            try {
+                validateFilterRule(filterRule, field);
+            } catch (e) {
+                errors.push(
+                    `Custom metric "${metric.name}": ${getErrorMessage(e)}`,
+                );
+            }
+        });
+    });
+
+    if (errors.length > 0) {
+        const errorMessage = `Invalid custom metric filters:\n\n${errors.join('\n\n')}`;
+        Logger.error(
+            `[AiAgent][Validate Custom Metric Filters] ${errorMessage}`,
+        );
         throw new AiAgentValidatorError(errorMessage);
     }
 }
@@ -717,6 +777,8 @@ const NUMERIC_METRIC_TYPES: MetricType[] = [
     MetricType.COUNT,
     MetricType.COUNT_DISTINCT,
     MetricType.SUM,
+    MetricType.SUM_DISTINCT,
+    MetricType.AVERAGE_DISTINCT,
     // MIN and MAX can be of non-numeric types, like dates
 ];
 

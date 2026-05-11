@@ -1,13 +1,12 @@
-import { Anchor, Text, useMantineColorScheme } from '@mantine/core';
+import { Anchor, Text, useMantineColorScheme } from '@mantine-8/core';
 import { IconGraphOff } from '@tabler/icons-react';
-import { Suspense, lazy, useEffect, useMemo, useRef, type FC } from 'react';
-// @ts-expect-error - vega-themes ESM export not resolved by TS moduleResolution
+import { lazy, Suspense, useEffect, useMemo, useRef, type FC } from 'react';
 import { dark as vegaDarkTheme } from 'vega-themes';
 import { type CustomVisualizationConfigAndData } from '../../hooks/useCustomVisualizationConfig';
-import { isCustomVisualizationConfig } from '../LightdashVisualization/types';
-import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
 import LoadingChart from '../common/LoadingChart';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
+import { isCustomVisualizationConfig } from '../LightdashVisualization/types';
+import { useVisualizationContext } from '../LightdashVisualization/useVisualizationContext';
 import { vegaStyleConfig } from './vegaConfig';
 
 const VegaEmbed = lazy(async () => {
@@ -39,7 +38,9 @@ const CustomVisualization: FC<Props> = ({
 
     const hasSignaledScreenshotReady = useRef(false);
 
-    const vegaConfig = useMemo(
+    // Vega and Vega-Lite Config types are structurally incompatible
+    // (e.g. FontWeight vs number, ExprRef vs SignalRef), so we bypass checking here.
+    const vegaConfig: Record<string, unknown> = useMemo(
         () => ({
             ...(isDarkMode ? vegaDarkTheme : {}),
             ...vegaStyleConfig,
@@ -144,6 +145,7 @@ const CustomVisualization: FC<Props> = ({
                         width: 'container',
                         // @ts-ignore, see above
                         height: 'container',
+                        // @ts-ignore, see above
                         data: data,
                         // Merge configs: our defaults first, then user's config overrides
                         config: {

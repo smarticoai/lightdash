@@ -25,8 +25,10 @@ import {
     ExecuteAsyncDashboardChartRequestParams,
     Explore,
     FieldValueSearchResult,
+    GetEmbedDashboardRequest,
     Item,
     MetricQueryResponse,
+    OrganizationColorPalette,
     ParametersValuesMap,
     SavedChart,
     SavedChartsInfoForDashboardAvailableFilters,
@@ -61,8 +63,17 @@ export type ApiEmbedDashboardResponse = {
     results: Dashboard & {
         // declare type as TSOA doesn't understand zod type InteractivityOptions
         dashboardFiltersInteractivity?: CommonEmbedJwtContent['dashboardFiltersInteractivity'];
+        parameterInteractivity?: CommonEmbedJwtContent['parameterInteractivity'];
         canExportCsv?: boolean;
         canExportImages?: boolean;
+        canExportPagePdf?: boolean;
+        canDateZoom?: boolean;
+        canExplore?: boolean;
+        canViewUnderlyingData?: boolean;
+        selectedPalette?: Pick<
+            OrganizationColorPalette,
+            'colors' | 'darkColors'
+        > | null;
     };
 };
 
@@ -111,7 +122,7 @@ export class EmbedController extends BaseController {
         return {
             status: 'ok',
             results: await this.getEmbedService().getConfig(
-                req.account.user,
+                req.account,
                 projectUuid,
             ),
         };
@@ -131,7 +142,7 @@ export class EmbedController extends BaseController {
         return {
             status: 'ok',
             results: await this.getEmbedService().createConfig(
-                req.account.user,
+                req.account,
                 projectUuid,
                 body,
             ),
@@ -218,6 +229,7 @@ export class EmbedController extends BaseController {
     async getEmbedDashboard(
         @Request() req: express.Request,
         @Path() projectUuid: string,
+        @Body() body?: GetEmbedDashboardRequest,
     ): Promise<ApiEmbedDashboardResponse> {
         this.setStatus(200);
 
@@ -228,6 +240,7 @@ export class EmbedController extends BaseController {
             results: await this.getEmbedService().getDashboard(
                 projectUuid,
                 req.account,
+                { paletteUuid: body?.paletteUuid },
             ),
         };
     }
@@ -266,7 +279,7 @@ export class EmbedController extends BaseController {
         body: {
             tileUuid: string;
             dashboardFilters?: DashboardFilters;
-            dateZoomGranularity?: DateGranularity;
+            dateZoomGranularity?: DateGranularity | string;
             dashboardSorts?: SortField[];
             parameters?: ParametersValuesMap;
         },
@@ -306,6 +319,7 @@ export class EmbedController extends BaseController {
             | 'invalidateCache'
             | 'dateZoom'
             | 'parameters'
+            | 'limit'
         >,
     ): Promise<{
         status: 'ok';
@@ -326,6 +340,7 @@ export class EmbedController extends BaseController {
                 dashboardSorts: body.dashboardSorts,
                 parameters: body.parameters,
                 pivotResults: body.pivotResults,
+                limit: body.limit,
             });
 
         return {
@@ -470,13 +485,16 @@ export class EmbedController extends BaseController {
             limit: number;
             filters: AndFilterGroup | undefined;
             forceRefresh: boolean;
+            tableName?: string;
+            fieldId?: string;
         },
     ): Promise<{
         status: 'ok';
         results: FieldValueSearchResult;
     }> {
         this.setStatus(200);
-        const { search, limit, filters, forceRefresh } = body;
+        const { search, limit, filters, forceRefresh, tableName, fieldId } =
+            body;
 
         assertEmbeddedAuth(req.account);
 
@@ -488,6 +506,8 @@ export class EmbedController extends BaseController {
             limit,
             filters,
             forceRefresh,
+            tableName,
+            fieldId,
         });
         return {
             status: 'ok',

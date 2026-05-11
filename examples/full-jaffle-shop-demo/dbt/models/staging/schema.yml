@@ -156,6 +156,29 @@ models:
       - name: chronic
         description: Whether condition is chronic
 
+  - name: stg_regional_sales
+    description: Cleaned regional sales data
+    meta:
+      group_label: "staging"
+    columns:
+      - name: sale_id
+        description: Unique sale identifier
+        tests:
+          - unique
+          - not_null
+      - name: sale_date
+        description: Date of the sale
+      - name: region
+        description: Sales region
+      - name: product_category
+        description: Product category
+      - name: units_sold
+        description: Number of units sold
+      - name: revenue
+        description: Sale revenue amount
+      - name: customer_id
+        description: Reference to customer
+
   # Facilities Management staging models - all prefixed with stg_fm_
   - name: stg_fm_work_orders
     description: Service tickets and maintenance requests
@@ -257,3 +280,55 @@ models:
         description: Monthly revenue
       - name: customer_satisfaction_score
         description: Customer satisfaction rating
+
+  - name: stg_country_orders
+    description: Cleaned country-level order data
+    meta:
+      group_label: "staging"
+    columns:
+      - name: order_id
+        description: Unique order identifier
+        tests:
+          - unique
+          - not_null
+        meta:
+          dimension:
+            type: number
+      - name: order_date
+        description: Date of the order
+        meta:
+          dimension:
+            type: date
+      - name: country
+        description: Country of the order
+        meta:
+          dimension:
+            type: string
+      - name: amount
+        description: Order amount
+        meta:
+          dimension:
+            type: number
+
+  - name: stg_order_currencies
+    description: Cleaned order currency conversion data
+    meta:
+      group_label: "staging"
+    columns:
+      - name: order_id
+        description: Reference to order
+        tests:
+          - not_null
+        meta:
+          dimension:
+            type: number
+      - name: currency
+        description: Currency code
+        meta:
+          dimension:
+            type: string
+      - name: converted_amount
+        description: Amount converted to the specified currency
+        meta:
+          dimension:
+            type: number

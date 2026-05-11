@@ -35,17 +35,22 @@ jobs:
                     - 5432:5432
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-            - uses: pnpm/action-setup@v4
-            - uses: actions/setup-node@v4
+            - name: Setup Socket Firewall
+              uses: socketdev/action@ba6de6cc0565af1f42295590380973573297e31f # v1.3.2
               with:
-                  node-version: '20'
+                  mode: firewall-free
+
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+              with:
+                  node-version-file: '.nvmrc'
                   cache: 'pnpm'
                   cache-dependency-path: 'pnpm-lock.yaml'
 
             - name: Install packages
-              run: pnpm install --frozen-lockfile --prefer-offline
+              run: sfw pnpm install --frozen-lockfile --prefer-offline
 
             - name: Build common
               run: pnpm common-build
@@ -57,7 +62,7 @@ jobs:
               run: pnpm backend-build
 
             - name: Setup Python and dbt
-              uses: actions/setup-python@v4
+              uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
               with:
                   python-version: '3.10.x'
 
@@ -98,7 +103,7 @@ jobs:
                   PGPASSWORD=password pg_dump -h localhost -U postgres -d lightdash_test -Fc -f lightdash_test_setup.dump
 
             - name: Cache build artifacts
-              uses: actions/cache/save@v4
+              uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
               with:
                   path: |
                       node_modules
@@ -118,13 +123,14 @@ jobs:
             matrix:
                 include:
                     - ai_provider: openai
-                      model_name: gpt-4.1-2025-04-14
+                      model_name: gpt-5.2-2025-12-11
                     - ai_provider: openai
                       model_name: gpt-5.1-2025-11-13
-                    - ai_provider: anthropic
-                      model_name: claude-sonnet-4-5-20250929
-                    - ai_provider: anthropic
-                      model_name: claude-haiku-4-5-20251001
+                    # Temporary disable
+                    # - ai_provider: anthropic
+                    #   model_name: claude-sonnet-4-5-20250929
+                    # - ai_provider: anthropic
+                    #   model_name: claude-haiku-4-5-20251001
 
         services:
             postgres:
@@ -141,17 +147,17 @@ jobs:
                     - 5432:5432
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-            - uses: pnpm/action-setup@v4
-            - uses: actions/setup-node@v4
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+            - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
               with:
-                  node-version: '20'
+                  node-version-file: '.nvmrc'
                   cache: 'pnpm'
                   cache-dependency-path: 'pnpm-lock.yaml'
 
             - name: Restore build artifacts
-              uses: actions/cache/restore@v4
+              uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
               with:
                   path: |
                       node_modules
@@ -166,7 +172,7 @@ jobs:
                   fail-on-cache-miss: true
 
             - name: Setup Python and dbt
-              uses: actions/setup-python@v4
+              uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
               with:
                   python-version: '3.10.x'
 
@@ -220,7 +226,6 @@ jobs:
                   AI_DEFAULT_PROVIDER: ${{ matrix.ai_provider }}
                   OPENAI_MODEL_NAME: ${{ matrix.ai_provider == 'openai' && matrix.model_name || '' }}
                   ANTHROPIC_MODEL_NAME: ${{ matrix.ai_provider == 'anthropic' && matrix.model_name || '' }}
-                  OPENAI_REASONING_ENABLED: ${{ matrix.model_name == 'gpt-5.1-2025-11-13' && 'true' || 'false' }}
                   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
                   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
                   LIGHTDASH_LICENSE_KEY: ${{ secrets.LIGHTDASH_LICENSE_KEY }}
@@ -229,12 +234,18 @@ jobs:
                   DBT_DEMO_DIR: ${{ github.workspace }}/examples/full-jaffle-shop-demo
                   LD_SETUP_DBT_VERSION: v1.7
                   SKIP_TEST_MIGRATIONS: 'true'
+                  # S3 storage (required for async query results)
+                  S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
+                  S3_SECRET_KEY: ${{ secrets.S3_SECRET_KEY }}
+                  S3_ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+                  S3_REGION: ${{ secrets.S3_REGION }}
+                  S3_BUCKET: ${{ secrets.S3_BUCKET }}
                   # TODO :: Support embeddings (Verifying Answers)
                   AI_EMBEDDING_ENABLED: false
                   AI_DEFAULT_EMBEDDING_PROVIDER: 'openai'
 
             - name: Upload test results
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
               if: always()
               with:
                   name: ai-agent-test-results-${{ matrix.ai_provider }}-${{ matrix.model_name }}

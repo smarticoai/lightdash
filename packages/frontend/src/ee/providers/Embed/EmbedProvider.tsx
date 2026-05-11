@@ -12,12 +12,35 @@ import { type SdkFilter } from '../../features/embed/EmbedDashboard/types';
 import { LightdashEventType } from '../../features/embed/events/types';
 import { useEmbedEventEmitter } from '../../features/embed/hooks/useEmbedEventEmitter';
 import EmbedProviderContext from './context';
-import { EMBED_KEY, type EmbedMode, type InMemoryEmbed } from './types';
+import {
+    EMBED_KEY,
+    type EmbedMode,
+    type EmbedTheme,
+    type InMemoryEmbed,
+} from './types';
+
+const HEX_COLOR_REGEX = /^[0-9a-fA-F]{3,8}$/;
+
+function parseEmbedThemeParams(): {
+    theme: EmbedTheme;
+    backgroundColor: string | null;
+} {
+    const params = new URLSearchParams(window.location.search);
+    const themeParam = params.get('theme');
+    const theme: EmbedTheme =
+        themeParam === 'light' || themeParam === 'dark' ? themeParam : 'light';
+    const bgParam = params.get('backgroundColor');
+    // Accept bare hex codes (e.g. "121212") and prepend "#"
+    const backgroundColor =
+        bgParam && HEX_COLOR_REGEX.test(bgParam) ? `#${bgParam}` : null;
+    return { theme, backgroundColor };
+}
 
 type Props = {
     embedToken?: string;
     filters?: SdkFilter[];
     projectUuid?: string;
+    paletteUuid?: string;
     contentOverrides?: LanguageMap;
     embedHeaders?: Record<string, string>;
     onExplore?: (options: { chart: SavedChart }) => void;
@@ -31,6 +54,7 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
     embedToken: encodedToken,
     filters,
     projectUuid: projectUuidFromProps,
+    paletteUuid,
     contentOverrides,
     onExplore,
     onBackToDashboard,
@@ -39,6 +63,9 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
 }) => {
     const embedToken = encodedToken || window.location.hash.replace('#', '');
     const [isInitialized, setIsInitialized] = useState(false);
+
+    // Parse theme params from URL once on mount (before hash is stripped)
+    const [embedThemeParams] = useState(parseEmbedThemeParams);
     const embed = getFromInMemoryStorage<InMemoryEmbed>(EMBED_KEY);
     const { data: account, isLoading } = useAccount();
     const ability = useAbilityContext();
@@ -97,12 +124,15 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
             filters,
             t: (input: string) => get(contentOverrides, input),
             projectUuid: embed?.projectUuid || projectUuid,
+            paletteUuid,
             languageMap: contentOverrides,
             onExplore,
             savedChart,
             savedQueryUuid,
             onBackToDashboard,
             mode,
+            theme: embedThemeParams.theme,
+            backgroundColor: embedThemeParams.backgroundColor,
         };
     }, [
         embed?.projectUuid,
@@ -110,12 +140,15 @@ const EmbedProvider: FC<React.PropsWithChildren<Props>> = ({
         embedToken,
         filters,
         projectUuid,
+        paletteUuid,
         contentOverrides,
         onExplore,
         savedChart,
         savedQueryUuid,
         onBackToDashboard,
         mode,
+        embedThemeParams.theme,
+        embedThemeParams.backgroundColor,
     ]);
 
     return (

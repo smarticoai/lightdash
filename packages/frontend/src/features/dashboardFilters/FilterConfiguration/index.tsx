@@ -13,10 +13,10 @@ import {
     matchFieldByTypeAndName,
     matchFieldExact,
     type DashboardFieldTarget,
+    type DashboardFilterableField,
     type DashboardFilterRule,
     type DashboardTab,
     type DashboardTile,
-    type FilterableDimension,
     type ResultColumn,
 } from '@lightdash/common';
 import {
@@ -34,14 +34,15 @@ import {
 import { IconRotate2, IconSql } from '@tabler/icons-react';
 import { produce } from 'immer';
 import { useCallback, useMemo, useState, type FC } from 'react';
-import FieldSelect from '../../../components/common/FieldSelect';
 import FieldIcon from '../../../components/common/Filters/FieldIcon';
 import FieldLabel from '../../../components/common/Filters/FieldLabel';
 import MantineIcon from '../../../components/common/MantineIcon';
-import useDashboardContext from '../../../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../../../providers/Dashboard/useDashboardTileStatusContext';
+import { DEFAULT_TAB, FilterActions, FilterTabs } from './constants';
+import FilterCoverageSummary from './FilterCoverageSummary';
+import FilterFieldSelect from './FilterFieldSelect';
 import FilterSettings from './FilterSettings';
 import TileFilterConfiguration from './TileFilterConfiguration';
-import { DEFAULT_TAB, FilterActions, FilterTabs } from './constants';
 import {
     getFilterRuleRevertableObject,
     hasFilterValueSet,
@@ -52,9 +53,10 @@ import {
 interface Props {
     tiles: DashboardTile[];
     tabs: DashboardTab[];
-    field?: FilterableDimension;
-    fields?: FilterableDimension[];
-    availableTileFilters: Record<string, FilterableDimension[]>;
+    activeTabUuid?: string;
+    field?: DashboardFilterableField;
+    fields?: DashboardFilterableField[];
+    availableTileFilters: Record<string, DashboardFilterableField[]>;
     originalFilterRule?: DashboardFilterRule;
     defaultFilterRule?: DashboardFilterRule;
     popoverProps?: Omit<PopoverProps, 'children'>;
@@ -65,8 +67,8 @@ interface Props {
 }
 
 const getDefaultField = (
-    fields: FilterableDimension[],
-    selectedField: FilterableDimension,
+    fields: DashboardFilterableField[],
+    selectedField: DashboardFilterableField,
 ) => {
     return (
         fields.find(matchFieldExact(selectedField)) ??
@@ -81,6 +83,7 @@ const FilterConfiguration: FC<Props> = ({
     isTemporary = false,
     tiles,
     tabs,
+    activeTabUuid,
     field,
     fields,
     availableTileFilters,
@@ -91,7 +94,7 @@ const FilterConfiguration: FC<Props> = ({
 }) => {
     const [selectedTabId, setSelectedTabId] = useState<FilterTabs>(DEFAULT_TAB);
     const [selectedField, setSelectedField] = useState<
-        FilterableDimension | undefined
+        DashboardFilterableField | undefined
     >(field);
 
     const [draftFilterRule, setDraftFilterRule] = useState<
@@ -104,7 +107,7 @@ const FilterConfiguration: FC<Props> = ({
         return hasSavedFilterValueChanged(originalFilterRule, draftFilterRule);
     }, [originalFilterRule, draftFilterRule]);
 
-    const handleChangeField = (newField: FilterableDimension) => {
+    const handleChangeField = (newField: DashboardFilterableField) => {
         const isCreatingTemporary = isCreatingNew && !isEditMode;
 
         if (newField && isField(newField) && isFilterableField(newField)) {
@@ -124,14 +127,28 @@ const FilterConfiguration: FC<Props> = ({
         if (!originalFilterRule) return;
 
         setDraftFilterRule((oldDraftFilterRule) => {
-            return oldDraftFilterRule
-                ? {
-                      ...oldDraftFilterRule,
-                      ...getFilterRuleRevertableObject(originalFilterRule),
-                  }
-                : undefined;
+            if (!oldDraftFilterRule) return undefined;
+
+            const revertedRule = {
+                ...oldDraftFilterRule,
+                ...getFilterRuleRevertableObject(originalFilterRule),
+            };
+
+            // Mirror handleChangeFilterRule's disable logic: without this, reverting to
+            // a saved state of { disabled: false, values: [] } leaves Apply stuck disabled.
+            const isRevertedFilterDisabled =
+                revertedRule.disabled && !hasFilterValueSet(revertedRule);
+            const shouldDisableInViewMode =
+                !isEditMode &&
+                !revertedRule.required &&
+                !hasFilterValueSet(revertedRule);
+
+            return {
+                ...revertedRule,
+                disabled: isRevertedFilterDisabled || shouldDisableInViewMode,
+            };
         });
-    }, [originalFilterRule, setDraftFilterRule]);
+    }, [originalFilterRule, setDraftFilterRule, isEditMode]);
 
     const handleChangeFilterRule = useCallback(
         (newFilterRule: DashboardFilterRule) => {
@@ -154,7 +171,7 @@ const FilterConfiguration: FC<Props> = ({
         },
         [setDraftFilterRule, isEditMode],
     );
-    const sqlChartTilesMetadata = useDashboardContext(
+    const sqlChartTilesMetadata = useDashboardTileStatusContext(
         (c) => c.sqlChartTilesMetadata,
     );
     const columnsOptions = useMemo(() => {
@@ -378,29 +395,15 @@ const FilterConfiguration: FC<Props> = ({
                     <Stack spacing="sm">
                         {isCreatingNew ? (
                             !!fields && fields.length > 0 ? (
-                                <FieldSelect
-                                    data-testid="FilterConfiguration/FieldSelect"
-                                    size="xs"
-                                    focusOnRender={true}
-                                    label={
-                                        <Text>
-                                            Select a dimension to filter{' '}
-                                            <Text color="red" span>
-                                                *
-                                            </Text>{' '}
-                                        </Text>
-                                    }
-                                    withinPortal={popoverProps?.withinPortal}
-                                    onDropdownOpen={popoverProps?.onOpen}
-                                    onDropdownClose={popoverProps?.onClose}
-                                    hasGrouping
-                                    item={selectedField}
-                                    items={fields}
-                                    onChange={(newField) => {
-                                        if (!newField) return;
-
-                                        handleChangeField(newField);
-                                    }}
+                                <FilterFieldSelect
+                                    fields={fields}
+                                    availableTileFilters={availableTileFilters}
+                                    tiles={tiles}
+                                    tabs={tabs}
+                                    activeTabUuid={activeTabUuid}
+                                    selectedField={selectedField}
+                                    onChange={handleChangeField}
+                                    popoverProps={popoverProps}
                                 />
                             ) : (
                                 <Select
@@ -473,10 +476,25 @@ const FilterConfiguration: FC<Props> = ({
                                 popoverProps={popoverProps}
                             />
                         )}
+
+                        {isCreatingNew &&
+                            draftFilterRule &&
+                            tabs.length > 1 && (
+                                <FilterCoverageSummary
+                                    draftFilterRule={draftFilterRule}
+                                    tiles={tiles}
+                                    tabs={tabs}
+                                    activeTabUuid={activeTabUuid}
+                                    availableTileFilters={availableTileFilters}
+                                    onNavigateToTilesTab={() =>
+                                        setSelectedTabId(FilterTabs.TILES)
+                                    }
+                                />
+                            )}
                     </Stack>
                 </Tabs.Panel>
 
-                {draftFilterRule && (
+                {draftFilterRule && selectedTabId === FilterTabs.TILES && (
                     <Tabs.Panel
                         value={FilterTabs.TILES}
                         w={500}

@@ -12,6 +12,8 @@ import {
     Explore,
     ExploreCompiler,
     getItemId,
+    isCustomBinDimension,
+    isFormulaTableCalculation,
     isPeriodOverPeriodAdditionalMetric,
     isPostCalculationMetricType,
     isSqlTableCalculation,
@@ -25,9 +27,20 @@ import {
     TableCalculationTemplateType,
     type WarehouseSqlBuilder,
 } from '@lightdash/common';
+import {
+    compile as compileFormula,
+    extractColumnRefs,
+    parse as parseFormula,
+} from '@lightdash/formula';
+import { mapAdapterToFormulaDialect } from './formulaDialectMapper';
 import { compileTableCalculationFromTemplate } from './tableCalculationTemplateQueryCompiler';
 
-
+const formatFormulaError = (displayName: string, error: unknown): string => {
+    const message = error instanceof Error ? error.message : String(error);
+    return displayName
+        ? `Error in formula "${displayName}": ${message}`
+        : `Formula error: ${message}`;
+};
 const getTableCalculationReferences = (sql: string): string[] => {
     const matches = sql.match(lightdashVariablePattern) || [];
     return matches.map((match) => match.slice(2, -1)); // Remove ${ and }
@@ -70,7 +83,25 @@ const buildTableCalculationDependencyGraph = (
             };
         }
 
-        throw new CompileError(`Table calculation has no SQL or template`, {});
+        if (isFormulaTableCalculation(calc)) {
+            try {
+                const ast = parseFormula(calc.formula);
+                return {
+                    name: calc.name,
+                    dependencies: extractColumnRefs(ast),
+                };
+            } catch (e) {
+                throw new CompileError(
+                    formatFormulaError(calc.displayName, e),
+                    {},
+                );
+            }
+        }
+
+        throw new CompileError(
+            `Table calculation has no SQL, template, or formula`,
+            {},
+        );
     });
 
 const compileTableCalculation = (
@@ -80,6 +111,7 @@ const compileTableCalculation = (
     dependencyGraph: DependencyNode[],
     warehouseSqlBuilder: WarehouseSqlBuilder,
     sortFields: MetricQuery['sorts'],
+    customBinDimensionIds: Set<string>,
 ): CompiledTableCalculation => {
     if (validFieldIds.includes(tableCalculation.name)) {
         throw new CompileError(
@@ -102,31 +134,22 @@ const compileTableCalculation = (
         const compiledSql = tableCalculation.sql.replace(
             lightdashVariablePattern,
             (_, p1) => {
-                // Check if this is a reference to another table calculation
                 if (dependencyGraph.some((dep) => dep.name === p1)) {
-                    // For table calc references, we'll leave them as placeholders
-                    // MetricQueryBuilder will resolve these with proper CTE references
                     return `${quoteChar}${p1}${quoteChar}`;
                 }
-
-                // If the field is already valid, return it
                 if (validFieldIds.includes(p1)) {
                     return `${quoteChar}${p1}${quoteChar}`;
                 }
-
-                // Otherwise, try to convert it as a field reference (table.field format)
                 const fieldId = convertFieldRefToFieldId(p1);
                 if (validFieldIds.includes(fieldId)) {
                     return `${quoteChar}${fieldId}${quoteChar}`;
                 }
-
                 throw new CompileError(
                     `Table calculation contains a reference "${p1}" to a field or table calculation that isn't included in the query.`,
                     {},
                 );
             },
         );
-
         return {
             ...tableCalculation,
             compiledSql,
@@ -139,8 +162,8 @@ const compileTableCalculation = (
             tableCalculation.template,
             warehouseSqlBuilder,
             sortFields,
+            customBinDimensionIds,
         );
-
         return {
             ...tableCalculation,
             compiledSql,
@@ -148,7 +171,64 @@ const compileTableCalculation = (
         };
     }
 
-    throw new CompileError(`Table calculation has no SQL or template`, {});
+    if (isFormulaTableCalculation(tableCalculation)) {
+        try {
+            const dialect = mapAdapterToFormulaDialect(
+                warehouseSqlBuilder.getAdapterType(),
+            );
+            const columns: Record<string, string> = {};
+            for (const fieldId of validFieldIds) {
+                columns[fieldId] = fieldId;
+            }
+            for (const dep of dependencyGraph) {
+                if (dep.name !== tableCalculation.name) {
+                    columns[dep.name] = dep.name;
+                }
+            }
+            // Filter out sorts on table calculations: a formula table calc
+            // and its siblings are projected in the same SELECT, so ordering
+            // by a sibling alias inside its OVER clause self-references
+            // within that SELECT and every warehouse rejects it.
+            const validFieldIdsForSort = new Set(validFieldIds);
+            const defaultOrderBy = sortFields
+                .filter((s) => validFieldIdsForSort.has(s.fieldId))
+                .map((s) => ({
+                    column: customBinDimensionIds.has(s.fieldId)
+                        ? `${s.fieldId}_order`
+                        : s.fieldId,
+                    direction: (s.descending ? 'DESC' : 'ASC') as
+                        | 'ASC'
+                        | 'DESC',
+                }));
+            // Table calcs land in a post-aggregation SELECT alongside non-
+            // aggregate dimension columns, so bare SQL aggregates would be
+            // rejected by the warehouse. Wrapping as `AGG(x) OVER ()` turns
+            // them into window aggregates — legal in that context and
+            // preserving Sheets-like whole-result-set semantics.
+            const compiledSql = compileFormula(tableCalculation.formula, {
+                dialect,
+                columns,
+                renderAggregate: (inner) => `${inner} OVER ()`,
+                defaultOrderBy,
+            });
+            return {
+                ...tableCalculation,
+                compiledSql,
+                dependsOn: tableCalcDependencies,
+            };
+        } catch (e) {
+            if (e instanceof CompileError) throw e;
+            throw new CompileError(
+                formatFormulaError(tableCalculation.displayName, e),
+                {},
+            );
+        }
+    }
+
+    throw new CompileError(
+        `Table calculation has no SQL, template, or formula`,
+        {},
+    );
 };
 
 const compileTableCalculations = (
@@ -157,6 +237,7 @@ const compileTableCalculations = (
     quoteChar: string,
     warehouseSqlBuilder: WarehouseSqlBuilder,
     sortFields: MetricQuery['sorts'],
+    customBinDimensionIds: Set<string>,
 ): CompiledTableCalculation[] => {
     if (tableCalculations.length === 0) {
         return [];
@@ -181,6 +262,7 @@ const compileTableCalculations = (
             dependencyGraph,
             warehouseSqlBuilder,
             sortFields,
+            customBinDimensionIds,
         );
         compiledTableCalculations.push(compiled);
     }
@@ -269,10 +351,28 @@ export function compilePostCalculationMetric({
     }
 
     if (type === MetricType.PERCENT_OF_TOTAL) {
+        // Only emit a row-total partition when the data is actually pivoted
+        // (groupByColumns non-empty). For a regular table view (row dims, no
+        // pivot) we want the grand total — partitioning by the row dim there
+        // would make every row equal 100% of itself.
+        const rawIndexColumn = pivotConfiguration?.indexColumn;
+        let indexColumns: { reference: string }[] = [];
+        if (rawIndexColumn) {
+            indexColumns = Array.isArray(rawIndexColumn)
+                ? rawIndexColumn
+                : [rawIndexColumn];
+        }
+        const isPivoted = groupByColumns.length > 0;
+        const indexPartitionByClause: string | undefined =
+            isPivoted && indexColumns.length > 0
+                ? `PARTITION BY ${indexColumns
+                      .map((col) => `${q}${col.reference}${q}`)
+                      .join(', ')}`
+                : undefined;
         return (
             `(CAST(${sql} AS ${floatType}) / ` +
             `CAST(NULLIF(SUM(${sql}) OVER(${
-                partitionByClause ?? ''
+                indexPartitionByClause ?? ''
             }), 0) AS ${floatType}))`
         );
     }
@@ -325,6 +425,11 @@ export const compileMetricQuery = ({
                 availableParameters,
             ),
     );
+    const customBinDimensionIds = new Set(
+        (metricQuery.customDimensions || [])
+            .filter(isCustomBinDimension)
+            .map(getItemId),
+    );
 
     const compiledTableCalculations = compileTableCalculations(
         metricQuery.tableCalculations,
@@ -332,6 +437,7 @@ export const compileMetricQuery = ({
         fieldQuoteChar,
         warehouseSqlBuilder,
         metricQuery.sorts,
+        customBinDimensionIds,
     );
 
     return {

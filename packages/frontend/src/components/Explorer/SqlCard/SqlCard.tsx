@@ -1,6 +1,12 @@
 import { subject } from '@casl/ability';
 import {
+    formatSql,
+    isCustomSqlDimension,
+    isSqlTableCalculation,
+} from '@lightdash/common';
+import {
     ActionIcon,
+    Box,
     CopyButton,
     Group,
     SegmentedControl,
@@ -9,18 +15,30 @@ import {
 } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
 import { IconCheck, IconClipboard } from '@tabler/icons-react';
-import { lazy, memo, Suspense, useCallback, useState, type FC } from 'react';
+import {
+    lazy,
+    memo,
+    Suspense,
+    useCallback,
+    useMemo,
+    useState,
+    type FC,
+} from 'react';
 import {
     explorerActions,
     selectIsSqlExpanded,
+    selectMetricQuery,
     selectTableName,
     useExplorerDispatch,
     useExplorerSelector,
 } from '../../../features/explorer/store';
 import { useCompiledSql } from '../../../hooks/useCompiledSql';
+import { useProject } from '../../../hooks/useProject';
+import { useCannotAuthorCustomSql } from '../../../hooks/user/useCannotAuthorCustomSql';
 import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import { ExplorerSection } from '../../../providers/Explorer/types';
+import Callout from '../../common/Callout';
 import CollapsableCard from '../../common/CollapsableCard/CollapsableCard';
 import MantineIcon from '../../common/MantineIcon';
 import { type SqlViewType } from '../../RenderedSql';
@@ -45,6 +63,8 @@ const SqlCard: FC<SqlCardProps> = memo(({ projectUuid }) => {
     const dispatch = useExplorerDispatch();
 
     const unsavedChartVersionTableName = useExplorerSelector(selectTableName);
+    const metricQuery = useExplorerSelector(selectMetricQuery);
+    const cannotAuthorCustomSql = useCannotAuthorCustomSql(projectUuid);
 
     const toggleExpandedSection = useCallback(
         (section: ExplorerSection) => {
@@ -53,14 +73,29 @@ const SqlCard: FC<SqlCardProps> = memo(({ projectUuid }) => {
         [dispatch],
     );
     const { user } = useApp();
+    const { data: project } = useProject(projectUuid);
+
+    const hasSqlAuthoredFields =
+        !!metricQuery.customDimensions?.some(isCustomSqlDimension) ||
+        !!metricQuery.tableCalculations?.some(isSqlTableCalculation);
+    const cannotViewSqlAuthoredFields =
+        hasSqlAuthoredFields && cannotAuthorCustomSql;
 
     const { data, isSuccess, isInitialLoading, error } = useCompiledSql({
-        enabled: !!unsavedChartVersionTableName,
+        enabled: !!unsavedChartVersionTableName && !cannotViewSqlAuthoredFields,
     });
 
     const hasPivotQuery = !!data?.pivotQuery;
     const selectedSql =
         selectedView === 'pivotQuery' ? data?.pivotQuery : data?.query;
+
+    const formattedSql = useMemo(
+        () =>
+            selectedSql
+                ? formatSql(selectedSql, project?.warehouseConnection?.type)
+                : '',
+        [selectedSql, project?.warehouseConnection?.type],
+    );
 
     return (
         <CollapsableCard
@@ -71,8 +106,11 @@ const SqlCard: FC<SqlCardProps> = memo(({ projectUuid }) => {
             onToggle={() => toggleExpandedSection(ExplorerSection.SQL)}
             disabled={!unsavedChartVersionTableName}
             headerElement={
-                (hovered || sqlIsOpen) && data && isSuccess ? (
-                    <CopyButton value={selectedSql ?? ''} timeout={2000}>
+                !cannotViewSqlAuthoredFields &&
+                (hovered || sqlIsOpen) &&
+                data &&
+                isSuccess ? (
+                    <CopyButton value={formattedSql} timeout={2000}>
                         {({ copied, copy }) => (
                             <Tooltip
                                 variant="xs"
@@ -104,7 +142,8 @@ const SqlCard: FC<SqlCardProps> = memo(({ projectUuid }) => {
                 ) : undefined
             }
             rightHeaderElement={
-                sqlIsOpen && (
+                sqlIsOpen &&
+                !cannotViewSqlAuthoredFields && (
                     <Group spacing="xs">
                         {hasPivotQuery && (
                             <SegmentedControl
@@ -131,7 +170,7 @@ const SqlCard: FC<SqlCardProps> = memo(({ projectUuid }) => {
                         >
                             <OpenInSqlRunnerButton
                                 projectUuid={projectUuid}
-                                sql={selectedSql}
+                                sql={formattedSql}
                                 disabled={isInitialLoading || !!error}
                             />
                         </Can>
@@ -139,9 +178,18 @@ const SqlCard: FC<SqlCardProps> = memo(({ projectUuid }) => {
                 )
             }
         >
-            <Suspense fallback={<Skeleton height={60} radius="sm" />}>
-                <LazyRenderedSql selectedView={selectedView} />
-            </Suspense>
+            {cannotViewSqlAuthoredFields ? (
+                <Box p="sm">
+                    <Callout variant="info" title="SQL preview unavailable">
+                        This chart contains custom SQL fields that you don't
+                        have permission to view.
+                    </Callout>
+                </Box>
+            ) : (
+                <Suspense fallback={<Skeleton height={60} radius="sm" />}>
+                    <LazyRenderedSql selectedView={selectedView} />
+                </Suspense>
+            )}
         </CollapsableCard>
     );
 });

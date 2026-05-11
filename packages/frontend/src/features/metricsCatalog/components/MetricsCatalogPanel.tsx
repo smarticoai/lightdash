@@ -2,14 +2,12 @@ import { subject } from '@casl/ability';
 import { CatalogCategoryFilterMode, isCompileJob } from '@lightdash/common';
 import {
     ActionIcon,
-    Badge,
     Box,
     Button,
     Group,
     Popover,
     Stack,
     Text,
-    Tooltip,
     useMantineTheme,
     type ButtonProps,
 } from '@mantine/core';
@@ -17,17 +15,16 @@ import { useClickOutside, useDisclosure } from '@mantine/hooks';
 import { IconRefresh, IconSparkles, IconX } from '@tabler/icons-react';
 import { useCallback, useEffect, useRef, useState, type FC } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useIntercom } from 'react-use-intercom';
-import RefreshDbtButton from '../../../components/RefreshDbtButton';
 import MantineIcon from '../../../components/common/MantineIcon';
+import RefreshDbtButton from '../../../components/RefreshDbtButton';
 import { useProject } from '../../../hooks/useProject';
 import useSearchParams from '../../../hooks/useSearchParams';
 import { useTimeAgo } from '../../../hooks/useTimeAgo';
 import useActiveJob from '../../../providers/ActiveJob/useActiveJob';
 import useApp from '../../../providers/App/useApp';
 import { LearnMoreContent } from '../../../svgs/metricsCatalog';
-import { useIndexCatalogJob } from '../../catalog/hooks/useIndexCatalogJob';
 import { useAppDispatch, useAppSelector } from '../../sqlRunner/store/hooks';
+import { useIndexCatalogJob } from '../hooks/useIndexCatalogJob';
 import {
     setAbility,
     setActiveMetric,
@@ -177,7 +174,6 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
 }) => {
     const dispatch = useAppDispatch();
     const theme = useMantineTheme();
-    const { show: showIntercom } = useIntercom();
     const projectUuid = useAppSelector(
         (state) => state.metricsCatalog.projectUuid,
     );
@@ -460,41 +456,41 @@ export const MetricsCatalogPanel: FC<MetricsCatalogPanelProps> = ({
                         <Text color="ldGray.8" weight={600} size="xl">
                             Metrics Catalog
                         </Text>
-                        {!smrMode() &&
-                        <Tooltip
-                            variant="xs"
-                            label="This feature is in beta. We're actively testing and improving it—your feedback is welcome!"
-                            position="right"
-                        >
-                            <Badge
-                                variant="filled"
-                                color="indigo.5"
-                                radius={6}
-                                size="md"
-                                py="xxs"
-                                px="xs"
-                                sx={{
-                                    cursor: 'default',
-                                    boxShadow:
-                                        '0px -2px 0px 0px rgba(4, 4, 4, 0.04) inset',
-                                    '&:hover': {
-                                        cursor: 'pointer',
-                                    },
-                                }}
-                                onClick={() => {
-                                    // @ts-ignore
-                                    if (window.Pylon) {
-                                        // @ts-ignore
-                                        window.Pylon('show');
-                                    } else {
-                                        showIntercom();
-                                    }
-                                }}
+                        {!smrMode() && (
+                            <Tooltip
+                                variant="xs"
+                                label="This feature is in beta. We're actively testing and improving it—your feedback is welcome!"
+                                position="right"
                             >
-                                Beta
-                            </Badge>
-                        </Tooltip>
-                        }
+                                <Badge
+                                    variant="filled"
+                                    color="indigo.5"
+                                    radius={6}
+                                    size="md"
+                                    py="xxs"
+                                    px="xs"
+                                    sx={{
+                                        cursor: 'default',
+                                        boxShadow:
+                                            '0px -2px 0px 0px rgba(4, 4, 4, 0.04) inset',
+                                        '&:hover': {
+                                            cursor: 'pointer',
+                                        },
+                                    }}
+                                    onClick={() => {
+                                        // @ts-ignore
+                                        if (window.Pylon) {
+                                            // @ts-ignore
+                                            window.Pylon('show');
+                                        } else {
+                                            showIntercom();
+                                        }
+                                    }}
+                                >
+                                    Beta
+                                </Badge>
+                            </Tooltip>
+                        )}
                     </Group>
                     <Text color="ldGray.6" size="sm" weight={400}>
                         Browse all Metrics & KPIs across this project

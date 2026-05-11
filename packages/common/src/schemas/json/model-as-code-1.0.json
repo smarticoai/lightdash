@@ -54,7 +54,17 @@
                 },
                 "group_label": {
                     "type": "string",
-                    "description": "Group label for organizing models"
+                    "deprecated": true,
+                    "description": "Deprecated: use groups instead"
+                },
+                "groups": {
+                    "type": "array",
+                    "description": "Groups are used to group tables in the sidebar. You can create nested groups up to 3 levels. Define labels & descriptions for the group keys in lightdash.config.yml under table_groups.",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "maxItems": 3
                 },
                 "sql_filter": {
                     "type": "string",
@@ -63,6 +73,81 @@
                 "sql_where": {
                     "type": "string",
                     "description": "Alias for sql_filter"
+                },
+                "pre_aggregates": {
+                    "type": "array",
+                    "description": "Pre-aggregate rollups to materialize for this model",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string"
+                            },
+                            "dimensions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "metrics": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "filters": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/Filter"
+                                },
+                                "description": "Static filters applied when materializing the pre-aggregate"
+                            },
+                            "time_dimension": {
+                                "type": "string"
+                            },
+                            "granularity": {
+                                "type": "string"
+                            },
+                            "max_rows": {
+                                "type": "integer"
+                            },
+                            "refresh": {
+                                "type": "object",
+                                "properties": {
+                                    "cron": {
+                                        "type": "string"
+                                    }
+                                }
+                            },
+                            "materialization_role": {
+                                "type": "object",
+                                "properties": {
+                                    "email": {
+                                        "type": "string"
+                                    },
+                                    "attributes": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "string"
+                                                },
+                                                {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "required": ["email", "attributes"],
+                                "additionalProperties": false
+                            }
+                        },
+                        "required": ["name", "dimensions", "metrics"]
+                    }
                 },
                 "required_attributes": {
                     "type": "object",
@@ -80,6 +165,23 @@
                         ]
                     },
                     "description": "Required user attributes for accessing this model"
+                },
+                "any_attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        ]
+                    },
+                    "description": "Any user attributes (OR logic) for accessing this model"
                 },
                 "group_details": {
                     "type": "object",
@@ -277,7 +379,8 @@
                 },
                 "group_label": {
                     "type": "string",
-                    "description": "Group this dimension belongs to"
+                    "description": "Group this dimension belongs to. Deprecated: use groups instead",
+                    "deprecated": true
                 },
                 "groups": {
                     "oneOf": [
@@ -332,6 +435,23 @@
                         ]
                     },
                     "description": "Required user attributes for accessing this dimension"
+                },
+                "any_attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        ]
+                    },
+                    "description": "Any user attributes (OR logic) for accessing this dimension"
                 },
                 "ai_hint": {
                     "oneOf": [
@@ -540,7 +660,8 @@
                 },
                 "group_label": {
                     "type": "string",
-                    "description": "Group this metric belongs to"
+                    "description": "Group this metric belongs to. Deprecated: use groups instead",
+                    "deprecated": true
                 },
                 "urls": {
                     "type": "array",
@@ -574,6 +695,23 @@
                         ]
                     },
                     "description": "Required user attributes for accessing this metric"
+                },
+                "any_attributes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "oneOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        ]
+                    },
+                    "description": "Any user attributes (OR logic) for accessing this metric"
                 },
                 "ai_hint": {
                     "oneOf": [
@@ -658,7 +796,8 @@
                 },
                 "group_label": {
                     "type": "string",
-                    "description": "Group this dimension belongs to"
+                    "description": "Group this dimension belongs to. Deprecated: use groups instead",
+                    "deprecated": true
                 },
                 "colors": {
                     "type": "object",
@@ -741,7 +880,7 @@
                 },
                 "group_label": {
                     "type": "string",
-                    "description": "Group this explore belongs to"
+                    "description": "Group this explore belongs to in the sidebar"
                 },
                 "joins": {
                     "type": "array",

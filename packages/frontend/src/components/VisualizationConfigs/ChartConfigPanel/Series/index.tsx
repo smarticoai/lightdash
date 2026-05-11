@@ -9,19 +9,23 @@ import {
     CartesianSeriesType,
     getItemId,
     getSeriesId,
+    StackType,
     type CustomDimension,
     type Field,
     type Series as SeriesType,
     type TableCalculation,
 } from '@lightdash/common';
-import { Checkbox, Divider, Stack } from '@mantine/core';
+import { Checkbox, Divider, Stack, Switch } from '@mantine/core';
 import { produce } from 'immer';
 import React, { Fragment, useCallback, useMemo, type FC } from 'react';
 import { createPortal } from 'react-dom';
 import { getSeriesGroupedByField } from '../../../../hooks/cartesianChartConfig/utils';
 import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/types';
 import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
+import { ColorPaletteSection } from '../../common/ColorPaletteSection';
+import { Config } from '../../common/Config';
 import BasicSeriesConfiguration from './BasicSeriesConfiguration';
+import { CustomColors } from './CustomColors';
 import GroupedSeriesConfiguration from './GroupedSeriesConfiguration';
 import InvalidSeriesConfiguration from './InvalidSeriesConfiguration';
 
@@ -41,7 +45,22 @@ type Props = {
 };
 
 export const Series: FC<Props> = ({ items }) => {
-    const { visualizationConfig, getSeriesColor } = useVisualizationContext();
+    const {
+        visualizationConfig,
+        getSeriesColor,
+        pivotDimensions,
+        resultsData,
+        colorPalette,
+    } = useVisualizationContext();
+
+    const sortedByPivot = useMemo(
+        () =>
+            !!pivotDimensions?.length &&
+            !!resultsData?.metricQuery?.sorts?.some((sort) =>
+                pivotDimensions.includes(sort.fieldId),
+            ),
+        [pivotDimensions, resultsData?.metricQuery?.sorts],
+    );
 
     const isCartesianChart =
         isCartesianVisualizationConfig(visualizationConfig);
@@ -96,10 +115,16 @@ export const Series: FC<Props> = ({ items }) => {
     const {
         dirtyEchartsConfig,
         dirtyLayout,
+        dirtyChartType,
         updateSeries,
         getSingleSeries,
         updateSingleSeries,
         updateAllGroupedSeries,
+        setColorByCategory,
+        setCategoryColorOverride,
+        setAllCategoryColorOverrides,
+        conditionalFormattings,
+        onSetConditionalFormattings,
     } = visualizationConfig.chartConfig;
 
     const allSeries = dirtyEchartsConfig?.series ?? [];
@@ -128,8 +153,26 @@ export const Series: FC<Props> = ({ items }) => {
         updateSeries(updatedSeries);
     };
 
+    // Color by category: available for single-series bar charts without pivots
+    const hasCustomColorsStacking =
+        allSeries.some((series) => Boolean(series.stack)) ||
+        (dirtyLayout?.stack !== undefined &&
+            dirtyLayout.stack !== StackType.NONE);
+
+    const isSingleSeriesBar =
+        dirtyChartType === CartesianSeriesType.BAR &&
+        !pivotDimensions?.length &&
+        allSeries.length <= 1 &&
+        !hasCustomColorsStacking;
+
+    const colorByCategory = dirtyLayout?.colorByCategory ?? false;
+    const customColorsEnabled =
+        colorByCategory || conditionalFormattings.length > 0;
+
     return (
         <Stack spacing="md">
+            <ColorPaletteSection />
+            <Divider />
             <DragDropContext onDragEnd={onDragEnd}>
                 <Droppable droppableId="results-table-sort-fields">
                     {(dropProps) => (
@@ -170,6 +213,7 @@ export const Series: FC<Props> = ({ items }) => {
                                         key={getSeriesId(seriesEntry)}
                                         draggableId={getSeriesId(seriesEntry)}
                                         index={i}
+                                        isDragDisabled={sortedByPivot}
                                     >
                                         {(
                                             {
@@ -204,6 +248,9 @@ export const Series: FC<Props> = ({ items }) => {
                                                             dragHandleProps={
                                                                 dragHandleProps
                                                             }
+                                                            isDragDisabled={
+                                                                sortedByPivot
+                                                            }
                                                             updateSeries={
                                                                 updateSeries
                                                             }
@@ -235,6 +282,12 @@ export const Series: FC<Props> = ({ items }) => {
                                                             dragHandleProps={
                                                                 dragHandleProps
                                                             }
+                                                            isDragDisabled={
+                                                                sortedByPivot
+                                                            }
+                                                            showColorPickerIcon={
+                                                                colorByCategory
+                                                            }
                                                         />
                                                     )}
                                                     {hasDivider && (
@@ -251,6 +304,57 @@ export const Series: FC<Props> = ({ items }) => {
                     )}
                 </Droppable>
             </DragDropContext>
+            {isSingleSeriesBar && (
+                <Config>
+                    <Config.Section>
+                        <Stack spacing="xs">
+                            <Switch
+                                label="Apply custom colors"
+                                checked={customColorsEnabled}
+                                onChange={(e) => {
+                                    if (e.currentTarget.checked) {
+                                        if (conditionalFormattings.length > 0) {
+                                            return;
+                                        }
+                                        setColorByCategory(true);
+                                        return;
+                                    }
+
+                                    setColorByCategory(false);
+                                    onSetConditionalFormattings([]);
+                                }}
+                            />
+                            {customColorsEnabled && (
+                                <CustomColors
+                                    items={items}
+                                    rows={resultsData?.rows}
+                                    xField={dirtyLayout?.xField}
+                                    yField={dirtyLayout?.yField?.[0]}
+                                    colorPalette={colorPalette}
+                                    colorByCategory={colorByCategory}
+                                    categoryColorOverrides={
+                                        dirtyLayout?.categoryColorOverrides ??
+                                        {}
+                                    }
+                                    conditionalFormattings={
+                                        conditionalFormattings
+                                    }
+                                    setColorByCategory={setColorByCategory}
+                                    setCategoryColorOverride={
+                                        setCategoryColorOverride
+                                    }
+                                    setAllCategoryColorOverrides={
+                                        setAllCategoryColorOverrides
+                                    }
+                                    onSetConditionalFormattings={
+                                        onSetConditionalFormattings
+                                    }
+                                />
+                            )}
+                        </Stack>
+                    </Config.Section>
+                </Config>
+            )}
             {hasStackedBars && (
                 <Checkbox
                     checked={showOverlappingLabelsEnabled}

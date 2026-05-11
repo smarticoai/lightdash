@@ -14,6 +14,7 @@ import {
     PersonalAccessTokenTableName,
 } from '../../database/entities/personalAccessTokens';
 import { hash } from '../../utils/hash';
+import { PatSessionCache } from '../caches/PatSessionCache';
 
 export class PersonalAccessTokenModel {
     private readonly database: Knex;
@@ -95,13 +96,14 @@ export class PersonalAccessTokenModel {
             })
             .where('personal_access_token_uuid', personalAccessTokenUuid)
             .returning('*');
+        PatSessionCache.invalidate();
         return {
             ...PersonalAccessTokenModel.mapDbObjectToPersonalAccessToken(row),
             token,
         };
     }
 
-    /* 
+    /*
     Generates a new token and saves it
     */
     async create(
@@ -117,7 +119,7 @@ export class PersonalAccessTokenModel {
         });
     }
 
-    /* 
+    /*
     Save an already generated token
     it might be provided by the user, or generated automatically on this.create
     */
@@ -149,11 +151,13 @@ export class PersonalAccessTokenModel {
         await this.database(PersonalAccessTokenTableName)
             .delete()
             .where('created_by_user_id', userId);
+        PatSessionCache.invalidate();
     }
 
     async delete(personalAccessTokenUuid: string): Promise<void> {
         await this.database(PersonalAccessTokenTableName)
             .delete()
             .where('personal_access_token_uuid', personalAccessTokenUuid);
+        PatSessionCache.invalidate();
     }
 }

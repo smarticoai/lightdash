@@ -21,7 +21,9 @@ import {
     type MetricType,
     type ParameterDefinitions,
     type PieChartConfig,
+    type PreAggregateCheckResult,
     type ReplaceCustomFields,
+    type SankeyChartConfig,
     type SavedChart,
     type TableCalculation,
     type TableCalculationMetadata,
@@ -103,6 +105,7 @@ export type ConfigCacheMap = {
     [ChartType.GAUGE]: ChartConfigCache<GaugeChartConfig['config']>;
     [ChartType.MAP]: MapChartConfigCache;
     [ChartType.CUSTOM]: ChartConfigCache<CustomVisConfig['config']>;
+    [ChartType.SANKEY]: ChartConfigCache<SankeyChartConfig['config']>;
 };
 
 export type Action =
@@ -230,6 +233,26 @@ export type Action =
           payload: string[] | null;
       };
 
+export type PreAggregateCheck =
+    | {
+          status: 'unavailable';
+          reason: 'feature_disabled' | 'no_configured_pre_aggregates';
+      }
+    | {
+          status: 'idle';
+      }
+    | {
+          status: 'loading';
+      }
+    | {
+          status: 'error';
+          message: string;
+      }
+    | {
+          status: 'ready';
+          result: PreAggregateCheckResult;
+      };
+
 export interface ExplorerReduceState {
     expandedSections: ExplorerSection[];
     metadata?: {
@@ -297,4 +320,11 @@ export interface ExplorerReduceState {
     fromDashboard?: string;
     isExploreFromHere?: boolean;
     savedChart?: SavedChart;
+    unsavedColorPaletteUuid: string | null;
+
+    // Pre-aggregate check state — computed once in useExplorerQueryEffects
+    preAggregate: {
+        usePreAggregateCache: boolean;
+        check: PreAggregateCheck;
+    };
 }

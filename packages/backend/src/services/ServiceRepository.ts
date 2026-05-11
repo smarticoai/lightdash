@@ -1,10 +1,14 @@
-import { MissingConfigError } from '@lightdash/common';
+import { BulkActionable, MissingConfigError } from '@lightdash/common';
+import { Knex } from 'knex';
 import { LightdashAnalytics } from '../analytics/LightdashAnalytics';
 import { ClientRepository } from '../clients/ClientRepository';
 import { LightdashConfig } from '../config/parseConfig';
+import { AppGenerateService } from '../ee/services/AppGenerateService/AppGenerateService';
+import { PreAggregateMaterializationService } from '../ee/services/PreAggregateMaterializationService/PreAggregateMaterializationService';
 import { ModelRepository } from '../models/ModelRepository';
-import PrometheusMetrics from '../prometheus';
+import PrometheusMetrics from '../prometheus/PrometheusMetrics';
 import type { UtilRepository } from '../utils/UtilRepository';
+import { AdminNotificationService } from './AdminNotificationService/AdminNotificationService';
 import { AnalyticsService } from './AnalyticsService/AnalyticsService';
 import { AsyncQueryService } from './AsyncQueryService/AsyncQueryService';
 import { BaseService } from './BaseService';
@@ -13,12 +17,13 @@ import { ChangesetService } from './ChangesetService';
 import { CoderService } from './CoderService/CoderService';
 import { CommentService } from './CommentService/CommentService';
 import { ContentService } from './ContentService/ContentService';
+import { ContentVerificationService } from './ContentVerificationService';
 import { CsvService } from './CsvService/CsvService';
 import { DashboardService } from './DashboardService/DashboardService';
-// SMR-START
 import { DashboardTabAnalysisService } from './DashboardTabAnalysisService/SMRDashboardTabAnalysisService';
-// SMR-END
+import { DeployService } from './DeployService';
 import { DownloadFileService } from './DownloadFileService/DownloadFileService';
+import { FavoritesService } from './FavoritesService/FavoritesService';
 import { FeatureFlagService } from './FeatureFlag/FeatureFlagService';
 import { FunnelService } from './FunnelService/FunnelService';
 import { GdriveService } from './GdriveService/GdriveService';
@@ -33,6 +38,7 @@ import { NotificationsService } from './NotificationsService/NotificationsServic
 import { OAuthService } from './OAuthService/OAuthService';
 import { OrganizationService } from './OrganizationService/OrganizationService';
 import { PermissionsService } from './PermissionsService/PermissionsService';
+import { PersistentDownloadFileService } from './PersistentDownloadFileService/PersistentDownloadFileService';
 import { PersonalAccessTokenService } from './PersonalAccessTokenService';
 import { PinningService } from './PinningService/PinningService';
 import { PivotTableService } from './PivotTableService/PivotTableService';
@@ -49,6 +55,7 @@ import { SearchService } from './SearchService/SearchService';
 import { ShareService } from './ShareService/ShareService';
 import { SlackIntegrationService } from './SlackIntegrationService/SlackIntegrationService';
 import { SlackService } from './SlackService/SlackService';
+import { SpacePermissionService } from './SpaceService/SpacePermissionService';
 import { SpaceService } from './SpaceService/SpaceService';
 import { SpotlightService } from './SpotlightService/SpotlightService';
 import { SshKeyPairService } from './SshKeyPairService';
@@ -66,14 +73,15 @@ import type { ICacheService } from './CacheService/ICacheService';
  * service repository correctly.
  */
 interface ServiceManifest {
+    adminNotificationService: AdminNotificationService;
     analyticsService: AnalyticsService;
     commentService: CommentService;
     csvService: CsvService;
     dashboardService: DashboardService;
-    // SMR-START
     dashboardTabAnalysisService: DashboardTabAnalysisService;
-    // SMR-END
+    deployService: DeployService;
     downloadFileService: DownloadFileService;
+    favoritesService: FavoritesService;
     gitIntegrationService: GitIntegrationService;
     githubAppService: GithubAppService;
     gitlabAppService: GitlabAppService;
@@ -84,6 +92,8 @@ interface ServiceManifest {
     oauthService: OAuthService;
 
     organizationService: OrganizationService;
+    preAggregateMaterializationService: PreAggregateMaterializationService;
+    persistentDownloadFileService: PersistentDownloadFileService;
     personalAccessTokenService: PersonalAccessTokenService;
     pinningService: PinningService;
     pivotTableService: PivotTableService;
@@ -94,6 +104,7 @@ interface ServiceManifest {
     shareService: ShareService;
     slackIntegrationService: SlackIntegrationService;
     sshKeyPairService: SshKeyPairService;
+    spacePermissionService: SpacePermissionService;
     spaceService: SpaceService;
     unfurlService: UnfurlService;
     userAttributesService: UserAttributesService;
@@ -104,6 +115,7 @@ interface ServiceManifest {
     promoteService: PromoteService;
     savedSqlService: SavedSqlService;
     contentService: ContentService;
+    contentVerificationService: ContentVerificationService;
     coderService: CoderService;
     featureFlagService: FeatureFlagService;
     funnelService: FunnelService;
@@ -115,6 +127,7 @@ interface ServiceManifest {
     projectCompileLogService: ProjectCompileLogService;
     permissionsService: PermissionsService;
     /** An implementation signature for these services are not available at this stage */
+    appGenerateService: unknown;
     embedService: unknown;
     aiService: unknown;
     aiAgentService: unknown;
@@ -127,6 +140,7 @@ interface ServiceManifest {
     // SMR-END
     serviceAccountService: unknown;
     instanceConfigurationService: unknown;
+    managedAgentService: unknown;
     mcpService: unknown;
     rolesService: RolesService;
     slackService: SlackService;
@@ -272,6 +286,22 @@ export class ServiceRepository
      */
     protected serviceInstances: Partial<ServiceManifest> = {};
 
+    public getAdminNotificationService(): AdminNotificationService {
+        return this.getService(
+            'adminNotificationService',
+            () =>
+                new AdminNotificationService({
+                    lightdashConfig: this.context.lightdashConfig,
+                    emailClient: this.clients.getEmailClient(),
+                    organizationMemberProfileModel:
+                        this.models.getOrganizationMemberProfileModel(),
+                    organizationModel: this.models.getOrganizationModel(),
+                    projectModel: this.models.getProjectModel(),
+                    userModel: this.models.getUserModel(),
+                }),
+        );
+    }
+
     public getAnalyticsService(): AnalyticsService {
         return this.getService(
             'analyticsService',
@@ -290,13 +320,13 @@ export class ServiceRepository
             'commentService',
             () =>
                 new CommentService({
+                    lightdashConfig: this.context.lightdashConfig,
                     analytics: this.context.lightdashAnalytics,
                     dashboardModel: this.models.getDashboardModel(),
-                    spaceModel: this.models.getSpaceModel(),
                     commentModel: this.models.getCommentModel(),
                     notificationsModel: this.models.getNotificationsModel(),
                     userModel: this.models.getUserModel(),
-                    featureFlagModel: this.models.getFeatureFlagModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -310,7 +340,7 @@ export class ServiceRepository
                     analytics: this.context.lightdashAnalytics,
                     projectService: this.getProjectService(),
                     userModel: this.models.getUserModel(),
-                    s3Client: this.clients.getS3Client(),
+                    fileStorageClient: this.clients.getFileStorageClient(),
                     dashboardModel: this.models.getDashboardModel(),
                     savedChartModel: this.models.getSavedChartModel(),
                     savedSqlModel: this.models.getSavedSqlModel(),
@@ -318,6 +348,8 @@ export class ServiceRepository
                     schedulerClient: this.clients.getSchedulerClient(),
                     projectModel: this.models.getProjectModel(),
                     pivotTableService: this.getPivotTableService(),
+                    persistentDownloadFileService:
+                        this.getPersistentDownloadFileService(),
                 }),
         );
     }
@@ -327,18 +359,37 @@ export class ServiceRepository
             'dashboardService',
             () =>
                 new DashboardService({
+                    lightdashConfig: this.context.lightdashConfig,
                     analytics: this.context.lightdashAnalytics,
                     dashboardModel: this.models.getDashboardModel(),
                     spaceModel: this.models.getSpaceModel(),
                     analyticsModel: this.models.getAnalyticsModel(),
                     pinnedListModel: this.models.getPinnedListModel(),
                     schedulerModel: this.models.getSchedulerModel(),
+                    schedulerService: this.getSchedulerService(),
                     savedChartModel: this.models.getSavedChartModel(),
                     savedChartService: this.getSavedChartService(),
                     projectModel: this.models.getProjectModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
                     slackClient: this.clients.getSlackClient(),
                     catalogModel: this.models.getCatalogModel(),
+                    organizationModel: this.models.getOrganizationModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
+                }),
+        );
+    }
+
+    public getDeployService(): DeployService {
+        return this.getService(
+            'deployService',
+            () =>
+                new DeployService({
+                    deploySessionModel: this.models.getDeploySessionModel(),
+                    projectModel: this.models.getProjectModel(),
+                    projectService: this.getProjectService(),
+                    schedulerClient: this.clients.getSchedulerClient(),
                 }),
         );
     }
@@ -491,6 +542,7 @@ export class ServiceRepository
                     organizationAllowedEmailDomainsModel:
                         this.models.getOrganizationAllowedEmailDomainsModel(),
                     groupsModel: this.models.getGroupsModel(),
+                    featureFlagModel: this.models.getFeatureFlagModel(),
                 }),
         );
     }
@@ -501,6 +553,36 @@ export class ServiceRepository
             () =>
                 new PermissionsService({
                     dashboardModel: this.models.getDashboardModel(),
+                }),
+        );
+    }
+
+    public getPersistentDownloadFileService(): PersistentDownloadFileService {
+        return this.getService(
+            'persistentDownloadFileService',
+            () =>
+                new PersistentDownloadFileService({
+                    lightdashConfig: this.context.lightdashConfig,
+                    persistentDownloadFileModel:
+                        this.models.getPersistentDownloadFileModel(),
+                    fileStorageClient: this.clients.getFileStorageClient(),
+                }),
+        );
+    }
+
+    public getPreAggregateMaterializationService(): PreAggregateMaterializationService {
+        return this.getService(
+            'preAggregateMaterializationService',
+            () =>
+                new PreAggregateMaterializationService({
+                    lightdashConfig: this.context.lightdashConfig,
+                    preAggregateModel: this.models.getPreAggregateModel(),
+                    queryHistoryModel: this.models.getQueryHistoryModel(),
+                    asyncQueryService: this.getAsyncQueryService(),
+                    analytics: this.context.lightdashAnalytics,
+                    preAggregateResultsStorageClient:
+                        this.clients.getPreAggregateResultsFileStorageClient(),
+                    prometheusMetrics: this.prometheusMetrics,
                 }),
         );
     }
@@ -530,6 +612,7 @@ export class ServiceRepository
                     resourceViewItemModel:
                         this.models.getResourceViewItemModel(),
                     projectModel: this.models.getProjectModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -540,8 +623,10 @@ export class ServiceRepository
             () =>
                 new PivotTableService({
                     lightdashConfig: this.context.lightdashConfig,
-                    s3Client: this.clients.getS3Client(),
+                    fileStorageClient: this.clients.getFileStorageClient(),
                     downloadFileModel: this.models.getDownloadFileModel(),
+                    persistentDownloadFileService:
+                        this.getPersistentDownloadFileService(),
                 }),
         );
     }
@@ -554,6 +639,7 @@ export class ServiceRepository
                     lightdashConfig: this.context.lightdashConfig,
                     analytics: this.context.lightdashAnalytics,
                     projectModel: this.models.getProjectModel(),
+                    preAggregateModel: this.models.getPreAggregateModel(),
                     onboardingModel: this.models.getOnboardingModel(),
                     savedChartModel: this.models.getSavedChartModel(),
                     jobModel: this.models.getJobModel(),
@@ -570,8 +656,9 @@ export class ServiceRepository
                         this.models.getWarehouseAvailableTablesModel(),
                     emailModel: this.models.getEmailModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
+                    natsClient: this.clients.getNatsClient(),
                     downloadFileModel: this.models.getDownloadFileModel(),
-                    s3Client: this.clients.getS3Client(),
+                    fileStorageClient: this.clients.getFileStorageClient(),
                     groupsModel: this.models.getGroupsModel(),
                     tagsModel: this.models.getTagsModel(),
                     catalogModel: this.models.getCatalogModel(),
@@ -583,8 +670,14 @@ export class ServiceRepository
                         this.models.getProjectParametersModel(),
                     organizationWarehouseCredentialsModel:
                         this.models.getOrganizationWarehouseCredentialsModel(),
+                    organizationModel: this.models.getOrganizationModel(),
                     projectCompileLogModel:
                         this.models.getProjectCompileLogModel(),
+                    adminNotificationService:
+                        this.getAdminNotificationService(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
                 }),
         );
     }
@@ -597,6 +690,7 @@ export class ServiceRepository
                     lightdashConfig: this.context.lightdashConfig,
                     analytics: this.context.lightdashAnalytics,
                     projectModel: this.models.getProjectModel(),
+                    preAggregateModel: this.models.getPreAggregateModel(),
                     onboardingModel: this.models.getOnboardingModel(),
                     savedChartModel: this.models.getSavedChartModel(),
                     jobModel: this.models.getJobModel(),
@@ -613,8 +707,9 @@ export class ServiceRepository
                         this.models.getWarehouseAvailableTablesModel(),
                     emailModel: this.models.getEmailModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
+                    natsClient: this.clients.getNatsClient(),
                     downloadFileModel: this.models.getDownloadFileModel(),
-                    s3Client: this.clients.getS3Client(),
+                    fileStorageClient: this.clients.getFileStorageClient(),
                     groupsModel: this.models.getGroupsModel(),
                     tagsModel: this.models.getTagsModel(),
                     catalogModel: this.models.getCatalogModel(),
@@ -631,14 +726,18 @@ export class ServiceRepository
                         this.models.getProjectParametersModel(),
                     organizationWarehouseCredentialsModel:
                         this.models.getOrganizationWarehouseCredentialsModel(),
+                    organizationModel: this.models.getOrganizationModel(),
                     pivotTableService: this.getPivotTableService(),
                     prometheusMetrics: this.prometheusMetrics,
                     permissionsService: this.getPermissionsService(),
+                    persistentDownloadFileService:
+                        this.getPersistentDownloadFileService(),
                     projectCompileLogModel:
                         this.models.getProjectCompileLogModel(),
-                    // SMR-START
                     cacheService: this.getCacheService(),
-                    // SMR-END
+                    adminNotificationService:
+                        this.getAdminNotificationService(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -649,12 +748,14 @@ export class ServiceRepository
             () =>
                 new SavedChartService({
                     analytics: this.context.lightdashAnalytics,
+                    lightdashConfig: this.context.lightdashConfig,
                     projectModel: this.models.getProjectModel(),
                     savedChartModel: this.models.getSavedChartModel(),
                     spaceModel: this.models.getSpaceModel(),
                     analyticsModel: this.models.getAnalyticsModel(),
                     pinnedListModel: this.models.getPinnedListModel(),
                     schedulerModel: this.models.getSchedulerModel(),
+                    schedulerService: this.getSchedulerService(),
                     schedulerClient: this.clients.getSchedulerClient(),
                     slackClient: this.clients.getSlackClient(),
                     dashboardModel: this.models.getDashboardModel(),
@@ -662,6 +763,10 @@ export class ServiceRepository
                     permissionsService: this.getPermissionsService(),
                     googleDriveClient: this.clients.getGoogleDriveClient(),
                     userService: this.getUserService(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
+                    organizationModel: this.models.getOrganizationModel(),
                 }),
         );
     }
@@ -675,8 +780,8 @@ export class ServiceRepository
                     analytics: this.context.lightdashAnalytics,
                     schedulerModel: this.models.getSchedulerModel(),
                     savedChartModel: this.models.getSavedChartModel(),
+                    savedSqlModel: this.models.getSavedSqlModel(),
                     dashboardModel: this.models.getDashboardModel(),
-                    spaceModel: this.models.getSpaceModel(),
                     projectModel: this.models.getProjectModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
                     slackClient: this.clients.getSlackClient(),
@@ -684,6 +789,7 @@ export class ServiceRepository
                     googleDriveClient: this.clients.getGoogleDriveClient(),
                     userService: this.getUserService(),
                     jobModel: this.models.getJobModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -698,6 +804,7 @@ export class ServiceRepository
                     searchModel: this.models.getSearchModel(),
                     spaceModel: this.models.getSpaceModel(),
                     userAttributesModel: this.models.getUserAttributesModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -737,15 +844,36 @@ export class ServiceRepository
         );
     }
 
+    public getSpacePermissionService(): SpacePermissionService {
+        return this.getService(
+            'spacePermissionService',
+            () =>
+                new SpacePermissionService(
+                    this.models.getSpaceModel(),
+                    this.models.getSpacePermissionModel(),
+                ),
+        );
+    }
+
     public getSpaceService(): SpaceService {
         return this.getService(
             'spaceService',
             () =>
                 new SpaceService({
                     analytics: this.context.lightdashAnalytics,
+                    lightdashConfig: this.context.lightdashConfig,
                     projectModel: this.models.getProjectModel(),
                     spaceModel: this.models.getSpaceModel(),
+                    organizationModel: this.models.getOrganizationModel(),
                     pinnedListModel: this.models.getPinnedListModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    savedChartService: this.getSavedChartService(),
+                    dashboardService: this.getDashboardService(),
+                    // Only wired when EE license is active. Core builds get
+                    // undefined and the delete cascade skips apps.
+                    appGenerateService: this.providers.appGenerateService
+                        ? this.getAppGenerateService<AppGenerateService>()
+                        : undefined,
                 }),
         );
     }
@@ -758,15 +886,17 @@ export class ServiceRepository
                     lightdashConfig: this.context.lightdashConfig,
                     dashboardModel: this.models.getDashboardModel(),
                     savedChartModel: this.models.getSavedChartModel(),
-                    spaceModel: this.models.getSpaceModel(),
                     shareModel: this.models.getShareModel(),
-                    s3Client: this.clients.getS3Client(),
+                    fileStorageClient: this.clients.getFileStorageClient(),
                     projectModel: this.models.getProjectModel(),
                     downloadFileModel: this.models.getDownloadFileModel(),
+                    slackUnfurlImageModel:
+                        this.models.getSlackUnfurlImageModel(),
                     slackClient: this.clients.getSlackClient(),
                     analytics: this.context.lightdashAnalytics,
                     slackAuthenticationModel:
                         this.models.getSlackAuthenticationModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -809,6 +939,7 @@ export class ServiceRepository
                         this.models.getUserWarehouseCredentialsModel(),
                     warehouseAvailableTablesModel:
                         this.models.getWarehouseAvailableTablesModel(),
+                    projectModel: this.models.getProjectModel(),
                 }),
         );
     }
@@ -826,6 +957,7 @@ export class ServiceRepository
                     dashboardModel: this.models.getDashboardModel(),
                     spaceModel: this.models.getSpaceModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
+                    spacePermissionService: this.getSpacePermissionService(),
                     featureFlagModel: this.models.getFeatureFlagModel(),
                 }),
         );
@@ -845,6 +977,9 @@ export class ServiceRepository
                     spaceModel: this.models.getSpaceModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
                     promoteService: this.getPromoteService(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
                 }),
         );
     }
@@ -863,6 +998,7 @@ export class ServiceRepository
                     spaceModel: this.models.getSpaceModel(),
                     tagsModel: this.models.getTagsModel(),
                     changesetModel: this.models.getChangesetModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -884,9 +1020,8 @@ export class ServiceRepository
             'metricsExplorerService',
             () =>
                 new MetricsExplorerService({
-                    lightdashConfig: this.context.lightdashConfig,
-                    catalogModel: this.models.getCatalogModel(),
                     projectService: this.getProjectService(),
+                    asyncQueryService: this.getAsyncQueryService(),
                     catalogService: this.getCatalogService(),
                     projectModel: this.models.getProjectModel(),
                 }),
@@ -902,8 +1037,10 @@ export class ServiceRepository
                     analytics: this.context.lightdashAnalytics,
                     projectModel: this.models.getProjectModel(),
                     savedChartModel: this.models.getSavedChartModel(),
+                    savedSqlModel: this.models.getSavedSqlModel(),
                     spaceModel: this.models.getSpaceModel(),
                     dashboardModel: this.models.getDashboardModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -920,6 +1057,7 @@ export class ServiceRepository
                     dashboardModel: this.models.getDashboardModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
                     schedulerModel: this.models.getSchedulerModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -929,12 +1067,14 @@ export class ServiceRepository
             'savedSqlService',
             () =>
                 new SavedSqlService({
+                    lightdashConfig: this.context.lightdashConfig,
                     analytics: this.context.lightdashAnalytics,
                     projectModel: this.models.getProjectModel(),
-                    spaceModel: this.models.getSpaceModel(),
                     savedSqlModel: this.models.getSavedSqlModel(),
                     schedulerClient: this.clients.getSchedulerClient(),
+                    schedulerModel: this.models.getSchedulerModel(),
                     analyticsModel: this.models.getAnalyticsModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
                 }),
         );
     }
@@ -952,6 +1092,44 @@ export class ServiceRepository
                     dashboardService: this.getDashboardService(),
                     savedChartService: this.getSavedChartService(),
                     savedSqlService: this.getSavedSqlService(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    // Only wired when EE license is active. Core builds get
+                    // undefined and fail DATA_APP moves with a clear error.
+                    appMoveService: this.providers.appGenerateService
+                        ? this.getAppGenerateService<BulkActionable<Knex>>()
+                        : undefined,
+                    appGenerateService: this.providers.appGenerateService
+                        ? this.getAppGenerateService<AppGenerateService>()
+                        : undefined,
+                }),
+        );
+    }
+
+    public getContentVerificationService(): ContentVerificationService {
+        return this.getService(
+            'contentVerificationService',
+            () =>
+                new ContentVerificationService({
+                    contentVerificationModel:
+                        this.models.getContentVerificationModel(),
+                    projectModel: this.models.getProjectModel(),
+                }),
+        );
+    }
+
+    public getFavoritesService(): FavoritesService {
+        return this.getService(
+            'favoritesService',
+            () =>
+                new FavoritesService({
+                    analytics: this.context.lightdashAnalytics,
+                    userFavoritesModel: this.models.getUserFavoritesModel(),
+                    projectModel: this.models.getProjectModel(),
+                    spaceModel: this.models.getSpaceModel(),
+                    spacePermissionService: this.getSpacePermissionService(),
+                    savedChartModel: this.models.getSavedChartModel(),
+                    dashboardModel: this.models.getDashboardModel(),
+                    appModel: this.models.getAppModel(),
                 }),
         );
     }
@@ -978,6 +1156,12 @@ export class ServiceRepository
                     projectService: this.getProjectService(),
                 }),
         );
+    }
+
+    public getAppGenerateService<
+        AppGenerateServiceImplT,
+    >(): AppGenerateServiceImplT {
+        return this.getService('appGenerateService');
     }
 
     public getEmbedService<EmbedServiceImplT>(): EmbedServiceImplT {
@@ -1017,6 +1201,8 @@ export class ServiceRepository
                     groupsModel: this.models.getGroupsModel(),
                     projectModel: this.models.getProjectModel(),
                     emailClient: this.clients.getEmailClient(),
+                    adminNotificationService:
+                        this.getAdminNotificationService(),
                 }),
         );
     }
@@ -1027,6 +1213,12 @@ export class ServiceRepository
 
     public getSupportService<SupportServiceImptT>(): SupportServiceImptT {
         return this.getService('supportService');
+    }
+
+    public getManagedAgentService<
+        ManagedAgentServiceImplT,
+    >(): ManagedAgentServiceImplT {
+        return this.getService('managedAgentService');
     }
 
     public getMcpService<McpServiceImplT>(): McpServiceImplT {

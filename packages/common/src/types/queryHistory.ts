@@ -2,6 +2,7 @@ import type { PivotConfiguration, ResultColumns } from '..';
 import type { PivotValuesColumn } from '../visualizations/types';
 import type { QueryExecutionContext } from './analytics';
 import type { ExecuteAsyncQueryRequestParams } from './api/paginatedQuery';
+import type { AuthType } from './auth';
 import type { ItemsMap } from './field';
 import type { MetricQuery } from './metricQuery';
 import type { WarehouseTypes } from './projects';
@@ -29,6 +30,9 @@ export interface SmrWarehouseResponseMeta {
 
 export enum QueryHistoryStatus {
     PENDING = 'pending',
+    QUEUED = 'queued',
+    EXECUTING = 'executing',
+    EXPIRED = 'expired',
     READY = 'ready',
     ERROR = 'error',
     CANCELLED = 'cancelled',
@@ -40,6 +44,7 @@ export type QueryHistory = {
     createdBy: string | null;
     createdByUserUuid: string | null;
     createdByAccount: string | null;
+    createdByActorType: AuthType | null;
     organizationUuid: string;
     projectUuid: string | null;
     warehouseQueryId: string | null;
@@ -54,6 +59,7 @@ export type QueryHistory = {
     totalRowCount: number | null;
     warehouseExecutionTimeMs: number | null;
     error: string | null;
+    erroredAt: Date | null;
     cacheKey: string;
     pivotConfiguration: PivotConfiguration | null;
     pivotValuesColumns: Record<string, PivotValuesColumn> | null;
@@ -65,4 +71,6 @@ export type QueryHistory = {
     columns: ResultColumns | null; // result columns with or without pivoting
     originalColumns: ResultColumns | null; // columns from original SQL, before pivoting
     smrWarehouseResponseMeta: SmrWarehouseResponseMeta | null;
+    preAggregateCompiledSql: string | null; // DuckDB SQL for pre-aggregate execution path
+    processingStartedAt: Date | null; // when the NATS worker picked up the job
 };

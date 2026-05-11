@@ -1,11 +1,9 @@
 import {
     type ApiError,
     type ApiUserActivityDownloadCsv,
-    type UnusedContent,
     type UserActivity,
 } from '@lightdash/common';
 import { useMutation, useQuery } from '@tanstack/react-query';
-
 import { lightdashApi } from '../../api';
 import useQueryError from '../useQueryError';
 
@@ -35,28 +33,12 @@ const downloadUserActivityCsv = async (projectUuid: string) =>
     });
 
 export const useDownloadUserActivityCsv = () => {
+    const setErrorResponse = useQueryError();
     return useMutation<ApiUserActivityDownloadCsv['results'], ApiError, string>(
         downloadUserActivityCsv,
         {
             mutationKey: ['download_user_activity_csv'],
+            onError: (result) => setErrorResponse(result),
         },
     );
-};
-
-const getUnusedContent = async (projectUuid: string) =>
-    lightdashApi<UnusedContent>({
-        url: `/analytics/user-activity/${projectUuid}/unused-content`,
-        method: 'GET',
-        body: undefined,
-    });
-
-export const useUnusedContent = (projectUuid?: string) => {
-    const setErrorResponse = useQueryError();
-    return useQuery<UnusedContent, ApiError>({
-        queryKey: ['unused_content', projectUuid],
-        queryFn: () => getUnusedContent(projectUuid || ''),
-        enabled: projectUuid !== undefined,
-        retry: false,
-        onError: (result) => setErrorResponse(result),
-    });
 };

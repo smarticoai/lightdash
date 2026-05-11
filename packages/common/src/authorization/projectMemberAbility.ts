@@ -16,14 +16,14 @@ export const projectMemberAbilities: Record<
     viewer(member, { can }) {
         can('view', 'Dashboard', {
             projectUuid: member.projectUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('view', 'JobStatus', {
             createdByUserUuid: member.userUuid,
         });
         can('view', 'SavedChart', {
             projectUuid: member.projectUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('view', 'Dashboard', {
             projectUuid: member.projectUuid,
@@ -39,7 +39,7 @@ export const projectMemberAbilities: Record<
         });
         can('view', 'Space', {
             projectUuid: member.projectUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('view', 'Space', {
             projectUuid: member.projectUuid,
@@ -71,6 +71,16 @@ export const projectMemberAbilities: Record<
         can('view', 'AiAgentThread', {
             projectUuid: member.projectUuid,
             userUuid: member.userUuid,
+        });
+        can('view', 'DataApp', {
+            projectUuid: member.projectUuid,
+            inheritsFromOrgOrProject: true,
+        });
+        can('view', 'DataApp', {
+            projectUuid: member.projectUuid,
+            access: {
+                $elemMatch: { userUuid: member.userUuid },
+            },
         });
     },
     interactive_viewer(member, { can }) {
@@ -136,6 +146,38 @@ export const projectMemberAbilities: Record<
                 },
             },
         });
+        can('manage', 'DataApp', {
+            projectUuid: member.projectUuid,
+            access: {
+                $elemMatch: {
+                    userUuid: member.userUuid,
+                    role: SpaceMemberRole.EDITOR,
+                },
+            },
+        });
+        can('manage', 'DataApp', {
+            projectUuid: member.projectUuid,
+            access: {
+                $elemMatch: {
+                    userUuid: member.userUuid,
+                    role: SpaceMemberRole.ADMIN,
+                },
+            },
+        });
+        // Create personal data apps; once created, the user can also view
+        // and manage their own. Moving an app into a space is gated
+        // separately by the target space's manage rule.
+        can('create', 'DataApp', {
+            projectUuid: member.projectUuid,
+        });
+        can('view', 'DataApp', {
+            projectUuid: member.projectUuid,
+            createdByUserUuid: member.userUuid,
+        });
+        can('manage', 'DataApp', {
+            projectUuid: member.projectUuid,
+            createdByUserUuid: member.userUuid,
+        });
 
         can('manage', 'Space', {
             projectUuid: member.projectUuid,
@@ -161,7 +203,7 @@ export const projectMemberAbilities: Record<
         });
         can('manage', 'Space', {
             projectUuid: member.projectUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('manage', 'Job');
         can('manage', 'PinnedItems', {
@@ -185,10 +227,16 @@ export const projectMemberAbilities: Record<
     },
     developer(member, { can }) {
         projectMemberAbilities.editor(member, { can });
+        can('manage', 'PreAggregation', {
+            projectUuid: member.projectUuid,
+        });
         can('manage', 'VirtualView', {
             projectUuid: member.projectUuid,
         });
         can('manage', 'CustomSql', {
+            projectUuid: member.projectUuid,
+        });
+        can('manage', 'CustomFields', {
             projectUuid: member.projectUuid,
         });
         can('manage', 'SqlRunner', {
@@ -202,10 +250,20 @@ export const projectMemberAbilities: Record<
         });
         can('manage', 'SourceCode', {
             projectUuid: member.projectUuid,
+            isProtectedBranch: false, // Only allow writes when NOT writing to protected branch
         });
 
         can('manage', 'CompileProject', {
             projectUuid: member.projectUuid,
+        });
+
+        can('manage', 'DeployProject', {
+            projectUuid: member.projectUuid,
+        });
+        can('manage', 'DeployProject', {
+            projectUuid: member.projectUuid,
+            type: ProjectType.PREVIEW,
+            createdByUserUuid: member.userUuid,
         });
 
         can('delete', 'Project', {
@@ -243,6 +301,14 @@ export const projectMemberAbilities: Record<
     admin(member, { can }) {
         projectMemberAbilities.developer(member, { can });
 
+        can('manage', 'DataApp', {
+            projectUuid: member.projectUuid,
+        });
+
+        can('manage', 'ContentVerification', {
+            projectUuid: member.projectUuid,
+        });
+
         can('delete', 'Project', {
             projectUuid: member.projectUuid,
         });
@@ -274,6 +340,10 @@ export const projectMemberAbilities: Record<
         });
 
         can('manage', 'ScheduledDeliveries', {
+            projectUuid: member.projectUuid,
+        });
+
+        can('manage', 'DeletedContent', {
             projectUuid: member.projectUuid,
         });
     },

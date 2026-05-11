@@ -1,13 +1,14 @@
 import { DragDropContext, type DropResult } from '@hello-pangea/dnd';
-import { Box, Checkbox, Stack, Switch, Tooltip } from '@mantine/core';
+import { Box, Checkbox, Stack, Switch, Tooltip } from '@mantine-8/core';
 import { useCallback, useMemo, useState, type FC } from 'react';
 import useToaster from '../../../hooks/toaster/useToaster';
 import { isTableVisualizationConfig } from '../../LightdashVisualization/types';
 import { useVisualizationContext } from '../../LightdashVisualization/useVisualizationContext';
 import { Config } from '../common/Config';
+import { RowLimitControls } from '../common/RowLimitControls';
 import ColumnConfiguration from './ColumnConfiguration';
-import DroppableItemsList from './DroppableItemsList';
 import { MAX_PIVOTS } from './constants';
+import DroppableItemsList from './DroppableItemsList';
 
 enum DroppableIds {
     COLUMNS = 'COLUMNS',
@@ -20,6 +21,7 @@ const GeneralSettings: FC = () => {
         pivotDimensions,
         visualizationConfig,
         setPivotDimensions,
+        columnOrder,
     } = useVisualizationContext();
     const [isDragging, setIsDragging] = useState<boolean>(false);
     const { showToastError } = useToaster();
@@ -43,15 +45,17 @@ const GeneralSettings: FC = () => {
             const rowsFields = [...dimensions].filter(
                 (itemId) => !pivotDimensions?.includes(itemId),
             );
-            const metricsFields = (chartConfig?.selectedItemIds ?? []).filter(
-                (id) => ![...columnFields, ...rowsFields].includes(id),
-            );
+            const metricsFields = (chartConfig?.selectedItemIds ?? [])
+                .filter((id) => ![...columnFields, ...rowsFields].includes(id))
+                .sort(
+                    (a, b) => columnOrder.indexOf(a) - columnOrder.indexOf(b),
+                );
             return {
                 columns: columnFields,
                 rows: rowsFields,
                 metrics: metricsFields,
             };
-        }, [pivotDimensions, dimensions, chartConfig]);
+        }, [pivotDimensions, dimensions, chartConfig, columnOrder]);
 
     const handleToggleMetricsAsRows = useCallback(() => {
         if (!chartConfig) return;
@@ -156,6 +160,8 @@ const GeneralSettings: FC = () => {
         showRowCalculation,
         showSubtotals,
         showTableNames,
+        rowLimit,
+        setRowLimit,
     } = chartConfig;
 
     return (
@@ -243,6 +249,16 @@ const GeneralSettings: FC = () => {
                     }}
                 />
             </Config.Section>
+
+            {!isPivotTableEnabled && (
+                <Config.Section>
+                    <Config.Heading>Data</Config.Heading>
+                    <RowLimitControls
+                        rowLimit={rowLimit}
+                        onRowLimitChange={setRowLimit}
+                    />
+                </Config.Section>
+            )}
 
             <Config.Section>
                 <Config.Heading>Results</Config.Heading>

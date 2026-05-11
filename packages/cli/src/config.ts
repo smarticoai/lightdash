@@ -29,6 +29,7 @@ export type Config = {
     };
     answers?: {
         permissionToStoreWarehouseCredentials?: boolean;
+        metadataFileGitignoreNoticeShown?: boolean;
     };
 };
 
@@ -91,6 +92,18 @@ export const setProject = async (projectUuid: string, projectName: string) => {
             ...(config.context || {}),
             project: projectUuid,
             projectName,
+        },
+    });
+};
+
+export const unsetProject = async () => {
+    const config = await getRawConfig();
+    await setConfig({
+        ...config,
+        context: {
+            ...(config.context || {}),
+            project: undefined,
+            projectName: undefined,
         },
     });
 };

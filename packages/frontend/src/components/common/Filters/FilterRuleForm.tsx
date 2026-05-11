@@ -1,20 +1,22 @@
 import {
-    FilterType,
     createFilterRuleFromField,
+    type FilterOperator,
+    FilterType,
     getFilterRuleFromFieldWithDefaultValue,
     getFilterTypeFromItem,
     getItemId,
     isDateItem,
-    type FilterRule,
     type FilterableField,
+    type FilterRule,
 } from '@lightdash/common';
-import { ActionIcon, Box, Group, Menu, Select, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Group, Menu, Select, Tooltip } from '@mantine-8/core';
 import { IconDots, IconX } from '@tabler/icons-react';
 import { memo, useCallback, useMemo, type FC } from 'react';
 import FieldSelect from '../FieldSelect';
 import MantineIcon from '../MantineIcon';
 import { FILTER_SELECT_LIMIT } from './constants';
 import FilterInputComponent from './FilterInputs';
+import { filterOperatorDescription } from './FilterInputs/constants';
 import { getFilterOperatorOptions } from './FilterInputs/utils';
 import useFiltersContext from './useFiltersContext';
 
@@ -50,8 +52,8 @@ const FilterRuleForm: FC<Props> = memo(
         }, [activeField]);
 
         const filterOperatorOptions = useMemo(() => {
-            return getFilterOperatorOptions(filterType);
-        }, [filterType]);
+            return getFilterOperatorOptions(filterType, activeField);
+        }, [filterType, activeField]);
 
         const onFieldChange = useCallback(
             (fieldId: string) => {
@@ -86,46 +88,103 @@ const FilterRuleForm: FC<Props> = memo(
         );
         const isRequired = filterRule.required;
         const isRequiredLabel = isRequired
-            ? "This filter is a required filter.\n It can't be deleted, but the value can be changed."
+            ? 'This is a required filter defined in the model configuration and cannot be removed.'
             : '';
+
+        const availableFields = useMemo(() => {
+            if (!isRequired) return fields;
+            // For required filters, restrict to same-type sub-dimensions
+            const baseFieldId = filterRule.target.fieldId;
+            return fields.filter(
+                (field) =>
+                    getItemId(field).startsWith(baseFieldId) &&
+                    getFilterTypeFromItem(field) === filterType,
+            );
+        }, [isRequired, fields, filterRule.target.fieldId, filterType]);
+
+        const isFieldSelectDisabled =
+            !isEditMode || (isRequired && availableFields.length <= 1);
+
+        const isOperatorValid = useMemo(
+            () =>
+                filterOperatorOptions.some(
+                    (o) => o.value === filterRule.operator,
+                ),
+            [filterOperatorOptions, filterRule.operator],
+        );
 
         if (!activeField) {
             return null;
         }
 
+        if (!isOperatorValid) {
+            return null;
+        }
+
         return (
             <Group
-                noWrap
+                wrap="nowrap"
                 align="start"
-                spacing="xs"
+                gap="xs"
                 data-testid="FilterRuleForm/filter-rule"
             >
-                <FieldSelect
-                    size="xs"
-                    disabled={!isEditMode}
-                    withinPortal={popoverProps?.withinPortal}
-                    onDropdownOpen={popoverProps?.onOpen}
-                    onDropdownClose={popoverProps?.onClose}
-                    hasGrouping
-                    item={activeField}
-                    items={fields}
-                    onChange={(field) => {
-                        if (!field) return;
-                        onFieldChange(getItemId(field));
-                    }}
-                    baseTable={baseTable}
-                />
+                <Tooltip
+                    label={isRequiredLabel}
+                    disabled={!isFieldSelectDisabled}
+                    withinPortal
+                    variant="xs"
+                    multiline
+                >
+                    <Box>
+                        <FieldSelect
+                            size="xs"
+                            disabled={isFieldSelectDisabled}
+                            comboboxProps={{
+                                withinPortal: popoverProps?.withinPortal,
+                            }}
+                            onDropdownOpen={popoverProps?.onOpen}
+                            onDropdownClose={popoverProps?.onClose}
+                            hasGrouping
+                            item={activeField}
+                            items={availableFields}
+                            onChange={(field) => {
+                                if (!field) return;
+                                onFieldChange(getItemId(field));
+                            }}
+                            baseTable={baseTable}
+                        />
+                    </Box>
+                </Tooltip>
                 <Select
                     limit={FILTER_SELECT_LIMIT}
                     size="xs"
                     w="175px"
-                    sx={{ flexShrink: 0 }}
-                    withinPortal={popoverProps?.withinPortal}
+                    style={{ flexShrink: 0 }}
                     onDropdownOpen={popoverProps?.onOpen}
                     onDropdownClose={popoverProps?.onClose}
                     disabled={!isEditMode}
                     value={filterRule.operator}
                     data={filterOperatorOptions}
+                    renderOption={({ option }) => {
+                        const description =
+                            filterOperatorDescription[
+                                option.value as FilterOperator
+                            ];
+                        if (description) {
+                            return (
+                                <Tooltip
+                                    label={description}
+                                    position="right"
+                                    multiline
+                                    maw={300}
+                                    withinPortal
+                                >
+                                    <span>{option.label}</span>
+                                </Tooltip>
+                            );
+                        }
+                        return <span>{option.label}</span>;
+                    }}
                     onChange={(value) => {
                         if (!value) return;
                         onChange(
@@ -161,11 +220,26 @@ const FilterRuleForm: FC<Props> = memo(
                         >
                             <span>
                                 <ActionIcon
+                                    variant="subtle"
+                                    color="gray"
                                     onClick={onDelete}
                                     disabled={isRequired}
                                     data-testid="delete-filter-rule-button"
                                 >
                                     <MantineIcon icon={IconX} size="sm" />
+                                </ActionIcon>
+                            </span>
+                        </Tooltip>
+                    ) : isRequired ? (
+                        <Tooltip
+                            label={isRequiredLabel}
+                            withinPortal
+                            variant="xs"
+                            multiline
+                        >
+                            <span>
+                                <ActionIcon variant="subtle" disabled>
+                                    <IconDots size="20" />
                                 </ActionIcon>
                             </span>
                         </Tooltip>
@@ -190,23 +264,9 @@ const FilterRuleForm: FC<Props> = memo(
                                 <Menu.Item onClick={onConvertToGroup}>
                                     Convert to group
                                 </Menu.Item>
-                                <Tooltip
-                                    label={isRequiredLabel}
-                                    disabled={!isRequired}
-                                    withinPortal
-                                    variant="xs"
-                                    multiline
-                                >
-                                    <span>
-                                        <Menu.Item
-                                            color="red"
-                                            disabled={isRequired}
-                                            onClick={onDelete}
-                                        >
-                                            Remove
-                                        </Menu.Item>
-                                    </span>
-                                </Tooltip>
+                                <Menu.Item color="red" onClick={onDelete}>
+                                    Remove
+                                </Menu.Item>
                             </Menu.Dropdown>
                         </Menu>
                     ))}

@@ -1,3 +1,4 @@
+import { DimensionType, FieldType } from '../types/field';
 import {
     FilterOperator,
     type AndFilterGroup,
@@ -8,9 +9,12 @@ import {
     type MetricFilterRule,
     type OrFilterGroup,
 } from '../types/filter';
+import { type MetricQuery } from '../types/metricQuery';
+import { TimeFrames } from '../types/timeFrames';
 import {
     addDashboardFiltersToMetricQuery,
     addFilterRule,
+    applyDashboardFiltersForTile,
     createFilterRuleFromModelRequiredFilterRule,
     getDashboardFilterRulesForTileAndReferences,
     isFilterRuleInQuery,
@@ -23,10 +27,12 @@ import {
     chartAndFilterGroup,
     chartOrFilterGroup,
     customSqlDimension,
+    dashboardFilters,
+    dashboardFiltersWithMetrics,
     dashboardFilterWithSameTargetAndOperator,
     dashboardFilterWithSameTargetButDifferentOperator,
-    dashboardFilters,
     dimension,
+    emptyDashboardFilters,
     expectedChartWithOverrideDashboardFilters,
     expectedChartWithOverrideDashboardORFilters,
     expectedFiltersWithCustomSqlDimension,
@@ -35,6 +41,7 @@ import {
     filterRule,
     joinedModelRequiredFilterRule,
     metricQueryWithAndFilters,
+    metricQueryWithExistingMetricFilters,
     metricQueryWithOrFilters,
     mockExplore,
     mockExploreWithJoinedTable,
@@ -60,7 +67,69 @@ describe('addDashboardFiltersToMetricQuery', () => {
         );
         expect(result).toEqual(expectedChartWithOverrideDashboardORFilters);
     });
+
+    test('should merge dashboard metric filters into the metric query', () => {
+        const result = addDashboardFiltersToMetricQuery(
+            metricQueryWithAndFilters,
+            dashboardFiltersWithMetrics,
+        );
+        expect(result.filters.metrics).toBeDefined();
+        expect((result.filters.metrics as AndFilterGroup).and).toHaveLength(1);
+        expect((result.filters.metrics as AndFilterGroup).and[0]).toMatchObject(
+            {
+                target: { fieldId: 'a_metric1' },
+                operator: FilterOperator.GREATER_THAN,
+                values: [100],
+            },
+        );
+    });
+
+    test('should override existing chart metric filter with same target from dashboard', () => {
+        const result = addDashboardFiltersToMetricQuery(
+            metricQueryWithExistingMetricFilters,
+            dashboardFiltersWithMetrics,
+        );
+        expect(result.filters.metrics).toBeDefined();
+        const metricFilters = (result.filters.metrics as AndFilterGroup).and;
+        // Dashboard metric filter overrides the existing chart metric filter with same fieldId
+        expect(metricFilters).toContainEqual(
+            expect.objectContaining({
+                target: { fieldId: 'a_metric1' },
+                operator: FilterOperator.GREATER_THAN,
+                values: [100],
+            }),
+        );
+    });
+
+    test('should return metric query unchanged when dashboard has no filters', () => {
+        const result = addDashboardFiltersToMetricQuery(
+            metricQueryWithAndFilters,
+            emptyDashboardFilters,
+        );
+        expect(result.filters.dimensions).toBeDefined();
+        expect((result.filters.metrics as AndFilterGroup).and).toHaveLength(0);
+        expect(
+            (result.filters.tableCalculations as AndFilterGroup).and,
+        ).toHaveLength(0);
+    });
+
+    test('should not affect dimension filters when adding metric filters', () => {
+        const result = addDashboardFiltersToMetricQuery(
+            metricQueryWithAndFilters,
+            dashboardFiltersWithMetrics,
+        );
+        expect(
+            (result.filters.dimensions as AndFilterGroup).and,
+        ).toContainEqual(
+            expect.objectContaining({
+                target: { fieldId: 'a_dim1' },
+                operator: FilterOperator.EQUALS,
+                values: ['1', '2', '3'],
+            }),
+        );
+    });
 });
+
 describe('overrideChartFilter', () => {
     test('should override the chart and group filter', async () => {
         const result = overrideChartFilter(
@@ -181,6 +250,7 @@ describe('isFilterRuleInQuery', () => {
                 dimension('dim', 'table'),
                 filterRule,
                 filterGroupWithFilterRule,
+                mockExplore,
             ),
         ).toEqual(true);
         expect(
@@ -188,8 +258,271 @@ describe('isFilterRuleInQuery', () => {
                 dimension('dim', 'table'),
                 filterRule,
                 filterGroupWithoutFilterRule,
+                mockExplore,
             ),
         ).toEqual(false);
+    });
+
+    test('should not treat string-derived time dimensions as satisfying required date filters', () => {
+        const exploreWithStringDerivedTimeDimension = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date: {
+                            name: 'order_date',
+                            label: 'Order Date',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date',
+                            tablesReferences: [],
+                            sql: 'order_date',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.DATE,
+                            isIntervalBase: true,
+                        },
+                        order_date_fiscal_quarter: {
+                            name: 'order_date_fiscal_quarter',
+                            label: 'Order Date Fiscal Quarter',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_fiscal_quarter',
+                            tablesReferences: [],
+                            sql: 'order_date_fiscal_quarter',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.STRING,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'fiscal_quarter',
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const requiredFilter = expectedRequiredResult('order_date', 'orders');
+        const filtersWithOnlyStringDerivedDimension: FilterGroup = {
+            id: 'mockGroupId',
+            and: [
+                {
+                    id: 'string-derived-filter',
+                    target: { fieldId: 'orders_order_date_fiscal_quarter' },
+                    operator: FilterOperator.EQUALS,
+                    values: ['FY2024-Q1'],
+                },
+            ],
+        };
+
+        expect(
+            isFilterRuleInQuery(
+                exploreWithStringDerivedTimeDimension.tables.orders.dimensions
+                    .order_date,
+                requiredFilter,
+                filtersWithOnlyStringDerivedDimension,
+                exploreWithStringDerivedTimeDimension,
+            ),
+        ).toEqual(false);
+    });
+
+    test('should treat date-derived time dimensions as satisfying required date filters', () => {
+        const exploreWithDateDerivedTimeDimension = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date: {
+                            name: 'order_date',
+                            label: 'Order Date',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date',
+                            tablesReferences: [],
+                            sql: 'order_date',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.DATE,
+                            isIntervalBase: true,
+                        },
+                        order_date_biweekly: {
+                            name: 'order_date_biweekly',
+                            label: 'Order Date Biweekly',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_biweekly',
+                            tablesReferences: [],
+                            sql: 'order_date_biweekly',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.DATE,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'biweekly',
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const requiredFilter = expectedRequiredResult('order_date', 'orders');
+        const filtersWithOnlyDateDerivedDimension: FilterGroup = {
+            id: 'mockGroupId',
+            and: [
+                {
+                    id: 'date-derived-filter',
+                    target: { fieldId: 'orders_order_date_biweekly' },
+                    operator: FilterOperator.IN_THE_PAST,
+                    values: [14],
+                    settings: {
+                        unitOfTime: 'days',
+                    },
+                },
+            ],
+        };
+
+        expect(
+            isFilterRuleInQuery(
+                exploreWithDateDerivedTimeDimension.tables.orders.dimensions
+                    .order_date,
+                requiredFilter,
+                filtersWithOnlyDateDerivedDimension,
+                exploreWithDateDerivedTimeDimension,
+            ),
+        ).toEqual(true);
+    });
+
+    test('should require an exact match when the required filter targets a custom derived time dimension', () => {
+        const exploreWithSiblingStringDerivedTimeDimensions = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date: {
+                            name: 'order_date',
+                            label: 'Order Date',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date',
+                            tablesReferences: [],
+                            sql: 'order_date',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.DATE,
+                            isIntervalBase: true,
+                        },
+                        order_date_fiscal_year: {
+                            name: 'order_date_fiscal_year',
+                            label: 'Order Date Fiscal Year',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_fiscal_year',
+                            tablesReferences: [],
+                            sql: 'order_date_fiscal_year',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.STRING,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'fiscal_year',
+                        },
+                        order_date_fiscal_quarter: {
+                            name: 'order_date_fiscal_quarter',
+                            label: 'Order Date Fiscal Quarter',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_fiscal_quarter',
+                            tablesReferences: [],
+                            sql: 'order_date_fiscal_quarter',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.STRING,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'fiscal_quarter',
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const requiredFilter = expectedRequiredResult(
+            'order_date_fiscal_year',
+            'orders',
+        );
+        const filtersWithSiblingDerivedDimensionOnly: FilterGroup = {
+            id: 'mockGroupId',
+            and: [
+                {
+                    id: 'sibling-derived-filter',
+                    target: { fieldId: 'orders_order_date_fiscal_quarter' },
+                    operator: FilterOperator.EQUALS,
+                    values: ['FY2024-Q1'],
+                },
+            ],
+        };
+
+        expect(
+            isFilterRuleInQuery(
+                exploreWithSiblingStringDerivedTimeDimensions.tables.orders
+                    .dimensions.order_date_fiscal_year,
+                requiredFilter,
+                filtersWithSiblingDerivedDimensionOnly,
+                exploreWithSiblingStringDerivedTimeDimensions,
+            ),
+        ).toEqual(false);
+    });
+
+    test('should allow sibling standard time dimensions when the required filter targets a standard derived time dimension', () => {
+        const exploreWithStandardDerivedTimeDimensions = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date_week: {
+                            ...mockExplore.tables.orders.dimensions
+                                .order_date_week,
+                            timeInterval: TimeFrames.WEEK,
+                        },
+                        order_date_month: {
+                            ...mockExplore.tables.orders.dimensions
+                                .order_date_month,
+                            timeInterval: TimeFrames.MONTH,
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const requiredFilter = expectedRequiredResult(
+            'order_date_week',
+            'orders',
+        );
+        const filtersWithSiblingStandardDimension: FilterGroup = {
+            id: 'mockGroupId',
+            and: [
+                {
+                    id: 'sibling-standard-filter',
+                    target: { fieldId: 'orders_order_date_month' },
+                    operator: FilterOperator.EQUALS,
+                    values: ['2024-09-01'],
+                },
+            ],
+        };
+
+        expect(
+            isFilterRuleInQuery(
+                exploreWithStandardDerivedTimeDimensions.tables.orders
+                    .dimensions.order_date_week,
+                requiredFilter,
+                filtersWithSiblingStandardDimension,
+                exploreWithStandardDerivedTimeDimensions,
+            ),
+        ).toEqual(true);
     });
 });
 
@@ -220,6 +553,196 @@ describe('reduceRequiredDimensionFiltersToFilterRules', () => {
         ];
 
         expect(result).toEqual(expectedFilterRuleResult);
+    });
+
+    test('should keep required date filters when only string-derived time filters are present', () => {
+        const exploreWithStringDerivedTimeDimension = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date: {
+                            name: 'order_date',
+                            label: 'Order Date',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date',
+                            tablesReferences: [],
+                            sql: 'order_date',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.DATE,
+                            isIntervalBase: true,
+                        },
+                        order_date_fiscal_quarter: {
+                            name: 'order_date_fiscal_quarter',
+                            label: 'Order Date Fiscal Quarter',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_fiscal_quarter',
+                            tablesReferences: [],
+                            sql: 'order_date_fiscal_quarter',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.STRING,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'fiscal_quarter',
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const filtersWithOnlyStringDerivedDimension: Filters = {
+            dimensions: {
+                id: 'mockGroupId',
+                and: [
+                    {
+                        id: 'string-derived-filter',
+                        target: { fieldId: 'orders_order_date_fiscal_quarter' },
+                        operator: FilterOperator.EQUALS,
+                        values: ['FY2024-Q1'],
+                    },
+                ],
+            },
+        };
+
+        const result = reduceRequiredDimensionFiltersToFilterRules(
+            [modelRequiredFilterRule('order_date')],
+            filtersWithOnlyStringDerivedDimension.dimensions,
+            exploreWithStringDerivedTimeDimension,
+        );
+
+        expect(result).toEqual([
+            expectedRequiredResult('order_date', 'orders'),
+        ]);
+    });
+
+    test('should keep required derived time filters when only a sibling derived time filter is present', () => {
+        const exploreWithSiblingStringDerivedTimeDimensions = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date: {
+                            name: 'order_date',
+                            label: 'Order Date',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date',
+                            tablesReferences: [],
+                            sql: 'order_date',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.DATE,
+                            isIntervalBase: true,
+                        },
+                        order_date_fiscal_year: {
+                            name: 'order_date_fiscal_year',
+                            label: 'Order Date Fiscal Year',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_fiscal_year',
+                            tablesReferences: [],
+                            sql: 'order_date_fiscal_year',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.STRING,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'fiscal_year',
+                        },
+                        order_date_fiscal_quarter: {
+                            name: 'order_date_fiscal_quarter',
+                            label: 'Order Date Fiscal Quarter',
+                            table: 'orders',
+                            tableLabel: 'Orders',
+                            compiledSql: 'order_date_fiscal_quarter',
+                            tablesReferences: [],
+                            sql: 'order_date_fiscal_quarter',
+                            hidden: false,
+                            fieldType: FieldType.DIMENSION,
+                            type: DimensionType.STRING,
+                            timeIntervalBaseDimensionName: 'order_date',
+                            customTimeInterval: 'fiscal_quarter',
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const filtersWithSiblingDerivedDimensionOnly: Filters = {
+            dimensions: {
+                id: 'mockGroupId',
+                and: [
+                    {
+                        id: 'sibling-derived-filter',
+                        target: { fieldId: 'orders_order_date_fiscal_quarter' },
+                        operator: FilterOperator.EQUALS,
+                        values: ['FY2024-Q1'],
+                    },
+                ],
+            },
+        };
+
+        const result = reduceRequiredDimensionFiltersToFilterRules(
+            [modelRequiredFilterRule('order_date_fiscal_year')],
+            filtersWithSiblingDerivedDimensionOnly.dimensions,
+            exploreWithSiblingStringDerivedTimeDimensions,
+        );
+
+        expect(result).toEqual([
+            expectedRequiredResult('order_date_fiscal_year', 'orders'),
+        ]);
+    });
+
+    test('should not add a required standard derived time filter when a sibling standard time filter is present', () => {
+        const exploreWithStandardDerivedTimeDimensions = {
+            ...mockExplore,
+            tables: {
+                ...mockExplore.tables,
+                orders: {
+                    ...mockExplore.tables.orders,
+                    dimensions: {
+                        ...mockExplore.tables.orders.dimensions,
+                        order_date_week: {
+                            ...mockExplore.tables.orders.dimensions
+                                .order_date_week,
+                            timeInterval: TimeFrames.WEEK,
+                        },
+                        order_date_month: {
+                            ...mockExplore.tables.orders.dimensions
+                                .order_date_month,
+                            timeInterval: TimeFrames.MONTH,
+                        },
+                    },
+                },
+            },
+        } as typeof mockExplore;
+        const filtersWithSiblingStandardDimension: Filters = {
+            dimensions: {
+                id: 'mockGroupId',
+                and: [
+                    {
+                        id: 'sibling-standard-filter',
+                        target: { fieldId: 'orders_order_date_month' },
+                        operator: FilterOperator.EQUALS,
+                        values: ['2024-09-01'],
+                    },
+                ],
+            },
+        };
+
+        const result = reduceRequiredDimensionFiltersToFilterRules(
+            [modelRequiredFilterRule('order_date_week')],
+            filtersWithSiblingStandardDimension.dimensions,
+            exploreWithStandardDerivedTimeDimensions,
+        );
+
+        expect(result).toEqual([]);
     });
 });
 
@@ -506,5 +1029,101 @@ describe('getDashboardFilterRulesForTileAndReferences', () => {
 
         // Verify filter-3 is not included (isSqlColumn is true but fieldId doesn't match)
         expect(result).toHaveLength(0);
+    });
+});
+
+describe('applyDashboardFiltersForTile', () => {
+    const baseMetricQuery: MetricQuery = {
+        exploreName: 'test',
+        dimensions: [],
+        metrics: [],
+        filters: {},
+        sorts: [],
+        limit: 500,
+        tableCalculations: [],
+    };
+
+    const statusRule: DashboardFilterRule = {
+        id: 'f-status',
+        target: { fieldId: 'orders_status', tableName: 'orders' },
+        operator: FilterOperator.EQUALS,
+        values: [true],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    const offExploreRule: DashboardFilterRule = {
+        id: 'f-off',
+        target: { fieldId: 'other_browser', tableName: 'other' },
+        operator: FilterOperator.EQUALS,
+        values: ['chrome'],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+
+    test('drops rules whose fieldId is not in the explore', () => {
+        const { metricQuery, appliedDashboardFilters } =
+            applyDashboardFiltersForTile({
+                tileUuid: 't-1',
+                metricQuery: baseMetricQuery,
+                dashboardFilters: {
+                    dimensions: [offExploreRule],
+                    metrics: [],
+                    tableCalculations: [],
+                },
+                explore: mockExplore,
+            });
+
+        expect(appliedDashboardFilters.dimensions).toEqual([]);
+        expect(
+            (metricQuery.filters.dimensions as AndFilterGroup | undefined)
+                ?.and ?? [],
+        ).toEqual([]);
+    });
+
+    test('drops rules whose tileTargets disable them for this tile', () => {
+        const disabledRule: DashboardFilterRule = {
+            ...statusRule,
+            tileTargets: { 't-1': false },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any;
+        const { metricQuery, appliedDashboardFilters } =
+            applyDashboardFiltersForTile({
+                tileUuid: 't-1',
+                metricQuery: baseMetricQuery,
+                dashboardFilters: {
+                    dimensions: [disabledRule],
+                    metrics: [],
+                    tableCalculations: [],
+                },
+                explore: mockExplore,
+            });
+
+        expect(appliedDashboardFilters.dimensions).toEqual([]);
+        expect(
+            (metricQuery.filters.dimensions as AndFilterGroup | undefined)
+                ?.and ?? [],
+        ).toEqual([]);
+    });
+
+    test('merges applicable rules into the metric query', () => {
+        const { metricQuery, appliedDashboardFilters } =
+            applyDashboardFiltersForTile({
+                tileUuid: 't-1',
+                metricQuery: baseMetricQuery,
+                dashboardFilters: {
+                    dimensions: [statusRule, offExploreRule],
+                    metrics: [],
+                    tableCalculations: [],
+                },
+                explore: mockExplore,
+            });
+
+        expect(appliedDashboardFilters.dimensions).toHaveLength(1);
+        expect(appliedDashboardFilters.dimensions[0].id).toBe('f-status');
+        const merged = (metricQuery.filters.dimensions as AndFilterGroup).and;
+        expect(merged).toHaveLength(1);
+        expect(merged[0]).toMatchObject({
+            target: { fieldId: 'orders_status' },
+            values: [true],
+        });
     });
 });

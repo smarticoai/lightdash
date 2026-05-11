@@ -20,12 +20,19 @@ import {
 } from '../utils/dateFilter';
 import { useProjectUuid } from './useProjectUuid';
 
-const calculateTotalFromQuery = async (
-    projectUuid: string,
-    metricQuery?: MetricQuery,
-    explore?: string,
-    parameters?: ParametersValuesMap,
-): Promise<ApiCalculateTotalResponse['results']> => {
+const calculateTotalFromQuery = async ({
+    projectUuid,
+    metricQuery,
+    explore,
+    invalidateCache,
+    parameters,
+}: {
+    projectUuid: string;
+    metricQuery?: MetricQuery;
+    explore?: string;
+    invalidateCache?: boolean;
+    parameters?: ParametersValuesMap;
+}): Promise<ApiCalculateTotalResponse['results']> => {
     if (!metricQuery || !explore) {
         throw new Error(
             'missing metricQuery or explore on calculateTotalFromQuery',
@@ -39,6 +46,7 @@ const calculateTotalFromQuery = async (
             filters: convertDateFilters(metricQuery.filters),
         },
         parameters,
+        invalidateCache,
     };
     return lightdashApi<ApiCalculateTotalResponse['results']>({
         url: `/projects/${projectUuid}/calculate-total`,
@@ -47,12 +55,17 @@ const calculateTotalFromQuery = async (
     });
 };
 
-const calculateTotalFromSavedChart = async (
-    savedChartUuid: string,
-    dashboardFilters?: DashboardFilters,
-    invalidateCache?: boolean,
-    parameters?: ParametersValuesMap,
-): Promise<ApiCalculateTotalResponse['results']> => {
+const calculateTotalFromSavedChart = async ({
+    savedChartUuid,
+    dashboardFilters,
+    invalidateCache,
+    parameters,
+}: {
+    savedChartUuid: string;
+    dashboardFilters?: DashboardFilters;
+    invalidateCache?: boolean;
+    parameters?: ParametersValuesMap;
+}): Promise<ApiCalculateTotalResponse['results']> => {
     const timezoneFixFilters =
         dashboardFilters && convertDateDashboardFilters(dashboardFilters);
 
@@ -67,18 +80,28 @@ const calculateTotalFromSavedChart = async (
     });
 };
 
-const postCalculateTotalForEmbed = async (
-    projectUuid: string,
-    savedChartUuid: string,
-    dashboardFilters?: DashboardFilters,
-    invalidateCache?: boolean,
-): Promise<ApiCalculateTotalResponse['results']> => {
+const postCalculateTotalForEmbed = async ({
+    embedToken,
+    projectUuid,
+    savedChartUuid,
+    dashboardFilters,
+    invalidateCache,
+}: {
+    embedToken: string;
+    projectUuid: string;
+    savedChartUuid: string;
+    dashboardFilters?: DashboardFilters;
+    invalidateCache?: boolean;
+}): Promise<ApiCalculateTotalResponse['results']> => {
     const timezoneFixFilters =
         dashboardFilters && convertDateDashboardFilters(dashboardFilters);
 
     return lightdashApi<ApiCalculateTotalResponse['results']>({
         url: `/embed/${projectUuid}/chart/${savedChartUuid}/calculate-total`,
         method: 'POST',
+        headers: {
+            'Lightdash-Embed-Token': embedToken,
+        },
         body: JSON.stringify({
             dashboardFilters: timezoneFixFilters,
             invalidateCache,
@@ -90,12 +113,21 @@ const postCalculateTotalForEmbed = async (
  * Calculate totals from a raw metric query in embed context.
  * Used when exploring data directly (not from a saved chart).
  */
-const postCalculateTotalFromQueryForEmbed = async (
-    projectUuid: string,
-    metricQuery: MetricQuery,
-    explore: string,
-    parameters?: ParametersValuesMap,
-): Promise<ApiCalculateTotalResponse['results']> => {
+const postCalculateTotalFromQueryForEmbed = async ({
+    embedToken,
+    projectUuid,
+    metricQuery,
+    explore,
+    invalidateCache,
+    parameters,
+}: {
+    embedToken: string;
+    projectUuid: string;
+    metricQuery: MetricQuery;
+    explore: string;
+    invalidateCache?: boolean;
+    parameters?: ParametersValuesMap;
+}): Promise<ApiCalculateTotalResponse['results']> => {
     const timezoneFixPayload: CalculateTotalFromQuery = {
         explore,
         metricQuery: {
@@ -103,10 +135,14 @@ const postCalculateTotalFromQueryForEmbed = async (
             filters: convertDateFilters(metricQuery.filters),
         },
         parameters,
+        invalidateCache,
     };
     return lightdashApi<ApiCalculateTotalResponse['results']>({
         url: `/embed/${projectUuid}/calculate-total`,
         method: 'POST',
+        headers: {
+            'Lightdash-Embed-Token': embedToken,
+        },
         body: JSON.stringify(timezoneFixPayload),
     });
 };
@@ -166,6 +202,7 @@ export const useCalculateTotal = ({
               filters: metricQuery?.filters,
               metrics: metricQuery?.metrics,
               additionalMetrics: metricQuery?.additionalMetrics,
+              invalidateCache,
               parameters,
           };
 
@@ -174,36 +211,40 @@ export const useCalculateTotal = ({
         queryFn: () =>
             // Embed mode with saved chart
             embedToken && projectUuid && savedChartUuid
-                ? postCalculateTotalForEmbed(
+                ? postCalculateTotalForEmbed({
+                      embedToken,
                       projectUuid,
                       savedChartUuid,
                       dashboardFilters,
                       invalidateCache,
-                  )
+                  })
                 : // Embed mode with raw query (Explore)
                   embedToken && projectUuid && metricQuery && explore
-                  ? postCalculateTotalFromQueryForEmbed(
+                  ? postCalculateTotalFromQueryForEmbed({
+                        embedToken,
                         projectUuid,
                         metricQuery,
                         explore,
+                        invalidateCache,
                         parameters,
-                    )
+                    })
                   : // Regular mode with saved chart
                     savedChartUuid
-                    ? calculateTotalFromSavedChart(
+                    ? calculateTotalFromSavedChart({
                           savedChartUuid,
                           dashboardFilters,
                           invalidateCache,
                           parameters,
-                      )
+                      })
                     : // Regular mode with raw query
                       projectUuid
-                      ? calculateTotalFromQuery(
+                      ? calculateTotalFromQuery({
                             projectUuid,
                             metricQuery,
                             explore,
+                            invalidateCache,
                             parameters,
-                        )
+                        })
                       : Promise.reject(),
         retry: false,
         enabled:

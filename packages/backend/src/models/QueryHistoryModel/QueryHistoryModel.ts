@@ -1,13 +1,15 @@
 import {
     Account,
+    assertUnreachable,
     ForbiddenError,
     NotFoundError,
     QueryHistory,
     QueryHistoryStatus,
+    sleep,
 } from '@lightdash/common';
 import crypto from 'crypto';
 import { Knex } from 'knex';
-import { nanoid } from 'nanoid';
+import { customAlphabet, nanoid } from 'nanoid';
 import {
     DbQueryHistory,
     DbQueryHistoryUpdate,
@@ -25,6 +27,7 @@ function convertDbQueryHistoryToQueryHistory(
             queryHistory.created_by_account,
         createdByUserUuid: queryHistory.created_by_user_uuid,
         createdByAccount: queryHistory.created_by_account,
+        createdByActorType: queryHistory.created_by_actor_type,
         organizationUuid: queryHistory.organization_uuid,
         projectUuid: queryHistory.project_uuid,
         compiledSql: queryHistory.compiled_sql,
@@ -39,6 +42,7 @@ function convertDbQueryHistoryToQueryHistory(
         totalRowCount: queryHistory.total_row_count,
         warehouseExecutionTimeMs: queryHistory.warehouse_execution_time_ms,
         error: queryHistory.error,
+        erroredAt: queryHistory.errored_at,
         cacheKey: queryHistory.cache_key,
         pivotConfiguration: queryHistory.pivot_configuration,
         pivotValuesColumns: queryHistory.pivot_values_columns,
@@ -50,11 +54,18 @@ function convertDbQueryHistoryToQueryHistory(
         columns: queryHistory.columns,
         originalColumns: queryHistory.original_columns,
         smrWarehouseResponseMeta: queryHistory.smr_warehouse_response_meta,
+        preAggregateCompiledSql: queryHistory.pre_aggregate_compiled_sql,
+        processingStartedAt: queryHistory.processing_started_at,
     };
 }
 
 export class QueryHistoryModel {
     readonly database: Knex;
+
+    // Alphanumeric-only nanoid to avoid '--' sequences that break SQL comment stripping in DuckDB
+    private static readonly sqlSafeNanoid = customAlphabet(
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+    );
 
     constructor({ database }: { database: Knex }) {
         this.database = database;
@@ -86,8 +97,11 @@ export class QueryHistoryModel {
         return crypto.createHash('sha256').update(queryHashKey).digest('hex');
     }
 
-    static createUniqueResultsFileName(cacheKey: string) {
-        return `${cacheKey}-${nanoid()}`;
+    static createUniqueResultsFileName(
+        cacheKey: string,
+        options?: { sqlSafe: boolean },
+    ) {
+        return `${cacheKey}-${options?.sqlSafe ? QueryHistoryModel.sqlSafeNanoid() : nanoid()}`;
     }
 
     async create(
@@ -103,6 +117,7 @@ export class QueryHistoryModel {
             | 'warehouseQueryMetadata'
             | 'warehouseExecutionTimeMs'
             | 'error'
+            | 'erroredAt'
             | 'pivotValuesColumns'
             | 'pivotTotalColumnCount'
             | 'resultsFileName'
@@ -112,8 +127,11 @@ export class QueryHistoryModel {
             | 'columns'
             | 'originalColumns'
             | 'smrWarehouseResponseMeta'
+            | 'preAggregateCompiledSql'
+            | 'processingStartedAt'
             | 'createdByAccount'
             | 'createdByUserUuid'
+            | 'createdByActorType'
             | 'createdBy'
         >,
     ) {
@@ -126,6 +144,7 @@ export class QueryHistoryModel {
                 created_by_account: account.isAnonymousUser()
                     ? account.user.id
                     : null,
+                created_by_actor_type: account.authentication.type,
                 organization_uuid: queryHistory.organizationUuid,
                 project_uuid: queryHistory.projectUuid,
                 compiled_sql: queryHistory.compiledSql,
@@ -139,6 +158,7 @@ export class QueryHistoryModel {
                 warehouse_execution_time_ms: null,
                 warehouse_query_metadata: null,
                 error: null,
+                errored_at: null,
                 cache_key: queryHistory.cacheKey,
                 pivot_configuration: queryHistory.pivotConfiguration,
                 pivot_values_columns: null,
@@ -150,6 +170,8 @@ export class QueryHistoryModel {
                 columns: null,
                 original_columns: null,
                 smr_warehouse_response_meta: null,
+                pre_aggregate_compiled_sql: null,
+                processing_started_at: null,
             })
             .returning('query_uuid');
 
@@ -176,11 +198,73 @@ export class QueryHistoryModel {
             : 'created_by_account';
         void query.andWhere(createdByColumn, account.user.id);
 
-        // only update pending queries to ready
+        // Only allow READY from PENDING (non-NATS) or EXECUTING (NATS).
         if (update.status === QueryHistoryStatus.READY) {
-            void query.andWhere('status', QueryHistoryStatus.PENDING);
+            void query.whereIn('status', [
+                QueryHistoryStatus.PENDING,
+                QueryHistoryStatus.EXECUTING,
+            ]);
         }
         return query;
+    }
+
+    async updateStatusToQueued(queryUuid: string): Promise<number> {
+        return this.database(QueryHistoryTableName)
+            .where('query_uuid', queryUuid)
+            .andWhere('status', QueryHistoryStatus.PENDING)
+            .update({
+                status: QueryHistoryStatus.QUEUED,
+            });
+    }
+
+    async updateStatusToExecuting(queryUuid: string): Promise<number> {
+        return this.database(QueryHistoryTableName)
+            .where('query_uuid', queryUuid)
+            .whereIn('status', [
+                QueryHistoryStatus.PENDING,
+                QueryHistoryStatus.QUEUED,
+            ])
+            .update({
+                status: QueryHistoryStatus.EXECUTING,
+                processing_started_at: new Date(),
+            });
+    }
+
+    async updateStatusToExpired(
+        queryUuid: string,
+        error: string,
+    ): Promise<number> {
+        return this.database(QueryHistoryTableName)
+            .where('query_uuid', queryUuid)
+            .whereIn('status', [
+                QueryHistoryStatus.PENDING,
+                QueryHistoryStatus.QUEUED,
+            ])
+            .update({
+                status: QueryHistoryStatus.EXPIRED,
+                error,
+                processing_started_at: new Date(),
+            });
+    }
+
+    async updateStatusToError(
+        queryUuid: string,
+        projectUuid: string,
+        error: string,
+        account: Pick<Account, 'isRegisteredUser'> & {
+            user: Pick<Account['user'], 'id'>;
+        },
+    ) {
+        return this.update(
+            queryUuid,
+            projectUuid,
+            {
+                status: QueryHistoryStatus.ERROR,
+                error,
+                errored_at: new Date(),
+            },
+            account,
+        );
     }
 
     async get(queryUuid: string, projectUuid: string, account: Account) {
@@ -237,6 +321,79 @@ export class QueryHistoryModel {
             columns: result.columns,
             originalColumns: result.original_columns,
         };
+    }
+
+    async getByQueryUuid(queryUuid: string): Promise<QueryHistory | undefined> {
+        const result = await this.database(QueryHistoryTableName)
+            .where('query_uuid', queryUuid)
+            .first<DbQueryHistory>();
+
+        return result ? convertDbQueryHistoryToQueryHistory(result) : undefined;
+    }
+
+    async pollForQueryCompletion({
+        queryUuid,
+        account,
+        projectUuid,
+        initialBackoffMs = 500,
+        maxBackoffMs = 2000,
+        timeoutMs = 5 * 60 * 1000,
+        throwOnCancelled = true,
+        throwOnError = true,
+    }: {
+        queryUuid: string;
+        account: Account;
+        projectUuid: string;
+        initialBackoffMs?: number;
+        maxBackoffMs?: number;
+        timeoutMs?: number;
+        throwOnCancelled?: boolean;
+        throwOnError?: boolean;
+    }): Promise<QueryHistory> {
+        const startTime = Date.now();
+        const getQueryHistory = () => this.get(queryUuid, projectUuid, account);
+
+        const poll = async (backoffMs: number): Promise<QueryHistory> => {
+            if (Date.now() - startTime > timeoutMs) {
+                throw new Error(`Query polling timed out after ${timeoutMs}ms`);
+            }
+
+            const queryHistory = await getQueryHistory();
+            if (!queryHistory) {
+                await sleep(backoffMs);
+                return poll(Math.min(backoffMs * 2, maxBackoffMs));
+            }
+
+            switch (queryHistory.status) {
+                case QueryHistoryStatus.CANCELLED:
+                    if (throwOnCancelled) {
+                        throw new Error('Query was cancelled');
+                    }
+                    return queryHistory;
+                case QueryHistoryStatus.ERROR:
+                case QueryHistoryStatus.EXPIRED:
+                    if (throwOnError) {
+                        throw new Error(
+                            queryHistory.error ?? 'Warehouse query failed',
+                        );
+                    }
+                    return queryHistory;
+                case QueryHistoryStatus.PENDING:
+                case QueryHistoryStatus.QUEUED:
+                case QueryHistoryStatus.EXECUTING:
+                    await sleep(backoffMs);
+                    return poll(Math.min(backoffMs * 2, maxBackoffMs));
+                case QueryHistoryStatus.READY:
+                    return queryHistory;
+                default:
+                    return assertUnreachable(
+                        queryHistory.status,
+                        'Unknown query status',
+                    );
+            }
+        };
+
+        return poll(initialBackoffMs);
     }
 
     async cleanupBatch(

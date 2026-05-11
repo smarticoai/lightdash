@@ -8,10 +8,11 @@ import {
 } from '@mantine-8/core';
 import { useClickOutside, useDisclosure } from '@mantine-8/hooks';
 import { IconChevronDown } from '@tabler/icons-react';
-import { memo, useEffect, useState, type FC } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type FC } from 'react';
 import MantineIcon from '../common/MantineIcon';
 import AutoFetchResultsSwitch from './AutoFetchResultsSwitch';
 import LimitInput from './LimitInput';
+import PreAggregateCacheSwitch from './PreAggregateCacheSwitch';
 
 export type Props = {
     size?: MantineSize;
@@ -20,6 +21,7 @@ export type Props = {
     limit: number;
     onLimitChange: (value: number) => void;
     showAutoFetchSetting?: boolean;
+    showPreAggregateSetting?: boolean;
     targetProps?: ButtonProps;
 };
 
@@ -31,13 +33,22 @@ const RunQuerySettings: FC<Props> = memo(
         limit,
         onLimitChange,
         showAutoFetchSetting = false,
+        showPreAggregateSetting = false,
         targetProps,
     }) => {
         const [opened, { open, close }] = useDisclosure(false);
-        const ref = useClickOutside(
-            () => setTimeout(() => close(), 0),
-            ['mouseup', 'touchend'],
-        );
+        const mouseDownInsideRef = useRef(false);
+        const handleClickOutside = useCallback(() => {
+            if (mouseDownInsideRef.current) {
+                mouseDownInsideRef.current = false;
+                return;
+            }
+            setTimeout(() => close(), 0);
+        }, [close]);
+        const ref = useClickOutside(handleClickOutside, [
+            'mouseup',
+            'touchend',
+        ]);
 
         const [tempLimit, setTempLimit] = useState(limit);
 
@@ -79,11 +90,24 @@ const RunQuerySettings: FC<Props> = memo(
                 </Popover.Target>
 
                 <Popover.Dropdown>
-                    <Stack ref={ref}>
+                    <Stack
+                        ref={ref}
+                        onMouseDown={() => {
+                            mouseDownInsideRef.current = true;
+                        }}
+                    >
+                        {showPreAggregateSetting && (
+                            <PreAggregateCacheSwitch size={size} />
+                        )}
+                        {showPreAggregateSetting && showAutoFetchSetting && (
+                            <Divider />
+                        )}
                         {showAutoFetchSetting && (
                             <AutoFetchResultsSwitch size={size} />
                         )}
-                        {showAutoFetchSetting && <Divider />}
+                        {(showAutoFetchSetting || showPreAggregateSetting) && (
+                            <Divider />
+                        )}
                         <LimitInput
                             maxLimit={maxLimit}
                             limit={tempLimit}
@@ -91,6 +115,12 @@ const RunQuerySettings: FC<Props> = memo(
                             size={size}
                             numberInputProps={{
                                 onBlur: handleLimitBlur,
+                                onKeyDown: (e) => {
+                                    if (e.key === 'Enter') {
+                                        handleLimitBlur();
+                                        close();
+                                    }
+                                },
                             }}
                         />
                     </Stack>

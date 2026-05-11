@@ -5,11 +5,11 @@ import { type FC } from 'react';
 import ErrorBoundary from '../../../features/errorBoundary/ErrorBoundary';
 import { useActiveProjectUuid } from '../../../hooks/useActiveProject';
 import { useProject } from '../../../hooks/useProject';
+import { useImpersonation } from '../../../hooks/user/useImpersonation';
 import { TrackSection } from '../../../providers/Tracking/TrackingProvider';
 import { SectionName } from '../../../types/Events';
 import AboutFooter from '../../AboutFooter';
 import { DocumentTitle } from '../DocumentTitle';
-import Sidebar from './Sidebar';
 import {
     BANNER_HEIGHT,
     FOOTER_HEIGHT,
@@ -20,6 +20,7 @@ import {
     PAGE_HEADER_HEIGHT,
     PAGE_MIN_CONTENT_WIDTH,
 } from './constants';
+import Sidebar from './Sidebar';
 import { SidebarPosition, type SidebarWidthProps } from './types';
 import { smrIsEmbeddedMode, smrWithNavbar } from '../../../utils/smarticoUtils';
 
@@ -246,6 +247,7 @@ const Page: FC<React.PropsWithChildren<Props>> = ({
     const { data: project } = useProject(activeProjectUuid);
 
     const isCurrentProjectPreview = project?.type === ProjectType.PREVIEW;
+    const { isImpersonating } = useImpersonation();
 
     const { classes } = usePageStyles(
         {
@@ -264,7 +266,7 @@ const Page: FC<React.PropsWithChildren<Props>> = ({
             withSidebarFooter,
             withSidebarBorder,
             withRightSidebar: !!rightSidebar,
-            hasBanner: isCurrentProjectPreview,
+            hasBanner: isCurrentProjectPreview || isImpersonating,
             noContentPadding,
             flexContent,
             isSidebarResizing,

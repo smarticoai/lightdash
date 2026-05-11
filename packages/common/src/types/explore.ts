@@ -12,6 +12,8 @@ import {
     type Source,
 } from './field';
 import { type LightdashProjectConfig } from './lightdashProjectConfig';
+import { type ParametersValuesMap } from './parameters';
+import { type PreAggregateDef } from './preAggregate';
 import { type TableBase } from './table';
 
 export enum JoinRelationship {
@@ -57,6 +59,7 @@ export type CompiledTable = TableBase & {
 export enum ExploreType {
     VIRTUAL = 'virtual',
     DEFAULT = 'default',
+    PRE_AGGREGATE = 'pre_aggregate',
 }
 
 export enum InlineErrorType {
@@ -67,6 +70,9 @@ export enum InlineErrorType {
     SKIPPED_JOIN = 'SKIPPED_JOIN',
     MISSING_TABLE = 'MISSING_TABLE',
     FIELD_ERROR = 'FIELD_ERROR',
+    SET_VALIDATION_ERROR = 'SET_VALIDATION_ERROR',
+    INVALID_PARAMETER = 'INVALID_PARAMETER',
+    DUPLICATE_FIELD_NAME = 'DUPLICATE_FIELD_NAME',
 }
 
 export type InlineError = {
@@ -74,11 +80,24 @@ export type InlineError = {
     message: string;
 };
 
+export type PreAggregateSource = {
+    sourceExploreName: string;
+    preAggregateName: string;
+};
+
 export type Explore = {
     name: string; // Must be sql friendly (a-Z, 0-9, _)
     label: string; // Friendly name
     tags: string[];
+    /** @deprecated Use `groups` instead */
     groupLabel?: string;
+    /**
+     * Nested groups for the sidebar (max 3 levels). Group keys resolve to
+     * labels/descriptions via the project-level `table_groups` config
+     * (fetched separately); missing keys fall back to using the key as
+     * the label.
+     */
+    groups?: string[];
     baseTable: string; // Must match a tableName in tables
     joinedTables: CompiledExploreJoin[]; // Must match a tableName in tables
     tables: { [tableName: string]: CompiledTable }; // All tables in this explore, potentially filtered by user attributes
@@ -89,6 +108,7 @@ export type Explore = {
     ymlPath?: string;
     sqlPath?: string;
     type?: ExploreType;
+    caseSensitive?: boolean; // When false, all string filters in this explore will be case insensitive. Default is true
     // Spotlight config for this explore
     spotlight?: {
         visibility: LightdashProjectConfig['spotlight']['default_visibility'];
@@ -97,6 +117,9 @@ export type Explore = {
     };
     aiHint?: string | string[];
     parameters?: LightdashProjectConfig['parameters'];
+    savedParameterValues?: ParametersValuesMap; // Parameter values stored with virtual views
+    preAggregates?: PreAggregateDef[];
+    preAggregateSource?: PreAggregateSource;
     /**
      * Non-fatal warnings from partial compilation.
      * Present when some joins or fields failed to compile but the explore is still usable.
@@ -106,7 +129,7 @@ export type Explore = {
 };
 
 export type ExploreError = Partial<Explore> &
-    Pick<Explore, 'name' | 'label' | 'groupLabel'> & {
+    Pick<Explore, 'name' | 'label' | 'groupLabel' | 'groups'> & {
         errors: InlineError[];
     };
 
@@ -123,7 +146,9 @@ type SummaryExploreFields =
     | 'label'
     | 'tags'
     | 'groupLabel'
+    | 'groups'
     | 'type'
+    | 'preAggregateSource'
     | 'aiHint'
     | 'warnings';
 type SummaryExploreErrorFields =
@@ -131,6 +156,7 @@ type SummaryExploreErrorFields =
     | 'label'
     | 'tags'
     | 'groupLabel'
+    | 'groups'
     | 'type'
     | 'aiHint'
     | 'errors';

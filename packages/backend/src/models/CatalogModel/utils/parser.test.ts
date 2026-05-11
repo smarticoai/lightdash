@@ -12,6 +12,7 @@ const createDbCatalog = (
     description: null,
     field_type: undefined,
     required_attributes: null,
+    any_attributes: null,
     chart_usage: 0,
     catalog_search_uuid: 'catalog-1',
     icon: null,
@@ -22,6 +23,7 @@ const createDbCatalog = (
     ai_hints: null,
     joined_tables: null,
     owner_user_uuid: null,
+    has_time_dimension: false,
     ...overrides,
 });
 
@@ -33,12 +35,13 @@ const createMockExplore = (
         string,
         { dimensions: string[]; metrics: string[]; hidden?: boolean }
     >,
+    exploreTags: string[] = [],
 ): Explore =>
     ({
         name,
         baseTable,
         label: name,
-        tags: [],
+        tags: exploreTags,
         tables: Object.fromEntries(
             Object.entries(tables).map(
                 ([tableName, { dimensions, metrics }]) => [
@@ -175,6 +178,85 @@ describe('parseCatalog', () => {
             });
 
             expect(result).toBeNull();
+        });
+    });
+
+    describe('field tag merging', () => {
+        // Regression for PROD-7064: metric-level YAML tags must be returned
+        // alongside table-level tags inherited from the explore.
+        const taggedExplore = createMockExplore(
+            'orders',
+            'orders',
+            { orders: { dimensions: ['order_id'], metrics: ['total_orders'] } },
+            ['core', 'sales'], // table-level tags
+        );
+
+        it('merges field-level yaml_tags with explore tags (no duplicates)', () => {
+            const result = parseCatalog({
+                ...createDbCatalog({
+                    name: 'total_orders',
+                    table_name: 'orders',
+                    type: CatalogType.Field,
+                    field_type: FieldType.METRIC,
+                    label: 'Total Orders',
+                    yaml_tags: ['period_metric', 'core'], // 'core' overlaps with table
+                }),
+                explore: taggedExplore,
+                catalog_tags: [],
+                search_rank: 1,
+            });
+
+            expect(result?.type).toBe(CatalogType.Field);
+            if (result?.type === CatalogType.Field) {
+                expect(result.tags).toEqual(['core', 'sales', 'period_metric']);
+            }
+        });
+
+        it('returns only table tags when field has no yaml_tags', () => {
+            const result = parseCatalog({
+                ...createDbCatalog({
+                    name: 'total_orders',
+                    table_name: 'orders',
+                    type: CatalogType.Field,
+                    field_type: FieldType.METRIC,
+                    label: 'Total Orders',
+                    yaml_tags: null,
+                }),
+                explore: taggedExplore,
+                catalog_tags: [],
+                search_rank: 1,
+            });
+
+            if (result?.type === CatalogType.Field) {
+                expect(result.tags).toEqual(['core', 'sales']);
+            }
+        });
+
+        it('returns only field tags when explore has no tags', () => {
+            const untaggedExplore = createMockExplore('orders', 'orders', {
+                orders: {
+                    dimensions: ['order_id'],
+                    metrics: ['total_orders'],
+                },
+            });
+
+            const result = parseCatalog({
+                ...createDbCatalog({
+                    name: 'total_orders',
+                    table_name: 'orders',
+                    type: CatalogType.Field,
+                    field_type: FieldType.METRIC,
+                    label: 'Total Orders',
+                    yaml_tags: ['period_metric'],
+                }),
+                explore: untaggedExplore,
+                catalog_tags: [],
+                search_rank: 1,
+            });
+
+            if (result?.type === CatalogType.Field) {
+                expect(result.tags).toEqual(['period_metric']);
+            }
         });
     });
 });

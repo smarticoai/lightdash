@@ -1,20 +1,20 @@
 import {
     ChartKind,
-    WarehouseTypes,
     type ApiErrorDetail,
-    type ParameterValue,
     type ParametersValuesMap,
+    type ParameterValue,
     type RawResultRow,
     type SqlChart,
     type VizColumn,
     type VizSortBy,
     type VizTableColumnsConfig,
     type VizTableConfig,
+    type WarehouseTypes,
+    formatSql,
 } from '@lightdash/common';
 import type { PayloadAction, SerializedError } from '@reduxjs/toolkit';
 import { createSlice } from '@reduxjs/toolkit';
 import { createSelector } from 'reselect';
-import { format, type FormatOptionsWithLanguage } from 'sql-formatter';
 import { type MonacoHighlightChar } from '../components/SqlEditor';
 import { SqlRunnerResultsRunnerFrontend } from '../runners/SqlRunnerResultsRunnerFrontend';
 import { createHistoryReducer, withHistory, type WithHistory } from './history';
@@ -30,54 +30,14 @@ export enum SidebarTabs {
     VISUALIZATION = 'visualization',
 }
 
-export const getLanguage = (
-    warehouseConnectionType?: WarehouseTypes,
-): FormatOptionsWithLanguage['language'] => {
-    switch (warehouseConnectionType) {
-        case WarehouseTypes.BIGQUERY:
-            return 'bigquery';
-        case WarehouseTypes.SNOWFLAKE:
-            return 'snowflake';
-        case WarehouseTypes.TRINO:
-            return 'spark';
-        case WarehouseTypes.DATABRICKS:
-            return 'spark';
-        case WarehouseTypes.POSTGRES:
-            return 'postgresql';
-        case WarehouseTypes.REDSHIFT:
-            return 'redshift';
-        default:
-            return 'sql';
-    }
-};
-
-/**
- * Normalizes the SQL by removing all whitespace and formatting it consistently - helpful for comparing two SQL queries
- * @param sql
- * @returns formatted SQL
- */
-const normalizeSQL = (
-    sql: string,
-    warehouseConnectionType: WarehouseTypes | undefined,
-): string => {
-    try {
-        return format(sql, {
-            language: getLanguage(warehouseConnectionType),
-        });
-    } catch (error) {
-        // Return the original SQL or a placeholder if formatting fails
-        return sql;
-    }
-};
-
 export const compareSqlQueries = (
     previousSql: string,
     currentSql: string,
     warehouseConnectionType: WarehouseTypes | undefined,
 ): boolean => {
     return (
-        normalizeSQL(previousSql, warehouseConnectionType) !==
-        normalizeSQL(currentSql, warehouseConnectionType)
+        formatSql(previousSql, warehouseConnectionType) !==
+        formatSql(currentSql, warehouseConnectionType)
     );
 };
 
@@ -250,6 +210,12 @@ export const sqlRunnerSlice = createSlice({
         clearParameterValues: (state) => {
             state.parameterValues = {};
         },
+        setParameterValues: (
+            state,
+            action: PayloadAction<ParametersValuesMap>,
+        ) => {
+            state.parameterValues = action.payload;
+        },
         setFetchResultsOnLoad: (
             state,
             action: PayloadAction<{
@@ -271,11 +237,11 @@ export const sqlRunnerSlice = createSlice({
         setSql: (state, action: PayloadAction<string>) => {
             state.sql = action.payload;
 
-            const normalizedNewSql = normalizeSQL(
+            const normalizedNewSql = formatSql(
                 action.payload,
                 state.warehouseConnectionType,
             );
-            const normalizedCurrentSql = normalizeSQL(
+            const normalizedCurrentSql = formatSql(
                 state.successfulSqlQueries.current || '',
                 state.warehouseConnectionType,
             );
@@ -413,11 +379,11 @@ export const sqlRunnerSlice = createSlice({
                         payload: {
                             value: state.sql,
                             compareFunc: (a, b) =>
-                                normalizeSQL(
+                                formatSql(
                                     a || '',
                                     state.warehouseConnectionType,
                                 ) !==
-                                normalizeSQL(
+                                formatSql(
                                     b || '',
                                     state.warehouseConnectionType,
                                 ),
@@ -475,6 +441,7 @@ export const {
     setState,
     updateParameterValue,
     clearParameterValues,
+    setParameterValues,
 } = sqlRunnerSlice.actions;
 
 export const {

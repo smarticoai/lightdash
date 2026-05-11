@@ -2,6 +2,10 @@
  * Utility functions for handling SQL parameter references
  */
 
+import Ajv from 'ajv';
+import AjvErrors from 'ajv-errors';
+import betterAjvErrors from 'better-ajv-errors';
+import lightdashDbtYamlSchema from '../schemas/json/lightdash-dbt-2.0.json';
 import { CompileError } from '../types/errors';
 import type { CompiledTable, Table } from '../types/explore';
 import type { LightdashProjectParameter } from '../types/lightdashProjectConfig';
@@ -10,7 +14,8 @@ import type { LightdashProjectParameter } from '../types/lightdashProjectConfig'
 export const parameterRegex =
     /\$\{(?:lightdash|ld)\.parameters\.(\w+(?:\.\w+)?)\}/g;
 
-// Regex for extracting parameter references - works with format strings and ternary expressions
+// Regex for extracting parameter references - works with format strings, ternary expressions,
+// and Liquid template blocks like {% if ld.parameters.grain == "day" %}
 const parameterReferencePattern =
     /(?:lightdash|ld)\.parameters\.(\w+(?:\.\w+)?)/g;
 
@@ -53,14 +58,24 @@ export const getParameterReferencesFromSqlAndFormat = (
 ): string[] => {
     const sqlParameterReferences = getParameterReferences(compiledSql);
 
+    // Also extract parameter references from Liquid template blocks
+    // e.g., {% if ld.parameters.grain == "day" %}
+    const liquidParameterReferences = compiledSql.includes('{%')
+        ? getParameterReferences(compiledSql, parameterReferencePattern)
+        : [];
+
     const formatParameterReferences =
         format && typeof format === 'string'
             ? getParameterReferences(format, parameterReferencePattern)
             : [];
 
-    // Combine and deduplicate parameter references from both sources
+    // Combine and deduplicate parameter references from all sources
     return Array.from(
-        new Set([...sqlParameterReferences, ...formatParameterReferences]),
+        new Set([
+            ...sqlParameterReferences,
+            ...liquidParameterReferences,
+            ...formatParameterReferences,
+        ]),
     );
 };
 
@@ -74,10 +89,30 @@ export const validateParameterReferences = (
     );
 
     if (missingParameters.length > 0) {
+        // When a short-form reference (e.g. `attribution_source`) doesn't match
+        // but a model-prefixed parameter does (e.g. `model.attribution_source`),
+        // surface the correct full reference so the user knows what to write.
+        const hints = missingParameters.reduce<string[]>((acc, missing) => {
+            if (missing.includes('.')) return acc;
+            const matches = availableParameters.filter((p) =>
+                p.endsWith(`.${missing}`),
+            );
+            if (matches.length === 0) return acc;
+            const suggestions = matches
+                .map((m) => `\${lightdash.parameters.${m}}`)
+                .join(' or ');
+            acc.push(
+                `"${missing}" is a model-level parameter — use the model name prefix: ${suggestions}`,
+            );
+            return acc;
+        }, []);
+
+        const hintMsg = hints.length > 0 ? ` Hint: ${hints.join('; ')}` : '';
+
         throw new CompileError(
             `Failed to compile explore "${tableName}". Missing parameters: ${missingParameters.join(
                 ', ',
-            )}`,
+            )}.${hintMsg}`,
             {},
         );
     }
@@ -150,4 +185,69 @@ export const validateParameterNames = (
         isInvalid: invalidParameters.length > 0,
         invalidParameters,
     };
+};
+
+// Lazy-initialized AJV validator to avoid module-level side effects
+let cached: {
+    schema: object;
+    validator: ReturnType<Ajv['compile']>;
+} | null = null;
+
+const getParametersSchemaAndValidator = ():
+    | { schema: object; validator: ReturnType<Ajv['compile']> }
+    | undefined => {
+    if (!cached) {
+        const parametersSchema =
+            lightdashDbtYamlSchema.$defs?.modelMeta?.properties?.parameters;
+        if (!parametersSchema) {
+            console.warn(
+                'Parameters schema not found in lightdash-dbt-2.0.json — expected $defs.modelMeta.properties.parameters. Skipping parameter config validation.',
+            );
+            return undefined;
+        }
+        const ajv = new Ajv({
+            coerceTypes: true,
+            allowUnionTypes: true,
+            allErrors: true,
+        });
+        AjvErrors(ajv);
+        cached = {
+            schema: parametersSchema,
+            validator: ajv.compile(parametersSchema),
+        };
+    }
+    return cached;
+};
+
+/**
+ * Validate parameter configuration using AJV against the JSON schema.
+ */
+export const validateParameterConfiguration = (
+    parameters: Record<string, LightdashProjectParameter> | undefined,
+): { isValid: boolean; error: string | null } => {
+    if (!parameters || Object.keys(parameters).length === 0) {
+        return { isValid: true, error: null };
+    }
+
+    const schemaAndValidator = getParametersSchemaAndValidator();
+    if (!schemaAndValidator) {
+        return { isValid: true, error: null };
+    }
+
+    const { schema, validator } = schemaAndValidator;
+
+    if (!validator(parameters)) {
+        const error = betterAjvErrors(
+            schema,
+            parameters,
+            validator.errors || [],
+            { indent: 2 },
+        );
+        return {
+            isValid: false,
+            error: error || 'Invalid parameter configuration',
+        };
+    }
+
+    return { isValid: true, error: null };
 };

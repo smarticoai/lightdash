@@ -6,7 +6,9 @@ import {
     ContentSortByColumns,
     contentToResourceViewItem,
     ContentType,
+    FeatureFlags,
     isResourceViewSpaceItem,
+    type ApiContentBulkActionBody,
     type ResourceViewItem,
     type SpaceSummary,
 } from '@lightdash/common';
@@ -24,10 +26,12 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import {
+    IconAppWindow,
     IconArrowDown,
     IconArrowsSort,
     IconArrowUp,
     IconChartBar,
+    IconFolder,
     IconFolderSymlink,
     IconLayoutDashboard,
     IconSearch,
@@ -56,6 +60,7 @@ import {
     useInfiniteContent,
     type ContentArgs,
 } from '../../../hooks/useContent';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import { useSpaceSummaries } from '../../../hooks/useSpaces';
 import { useValidationUserAbility } from '../../../hooks/validation/useValidation';
 import useApp from '../../../providers/App/useApp';
@@ -119,6 +124,8 @@ const InfiniteResourceTable = ({
     const canUserManageValidation = useValidationUserAbility(
         filters.projectUuid,
     );
+    const dataAppsFlag = useServerFeatureFlag(FeatureFlags.EnableDataApps);
+    const dataAppsEnabled = dataAppsFlag.data?.enabled ?? false;
     const [action, setAction] = useState<ResourceViewItemActionState>({
         type: ResourceViewItemAction.CLOSE,
     });
@@ -225,7 +232,12 @@ const InfiniteResourceTable = ({
                 if (!isResourceViewSpaceItem(row.original)) return null;
                 const {
                     original: {
-                        data: { dashboardCount, chartCount },
+                        data: {
+                            dashboardCount,
+                            chartCount,
+                            childSpaceCount,
+                            appCount,
+                        },
                     },
                 } = row;
                 return (
@@ -239,6 +251,18 @@ const InfiniteResourceTable = ({
                             Icon={IconChartBar}
                             count={chartCount}
                             name="Charts"
+                        />
+                        {dataAppsEnabled && (
+                            <AttributeCount
+                                Icon={IconAppWindow}
+                                count={appCount}
+                                name="Data apps"
+                            />
+                        )}
+                        <AttributeCount
+                            Icon={IconFolder}
+                            count={childSpaceCount}
+                            name="Spaces"
                         />
                     </Group>
                 );
@@ -317,7 +341,7 @@ const InfiniteResourceTable = ({
 
                 const space = spaces.find((s) => s.uuid === item.data.uuid);
                 if (!space) return false;
-                return !space.isPrivate || space.userAccess?.hasDirectAccess;
+                return space.inheritsFromOrgOrProject || !!space.userAccess;
             });
     }, [data, userCanManageProject, spaces, selectedAdminContentType]);
 
@@ -521,12 +545,12 @@ const InfiniteResourceTable = ({
                         opacity: 0,
                     },
                     '&:hover': {
-                        td: {
-                            backgroundColor: isSelected
-                                ? theme.colors.blue[1]
-                                : theme.colors.ldGray[0],
-                            transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
-                        },
+                        td: isSelected
+                            ? {}
+                            : {
+                                  backgroundColor: theme.colors.ldGray[0],
+                                  transition: `background-color ${theme.other.transitionDuration}ms ${theme.other.transitionTimingFunction}`,
+                              },
 
                         'td:first-of-type > div > .explore-button-container': {
                             visibility: 'visible',
@@ -800,33 +824,48 @@ const InfiniteResourceTable = ({
                     type: 'move',
                     targetSpaceUuid: spaceUuid,
                 },
-                content: selectedItems.map((item) => {
-                    switch (item.type) {
-                        case ContentType.CHART:
-                            return {
-                                uuid: item.data.uuid,
-                                contentType: ContentType.CHART,
-                                source:
-                                    item.data.source ??
-                                    ChartSourceType.DBT_EXPLORE,
-                            };
-                        case ContentType.DASHBOARD:
-                            return {
-                                uuid: item.data.uuid,
-                                contentType: ContentType.DASHBOARD,
-                            };
-                        case ContentType.SPACE:
-                            return {
-                                uuid: item.data.uuid,
-                                contentType: ContentType.SPACE,
-                            };
-                        default:
-                            return assertUnreachable(
-                                item,
-                                'Invalid item type in bulk move handler',
-                            );
-                    }
-                }),
+                content: selectedItems.flatMap(
+                    (item): ApiContentBulkActionBody['content'] => {
+                        switch (item.type) {
+                            case ContentType.CHART:
+                                return [
+                                    {
+                                        uuid: item.data.uuid,
+                                        contentType: ContentType.CHART,
+                                        source:
+                                            item.data.source ??
+                                            ChartSourceType.DBT_EXPLORE,
+                                    },
+                                ];
+                            case ContentType.DASHBOARD:
+                                return [
+                                    {
+                                        uuid: item.data.uuid,
+                                        contentType: ContentType.DASHBOARD,
+                                    },
+                                ];
+                            case ContentType.SPACE:
+                                return [
+                                    {
+                                        uuid: item.data.uuid,
+                                        contentType: ContentType.SPACE,
+                                    },
+                                ];
+                            case ContentType.DATA_APP:
+                                return [
+                                    {
+                                        uuid: item.data.uuid,
+                                        contentType: ContentType.DATA_APP,
+                                    },
+                                ];
+                            default:
+                                return assertUnreachable(
+                                    item,
+                                    'Invalid item type in bulk move handler',
+                                );
+                        }
+                    },
+                ),
             });
 
             table.resetRowSelection();

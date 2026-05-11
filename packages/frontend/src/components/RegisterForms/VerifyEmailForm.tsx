@@ -9,7 +9,7 @@ import {
 } from '../../hooks/useEmailVerification';
 import useApp from '../../providers/App/useApp';
 import Callout from '../common/Callout';
-import LoadingState from '../common/LoadingState';
+import EmptyStateLoader from '../common/EmptyStateLoader';
 
 const VerifyEmailForm: FC<{
     isLoading?: boolean;
@@ -53,7 +53,7 @@ const VerifyEmailForm: FC<{
     }, [data, setFieldError, clearFieldError]);
 
     if (loadingState) {
-        return <LoadingState title="" />;
+        return <EmptyStateLoader my="xl" />;
     }
 
     return (
@@ -127,11 +127,11 @@ const VerifyEmailForm: FC<{
                                 >
                                     Submit
                                 </Button>
-                                <Text c="ldGray.6" ta="center">
+                                <Text c="ldGray.6" ta="center" fz="sm" fw={500}>
                                     Your one-time password expires in{' '}
-                                    <b>
+                                    <Text span fw={500} fz="sm" c="ldGray.7">
                                         {zeroPad(minutes)}:{zeroPad(seconds)}
-                                    </b>
+                                    </Text>
                                 </Text>
                             </Stack>
                         );

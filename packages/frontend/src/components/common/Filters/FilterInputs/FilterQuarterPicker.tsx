@@ -1,17 +1,17 @@
-import { TimeFrames, formatDate } from '@lightdash/common';
+import { formatDate, TimeFrames } from '@lightdash/common';
 import {
-    type MantineTheme,
     Popover,
     Stack,
-    type Sx,
     Text,
     TextInput,
+    type MantineTheme,
+    type Sx,
 } from '@mantine/core';
 import { MonthPicker, type MonthPickerProps } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
 import dayjs from 'dayjs';
 import quarterOfYear from 'dayjs/plugin/quarterOfYear';
-import { type FC, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FC } from 'react';
 
 dayjs.extend(quarterOfYear);
 
@@ -35,6 +35,7 @@ const FilterQuarterPicker: FC<Props> = ({
     placeholder = 'Select Quarter',
     disabled,
     popoverProps,
+    autoFocus,
 }) => {
     const [opened, { open, close }] = useDisclosure(false);
 
@@ -149,6 +150,7 @@ const FilterQuarterPicker: FC<Props> = ({
             <Popover.Target>
                 <TextInput
                     size="xs"
+                    data-autofocus={autoFocus || undefined}
                     onClick={disabled ? undefined : open}
                     placeholder={placeholder}
                     value={

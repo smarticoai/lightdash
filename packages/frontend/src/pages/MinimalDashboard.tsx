@@ -15,6 +15,7 @@ import { IconLayoutDashboard } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { Responsive, WidthProvider, type Layout } from 'react-grid-layout';
 import { useParams } from 'react-router';
+import ScreenshotProgressIndicator from '../components/common/ScreenshotProgressIndicator';
 import ScreenshotReadyIndicator from '../components/common/ScreenshotReadyIndicator';
 import SuboptimalState from '../components/common/SuboptimalState/SuboptimalState';
 import ChartTile from '../components/DashboardTiles/DashboardChartTile';
@@ -33,6 +34,7 @@ import { useDateZoomGranularitySearch } from '../hooks/useExplorerRoute';
 import useSearchParams from '../hooks/useSearchParams';
 import DashboardProvider from '../providers/Dashboard/DashboardProvider';
 import useDashboardContext from '../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../providers/Dashboard/useDashboardTileStatusContext';
 import '../styles/react-grid.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -68,17 +70,26 @@ const MinimalDashboardContent: FC<MinimalDashboardContentProps> = ({
     const setDashboardTiles = useDashboardContext((c) => c.setDashboardTiles);
     const setDashboardTabs = useDashboardContext((c) => c.setDashboardTabs);
 
-    const isReadyForScreenshot = useDashboardContext(
+    const isReadyForScreenshot = useDashboardTileStatusContext(
         (c) => c.isReadyForScreenshot,
     );
-    const expectedScreenshotTilesCount = useDashboardContext(
+    const expectedScreenshotTilesCount = useDashboardTileStatusContext(
         (c) => c.expectedScreenshotTilesCount,
     );
-    const screenshotReadyTilesCount = useDashboardContext(
+    const screenshotReadyTilesCount = useDashboardTileStatusContext(
         (c) => c.screenshotReadyTilesCount,
     );
-    const screenshotErroredTilesCount = useDashboardContext(
+    const screenshotErroredTilesCount = useDashboardTileStatusContext(
         (c) => c.screenshotErroredTilesCount,
+    );
+    const expectedScreenshotTileUuids = useDashboardTileStatusContext(
+        (c) => c.expectedScreenshotTileUuids,
+    );
+    const screenshotReadyTileUuids = useDashboardTileStatusContext(
+        (c) => c.screenshotReadyTileUuids,
+    );
+    const screenshotErroredTileUuids = useDashboardTileStatusContext(
+        (c) => c.screenshotErroredTileUuids,
     );
 
     useEffect(() => {
@@ -174,6 +185,11 @@ const MinimalDashboardContent: FC<MinimalDashboardContentProps> = ({
                 </ResponsiveGridLayout>
             )}
 
+            <ScreenshotProgressIndicator
+                expectedTileUuids={expectedScreenshotTileUuids}
+                readyTileUuids={screenshotReadyTileUuids}
+                erroredTileUuids={screenshotErroredTileUuids}
+            />
             {isReadyForScreenshot && (
                 <ScreenshotReadyIndicator
                     tilesTotal={expectedScreenshotTilesCount}
@@ -213,14 +229,19 @@ const MinimalDashboard: FC = () => {
         data: dashboard,
         isError: isDashboardError,
         error: dashboardError,
-    } = useDashboardQuery(dashboardUuid);
+    } = useDashboardQuery({
+        uuidOrSlug: dashboardUuid,
+        projectUuid,
+    });
 
     const [activeTab, setActiveTab] = useState<DashboardTab | null>(null);
 
     useEffect(() => {
+        // Minimal/embed renders are always treated as view mode — hidden tabs
+        // should not be selectable. Fall back to the first visible tab.
+        const visibleTabs = dashboard?.tabs.filter((tab) => !tab.hidden) ?? [];
         const matchedTab =
-            dashboard?.tabs.find((tab) => tab.uuid === tabUuid) ??
-            dashboard?.tabs[0];
+            visibleTabs.find((tab) => tab.uuid === tabUuid) ?? visibleTabs[0];
         setActiveTab(matchedTab || null);
     }, [tabUuid, dashboard?.tabs]);
 
@@ -355,6 +376,7 @@ const MinimalDashboard: FC = () => {
 
     return (
         <DashboardProvider
+            projectUuid={projectUuid}
             schedulerFilters={schedulerFilters}
             schedulerParameters={schedulerParameters}
             schedulerTabsSelected={schedulerTabsSelected}

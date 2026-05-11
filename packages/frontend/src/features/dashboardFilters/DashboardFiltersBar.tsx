@@ -11,8 +11,9 @@ import {
     IconFilter,
 } from '@tabler/icons-react';
 import { type FC, type ReactNode } from 'react';
-import PinnedParameters from '../../components/PinnedParameters';
 import MantineIcon from '../../components/common/MantineIcon';
+import PinnedParameters from '../../components/PinnedParameters';
+import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import { DateZoom } from '../dateZoom';
 import { Parameters } from '../parameters';
 import FilterGroupSeparator from './FilterGroupSeparator';
@@ -31,6 +32,8 @@ type Props = {
     missingRequiredParameters: string[];
     pinnedParameters: string[];
     onParameterPin: (parameterKey: string) => void;
+    parameterOrder: string[];
+    onParameterReorder: (order: string[]) => void;
     isDateZoomDisabled: boolean;
     onCollapse: () => void;
     // SMR-START
@@ -52,6 +55,8 @@ export const DashboardFiltersBar: FC<Props> = ({
     missingRequiredParameters,
     pinnedParameters,
     onParameterPin,
+    parameterOrder,
+    onParameterReorder,
     isDateZoomDisabled,
     onCollapse,
     // SMR-START
@@ -59,6 +64,14 @@ export const DashboardFiltersBar: FC<Props> = ({
     onAiAnalysisClick,
     // SMR-END
 }) => {
+    const isAddFilterDisabled = useDashboardContext(
+        (c) => c.isAddFilterDisabled,
+    );
+    const allFilters = useDashboardContext((c) => c.allFilters);
+    const hasFilters =
+        allFilters.dimensions.length > 0 ||
+        allFilters.metrics.length > 0 ||
+        allFilters.tableCalculations.length > 0;
     const hasParameters = Object.keys(parameters).length > 0;
 
     const parametersSeparator: ReactNode = (
@@ -78,6 +91,8 @@ export const DashboardFiltersBar: FC<Props> = ({
         />
     );
 
+    const renderFilters = !isAddFilterDisabled || isEditMode || hasFilters;
+
     return (
         <div>
             <Group
@@ -91,20 +106,22 @@ export const DashboardFiltersBar: FC<Props> = ({
                 <Group justify="apart" align="flex-start" wrap="nowrap" grow>
                     {hasTilesThatSupportFilters && (
                         <Group align="flex-start" gap="xs" wrap="wrap">
-                            <FilterGroupSeparator
-                                icon={IconFilter}
-                                tooltipLabel={
-                                    <div>
-                                        <Text fw={500} fz="xs">
-                                            Filters
-                                        </Text>
-                                        <Text fz="xs">
-                                            Refine your dashboard by choosing
-                                            which data to see.
-                                        </Text>
-                                    </div>
-                                }
-                            />
+                            {renderFilters && (
+                                <FilterGroupSeparator
+                                    icon={IconFilter}
+                                    tooltipLabel={
+                                        <div>
+                                            <Text fw={500} fz="xs">
+                                                Filters
+                                            </Text>
+                                            <Text fz="xs">
+                                                Refine your dashboard by
+                                                choosing which data to see.
+                                            </Text>
+                                        </div>
+                                    }
+                                />
+                            )}
                             <DashboardFilters
                                 isEditMode={isEditMode}
                                 activeTabUuid={activeTabUuid}
@@ -112,7 +129,9 @@ export const DashboardFiltersBar: FC<Props> = ({
 
                             {hasDashboardTiles && hasParameters && (
                                 <>
-                                    <Divider orientation="vertical" />
+                                    {renderFilters && (
+                                        <Divider orientation="vertical" />
+                                    )}
 
                                     <Parameters
                                         isEditMode={isEditMode}
@@ -126,6 +145,8 @@ export const DashboardFiltersBar: FC<Props> = ({
                                         }
                                         pinnedParameters={pinnedParameters}
                                         onParameterPin={onParameterPin}
+                                        parameterOrder={parameterOrder}
+                                        onParameterReorder={onParameterReorder}
                                         separator={parametersSeparator}
                                     />
                                     <PinnedParameters isEditMode={isEditMode} />

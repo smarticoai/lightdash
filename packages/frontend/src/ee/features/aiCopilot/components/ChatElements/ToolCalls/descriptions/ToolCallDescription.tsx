@@ -13,6 +13,7 @@ import {
     type ToolFindExploresArgsV2,
     type ToolFindExploresArgsV3,
     type ToolFindFieldsArgs,
+    type ToolGetDashboardChartsArgs,
     type ToolName,
     type ToolRunQueryArgs,
     type ToolSearchFieldValuesArgs,
@@ -21,6 +22,7 @@ import type { FC } from 'react';
 import type { ToolCallSummary } from '../utils/types';
 import { AiChartGenerationToolCallDescription } from './AiChartGenerationToolCallDescription';
 import { ContentSearchToolCallDescription } from './ContentSearchToolCallDescription';
+import { DashboardChartsToolCallDescription } from './DashboardChartsToolCallDescription';
 import { DashboardToolCallDescription } from './DashboardToolCallDescription';
 import { ExploreToolCallDescription } from './ExploreToolCallDescription';
 import { FieldSearchToolCallDescription } from './FieldSearchToolCallDescription';
@@ -95,6 +97,18 @@ export const ToolCallDescription: FC<{
                     searchQueries={findChartsToolArgs.chartSearchQueries}
                 />
             );
+        case 'getDashboardCharts':
+            const getDashboardChartsArgs =
+                toolCall.toolArgs as ToolGetDashboardChartsArgs;
+            return (
+                <DashboardChartsToolCallDescription
+                    dashboardName={
+                        getDashboardChartsArgs.dashboardName ??
+                        getDashboardChartsArgs.dashboardUuid
+                    }
+                    page={getDashboardChartsArgs.page ?? null}
+                />
+            );
         case 'generateDashboard':
             const dashboardToolArgs = toolCall.toolArgs as ToolDashboardArgs;
             return (
@@ -128,6 +142,7 @@ export const ToolCallDescription: FC<{
             );
         case 'improveContext':
         case 'proposeChange':
+        case 'runSavedChart':
             return <> </>;
         default:
             return assertUnreachable(toolName, `Unknown tool name ${toolName}`);

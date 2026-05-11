@@ -3,6 +3,7 @@ import { useElementSize } from '@mantine/hooks';
 import { memo, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { Provider } from 'react-redux';
 import { useParams } from 'react-router';
+import ScreenshotProgressIndicator from '../components/common/ScreenshotProgressIndicator';
 import ScreenshotReadyIndicator from '../components/common/ScreenshotReadyIndicator';
 import LightdashVisualization from '../components/LightdashVisualization';
 import VisualizationProvider from '../components/LightdashVisualization/VisualizationProvider';
@@ -53,6 +54,7 @@ const MinimalExplorerContent = memo(() => {
             ...queryResults,
             metricQuery: query.data?.metricQuery,
             fields: query.data?.fields,
+            resolvedTimezone: query.data?.resolvedTimezone ?? undefined,
         }),
         [queryResults, query.data],
     );
@@ -127,6 +129,19 @@ const MinimalExplorerContent = memo(() => {
                     </Box>
                 </MantineProvider>
 
+                <ScreenshotProgressIndicator
+                    expectedTileUuids={[savedChart.uuid]}
+                    readyTileUuids={
+                        isScreenshotReady && !hasQueryError
+                            ? [savedChart.uuid]
+                            : []
+                    }
+                    erroredTileUuids={
+                        isScreenshotReady && hasQueryError
+                            ? [savedChart.uuid]
+                            : []
+                    }
+                />
                 {isScreenshotReady && (
                     <ScreenshotReadyIndicator
                         tilesTotal={1}
@@ -145,11 +160,13 @@ const MinimalSavedExplorer: FC<Props> = ({
 }) => {
     const params = useParams<{
         savedQueryUuid: string;
+        projectUuid: string;
     }>();
     const savedQueryUuid = queryUuidProps || params.savedQueryUuid!;
 
     const { data, isInitialLoading, isError, error } = useSavedQuery({
-        id: savedQueryUuid,
+        uuidOrSlug: savedQueryUuid,
+        projectUuid: params.projectUuid,
     });
 
     // Create store once with useState

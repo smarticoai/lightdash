@@ -1,7 +1,14 @@
+import type { ApiSuccess } from './api/success';
+import type { KnexPaginatedData } from './knex-paginate';
 import type { ChartKind } from './savedCharts';
 
 export type ValidationResponseBase = {
-    validationId: number;
+    validationUuid: string;
+    /**
+     * @deprecated Use `validationUuid`. The integer `validationId` is null
+     * for validations created after the UUID migration (PROD-7386).
+     */
+    validationId: number | null;
     createdAt: Date;
     name: string;
     error: string;
@@ -80,18 +87,33 @@ export type CreateValidation =
     | CreateChartValidation
     | CreateDashboardValidation;
 
+/** @deprecated Use ApiPaginatedValidateResponse with GET /validate/list instead */
 export type ApiValidateResponse = {
     status: 'ok';
     results: ValidationResponse[];
 };
 
+export type ApiPaginatedValidateResponse = ApiSuccess<
+    KnexPaginatedData<ValidationResponse[]>
+>;
+
+export type ApiSingleValidationResponse = ApiSuccess<ValidationResponse>;
+
 export type ApiValidationDismissResponse = {
     status: 'ok';
 };
 
+export type ApiChartValidationResponse = ApiSuccess<{
+    errors: CreateChartValidation[];
+}>;
+
+export type ApiDashboardValidationResponse = ApiSuccess<{
+    errors: CreateDashboardValidation[];
+}>;
+
 export type ValidationSummary = Pick<
     ValidationResponse,
-    'error' | 'createdAt' | 'validationId'
+    'error' | 'createdAt' | 'validationUuid' | 'validationId'
 >;
 
 export enum ValidationErrorType {
@@ -107,6 +129,7 @@ export enum ValidationErrorType {
 
 export enum DashboardFilterValidationErrorType {
     FieldDoesNotExist = 'field_does_not_exist',
+    FieldTableMismatch = 'field_table_mismatch',
     TableNotUsedByAnyChart = 'table_not_used_by_any_chart',
     TableDoesNotExist = 'table_does_not_exist',
 }
@@ -131,6 +154,24 @@ export const isDashboardValidationError = (
     error: ValidationResponse | CreateValidation,
 ): error is ValidationErrorDashboardResponse | CreateDashboardValidation =>
     error.source === ValidationSourceType.Dashboard;
+
+/**
+ * Checks if a dashboard validation error is fixable via rename.
+ * Fixable: FieldDoesNotExist (field renamed), TableDoesNotExist (model renamed),
+ * FieldTableMismatch (field doesn't match table after model rename).
+ */
+export const isFixableDashboardValidationError = (
+    error: ValidationResponse,
+): error is ValidationErrorDashboardResponse =>
+    isDashboardValidationError(error) &&
+    !!error.dashboardUuid &&
+    !!error.dashboardFilterErrorType &&
+    (error.dashboardFilterErrorType ===
+        DashboardFilterValidationErrorType.FieldDoesNotExist ||
+        error.dashboardFilterErrorType ===
+            DashboardFilterValidationErrorType.TableDoesNotExist ||
+        error.dashboardFilterErrorType ===
+            DashboardFilterValidationErrorType.FieldTableMismatch);
 
 export enum ValidationTarget {
     CHARTS = 'charts',

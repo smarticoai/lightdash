@@ -1,6 +1,7 @@
 import {
     JWT_HEADER_NAME,
     LightdashRequestMethodHeader,
+    LightdashSdkVersionHeader,
     LightdashVersionHeader,
     RequestMethod,
     type AnyType,
@@ -16,23 +17,37 @@ import { smrIsEmbeddedMode, smrReplaceRecursivelyCurrency } from './utils/smarti
 // TODO: import from common or fix the instantiation of the request module
 const LIGHTDASH_SDK_INSTANCE_URL_LOCAL_STORAGE_KEY =
     '__lightdash_sdk_instance_url';
+const LIGHTDASH_SDK_VERSION_LOCAL_STORAGE_KEY = '__lightdash_sdk_version';
+const SMARTICO_JWT_HEADER_NAME = 'jwt';
 
 export const BASE_API_URL =
     import.meta.env.VITEST === 'true'
         ? `http://test.lightdash/`
         : import.meta.env.BASE_URL;
 
-const defaultHeaders = {
-    'Content-Type': 'application/json',
-    [LightdashRequestMethodHeader]: RequestMethod.WEB_APP,
-    [LightdashVersionHeader]: __APP_VERSION__,
-};
+const getDefaultHeaders = (): Record<string, string> => {
+    const sdkVersion = getFromInMemoryStorage<string>(
+        LIGHTDASH_SDK_VERSION_LOCAL_STORAGE_KEY,
+    );
 
-// SMR-START
-if (smrIsEmbeddedMode()) {
-    (defaultHeaders as any).JWT = 'token ' + (window as any)._smr_token;
-}
-// SMR-END
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        [LightdashRequestMethodHeader]: sdkVersion
+            ? RequestMethod.SDK
+            : RequestMethod.WEB_APP,
+        [LightdashVersionHeader]: __APP_VERSION__,
+    };
+
+    if (sdkVersion) {
+        headers[LightdashSdkVersionHeader] = sdkVersion;
+    }
+
+    if (smrIsEmbeddedMode()) {
+        headers[SMARTICO_JWT_HEADER_NAME] = `token ${(window as AnyType)._smr_token}`;
+    }
+
+    return headers;
+};
 
 const isSafeToAddEmbedHeader = (
     headers: Record<string, string> | undefined,
@@ -50,7 +65,7 @@ const finalizeHeaders = (
     sentryTrace: string | undefined,
 ): Record<string, string> => {
     const requestHeaders: Record<string, string> = {
-        ...defaultHeaders,
+        ...getDefaultHeaders(),
         ...headers,
     };
 

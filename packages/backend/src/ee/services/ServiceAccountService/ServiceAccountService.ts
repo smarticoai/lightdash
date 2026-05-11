@@ -8,11 +8,9 @@ import {
     ServiceAccount,
     ServiceAccountScope,
     ServiceAccountWithToken,
-    SessionServiceAccount,
     SessionUser,
     UnexpectedDatabaseError,
 } from '@lightdash/common';
-
 import { LightdashAnalytics } from '../../../analytics/LightdashAnalytics';
 import { LightdashConfig } from '../../../config/parseConfig';
 import { BaseService } from '../../../services/BaseService';
@@ -29,6 +27,11 @@ type ServiceAccountServiceArguments = {
     serviceAccountModel: ServiceAccountModel;
     commercialFeatureFlagModel: CommercialFeatureFlagModel;
 };
+
+function isSameMinute(a: Date | null, b: Date): boolean {
+    if (!a) return false;
+    return Math.floor(a.getTime() / 60000) === Math.floor(b.getTime() / 60000);
+}
 
 export class ServiceAccountService extends BaseService {
     private readonly lightdashConfig: LightdashConfig;
@@ -52,12 +55,13 @@ export class ServiceAccountService extends BaseService {
         this.commercialFeatureFlagModel = commercialFeatureFlagModel;
     }
 
-    private static throwForbiddenErrorOnNoPermission(user: SessionUser) {
+    private throwForbiddenErrorOnNoPermission(user: SessionUser) {
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
                 subject('Organization', {
-                    organizationUuid: user.organizationUuid,
+                    organizationUuid: user.organizationUuid!,
                 }),
             )
         ) {
@@ -75,7 +79,7 @@ export class ServiceAccountService extends BaseService {
         prefix?: string;
     }): Promise<ServiceAccount> {
         try {
-            ServiceAccountService.throwForbiddenErrorOnNoPermission(user);
+            this.throwForbiddenErrorOnNoPermission(user);
             const token = await this.serviceAccountModel.create({
                 user,
                 data: {
@@ -83,6 +87,7 @@ export class ServiceAccountService extends BaseService {
                     expiresAt: tokenDetails.expiresAt,
                     description: tokenDetails.description,
                     scopes: tokenDetails.scopes,
+                    roleUuid: tokenDetails.roleUuid,
                 },
                 prefix,
             });
@@ -95,7 +100,10 @@ export class ServiceAccountService extends BaseService {
             });
             return token;
         } catch (error) {
-            if (error instanceof ForbiddenError) {
+            if (
+                error instanceof ForbiddenError ||
+                error instanceof ParameterError
+            ) {
                 throw error;
             }
             this.logger.error(
@@ -116,7 +124,7 @@ export class ServiceAccountService extends BaseService {
         tokenUuid: string;
     }): Promise<void> {
         try {
-            ServiceAccountService.throwForbiddenErrorOnNoPermission(user);
+            this.throwForbiddenErrorOnNoPermission(user);
             const organizationUuid = user.organizationUuid as string;
             // get by uuid to check if token exists
             const token =
@@ -167,7 +175,7 @@ export class ServiceAccountService extends BaseService {
         update: { expiresAt: Date };
         prefix?: string;
     }): Promise<ServiceAccountWithToken> {
-        ServiceAccountService.throwForbiddenErrorOnNoPermission(user);
+        this.throwForbiddenErrorOnNoPermission(user);
 
         if (update.expiresAt.getTime() < Date.now()) {
             throw new ParameterError('Expire time must be in the future');
@@ -221,7 +229,7 @@ export class ServiceAccountService extends BaseService {
         user: SessionUser;
         tokenUuid: string;
     }): Promise<ServiceAccount> {
-        ServiceAccountService.throwForbiddenErrorOnNoPermission(user);
+        this.throwForbiddenErrorOnNoPermission(user);
 
         // get by uuid to check if token exists
         const existingToken =
@@ -241,7 +249,7 @@ export class ServiceAccountService extends BaseService {
         scopes: ServiceAccountScope[],
     ): Promise<ServiceAccount[]> {
         try {
-            ServiceAccountService.throwForbiddenErrorOnNoPermission(user);
+            this.throwForbiddenErrorOnNoPermission(user);
             const organizationUuid = user.organizationUuid as string;
             const tokens = await this.serviceAccountModel.getAllForOrganization(
                 organizationUuid,
@@ -269,7 +277,7 @@ export class ServiceAccountService extends BaseService {
             path: string;
             routePath: string;
         },
-    ): Promise<SessionServiceAccount | null> {
+    ): Promise<ServiceAccount | null> {
         // return null if token is empty
         if (token === '') return null;
 
@@ -281,6 +289,13 @@ export class ServiceAccountService extends BaseService {
                     return null;
                 }
 
+                this.logger.info('SCIM: access token authenticated', {
+                    serviceAccountUuid: dbToken.uuid,
+                    organizationUuid: dbToken.organizationUuid,
+                    description: dbToken.description,
+                    requestMethod: request.method,
+                    requestRoutePath: request.routePath,
+                });
                 this.analytics.track<ScimAccessTokenAuthenticationEvent>({
                     event: 'scim_access_token.authenticated',
                     anonymousId: LightdashAnalytics.anonymousId,
@@ -291,12 +306,11 @@ export class ServiceAccountService extends BaseService {
                         requestRoutePath: request.routePath,
                     },
                 });
-                // Update last used date
-                await this.serviceAccountModel.updateUsedDate(dbToken.uuid);
-                // finally return organization uuid
-                return {
-                    organizationUuid: dbToken.organizationUuid,
-                };
+                // Update last used date (throttled to once per minute)
+                if (!isSameMinute(dbToken.lastUsedAt, new Date())) {
+                    await this.serviceAccountModel.updateUsedDate(dbToken.uuid);
+                }
+                return dbToken;
             }
         } catch (error) {
             return null;
@@ -320,8 +334,10 @@ export class ServiceAccountService extends BaseService {
 
                 // TODO add analytics
 
-                // Update last used date
-                await this.serviceAccountModel.updateUsedDate(dbToken.uuid);
+                // Update last used date (throttled to once per minute)
+                if (!isSameMinute(dbToken.lastUsedAt, new Date())) {
+                    await this.serviceAccountModel.updateUsedDate(dbToken.uuid);
+                }
                 // finally return organization uuid
                 return dbToken;
             }

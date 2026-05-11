@@ -2,9 +2,11 @@ import {
     AnyType,
     assertUnreachable,
     isEmailTarget,
+    isGoogleChatTarget,
     isMsTeamsTarget,
     isSlackTarget,
     SchedulerEmailTarget,
+    SchedulerGoogleChatTarget,
     SchedulerMsTeamsTarget,
     SchedulerSlackTarget,
 } from '@lightdash/common';
@@ -14,6 +16,8 @@ export const SchedulerTableName = 'scheduler';
 export const SchedulerSlackTargetTableName = 'scheduler_slack_target';
 export const SchedulerEmailTargetTableName = 'scheduler_email_target';
 export const SchedulerMsTeamsTargetTableName = 'scheduler_msteams_target';
+export const SchedulerGoogleChatTargetTableName =
+    'scheduler_google_chat_target';
 
 export const SchedulerLogTableName = 'scheduler_log';
 
@@ -29,6 +33,7 @@ export type SchedulerDb = {
     timezone: string | null;
     saved_chart_uuid: string | null;
     dashboard_uuid: string | null;
+    saved_sql_uuid: string | null;
     options: Record<string, AnyType>;
     filters: string | null;
     parameters: string | null;
@@ -38,15 +43,24 @@ export type SchedulerDb = {
     notification_frequency: string | null;
     selected_tabs: string[] | null;
     include_links: boolean;
+    deleted_at: Date | null;
+    deleted_by_user_uuid: string | null;
 };
 
 export type ChartSchedulerDb = SchedulerDb & {
     saved_chart_uuid: string;
     dashboard_uuid: null;
+    saved_sql_uuid: null;
 };
 export type DashboardSchedulerDB = SchedulerDb & {
     saved_chart_uuid: null;
     dashboard_uuid: string;
+    saved_sql_uuid: null;
+};
+export type SqlChartSchedulerDb = SchedulerDb & {
+    saved_chart_uuid: null;
+    dashboard_uuid: null;
+    saved_sql_uuid: string;
 };
 
 export type SchedulerSlackTargetDb = {
@@ -58,6 +72,13 @@ export type SchedulerSlackTargetDb = {
 };
 export type SchedulerMsTeamsTargetDb = {
     scheduler_msteams_target_uuid: string;
+    created_at: Date;
+    updated_at: Date;
+    scheduler_uuid: string;
+    webhook: string;
+};
+export type SchedulerGoogleChatTargetDb = {
+    scheduler_google_chat_target_uuid: string;
     created_at: Date;
     updated_at: Date;
     scheduler_uuid: string;
@@ -75,8 +96,8 @@ export type SchedulerEmailTargetDb = {
 export type SchedulerTable = Knex.CompositeTableType<
     SchedulerDb,
     Omit<
-        ChartSchedulerDb | DashboardSchedulerDB,
-        'scheduler_uuid' | 'created_at'
+        ChartSchedulerDb | DashboardSchedulerDB | SqlChartSchedulerDb,
+        'scheduler_uuid' | 'created_at' | 'deleted_at' | 'deleted_by_user_uuid'
     >,
     | Pick<
           SchedulerDb,
@@ -98,6 +119,7 @@ export type SchedulerTable = Knex.CompositeTableType<
     | Pick<SchedulerDb, 'updated_at' | 'enabled'>
     | Pick<SchedulerDb, 'created_by' | 'updated_at'>
     | Pick<SchedulerDb, 'cron'>
+    | Pick<SchedulerDb, 'deleted_at' | 'deleted_by_user_uuid'>
 >;
 
 export type SchedulerSlackTargetTable = Knex.CompositeTableType<
@@ -115,6 +137,15 @@ export type SchedulerMsTeamsTargetTable = Knex.CompositeTableType<
     Pick<SchedulerMsTeamsTargetDb, 'webhook' | 'updated_at'>
 >;
 
+export type SchedulerGoogleChatTargetTable = Knex.CompositeTableType<
+    SchedulerGoogleChatTargetDb,
+    Omit<
+        SchedulerGoogleChatTargetDb,
+        'scheduler_google_chat_target_uuid' | 'created_at'
+    >,
+    Pick<SchedulerGoogleChatTargetDb, 'webhook' | 'updated_at'>
+>;
+
 export type SchedulerEmailTargetTable = Knex.CompositeTableType<
     SchedulerEmailTargetDb,
     Omit<SchedulerEmailTargetDb, 'scheduler_email_target_uuid' | 'created_at'>,
@@ -122,6 +153,7 @@ export type SchedulerEmailTargetTable = Knex.CompositeTableType<
 >;
 
 export type SchedulerLogDb = {
+    scheduler_log_uuid: string;
     task: string;
     scheduler_uuid?: string;
     job_id: string;
@@ -136,22 +168,29 @@ export type SchedulerLogDb = {
 
 export type SchedulerLogTable = Knex.CompositeTableType<
     SchedulerLogDb,
-    Omit<SchedulerLogDb, 'created_at'>
+    Omit<SchedulerLogDb, 'created_at' | 'scheduler_log_uuid'>
 >;
 
 export const getSchedulerTargetType = (
     target:
         | SchedulerSlackTarget
         | SchedulerEmailTarget
-        | SchedulerMsTeamsTarget,
+        | SchedulerMsTeamsTarget
+        | SchedulerGoogleChatTarget,
 ): {
     schedulerTargetId: string;
-    type: 'slack' | 'email' | 'msteams';
+    type: 'slack' | 'email' | 'msteams' | 'googlechat';
 } => {
     if (isSlackTarget(target)) {
         return {
             schedulerTargetId: target.schedulerSlackTargetUuid,
             type: 'slack',
+        };
+    }
+    if (isGoogleChatTarget(target)) {
+        return {
+            schedulerTargetId: target.schedulerGoogleChatTargetUuid,
+            type: 'googlechat',
         };
     }
     if (isMsTeamsTarget(target)) {

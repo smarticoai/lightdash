@@ -11,8 +11,8 @@ import {
     Stack,
     Switch,
     Text,
-    TextInput,
     Textarea,
+    TextInput,
     Tooltip,
 } from '@mantine-8/core';
 import { useForm } from '@mantine/form';
@@ -125,23 +125,17 @@ const UserAttributeModal: FC<{
         setChecked(false);
         if (onClose) onClose();
     };
-    const handleSubmit = async (data: CreateUserAttribute) => {
+    const handleSubmit = (data: CreateUserAttribute) => {
         if (userAttribute?.uuid) {
-            await updateUserAttribute(data);
+            updateUserAttribute(data);
         } else {
-            await createUserAttribute(data);
+            createUserAttribute(data);
         }
         handleClose();
     };
 
-    if (userGroupsFeatureFlagQuery.isError) {
-        console.error(userGroupsFeatureFlagQuery.error);
-        throw new Error('Error fetching user groups feature flag');
-    }
-
     const isGroupManagementEnabled =
-        userGroupsFeatureFlagQuery.isSuccess &&
-        userGroupsFeatureFlagQuery.data.enabled;
+        userGroupsFeatureFlagQuery.data?.enabled ?? false;
 
     const { data: orgUsers } = useOrganizationUsers();
     const { data: groups } = useOrganizationGroups(

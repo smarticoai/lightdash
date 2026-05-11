@@ -20,7 +20,7 @@ const applyOrganizationMemberDynamicAbilities = ({
     }
 };
 
-const applyOrganizationMemberStaticAbilities: Record<
+export const applyOrganizationMemberStaticAbilities: Record<
     OrganizationMemberRole,
     (
         member: OrganizationMemberAbilitiesArgs['member'],
@@ -42,11 +42,11 @@ const applyOrganizationMemberStaticAbilities: Record<
         applyOrganizationMemberStaticAbilities.member(member, { can });
         can('view', 'Dashboard', {
             organizationUuid: member.organizationUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('view', 'SavedChart', {
             organizationUuid: member.organizationUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('view', 'Dashboard', {
             organizationUuid: member.organizationUuid,
@@ -62,9 +62,19 @@ const applyOrganizationMemberStaticAbilities: Record<
         });
         can('view', 'Space', {
             organizationUuid: member.organizationUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('view', 'Space', {
+            organizationUuid: member.organizationUuid,
+            access: {
+                $elemMatch: { userUuid: member.userUuid },
+            },
+        });
+        can('view', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+            inheritsFromOrgOrProject: true,
+        });
+        can('view', 'DataApp', {
             organizationUuid: member.organizationUuid,
             access: {
                 $elemMatch: { userUuid: member.userUuid },
@@ -172,6 +182,38 @@ const applyOrganizationMemberStaticAbilities: Record<
                 },
             },
         });
+        can('manage', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+            access: {
+                $elemMatch: {
+                    userUuid: member.userUuid,
+                    role: SpaceMemberRole.EDITOR,
+                },
+            },
+        });
+        can('manage', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+            access: {
+                $elemMatch: {
+                    userUuid: member.userUuid,
+                    role: SpaceMemberRole.ADMIN,
+                },
+            },
+        });
+        // Create personal data apps; once created, the user can also view
+        // and manage their own. Moving an app into a space is gated
+        // separately by the target space's manage rule.
+        can('create', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('view', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+            createdByUserUuid: member.userUuid,
+        });
+        can('manage', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+            createdByUserUuid: member.userUuid,
+        });
 
         can('manage', 'Space', {
             organizationUuid: member.organizationUuid,
@@ -196,7 +238,7 @@ const applyOrganizationMemberStaticAbilities: Record<
         });
         can('manage', 'Space', {
             organizationUuid: member.organizationUuid,
-            isPrivate: false,
+            inheritsFromOrgOrProject: true,
         });
         can('create', 'Space', {
             organizationUuid: member.organizationUuid,
@@ -223,10 +265,16 @@ const applyOrganizationMemberStaticAbilities: Record<
     },
     developer(member, { can }) {
         applyOrganizationMemberStaticAbilities.editor(member, { can });
+        can('manage', 'PreAggregation', {
+            organizationUuid: member.organizationUuid,
+        });
         can('manage', 'VirtualView', {
             organizationUuid: member.organizationUuid,
         });
         can('manage', 'CustomSql', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'CustomFields', {
             organizationUuid: member.organizationUuid,
         });
         can('manage', 'SqlRunner', {
@@ -269,6 +317,11 @@ const applyOrganizationMemberStaticAbilities: Record<
         can('update', 'Project', {
             organizationUuid: member.organizationUuid,
         });
+        can('manage', 'DeployProject', {
+            organizationUuid: member.organizationUuid,
+            type: ProjectType.PREVIEW,
+            createdByUserUuid: member.userUuid,
+        });
         can('delete', 'Project', {
             organizationUuid: member.organizationUuid,
             type: ProjectType.PREVIEW,
@@ -292,6 +345,15 @@ const applyOrganizationMemberStaticAbilities: Record<
     },
     admin(member, { can }) {
         applyOrganizationMemberStaticAbilities.developer(member, { can });
+
+        can('manage', 'DataApp', {
+            organizationUuid: member.organizationUuid,
+        });
+
+        can('manage', 'ContentVerification', {
+            organizationUuid: member.organizationUuid,
+        });
+
         can('manage', 'Dashboard', {
             organizationUuid: member.organizationUuid,
         });
@@ -305,6 +367,7 @@ const applyOrganizationMemberStaticAbilities: Record<
             organizationUuid: member.organizationUuid,
             type: { $in: [ProjectType.DEFAULT, ProjectType.PREVIEW] },
         });
+
         can('delete', 'Project', {
             organizationUuid: member.organizationUuid,
         });
@@ -340,6 +403,19 @@ const applyOrganizationMemberStaticAbilities: Record<
         });
         can('manage', 'ScheduledDeliveries', {
             organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'DeletedContent', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'GitIntegration', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('manage', 'DeployProject', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('impersonate', 'User', {
+            organizationUuid: member.organizationUuid,
+            isActive: true,
         });
     },
 };

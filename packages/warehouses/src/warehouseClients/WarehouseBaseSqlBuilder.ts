@@ -1,4 +1,5 @@
 import {
+    defaultNullSafeEqualSql,
     Metric,
     SupportedDbtAdapter,
     TimeIntervalUnit,
@@ -35,6 +36,10 @@ export default abstract class WarehouseBaseSqlBuilder implements WarehouseSqlBui
 
     getFloatingType(): string {
         return 'FLOAT';
+    }
+
+    getNullSafeEqualSql(left: string, right: string): string {
+        return defaultNullSafeEqualSql(left, right);
     }
 
     getMetricSql(sql: string, metric: Metric): string {
@@ -100,5 +105,18 @@ export default abstract class WarehouseBaseSqlBuilder implements WarehouseSqlBui
     getMedianSql(valueSql: string): string {
         // Default: PostgreSQL/Redshift/Snowflake style
         return `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ${valueSql})`;
+    }
+
+    buildArray(elements: string[]): string {
+        // Default: PostgreSQL/Redshift style array construction
+        return `ARRAY[${elements.join(', ')}]`;
+    }
+
+    buildArrayAgg(expression: string, orderBy?: string): string {
+        // Default: PostgreSQL/Redshift style array aggregation
+        if (orderBy) {
+            return `ARRAY_AGG(${expression} ORDER BY ${orderBy})`;
+        }
+        return `ARRAY_AGG(${expression})`;
     }
 }

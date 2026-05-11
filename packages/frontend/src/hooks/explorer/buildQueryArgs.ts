@@ -29,8 +29,9 @@ export function buildQueryArgs(options: {
     viewModeQueryArgs?:
         | { chartUuid: string; context?: QueryExecutionContext }
         | { chartUuid: string; chartVersionUuid: string };
-    dateZoomGranularity?: DateGranularity;
+    dateZoomGranularity?: DateGranularity | string;
     minimal: boolean;
+    usePreAggregateCache?: boolean;
     savedChart: Pick<SavedChartDAO, 'chartConfig' | 'pivotConfig'>;
 }): QueryResultsProps | null {
     const {
@@ -63,13 +64,25 @@ export function buildQueryArgs(options: {
             items,
         );
     }
+
+    const pivotDimensions = options.savedChart.pivotConfig?.columns;
+
+    // View mode hits the saved-chart path (chartUuid) and respects the
+    // caller's cache flag. Edit mode hits the raw-query path, which must
+    // not be cached — the explore re-run is the user's signal to refetch.
+    const savedChartArgs = !isEditMode ? viewModeQueryArgs : undefined;
+
     return {
         projectUuid,
         tableId: tableName,
-        query: computedMetricQuery,
-        ...(isEditMode ? {} : viewModeQueryArgs),
+        query: {
+            ...computedMetricQuery,
+            pivotDimensions,
+        },
+        ...savedChartArgs,
         dateZoomGranularity,
-        invalidateCache: minimal,
+        invalidateCache: savedChartArgs ? minimal : true,
+        usePreAggregateCache: options.usePreAggregateCache,
         parameters: parameters || {},
         pivotConfiguration,
     };

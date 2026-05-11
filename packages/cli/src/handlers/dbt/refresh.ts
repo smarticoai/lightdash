@@ -69,7 +69,10 @@ export const getErrorStepsMessage = (steps: JobStep[]): string => {
 
 const REFETCH_JOB_INTERVAL = 3000;
 
-const getFinalJobState = async (jobUuid: string): Promise<Job> => {
+export const getFinalJobState = async (
+    jobUuid: string,
+    spinnerPrefix: string = 'Refreshing dbt project',
+): Promise<Job> => {
     const job = await getJobState(jobUuid);
 
     if (job.jobStatus === JobStatusType.DONE) {
@@ -79,10 +82,10 @@ const getFinalJobState = async (jobUuid: string): Promise<Job> => {
         throw new Error(getErrorStepsMessage(job.steps));
     }
     const spinner = GlobalState.getActiveSpinner();
-    spinner?.start(
-        `  Refreshing dbt project, ${getRunningStepsMessage(job.steps)}`,
+    spinner?.start(`  ${spinnerPrefix}, ${getRunningStepsMessage(job.steps)}`);
+    return delay(REFETCH_JOB_INTERVAL).then(() =>
+        getFinalJobState(jobUuid, spinnerPrefix),
     );
-    return delay(REFETCH_JOB_INTERVAL).then(() => getFinalJobState(jobUuid));
 };
 
 type RefreshHandlerOptions = {
@@ -113,6 +116,7 @@ export const refreshHandler = async (options: RefreshHandlerOptions) => {
     }
     const spinner = GlobalState.startSpinner(`  Refreshing dbt project`);
     try {
+        const refreshStartTime = Date.now();
         await LightdashAnalytics.track({
             event: 'refresh.started',
             properties: {
@@ -120,8 +124,8 @@ export const refreshHandler = async (options: RefreshHandlerOptions) => {
                 projectId: projectUuid,
             },
         });
-        const refreshResults = await refreshProject(projectUuid);
 
+        const refreshResults = await refreshProject(projectUuid);
         await getFinalJobState(refreshResults.jobUuid);
 
         await LightdashAnalytics.track({
@@ -129,6 +133,7 @@ export const refreshHandler = async (options: RefreshHandlerOptions) => {
             properties: {
                 executionId,
                 projectId: projectUuid,
+                durationMs: Date.now() - refreshStartTime,
             },
         });
         spinner.stop();

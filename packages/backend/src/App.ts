@@ -1,5 +1,3 @@
-// organize-imports-ignore
-// eslint-disable-next-line import/order
 import './sentry'; // Sentry has to be initialized before anything else
 import {
     Account,
@@ -19,23 +17,26 @@ import {
 import * as Sentry from '@sentry/node';
 import flash from 'connect-flash';
 import connectSessionKnex from 'connect-session-knex';
+import cors from 'cors';
+import { EventEmitter } from 'events';
 import express, { Express, NextFunction, Request, Response } from 'express';
 import expressSession from 'express-session';
 import expressStaticGzip from 'express-static-gzip';
 import helmet from 'helmet';
+import { produce } from 'immer';
 import knex, { Knex } from 'knex';
 import passport from 'passport';
 import refresh from 'passport-oauth2-refresh';
 import path from 'path';
+import qs from 'qs';
 import reDoc from 'redoc-express';
 import { URL } from 'url';
-import cors from 'cors';
-import { produce } from 'immer';
 import { LightdashAnalytics } from './analytics/LightdashAnalytics';
 import {
     ClientProviderMap,
     ClientRepository,
 } from './clients/ClientRepository';
+import { SlackClient } from './clients/Slack/SlackClient';
 import { LightdashConfig } from './config/parseConfig';
 import {
     apiKeyPassportStrategy,
@@ -50,6 +51,9 @@ import {
     oneLoginPassportStrategy,
     OpenIDClientOktaStrategy,
 } from './controllers/authentication';
+import { databricksPassportStrategy } from './controllers/authentication/strategies/databricksStrategy';
+import { slackPassportStrategy } from './controllers/authentication/strategies/slackStrategy';
+import { snowflakePassportStrategy } from './controllers/authentication/strategies/snowflakeStrategy';
 import { errorHandler, scimErrorHandler } from './errors';
 import { RegisterRoutes } from './generated/routes';
 import apiSpec from './generated/swagger.json';
@@ -58,14 +62,19 @@ import {
     expressWinstonMiddleware,
     expressWinstonPreResponseMiddleware,
 } from './logging/winston';
+import { sessionAccountMiddleware } from './middlewares/accountMiddleware';
+import { jwtAuthMiddleware } from './middlewares/jwtAuthMiddleware';
 import { ModelProviderMap, ModelRepository } from './models/ModelRepository';
 import { postHogClient } from './postHog';
+import PrometheusMetrics from './prometheus/PrometheusMetrics';
 import { apiV1Router } from './routers/apiV1Router';
+import { createAppPreviewRouter } from './routers/appPreviewRouter';
 import {
     oauthAuthorizationServerHandler,
     oauthProtectedResourceHandler,
 } from './routers/oauthRouter';
 import { SchedulerWorker } from './scheduler/SchedulerWorker';
+import { InstanceConfigurationService } from './services/InstanceConfigurationService/InstanceConfigurationService';
 import {
     OperationContext,
     ServiceProviderMap,
@@ -73,14 +82,6 @@ import {
 } from './services/ServiceRepository';
 import { UtilProviderMap, UtilRepository } from './utils/UtilRepository';
 import { VERSION } from './version';
-import PrometheusMetrics from './prometheus';
-import { snowflakePassportStrategy } from './controllers/authentication/strategies/snowflakeStrategy';
-import { databricksPassportStrategy } from './controllers/authentication/strategies/databricksStrategy';
-import { jwtAuthMiddleware } from './middlewares/jwtAuthMiddleware';
-import { InstanceConfigurationService } from './services/InstanceConfigurationService/InstanceConfigurationService';
-import { slackPassportStrategy } from './controllers/authentication/strategies/slackStrategy';
-import { SlackClient } from './clients/Slack/SlackClient';
-import { sessionAccountMiddleware } from './middlewares/accountMiddleware';
 import { jwtStrategy } from './controllers/authentication/strategies/jwtStrategy';
 
 // We need to override this interface to have our user typing
@@ -123,20 +124,27 @@ const schedulerWorkerFactory = (context: {
         unfurlService: context.serviceRepository.getUnfurlService(),
         csvService: context.serviceRepository.getCsvService(),
         dashboardService: context.serviceRepository.getDashboardService(),
+        deployService: context.serviceRepository.getDeployService(),
         projectService: context.serviceRepository.getProjectService(),
         schedulerService: context.serviceRepository.getSchedulerService(),
         validationService: context.serviceRepository.getValidationService(),
         userService: context.serviceRepository.getUserService(),
         emailClient: context.clients.getEmailClient(),
         googleDriveClient: context.clients.getGoogleDriveClient(),
-        s3Client: context.clients.getS3Client(),
+        fileStorageClient: context.clients.getFileStorageClient(),
         schedulerClient: context.clients.getSchedulerClient(),
         msTeamsClient: context.clients.getMsTeamsClient(),
+        googleChatClient: context.clients.getGoogleChatClient(),
         catalogService: context.serviceRepository.getCatalogService(),
         encryptionUtil: context.utils.getEncryptionUtil(),
         renameService: context.serviceRepository.getRenameService(),
         asyncQueryService: context.serviceRepository.getAsyncQueryService(),
         featureFlagService: context.serviceRepository.getFeatureFlagService(),
+        persistentDownloadFileService:
+            context.serviceRepository.getPersistentDownloadFileService(),
+        preAggregateModel: context.models.getPreAggregateModel(),
+        preAggregateMaterializationService:
+            context.serviceRepository.getPreAggregateMaterializationService(),
     });
 
 export type AppArguments = {
@@ -182,10 +190,13 @@ export default class App {
 
     private readonly customExpressMiddlewares: Array<(app: Express) => void>;
 
+    private readonly analyticsEventEmitter: EventEmitter;
+
     constructor(args: AppArguments) {
         this.lightdashConfig = args.lightdashConfig;
         this.port = args.port;
         this.environment = args.environment || 'production';
+        this.analyticsEventEmitter = new EventEmitter();
         this.analytics = new LightdashAnalytics({
             lightdashConfig: this.lightdashConfig,
             writeKey: this.lightdashConfig.rudder.writeKey || 'notrack',
@@ -197,6 +208,7 @@ export default class App {
                     this.lightdashConfig.rudder.writeKey &&
                     this.lightdashConfig.rudder.dataPlaneUrl,
             },
+            eventEmitter: this.analyticsEventEmitter,
         });
         this.database = knex(
             this.environment === 'production'
@@ -225,6 +237,7 @@ export default class App {
         this.prometheusMetrics = new PrometheusMetrics(
             this.lightdashConfig.prometheus,
         );
+
         this.serviceRepository = new ServiceRepository({
             serviceProviders: args.serviceProviders,
             context: new OperationContext({
@@ -245,6 +258,8 @@ export default class App {
     async start() {
         this.prometheusMetrics.start();
         this.prometheusMetrics.monitorDatabase(this.database);
+        this.prometheusMetrics.monitorPreAggregates(this.database);
+        this.prometheusMetrics.monitorEventMetrics(this.analyticsEventEmitter);
         // @ts-ignore
         // eslint-disable-next-line no-extend-native, func-names
         BigInt.prototype.toJSON = function () {
@@ -252,6 +267,12 @@ export default class App {
         };
 
         const expressApp = express();
+
+        // Increase query string array limit from default (20) to 100
+        // to support endpoints that accept large arrays (e.g. chart IDs)
+        expressApp.set('query parser', (str: string) =>
+            qs.parse(str, { arrayLimit: 100 }),
+        );
 
         // Slack must be initialized before our own middleware / routes, which cause the slack app to fail
         this.initSlack(expressApp).catch((e) => {
@@ -406,7 +427,7 @@ export default class App {
                         "'self'",
                         ...contentSecurityPolicyAllowedDomains,
                     ],
-                    'img-src': ["'self'", 'data:', 'https://*'],
+                    'img-src': ["'self'", 'data:', 'blob:', 'https://*'],
                     'frame-src': ["'self'", 'https://*'],
                     'frame-ancestors': [
                         "'self'",
@@ -475,12 +496,49 @@ export default class App {
 
         expressApp.use('/embed/*', helmet(helmetConfigForEmbeds));
 
+        expressApp.use('/api/v1/file/*', (_req, res, next) => {
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+            next();
+        });
+
         expressApp.use((req, res, next) => {
             // Permissions-Policy header that is not yet supported by helmet. More details here: https://github.com/helmetjs/helmet/issues/234
             res.setHeader('Permissions-Policy', 'camera=(), microphone=()');
             res.setHeader(LightdashVersionHeader, VERSION);
             next();
         });
+
+        // App runtime preview routes — stateless, no session/auth.
+        // Registered before session middleware so preview requests
+        // never touch the DB for session lookups.
+        // Always registered when S3 is configured so the preview router
+        // is available regardless of whether the feature is enabled via
+        // APPS_RUNTIME_ENABLED env var or the enable-data-apps feature flag.
+        if (this.lightdashConfig.appRuntime.s3) {
+            const analyticsModel = this.models.getAnalyticsModel();
+            expressApp.use(
+                '/api/apps',
+                createAppPreviewRouter(
+                    this.lightdashConfig.appRuntime,
+                    this.lightdashConfig.lightdashSecret,
+                    (p) => {
+                        void analyticsModel.addAppViewEvent(
+                            p.appUuid,
+                            p.userUuid,
+                        );
+                        this.analytics.track({
+                            event: 'data_app.view',
+                            userId: p.userUuid,
+                            properties: {
+                                organizationId: p.organizationUuid,
+                                projectId: p.projectUuid,
+                                appUuid: p.appUuid,
+                            },
+                        });
+                    },
+                ),
+            );
+        }
 
         expressApp.use(express.json());
         expressApp.use(express.urlencoded({ extended: false }));
@@ -798,17 +856,29 @@ export default class App {
                 id: user.userUuid,
                 organization: user.organizationUuid,
             });
+
+            // Fire-and-forget: run once-per-login setup tasks
+            void userService.onLogin(user).catch((err) => {
+                Logger.error('Failed to run onLogin tasks', err);
+            });
         });
 
         // Before each request handler we read `sess.passport.user` from the session store
         passport.deserializeUser(
             async (
+                req: express.Request,
                 passportUser: { id: string; organization: string },
-                done,
+                done: (err: unknown, user?: Express.User | false) => void,
             ) => {
-                // Convert to a full user profile
                 try {
-                    done(null, await userService.findSessionUser(passportUser));
+                    const sessionUser = await userService.resolveSessionUser(
+                        passportUser,
+                        req.session?.impersonation,
+                        () => {
+                            delete req.session.impersonation;
+                        },
+                    );
+                    done(null, sessionUser);
                 } catch (e) {
                     done(e);
                 }

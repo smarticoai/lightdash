@@ -8,7 +8,9 @@ import {
     UpdateAiOrganizationSettings,
     type SessionUser,
 } from '@lightdash/common';
+import { LightdashConfig } from '../../config/parseConfig';
 import { OrganizationModel } from '../../models/OrganizationModel';
+import { BaseService } from '../../services/BaseService';
 import { AiOrganizationSettingsModel } from '../models/AiOrganizationSettingsModel';
 import { CommercialFeatureFlagModel } from '../models/CommercialFeatureFlagModel';
 
@@ -16,32 +18,38 @@ type AiOrganizationSettingsServiceDependencies = {
     aiOrganizationSettingsModel: AiOrganizationSettingsModel;
     organizationModel: OrganizationModel;
     commercialFeatureFlagModel: CommercialFeatureFlagModel;
+    lightdashConfig: LightdashConfig;
 };
 
-export class AiOrganizationSettingsService {
+export class AiOrganizationSettingsService extends BaseService {
     private readonly aiOrganizationSettingsModel: AiOrganizationSettingsModel;
 
     private readonly organizationModel: OrganizationModel;
 
     private readonly commercialFeatureFlagModel: CommercialFeatureFlagModel;
 
+    private readonly lightdashConfig: LightdashConfig;
+
     // Date when trial feature was enabled for new organizations
     private static readonly TRIAL_START_DATE = new Date('2025-10-13T00:00:00Z');
 
     constructor(dependencies: AiOrganizationSettingsServiceDependencies) {
+        super();
         this.aiOrganizationSettingsModel =
             dependencies.aiOrganizationSettingsModel;
         this.organizationModel = dependencies.organizationModel;
         this.commercialFeatureFlagModel =
             dependencies.commercialFeatureFlagModel;
+        this.lightdashConfig = dependencies.lightdashConfig;
     }
 
-    private static checkManageAiAgentAccess(user: SessionUser): void {
+    private checkManageAiAgentAccess(user: SessionUser): void {
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
                 subject('AiAgent', {
-                    organizationUuid: user.organizationUuid,
+                    organizationUuid: user.organizationUuid!,
                 }),
             )
         ) {
@@ -73,6 +81,10 @@ export class AiOrganizationSettingsService {
         organizationUuid: string,
     ): Promise<boolean> {
         if (isCopilotEnabled) {
+            return false;
+        }
+
+        if (!this.lightdashConfig.ai.copilot.enabled) {
             return false;
         }
 
@@ -136,7 +148,7 @@ export class AiOrganizationSettingsService {
             throw new ForbiddenError('User must belong to an organization');
         }
 
-        AiOrganizationSettingsService.checkManageAiAgentAccess(user);
+        this.checkManageAiAgentAccess(user);
 
         return this.aiOrganizationSettingsModel.upsert(
             user.organizationUuid,

@@ -23,6 +23,7 @@ import { useQueryExecutor } from '../providers/Explorer/useQueryExecutor';
 import { buildQueryArgs } from './explorer/buildQueryArgs';
 import { useExplore } from './useExplore';
 import { useDateZoomGranularitySearch } from './useExplorerRoute';
+import { usePreAggregateCacheEnabled } from './usePreAggregateCacheEnabled';
 import { useServerFeatureFlag } from './useServerOrClientFeatureFlag';
 
 /**
@@ -91,6 +92,8 @@ export const useExplorerQueryManager = () => {
         FeatureFlags.UseSqlPivotResults,
     );
 
+    const [preAggCacheEnabled] = usePreAggregateCacheEnabled();
+
     // Compute active fields and query validity
     const activeFields = useMemo<Set<FieldId>>(() => {
         return new Set([
@@ -150,8 +153,10 @@ export const useExplorerQueryManager = () => {
     const { query: unpivotedQuery, queryResults: unpivotedQueryResults } =
         unpivotedQueryExecutor;
 
-    // Function to prepare and set query arguments (single source of truth)
-    const runQuery = useCallback(() => {
+    const runQuery = useCallback((): boolean => {
+        if (useSqlPivotResults === undefined) {
+            return false;
+        }
         const mainQueryArgs = buildQueryArgs({
             activeFields,
             tableName,
@@ -164,24 +169,28 @@ export const useExplorerQueryManager = () => {
             viewModeQueryArgs,
             dateZoomGranularity,
             minimal,
+            usePreAggregateCache: preAggCacheEnabled,
             savedChart: chartConfigForQuery,
         });
 
         if (mainQueryArgs) {
             dispatch(explorerActions.setValidQueryArgs(mainQueryArgs));
+            return true;
         }
+        return false;
     }, [
         activeFields,
         tableName,
         projectUuid,
         explore,
-        useSqlPivotResults?.enabled,
+        useSqlPivotResults,
         metricQuery,
         parameters,
         isEditMode,
         viewModeQueryArgs,
         dateZoomGranularity,
         minimal,
+        preAggCacheEnabled,
         chartConfigForQuery,
         dispatch,
     ]);

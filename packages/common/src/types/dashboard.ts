@@ -1,14 +1,17 @@
-import { type FilterableDimension } from './field';
+import { type ContentVerificationInfo } from './contentVerification';
+import { type FilterableDimension, type Metric } from './field';
 import { type DashboardFilters } from './filter';
 import { type KnexPaginatedData } from './knex-paginate';
 import { type DashboardParameters } from './parameters';
 import {
     type ChartKind,
+    type ChartVersionSummary,
     type CreateSavedChart,
     type SavedChartType,
 } from './savedCharts';
 import type { SchedulerAndTargets } from './scheduler';
-import { type SpaceShare } from './space';
+import { type SpaceAccess } from './space';
+import { type DateGranularity } from './timeFrames';
 import { type UpdatedByUser } from './user';
 import { type ValidationSummary } from './validation';
 
@@ -27,7 +30,7 @@ type CreateDashboardTileBase = {
     y: number;
     h: number;
     w: number;
-    tabUuid: string | undefined;
+    tabUuid: string | null | undefined;
 };
 
 type DashboardTileBase = Required<CreateDashboardTileBase>;
@@ -124,6 +127,7 @@ export type CreateDashboard = {
     spaceUuid?: string;
     tabs: DashboardTab[];
     config?: DashboardConfig;
+    colorPaletteUuid?: string | null;
 };
 
 export type DashboardTile =
@@ -157,10 +161,9 @@ export type DashboardTab = {
     uuid: string;
     name: string;
     order: number;
-    // SMR-START
+    hidden: boolean;
     smarticoEnableAiAnalysis: boolean | null;
     smarticoAiAnalysisPrompt: string | null;
-    // SMR-END
 };
 
 export type DashboardTabWithUrls = DashboardTab & {
@@ -169,19 +172,28 @@ export type DashboardTabWithUrls = DashboardTab & {
     selfUrl: string;
 };
 
-export type DashboardDAO = Omit<Dashboard, 'isPrivate' | 'access'>;
+export type DashboardDAO = Omit<
+    Dashboard,
+    'inheritsFromOrgOrProject' | 'access'
+>;
 
 export type DashboardConfig = {
     isDateZoomDisabled: boolean;
+    isAddFilterDisabled?: boolean;
     pinnedParameters?: string[];
+    parameterOrder?: string[];
+    dateZoomGranularities?: (DateGranularity | string)[];
+    defaultDateZoomGranularity?: DateGranularity | string;
 };
 
 export type Dashboard = {
     organizationUuid: string;
     projectUuid: string;
     dashboardVersionId: number;
+    versionUuid: string;
     uuid: string;
     name: string;
+    verification: ContentVerificationInfo | null;
     description?: string;
     updatedAt: Date;
     tiles: Array<DashboardTile>;
@@ -195,10 +207,17 @@ export type Dashboard = {
     pinnedListUuid: string | null;
     pinnedListOrder: number | null;
     tabs: DashboardTab[];
-    isPrivate: boolean | null;
-    access: SpaceShare[] | null;
+    inheritsFromOrgOrProject: boolean;
+    access: SpaceAccess[] | null;
     slug: string;
     config?: DashboardConfig;
+    colorPaletteUuid: string | null;
+    deletedAt?: Date;
+    deletedBy?: {
+        userUuid: string;
+        firstName: string;
+        lastName: string;
+    } | null;
 };
 
 export enum DashboardSummaryTone {
@@ -233,7 +252,10 @@ export type DashboardBasicDetails = Pick<
     | 'firstViewedAt'
     | 'pinnedListUuid'
     | 'pinnedListOrder'
-> & { validationErrors?: ValidationSummary[] };
+> & {
+    validationErrors?: ValidationSummary[];
+    verification: ContentVerificationInfo | null;
+};
 
 export type DashboardBasicDetailsWithTileTypes = DashboardBasicDetails & {
     tileTypes: DashboardTileTypes[];
@@ -243,7 +265,7 @@ export type SpaceDashboard = DashboardBasicDetails;
 
 export type DashboardUnversionedFields = Pick<
     CreateDashboard,
-    'name' | 'description' | 'spaceUuid'
+    'name' | 'description' | 'spaceUuid' | 'colorPaletteUuid'
 >;
 
 export type DashboardVersionedFields = Pick<
@@ -266,6 +288,8 @@ export type UpdateMultipleDashboards = Pick<
 export type DashboardAvailableFilters = {
     savedQueryFilters: Record<string, number[]>;
     allFilterableFields: FilterableDimension[];
+    allFilterableMetrics: Metric[];
+    savedQueryMetricFilters: Record<string, number[]>;
 };
 
 export type SavedChartsInfoForDashboardAvailableFilters = {
@@ -356,6 +380,11 @@ export type ApiDashboardSchedulersResponse = {
     results: SchedulerAndTargets[];
 };
 
+export type ApiDashboardResponse = {
+    status: 'ok';
+    results: Dashboard;
+};
+
 export type ApiDashboardPaginatedSchedulersResponse = {
     status: 'ok';
     results: KnexPaginatedData<SchedulerAndTargets[]>;
@@ -364,4 +393,46 @@ export type ApiDashboardPaginatedSchedulersResponse = {
 export type ApiCreateDashboardSchedulerResponse = {
     status: 'ok';
     results: SchedulerAndTargets;
+};
+
+export type DashboardVersionSummary = {
+    dashboardUuid: string;
+    versionUuid: string;
+    createdAt: Date;
+    createdBy: Pick<
+        UpdatedByUser,
+        'userUuid' | 'firstName' | 'lastName'
+    > | null;
+};
+
+export type DashboardHistory = {
+    history: DashboardVersionSummary[];
+};
+
+export type ChartVersionDifference = {
+    tileUuid: string;
+    chartUuid: string;
+    chartName: string | null;
+    currentVersion?: ChartVersionSummary | null;
+    selectedVersion?: ChartVersionSummary | null;
+};
+
+export type DashboardVersion = DashboardVersionSummary & {
+    dashboard: Dashboard;
+    chartVersionDifferences?: ChartVersionDifference[];
+};
+
+export type ApiGetDashboardHistoryResponse = {
+    status: 'ok';
+    results: DashboardHistory;
+};
+
+export type ApiGetDashboardVersionResponse = {
+    status: 'ok';
+    results: DashboardVersion;
+};
+
+export type ApiDashboardRollbackResponse = {
+    status: 'ok';
+    results: undefined;
 };

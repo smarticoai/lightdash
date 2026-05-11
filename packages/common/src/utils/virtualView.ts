@@ -7,6 +7,7 @@ import {
     friendlyName,
     type Dimension,
 } from '../types/field';
+import { type ParametersValuesMap } from '../types/parameters';
 import { WarehouseTypes } from '../types/projects';
 import {
     type TimeIntervalUnit,
@@ -14,6 +15,7 @@ import {
 } from '../types/warehouse';
 import { type VizColumn } from '../visualizations/types';
 import { WeekDay } from './timeFrames';
+import { defaultNullSafeEqualSql } from './warehouse';
 
 export const createVirtualView = (
     virtualViewName: string,
@@ -21,6 +23,7 @@ export const createVirtualView = (
     columns: VizColumn[],
     warehouseClient: WarehouseClient,
     label?: string,
+    parameterValues?: ParametersValuesMap,
 ): Explore => {
     const exploreCompiler = new ExploreCompiler(warehouseClient);
 
@@ -65,9 +68,15 @@ export const createVirtualView = (
         meta: {},
     });
 
-    const virtualView = {
+    const hasSavedParameters =
+        parameterValues && Object.keys(parameterValues).length > 0;
+
+    const virtualView: Explore = {
         ...explore,
         type: ExploreType.VIRTUAL,
+        ...(hasSavedParameters
+            ? { savedParameterValues: parameterValues }
+            : {}),
     };
 
     return virtualView;
@@ -117,6 +126,7 @@ export const createTemporaryVirtualView = (
         getEscapeStringQuoteChar: () => "''",
         getFieldQuoteChar: () => '"',
         getFloatingType: () => 'FLOAT',
+        getNullSafeEqualSql: defaultNullSafeEqualSql,
         getMetricSql: () => '',
         concatString: (...args) => args.join(''),
         getAllTables: async () => [],
@@ -131,6 +141,11 @@ export const createTemporaryVirtualView = (
             `EXTRACT(EPOCH FROM (${endTimestampSql} - ${startTimestampSql}))`,
         getMedianSql: (valueSql) =>
             `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ${valueSql})`,
+        buildArray: (elements) => `ARRAY[${elements.join(', ')}]`,
+        buildArrayAgg: (expression, orderBy) =>
+            orderBy
+                ? `ARRAY_AGG(${expression} ORDER BY ${orderBy})`
+                : `ARRAY_AGG(${expression})`,
     };
 
     return createVirtualView(

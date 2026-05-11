@@ -2,6 +2,7 @@ import { subject } from '@casl/ability';
 import {
     ApiRenameBody,
     ApiRenameChartBody,
+    ApiRenameDashboardBody,
     ApiRenameResponse,
     assertUnreachable,
     DashboardDAO,
@@ -10,6 +11,7 @@ import {
     getErrorMessage,
     getFieldRef,
     getItemId,
+    isDashboardFieldTarget,
     isExploreError,
     NameChanges,
     NotFoundError,
@@ -24,8 +26,6 @@ import {
     SessionUser,
     UnexpectedServerError,
 } from '@lightdash/common';
-
-import { attempt, isError } from 'lodash';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
 import { LightdashConfig } from '../../config/parseConfig';
 import { DashboardModel } from '../../models/DashboardModel/DashboardModel';
@@ -34,6 +34,7 @@ import { SavedChartModel } from '../../models/SavedChartModel';
 import { SchedulerModel } from '../../models/SchedulerModel';
 import { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { BaseService } from '../BaseService';
+import { SpacePermissionService } from '../SpaceService/SpacePermissionService';
 import {
     getNameChanges,
     renameAlert,
@@ -50,6 +51,7 @@ type RenameServiceArguments = {
     dashboardModel: DashboardModel;
     schedulerClient: SchedulerClient;
     schedulerModel: SchedulerModel;
+    spacePermissionService: SpacePermissionService;
 };
 
 export class RenameService extends BaseService {
@@ -67,6 +69,8 @@ export class RenameService extends BaseService {
 
     private readonly schedulerModel: SchedulerModel;
 
+    private readonly spacePermissionService: SpacePermissionService;
+
     constructor(args: RenameServiceArguments) {
         super();
         this.lightdashConfig = args.lightdashConfig;
@@ -76,6 +80,7 @@ export class RenameService extends BaseService {
         this.dashboardModel = args.dashboardModel;
         this.schedulerClient = args.schedulerClient;
         this.schedulerModel = args.schedulerModel;
+        this.spacePermissionService = args.spacePermissionService;
     }
 
     async getFieldsForChart({
@@ -89,8 +94,9 @@ export class RenameService extends BaseService {
     }) {
         const chart = await this.savedChartModel.get(chartUuid);
 
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'update',
                 subject('Project', {
                     organizationUuid: chart.organizationUuid,
@@ -163,21 +169,58 @@ export class RenameService extends BaseService {
             );
         }
 
-        const { organizationUuid } =
-            await this.projectModel.getSummary(projectUuid);
+        const chart = await this.savedChartModel.get(chartUuid);
+        if (chart.projectUuid !== projectUuid) {
+            throw new NotFoundError(`Chart ${chartUuid} not found`);
+        }
+        const {
+            organizationUuid,
+            projectUuid: chartProjectUuid,
+            spaceUuid,
+            name: chartName,
+        } = chart;
+        const { inheritsFromOrgOrProject, access } =
+            await this.spacePermissionService.getSpaceAccessContext(
+                user.userUuid,
+                spaceUuid,
+            );
+
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'update',
-                subject('Project', {
+                subject('SavedChart', {
                     organizationUuid,
-                    projectUuid,
+                    projectUuid: chartProjectUuid,
+                    inheritsFromOrgOrProject,
+                    access,
+                    metadata: {
+                        savedChartUuid: chartUuid,
+                        savedChartName: chartName,
+                    },
                 }),
             )
         ) {
             throw new ForbiddenError();
         }
 
-        const chart = await this.savedChartModel.get(chartUuid);
+        // The fixAll path schedules a project-wide rename via
+        // scheduleRenameResources, which itself requires update:Project. Check
+        // it here too so we fail before mutating the single chart — otherwise
+        // the inner check would 403 mid-flight and leave the chart updated
+        // while the API response reports failure.
+        if (
+            fixAll &&
+            auditedAbility.cannot(
+                'update',
+                subject('Project', {
+                    organizationUuid,
+                    projectUuid: chartProjectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
 
         const nameChanges = getNameChanges({
             from,
@@ -187,20 +230,22 @@ export class RenameService extends BaseService {
         });
 
         switch (type) {
-            case RenameType.MODEL:
+            case RenameType.MODEL: {
                 // Verify the model we want to assign to really exists, or the one we are renaming from
-                const toExists = attempt(() =>
+                const [toResult, fromResult] = await Promise.allSettled([
                     this.projectModel.getExploreFromCache(projectUuid, to),
-                );
-                const fromExists = attempt(() =>
                     this.projectModel.getExploreFromCache(projectUuid, from),
-                );
-                if (isError(toExists) && isError(fromExists)) {
+                ]);
+                if (
+                    toResult.status === 'rejected' &&
+                    fromResult.status === 'rejected'
+                ) {
                     throw new NotFoundError(
                         `Neither "${from}" nor "${to}" explores exist in the project.`,
                     );
                 }
                 break;
+            }
             case RenameType.FIELD:
                 // When renaming a field from a chart, we validate that the target field exists
                 // and ensure we're not trying to rename to a custom field (table calculation, custom metric, or custom dimension)
@@ -291,6 +336,263 @@ export class RenameService extends BaseService {
         return undefined;
     }
 
+    /**
+     * Get fields for dashboard filters rename UI.
+     * If tableName is provided, returns fields from that specific explore.
+     * Otherwise, returns fields from all explores referenced by the dashboard's filters.
+     */
+    async getFieldsForDashboard({
+        user,
+        projectUuid,
+        dashboardUuid,
+        tableName,
+    }: {
+        user: SessionUser;
+        projectUuid: string;
+        dashboardUuid: string;
+        tableName?: string;
+    }) {
+        const dashboard =
+            await this.dashboardModel.getByIdOrSlug(dashboardUuid);
+
+        const auditedAbility = this.createAuditedAbility(user);
+        if (
+            auditedAbility.cannot(
+                'update',
+                subject('Project', {
+                    organizationUuid: dashboard.organizationUuid,
+                    projectUuid: dashboard.projectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        // Collect table names to look up
+        const tableNames: Set<string> = new Set();
+        if (tableName) {
+            tableNames.add(tableName);
+        } else {
+            // Collect all unique table names from all filter targets
+            const allFilters = [
+                ...dashboard.filters.dimensions,
+                ...dashboard.filters.metrics,
+                ...dashboard.filters.tableCalculations,
+            ];
+            for (const filter of allFilters) {
+                tableNames.add(filter.target.tableName);
+                if (filter.tileTargets) {
+                    for (const tileTarget of Object.values(
+                        filter.tileTargets,
+                    )) {
+                        if (tileTarget && isDashboardFieldTarget(tileTarget)) {
+                            tableNames.add(tileTarget.tableName);
+                        }
+                    }
+                }
+            }
+        }
+
+        const fields: { [table: string]: string[] } = {};
+        const exploreResults = await Promise.allSettled(
+            Array.from(tableNames).map(async (table) => ({
+                table,
+                explore: await this.projectModel.getExploreFromCache(
+                    projectUuid,
+                    table,
+                ),
+            })),
+        );
+        for (const result of exploreResults) {
+            if (result.status === 'fulfilled') {
+                const { explore } = result.value;
+                if (!isExploreError(explore)) {
+                    Object.keys(explore.tables).forEach((expTableName) => {
+                        const expTable = explore.tables[expTableName];
+                        const dimensionsAndMetrics = Object.keys(
+                            expTable.dimensions,
+                        ).concat(Object.keys(expTable.metrics));
+                        fields[expTableName] = dimensionsAndMetrics.map(
+                            (field) =>
+                                getItemId({
+                                    name: field,
+                                    table: expTableName,
+                                }),
+                        );
+                    });
+                }
+            } else {
+                // Explore may not exist (e.g. table was renamed), skip it
+                this.logger.debug(
+                    `Could not load explore when getting fields for dashboard ${dashboardUuid}: ${result.reason}`,
+                );
+            }
+        }
+
+        return fields;
+    }
+
+    /**
+     * Triggered from the UI on validation settings for dashboard filter errors
+     */
+    async renameDashboardFilter({
+        user,
+        projectUuid,
+        dashboardUuid,
+        from,
+        to,
+        type,
+        fixAll,
+        context,
+    }: ApiRenameDashboardBody & {
+        user: SessionUser;
+        dashboardUuid: string;
+        projectUuid: string;
+        context: RequestMethod;
+    }): Promise<string | undefined> {
+        if (from === to) {
+            throw new ParameterError(
+                'Old and new names are the same, nothing to rename',
+            );
+        }
+
+        const { organizationUuid } =
+            await this.projectModel.getSummary(projectUuid);
+        const auditedAbility = this.createAuditedAbility(user);
+        if (
+            auditedAbility.cannot(
+                'update',
+                subject('Project', {
+                    organizationUuid,
+                    projectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        const dashboard =
+            await this.dashboardModel.getByIdOrSlug(dashboardUuid);
+
+        // Derive the table name from the dashboard's filters
+        let tableName: string;
+        if (type === RenameType.MODEL) {
+            // For model renames, the `from` IS the old table name
+            tableName = from;
+        } else {
+            // For field renames, find the filter that references this field
+            // and use its target.tableName
+            const allFilters = [
+                ...dashboard.filters.dimensions,
+                ...dashboard.filters.metrics,
+                ...dashboard.filters.tableCalculations,
+            ];
+            const matchingFilter = allFilters.find(
+                (f) => f.target.fieldId === from,
+            );
+            if (!matchingFilter) {
+                throw new NotFoundError(
+                    `No filter found in dashboard "${dashboard.name}" referencing field "${from}"`,
+                );
+            }
+            tableName = matchingFilter.target.tableName;
+        }
+
+        const nameChanges = getNameChanges({
+            from,
+            to,
+            table: tableName,
+            type,
+        });
+
+        switch (type) {
+            case RenameType.MODEL: {
+                const [dashToResult, dashFromResult] = await Promise.allSettled(
+                    [
+                        this.projectModel.getExploreFromCache(projectUuid, to),
+                        this.projectModel.getExploreFromCache(
+                            projectUuid,
+                            from,
+                        ),
+                    ],
+                );
+                if (
+                    dashToResult.status === 'rejected' &&
+                    dashFromResult.status === 'rejected'
+                ) {
+                    throw new NotFoundError(
+                        `Neither "${from}" nor "${to}" explores exist in the project.`,
+                    );
+                }
+                break;
+            }
+            case RenameType.FIELD: {
+                const explore = await this.findExploreForField({
+                    projectUuid,
+                    fieldName: to,
+                    model: tableName,
+                    isFullId: true,
+                });
+                this.logger.info(
+                    `Replacing field "${from}" with "${to}" on dashboard "${dashboard.name}" from explore "${explore.name}"`,
+                );
+                break;
+            }
+            default:
+                assertUnreachable(type, `Unexpected rename type ${type}`);
+        }
+
+        const { updatedDashboard, hasChanges } = renameDashboard(
+            type,
+            dashboard,
+            nameChanges,
+            true, // validate
+        );
+
+        if (hasChanges) {
+            await this.dashboardModel.addVersion(
+                dashboard.uuid,
+                updatedDashboard,
+                { userUuid: user.userUuid },
+                projectUuid,
+            );
+        }
+
+        this.analytics.track({
+            event: 'rename_dashboard_filter.executed',
+            userId: user.userUuid,
+            properties: {
+                organizationId: organizationUuid,
+                projectId: projectUuid,
+                context,
+                dryRun: false,
+                type,
+                ...nameChanges,
+                dashboardId: dashboard.uuid,
+            },
+        });
+
+        if (fixAll) {
+            this.logger.debug(
+                `Scheduling a rename of all resources for ${JSON.stringify(
+                    nameChanges,
+                )}`,
+            );
+            const { jobId } = await this.scheduleRenameResources({
+                context,
+                dryRun: false,
+                user,
+                projectUuid,
+                type,
+                model: tableName,
+                ...nameChanges,
+            });
+            return jobId;
+        }
+
+        return undefined;
+    }
+
     async scheduleRenameResources({
         user,
         projectUuid,
@@ -303,8 +605,9 @@ export class RenameService extends BaseService {
     }) {
         const { organizationUuid } =
             await this.projectModel.getSummary(projectUuid);
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'update',
                 subject('Project', {
                     organizationUuid,
@@ -329,6 +632,57 @@ export class RenameService extends BaseService {
             SCHEDULER_TASKS.RENAME_RESOURCES,
             payload,
         );
+    }
+
+    async previewRenameResources({
+        user,
+        projectUuid,
+        context,
+        ...renameBody
+    }: ApiRenameBody & {
+        user: SessionUser;
+        projectUuid: string;
+        context: RequestMethod;
+    }): Promise<ApiRenameResponse['results']> {
+        const { organizationUuid } =
+            await this.projectModel.getSummary(projectUuid);
+        const auditedAbility = this.createAuditedAbility(user);
+        if (
+            auditedAbility.cannot(
+                'update',
+                subject('Project', {
+                    organizationUuid,
+                    projectUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        // Pre-compute nameChanges so runScheduledRenameResources takes
+        // the fast path and doesn't need to look up the (possibly broken)
+        // field in the explore cache.
+        const { from, to, type, model } = renameBody;
+        const nameChanges =
+            model && type === RenameType.FIELD
+                ? getNameChanges({ from, to, table: model, type })
+                : undefined;
+
+        return this.runScheduledRenameResources({
+            ...renameBody,
+            ...(nameChanges && {
+                fromReference: nameChanges.fromReference,
+                toReference: nameChanges.toReference,
+                fromFieldName: nameChanges.fromFieldName,
+                toFieldName: nameChanges.toFieldName,
+            }),
+            dryRun: true,
+            context,
+            organizationUuid,
+            projectUuid,
+            userUuid: user.userUuid,
+            schedulerUuid: undefined,
+        });
     }
 
     private async findExploreForField({

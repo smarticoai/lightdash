@@ -10,6 +10,8 @@ export const warehouseTypes = [
     'databricks',
     'trino',
     'clickhouse',
+    'athena',
+    'duckdb',
 ] as const;
 export type WarehouseType = (typeof warehouseTypes)[number];
 type DbWarehouseCredentials = {

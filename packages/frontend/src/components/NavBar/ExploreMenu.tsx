@@ -1,6 +1,8 @@
 import { subject } from '@casl/ability';
-import { Button, Menu } from '@mantine/core';
+import { FeatureFlags } from '@lightdash/common';
+import { Button, getDefaultZIndex, Menu } from '@mantine-8/core';
 import {
+    IconAppWindow,
     IconFolder,
     IconFolderPlus,
     IconLayoutDashboard,
@@ -10,13 +12,14 @@ import {
 } from '@tabler/icons-react';
 import { memo, useState, type FC } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { useServerFeatureFlag } from '../../hooks/useServerOrClientFeatureFlag';
 import { Can } from '../../providers/Ability';
 import useApp from '../../providers/App/useApp';
 import LargeMenuItem from '../common/LargeMenuItem';
 import MantineIcon from '../common/MantineIcon';
+import DashboardCreateModal from '../common/modal/DashboardCreateModal';
 import SpaceActionModal from '../common/SpaceActionModal';
 import { ActionType } from '../common/SpaceActionModal/types';
-import DashboardCreateModal from '../common/modal/DashboardCreateModal';
 
 type Props = {
     projectUuid: string;
@@ -27,6 +30,7 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
     const location = useLocation();
 
     const { user } = useApp();
+    const dataAppsFlag = useServerFeatureFlag(FeatureFlags.EnableDataApps);
 
     const [isOpen, setIsOpen] = useState(false);
     const [isCreateSpaceOpen, setIsCreateSpaceOpen] = useState(false);
@@ -47,16 +51,17 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                     position="bottom-start"
                     arrowOffset={16}
                     offset={-2}
-                    withinPortal
+                    zIndex={getDefaultZIndex('max')}
+                    portalProps={{ target: '#navbar-header' }}
                 >
                     <Menu.Target>
                         <Button
                             variant="default"
                             size="xs"
                             fz="sm"
-                            leftIcon={
+                            leftSection={
                                 <MantineIcon
-                                    color="#adb5bd"
+                                    color="ldGray.6"
                                     icon={IconSquareRoundedPlus}
                                 />
                             }
@@ -70,7 +75,7 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                     <Menu.Dropdown>
                         <LargeMenuItem
                             component={Link}
-                            title="Query from tables"
+                            title="Chart"
                             description="Build queries and save them as charts."
                             to={`/projects/${projectUuid}/tables`}
                             icon={IconTable}
@@ -114,6 +119,27 @@ const ExploreMenu: FC<Props> = memo(({ projectUuid }) => {
                             icon={IconLayoutDashboard}
                             data-testid="ExploreMenu/NewDashboardButton"
                         />
+
+                        {dataAppsFlag.data?.enabled && (
+                            <Can
+                                I="create"
+                                this={subject('DataApp', {
+                                    organizationUuid:
+                                        user.data?.organizationUuid,
+                                    projectUuid,
+                                })}
+                            >
+                                <LargeMenuItem
+                                    component={Link}
+                                    title="App"
+                                    description="Build an interactive app powered by your data."
+                                    to={`/projects/${projectUuid}/apps/generate`}
+                                    icon={IconAppWindow}
+                                    isBeta
+                                />
+                            </Can>
+                        )}
+
                         <Can
                             I="create"
                             this={subject('Space', {

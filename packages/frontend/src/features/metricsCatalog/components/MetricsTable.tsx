@@ -1,14 +1,12 @@
 import {
-    MAX_METRICS_TREE_NODE_COUNT,
-    SpotlightTableColumns,
     assertUnreachable,
+    SpotlightTableColumns,
     type CatalogCategoryFilterMode,
     type CatalogItem,
 } from '@lightdash/common';
 import {
     Anchor,
     Box,
-    Button,
     Center,
     Divider,
     Group,
@@ -19,11 +17,10 @@ import {
 } from '@mantine/core';
 import {
     IconArrowDown,
-    IconArrowUp,
     IconArrowsSort,
+    IconArrowUp,
 } from '@tabler/icons-react';
 import { useIsMutating } from '@tanstack/react-query';
-import { ReactFlowProvider } from '@xyflow/react';
 import {
     MantineReactTable,
     useMantineReactTable,
@@ -40,7 +37,6 @@ import {
     type FC,
     type UIEvent,
 } from 'react';
-import { useLocation, useNavigate } from 'react-router';
 import MantineIcon from '../../../components/common/MantineIcon';
 import SuboptimalState from '../../../components/common/SuboptimalState/SuboptimalState';
 import useTracking from '../../../providers/Tracking/useTracking';
@@ -50,7 +46,6 @@ import {
     MIN_METRICS_CATALOG_SEARCH_LENGTH,
     useMetricsCatalog,
 } from '../hooks/useMetricsCatalog';
-import { useMetricsTree } from '../hooks/useMetricsTree';
 import { useSpotlightTableConfig } from '../hooks/useSpotlightTable';
 import {
     setCategoryFilterMode,
@@ -63,10 +58,10 @@ import {
     toggleMetricExploreModal,
 } from '../store/metricsCatalogSlice';
 import { MetricCatalogView } from '../types';
-import Canvas from './Canvas';
 import { MetricExploreModal } from './MetricExploreModal';
 import { MetricsCatalogColumns } from './MetricsCatalogColumns';
 import { MetricsTableTopToolbar } from './MetricsTableTopToolbar';
+import SavedTreesContainer from './SavedTrees/SavedTreesContainer';
 
 type MetricsTableProps = {
     metricCatalogView: MetricCatalogView;
@@ -76,8 +71,6 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
     const { track } = useTracking();
     const dispatch = useAppDispatch();
     const theme = useMantineTheme();
-    const location = useLocation();
-    const navigate = useNavigate();
 
     const userUuid = useAppSelector(
         (state) => state.metricsCatalog.user?.userUuid,
@@ -100,7 +93,7 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
     const ownerFilters = useAppSelector(
         (state) => state.metricsCatalog.ownerFilters,
     );
-    const { canManageTags, canManageMetricsTree } = useAppSelector(
+    const { canManageTags } = useAppSelector(
         (state) => state.metricsCatalog.abilities,
     );
     const isMetricExploreModalOpen = useAppSelector(
@@ -259,11 +252,6 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
         [data],
     );
 
-    // Fetch metric tree data
-    const selectedMetricUuids = useMemo(() => {
-        return flatData.map((metric) => metric.catalogSearchUuid);
-    }, [flatData]);
-
     const totalResults = useMemo(() => {
         if (!data) return 0;
         // Return total results from the last page, this should be the same but still we want to have the latest value
@@ -274,29 +262,6 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
     const showLoadingOverlay = useMemo(
         () => isFetching && isPreviousData && !isMutating,
         [isFetching, isPreviousData, isMutating],
-    );
-
-    const isValidMetricsNodeCount =
-        selectedMetricUuids.length > 0 &&
-        selectedMetricUuids.length <= MAX_METRICS_TREE_NODE_COUNT;
-
-    const { data: metricsTree } = useMetricsTree(
-        projectUuid,
-        selectedMetricUuids,
-        {
-            enabled: !!projectUuid && isValidMetricsNodeCount,
-        },
-    );
-
-    // Viewers cannot access metrics tree if there are no edges
-    const isValidMetricsEdgeCount = useMemo(
-        () => canManageMetricsTree || (metricsTree?.edges.length ?? 0) > 0,
-        [canManageMetricsTree, metricsTree],
-    );
-
-    const isValidMetricsTree = useMemo(
-        () => isValidMetricsNodeCount && isValidMetricsEdgeCount,
-        [isValidMetricsNodeCount, isValidMetricsEdgeCount],
     );
 
     const dataHasCategories = useMemo(() => {
@@ -543,9 +508,6 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                     position="apart"
                     p={`${theme.spacing.lg} ${theme.spacing.xl}`}
                     showCategoriesFilter={canManageTags || dataHasCategories}
-                    isValidMetricsTree={isValidMetricsTree}
-                    isValidMetricsNodeCount={isValidMetricsNodeCount}
-                    isValidMetricsEdgeCount={isValidMetricsEdgeCount}
                     metricCatalogView={metricCatalogView}
                     table={table}
                 />
@@ -701,49 +663,13 @@ export const MetricsTable: FC<MetricsTableProps> = ({ metricCatalogView }) => {
                             showCategoriesFilter={
                                 canManageTags || dataHasCategories
                             }
-                            isValidMetricsTree={isValidMetricsTree}
-                            isValidMetricsNodeCount={isValidMetricsNodeCount}
-                            isValidMetricsEdgeCount={isValidMetricsEdgeCount}
                             metricCatalogView={metricCatalogView}
                             table={table}
                         />
                         <Divider color="ldGray.2" />
                     </Box>
                     <Box w="100%" h="calc(100dvh - 350px)" mih={600}>
-                        <ReactFlowProvider>
-                            {isValidMetricsTree ? (
-                                <Canvas
-                                    metrics={flatData}
-                                    edges={metricsTree?.edges ?? []}
-                                    viewOnly={!canManageMetricsTree}
-                                />
-                            ) : (
-                                <SuboptimalState
-                                    title="Canvas mode not available"
-                                    description={
-                                        !isValidMetricsEdgeCount &&
-                                        isValidMetricsNodeCount
-                                            ? 'There are no connections between the selected metrics'
-                                            : 'Please narrow your search to display up to 30 metrics'
-                                    }
-                                    action={
-                                        <Button
-                                            onClick={() => {
-                                                void navigate({
-                                                    pathname:
-                                                        location.pathname.replace(
-                                                            /\/canvas/,
-                                                            '',
-                                                        ),
-                                                });
-                                            }}
-                                        >
-                                            Back to list view
-                                        </Button>
-                                    }
-                                />
-                            )}
-                        </ReactFlowProvider>
+                        <SavedTreesContainer />
                     </Box>
                 </Paper>
             );

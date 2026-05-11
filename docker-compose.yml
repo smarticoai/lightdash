@@ -11,6 +11,7 @@ services:
             - MINIO_ROOT_USER=minioadmin
             - MINIO_ROOT_PASSWORD=minioadmin
             - MINIO_DEFAULT_BUCKETS=default
+            - MINIO_EXPIRATION_DAYS=${MINIO_EXPIRATION_DAYS:-1}
     lightdash:
         platform: linux/amd64
         image: lightdash/lightdash:latest
@@ -59,6 +60,7 @@ services:
             - SCHEDULER_ENABLED=true
             - GROUPS_ENABLED=${GROUPS_ENABLED:-false}
             - SERVICE_ACCOUNT_ENABLED=${SERVICE_ACCOUNT_ENABLED:-false}
+            - SAVED_METRICS_TREE_ENABLED=${SAVED_METRICS_TREE_ENABLED:-false}
             - POSTHOG_PROJECT_API_KEY=${POSTHOG_PROJECT_API_KEY}
             - POSTHOG_FE_API_HOST=${POSTHOG_FE_API_HOST}
             - POSTHOG_BE_API_HOST=${POSTHOG_BE_API_HOST}
@@ -83,6 +85,7 @@ services:
             - BEDROCK_SECRET_ACCESS_KEY=${BEDROCK_SECRET_ACCESS_KEY}
             - BEDROCK_SESSION_TOKEN=${BEDROCK_SESSION_TOKEN}
             - BEDROCK_MODEL_NAME=${BEDROCK_MODEL_NAME}
+            - BEDROCK_INFERENCE_PROFILE_PREFIX=${BEDROCK_INFERENCE_PROFILE_PREFIX}
             - BEDROCK_EMBEDDING_MODEL=${BEDROCK_EMBEDDING_MODEL}
             - BEDROCK_TEMPERATURE=${BEDROCK_TEMPERATURE}
             - BEDROCK_AVAILABLE_MODELS=${BEDROCK_AVAILABLE_MODELS}
@@ -113,13 +116,14 @@ services:
             - TURBO_API=${TURBO_API}
             - SIGNUP_URL=${SIGNUP_URL}
             - HELP_MENU_URL=${HELP_MENU_URL}
-        volumes:
-            - '${DBT_PROJECT_DIR}:/usr/app/dbt'
+            - ATHENA_WAREHOUSE_IAM_ROLE_AUTH=${ATHENA_WAREHOUSE_IAM_ROLE_AUTH}
+        # volumes:
+        #     - '${DBT_PROJECT_DIR}:/usr/app/dbt'
         ports:
             - ${PORT:-8080}:${PORT:-8080}
 
     db:
-        image: postgres:15.4
+        image: pgvector/pgvector:pg15
         restart: always
         environment:
             POSTGRES_PASSWORD: ${PGPASSWORD}

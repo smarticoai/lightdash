@@ -2,14 +2,19 @@ import { subject } from '@casl/ability';
 import { CommercialFeatureFlags, FeatureFlags } from '@lightdash/common';
 import { Box, ScrollArea, Stack, Text, Title } from '@mantine-8/core';
 import {
+    IconAppWindow,
+    IconApps,
+    IconBolt,
     IconBrain,
     IconBrowser,
     IconBuildingSkyscraper,
     IconCalendarStats,
     IconChecklist,
+    IconClock,
     IconDatabase,
     IconDatabaseCog,
     IconDatabaseExport,
+    IconFolders,
     IconHistory,
     IconIdBadge2,
     IconKey,
@@ -18,22 +23,30 @@ import {
     IconPlug,
     IconRefresh,
     IconReportAnalytics,
+    IconShieldCheck,
     IconTableOptions,
+    IconTrash,
     IconUserCircle,
     IconUserCode,
     IconUserPlus,
-    IconUserShield,
     IconUsers,
+    IconUserShield,
     IconVariable,
 } from '@tabler/icons-react';
 import { useMemo, type FC } from 'react';
 import {
-    Navigate,
     matchPath,
+    Navigate,
     useLocation,
     useRoutes,
     type RouteObject,
 } from 'react-router';
+import ErrorState from '../components/common/ErrorState';
+import MantineIcon from '../components/common/MantineIcon';
+import Page from '../components/common/Page/Page';
+import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
+import RouterNavLink from '../components/common/RouterNavLink';
+import { SettingsGridCard } from '../components/common/Settings/SettingsCard';
 import PageSpinner from '../components/PageSpinner';
 import AccessTokensPanel from '../components/UserSettings/AccessTokensPanel';
 import AllowedDomainsPanel from '../components/UserSettings/AllowedDomainsPanel';
@@ -42,7 +55,10 @@ import DefaultProjectPanel from '../components/UserSettings/DefaultProjectPanel'
 import { DeleteOrganizationPanel } from '../components/UserSettings/DeleteOrganizationPanel';
 import GithubSettingsPanel from '../components/UserSettings/GithubSettingsPanel';
 import GitlabSettingsPanel from '../components/UserSettings/GitlabSettingsPanel';
+import ImpersonationPanel from '../components/UserSettings/ImpersonationPanel';
+import MyAppsPanel from '../components/UserSettings/MyAppsPanel';
 import { MyWarehouseConnectionsPanel } from '../components/UserSettings/MyWarehouseConnectionsPanel';
+import OAuthClientsPanel from '../components/UserSettings/OAuthClientsPanel';
 import OrganizationPanel from '../components/UserSettings/OrganizationPanel';
 import { OrganizationWarehouseCredentialsPanel } from '../components/UserSettings/OrganizationWarehouseCredentialsPanel';
 import PasswordPanel from '../components/UserSettings/PasswordPanel';
@@ -53,12 +69,6 @@ import SlackSettingsPanel from '../components/UserSettings/SlackSettingsPanel';
 import SocialLoginsPanel from '../components/UserSettings/SocialLoginsPanel';
 import UserAttributesPanel from '../components/UserSettings/UserAttributesPanel';
 import UsersAndGroupsPanel from '../components/UserSettings/UsersAndGroupsPanel';
-import ErrorState from '../components/common/ErrorState';
-import MantineIcon from '../components/common/MantineIcon';
-import Page from '../components/common/Page/Page';
-import PageBreadcrumbs from '../components/common/PageBreadcrumbs';
-import RouterNavLink from '../components/common/RouterNavLink';
-import { SettingsGridCard } from '../components/common/Settings/SettingsCard';
 import { useAiOrganizationSettings } from '../ee/features/aiCopilot/hooks/useAiOrganizationSettings';
 import ScimAccessTokensPanel from '../ee/features/scim/components/ScimAccessTokensPanel';
 import { ServiceAccountsPage } from '../ee/features/serviceAccounts';
@@ -68,10 +78,7 @@ import { CustomRoles } from '../ee/pages/customRoles/CustomRoles';
 import { useOrganization } from '../hooks/organization/useOrganization';
 import { useActiveProjectUuid } from '../hooks/useActiveProject';
 import { useProject } from '../hooks/useProject';
-import {
-    useClientFeatureFlag,
-    useServerFeatureFlag,
-} from '../hooks/useServerOrClientFeatureFlag';
+import { useServerFeatureFlag } from '../hooks/useServerOrClientFeatureFlag';
 import { Can } from '../providers/Ability';
 import useApp from '../providers/App/useApp';
 import { TrackPage } from '../providers/Tracking/TrackingProvider';
@@ -91,13 +98,15 @@ const Settings: FC = () => {
 
     const aiOrganizationSettingsQuery = useAiOrganizationSettings();
     const isAiCopilotEnabledOrTrial =
-        (aiOrganizationSettingsQuery.isSuccess &&
-            aiOrganizationSettingsQuery.data?.isCopilotEnabled) ||
-        aiOrganizationSettingsQuery.data?.isTrial;
+        aiOrganizationSettingsQuery.isSuccess &&
+        (aiOrganizationSettingsQuery.data.isCopilotEnabled ||
+            aiOrganizationSettingsQuery.data.isTrial);
 
-    const isServiceAccountFeatureFlagEnabled = useClientFeatureFlag(
+    const { data: serviceAccountsFlag } = useServerFeatureFlag(
         CommercialFeatureFlags.ServiceAccounts,
     );
+    const isServiceAccountFeatureFlagEnabled =
+        serviceAccountsFlag?.enabled ?? false;
 
     const {
         health: {
@@ -108,10 +117,22 @@ const Settings: FC = () => {
         user: { data: user, isInitialLoading: isUserLoading, error: userError },
     } = useApp();
 
+    const { data: isUserImpersonationEnabled } = useServerFeatureFlag(
+        FeatureFlags.UserImpersonation,
+    );
+
+    const showImpersonationPanel =
+        isUserImpersonationEnabled?.enabled &&
+        user?.ability?.can('update', 'Organization');
+
     const isCustomRolesEnabled = health?.isCustomRolesEnabled;
 
     const userGroupsFeatureFlagQuery = useServerFeatureFlag(
         FeatureFlags.UserGroupsEnabled,
+    );
+
+    const { data: dataAppsFlag } = useServerFeatureFlag(
+        FeatureFlags.EnableDataApps,
     );
 
     const { track } = useTracking();
@@ -138,22 +159,18 @@ const Settings: FC = () => {
         health?.auth.azuread.enabled ||
         health?.auth.oidc.enabled;
 
-    if (userGroupsFeatureFlagQuery.isError) {
-        console.error(userGroupsFeatureFlagQuery.error);
-        throw new Error('Error fetching user groups feature flag');
-    }
-
     const isGroupManagementEnabled =
-        userGroupsFeatureFlagQuery.isSuccess &&
-        userGroupsFeatureFlagQuery.data.enabled;
+        userGroupsFeatureFlagQuery.data?.enabled ?? false;
 
     // This allows us to enable service accounts in the UI for on-premise installations
     const isServiceAccountsEnabled =
         health?.isServiceAccountEnabled || isServiceAccountFeatureFlagEnabled;
 
-    const isWarehouseCredentialsFeatureFlagEnabled = useClientFeatureFlag(
+    const { data: warehouseCredentialsFlag } = useServerFeatureFlag(
         CommercialFeatureFlags.OrganizationWarehouseCredentials,
     );
+    const isWarehouseCredentialsFeatureFlagEnabled =
+        warehouseCredentialsFlag?.enabled ?? false;
 
     // This allows us to enable organization warehouse credentials in the UI for on-premise installations
     const isWarehouseCredentialsEnabled =
@@ -225,6 +242,19 @@ const Settings: FC = () => {
                 ),
             });
         }
+        if (dataAppsFlag?.enabled && user?.ability.can('create', 'DataApp')) {
+            allowedRoutes.push({
+                path: '/myApps',
+                element: (
+                    <Stack gap="xl">
+                        <SettingsGridCard>
+                            <Title order={4}>My apps</Title>
+                        </SettingsGridCard>
+                        <MyAppsPanel />
+                    </Stack>
+                ),
+            });
+        }
         if (user?.ability.can('manage', 'PersonalAccessToken')) {
             allowedRoutes.push({
                 path: '/organization',
@@ -258,6 +288,13 @@ const Settings: FC = () => {
                             </div>
                             <DefaultProjectPanel />
                         </SettingsGridCard>
+
+                        {showImpersonationPanel && (
+                            <SettingsGridCard>
+                                <Title order={4}>User impersonation</Title>
+                                <ImpersonationPanel />
+                            </SettingsGridCard>
+                        )}
 
                         {user.ability?.can('delete', 'Organization') && (
                             <SettingsGridCard>
@@ -373,6 +410,13 @@ const Settings: FC = () => {
             });
         }
 
+        if (user?.ability.can('manage', 'Organization')) {
+            allowedRoutes.push({
+                path: '/oauthClients',
+                element: <OAuthClientsPanel />,
+            });
+        }
+
         // Commercial route
         if (
             user?.ability.can('manage', 'Organization') &&
@@ -414,21 +458,32 @@ const Settings: FC = () => {
 
         return allowedRoutes;
     }, [
-        isServiceAccountsEnabled,
-        isScimTokenManagementEnabled?.enabled,
         allowPasswordAuthentication,
-        hasSocialLogin,
-        user,
+        user?.ability,
         organization,
         project,
-        health,
+        isScimTokenManagementEnabled?.enabled,
+        isServiceAccountsEnabled,
         isCustomRolesEnabled,
+        hasSocialLogin,
+        showImpersonationPanel,
+        health?.hasSlack,
+        health?.hasGithub,
+        health?.hasGitlab,
+        dataAppsFlag?.enabled,
     ]);
     const routeElements = useRoutes(routes);
 
     const location = useLocation();
     const isFixedContent = useMemo(() => {
         return (
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement',
+                    end: true,
+                },
+                location.pathname,
+            ) &&
             !matchPath(
                 {
                     path: '/generalSettings/projectManagement/:projectUuid/changesets',
@@ -449,7 +504,19 @@ const Settings: FC = () => {
             ) &&
             !matchPath(
                 {
+                    path: '/generalSettings/myApps',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
                     path: '/generalSettings/projectManagement/:projectUuid/compilationHistory',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement/:projectUuid/recentlyDeleted',
                 },
                 location.pathname,
             ) &&
@@ -462,6 +529,24 @@ const Settings: FC = () => {
             !matchPath(
                 {
                     path: '/generalSettings/customRoles/:roleId',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/serviceAccounts',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement/:projectUuid/preAggregates/*',
+                },
+                location.pathname,
+            ) &&
+            !matchPath(
+                {
+                    path: '/generalSettings/projectManagement/:projectUuid/validator',
                 },
                 location.pathname,
             )
@@ -517,9 +602,11 @@ const Settings: FC = () => {
                                 </Title>
                                 <RouterNavLink
                                     exact
-                                    to="/generalSettings"
+                                    to="/generalSettings/profile"
                                     label="Profile"
-                                    icon={<MantineIcon icon={IconUserCircle} />}
+                                    leftSection={
+                                        <MantineIcon icon={IconUserCircle} />
+                                    }
                                 />
                                 {allowPasswordAuthentication && (
                                     <RouterNavLink
@@ -530,14 +617,16 @@ const Settings: FC = () => {
                                         }
                                         exact
                                         to="/generalSettings/password"
-                                        icon={<MantineIcon icon={IconLock} />}
+                                        leftSection={
+                                            <MantineIcon icon={IconLock} />
+                                        }
                                     />
                                 )}
                                 <RouterNavLink
                                     label="My warehouse connections"
                                     exact
                                     to="/generalSettings/myWarehouseConnections"
-                                    icon={
+                                    leftSection={
                                         <MantineIcon icon={IconDatabaseCog} />
                                     }
                                 />
@@ -557,13 +646,26 @@ const Settings: FC = () => {
                                         label="My scheduled deliveries"
                                         exact
                                         to="/generalSettings/userScheduledDeliveries"
-                                        icon={
+                                        leftSection={
                                             <MantineIcon
                                                 icon={IconCalendarStats}
                                             />
                                         }
                                     />
                                 )}
+                                {dataAppsFlag?.enabled &&
+                                    user.ability.can('create', 'DataApp') && (
+                                        <RouterNavLink
+                                            label="My apps"
+                                            exact
+                                            to="/generalSettings/myApps"
+                                            leftSection={
+                                                <MantineIcon
+                                                    icon={IconAppWindow}
+                                                />
+                                            }
+                                        />
+                                    )}
                                 {user.ability.can(
                                     'manage',
                                     'PersonalAccessToken',
@@ -572,7 +674,9 @@ const Settings: FC = () => {
                                         label="Personal access tokens"
                                         exact
                                         to="/generalSettings/personalAccessTokens"
-                                        icon={<MantineIcon icon={IconKey} />}
+                                        leftSection={
+                                            <MantineIcon icon={IconKey} />
+                                        }
                                     />
                                 )}
                             </Box>
@@ -587,7 +691,7 @@ const Settings: FC = () => {
                                         label="General"
                                         to="/generalSettings/organization"
                                         exact
-                                        icon={
+                                        leftSection={
                                             <MantineIcon
                                                 icon={IconBuildingSkyscraper}
                                             />
@@ -600,7 +704,7 @@ const Settings: FC = () => {
                                             label="Custom roles"
                                             to="/generalSettings/customRoles"
                                             exact
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconIdBadge2}
                                                 />
@@ -621,7 +725,7 @@ const Settings: FC = () => {
                                         }
                                         to="/generalSettings/userManagement"
                                         exact
-                                        icon={
+                                        leftSection={
                                             <MantineIcon icon={IconUserPlus} />
                                         }
                                     />
@@ -641,7 +745,7 @@ const Settings: FC = () => {
                                         }
                                         to="/generalSettings/userAttributes"
                                         exact
-                                        icon={
+                                        leftSection={
                                             <MantineIcon
                                                 icon={IconUserShield}
                                             />
@@ -654,7 +758,7 @@ const Settings: FC = () => {
                                         label="Appearance"
                                         exact
                                         to="/generalSettings/appearance"
-                                        icon={
+                                        leftSection={
                                             <MantineIcon icon={IconPalette} />
                                         }
                                     />
@@ -665,7 +769,20 @@ const Settings: FC = () => {
                                         label="Integrations"
                                         exact
                                         to="/generalSettings/integrations"
-                                        icon={<MantineIcon icon={IconPlug} />}
+                                        leftSection={
+                                            <MantineIcon icon={IconPlug} />
+                                        }
+                                    />
+                                )}
+
+                                {user.ability.can('manage', 'Organization') && (
+                                    <RouterNavLink
+                                        label="OAuth applications"
+                                        exact
+                                        to="/generalSettings/oauthClients"
+                                        leftSection={
+                                            <MantineIcon icon={IconApps} />
+                                        }
                                     />
                                 )}
 
@@ -684,7 +801,7 @@ const Settings: FC = () => {
                                             label="Warehouse credentials"
                                             exact
                                             to="/generalSettings/warehouseCredentials"
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconDatabaseCog}
                                                 />
@@ -699,7 +816,7 @@ const Settings: FC = () => {
                                             label="All projects"
                                             to="/generalSettings/projectManagement"
                                             exact
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconDatabase}
                                                 />
@@ -713,7 +830,7 @@ const Settings: FC = () => {
                                             label="SCIM Access Tokens"
                                             exact
                                             to="/generalSettings/scimAccessTokens"
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon icon={IconKey} />
                                             }
                                         />
@@ -724,7 +841,7 @@ const Settings: FC = () => {
                                             label="Service Accounts"
                                             exact
                                             to="/generalSettings/serviceAccounts"
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconUserCode}
                                                 />
@@ -743,7 +860,7 @@ const Settings: FC = () => {
                                             label="AI Agents"
                                             exact
                                             to="/ai-agents/admin"
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon icon={IconBrain} />
                                             }
                                         />
@@ -770,7 +887,7 @@ const Settings: FC = () => {
                                         label="Connection settings"
                                         exact
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/settings`}
-                                        icon={
+                                        leftSection={
                                             <MantineIcon
                                                 icon={IconDatabaseCog}
                                             />
@@ -781,7 +898,7 @@ const Settings: FC = () => {
                                         label="Tables configuration"
                                         exact
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/tablesConfiguration`}
-                                        icon={
+                                        leftSection={
                                             <MantineIcon
                                                 icon={IconTableOptions}
                                             />
@@ -792,7 +909,7 @@ const Settings: FC = () => {
                                         label="Changesets"
                                         exact
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/changesets`}
-                                        icon={
+                                        leftSection={
                                             <MantineIcon icon={IconHistory} />
                                         }
                                     />
@@ -801,19 +918,97 @@ const Settings: FC = () => {
                                         label="Compilation history"
                                         exact
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/compilationHistory`}
-                                        icon={
+                                        leftSection={
                                             <MantineIcon icon={IconRefresh} />
                                         }
                                     />
+
+                                    {/* TODO: Consider adding a setting to disable pre-aggregate materializations on preview projects,
+                                        or turn them off by default. Currently materializations still run on previews,
+                                        which can be resource-intensive. Admins/developers should be able to control this. */}
+                                    {health.preAggregates.enabled && (
+                                        <RouterNavLink
+                                            label="Pre-aggregates"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/preAggregates`}
+                                            leftSection={
+                                                <MantineIcon icon={IconBolt} />
+                                            }
+                                            defaultOpened={location.pathname.includes(
+                                                `/projectManagement/${project.projectUuid}/preAggregates`,
+                                            )}
+                                        >
+                                            <RouterNavLink
+                                                label="Materializations"
+                                                exact
+                                                to={`/generalSettings/projectManagement/${project.projectUuid}/preAggregates/materializations`}
+                                                leftSection={
+                                                    <MantineIcon
+                                                        icon={IconDatabase}
+                                                    />
+                                                }
+                                            />
+                                            <RouterNavLink
+                                                label="Analytics"
+                                                exact
+                                                to={`/generalSettings/projectManagement/${project.projectUuid}/preAggregates/audit`}
+                                                leftSection={
+                                                    <MantineIcon
+                                                        icon={
+                                                            IconReportAnalytics
+                                                        }
+                                                    />
+                                                }
+                                            />
+                                        </RouterNavLink>
+                                    )}
 
                                     <RouterNavLink
                                         label="Parameters"
                                         exact
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/parameters`}
-                                        icon={
+                                        leftSection={
                                             <MantineIcon icon={IconVariable} />
                                         }
                                     />
+
+                                    <Can
+                                        I="update"
+                                        this={subject('Project', {
+                                            organizationUuid:
+                                                organization.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        })}
+                                    >
+                                        <RouterNavLink
+                                            label="Query time zone"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/queryTimezone`}
+                                            leftSection={
+                                                <MantineIcon icon={IconClock} />
+                                            }
+                                        />
+                                    </Can>
+
+                                    <Can
+                                        I="update"
+                                        this={subject('Project', {
+                                            organizationUuid:
+                                                organization.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        })}
+                                    >
+                                        <RouterNavLink
+                                            label="Appearance"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/appearance`}
+                                            leftSection={
+                                                <MantineIcon
+                                                    icon={IconPalette}
+                                                />
+                                            }
+                                        />
+                                    </Can>
 
                                     <Can
                                         I="manage"
@@ -827,8 +1022,18 @@ const Settings: FC = () => {
                                             label="Project access"
                                             exact
                                             to={`/generalSettings/projectManagement/${project.projectUuid}/projectAccess`}
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon icon={IconUsers} />
+                                            }
+                                        />
+                                        <RouterNavLink
+                                            label="Default user spaces"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/defaultUserSpaces`}
+                                            leftSection={
+                                                <MantineIcon
+                                                    icon={IconFolders}
+                                                />
                                             }
                                         />
                                     </Can>
@@ -850,7 +1055,7 @@ const Settings: FC = () => {
                                                     name: EventName.USAGE_ANALYTICS_CLICKED,
                                                 });
                                             }}
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconReportAnalytics}
                                                 />
@@ -862,7 +1067,7 @@ const Settings: FC = () => {
                                         label="Syncs & Scheduled deliveries"
                                         exact
                                         to={`/generalSettings/projectManagement/${project.projectUuid}/scheduledDeliveries`}
-                                        icon={
+                                        leftSection={
                                             <MantineIcon
                                                 icon={IconCalendarStats}
                                             />
@@ -881,7 +1086,7 @@ const Settings: FC = () => {
                                             label="Embed configuration"
                                             exact
                                             to={`/generalSettings/projectManagement/${project.projectUuid}/embed`}
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconBrowser}
                                                 />
@@ -901,9 +1106,29 @@ const Settings: FC = () => {
                                             label="Validator"
                                             exact
                                             to={`/generalSettings/projectManagement/${project.projectUuid}/validator`}
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconChecklist}
+                                                />
+                                            }
+                                        />
+                                    ) : null}
+
+                                    {user.ability?.can(
+                                        'manage',
+                                        subject('ContentVerification', {
+                                            organizationUuid:
+                                                project.organizationUuid,
+                                            projectUuid: project.projectUuid,
+                                        }),
+                                    ) ? (
+                                        <RouterNavLink
+                                            label="Verified content"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/verifiedContent`}
+                                            leftSection={
+                                                <MantineIcon
+                                                    icon={IconShieldCheck}
                                                 />
                                             }
                                         />
@@ -921,13 +1146,24 @@ const Settings: FC = () => {
                                             label="Data ops"
                                             exact
                                             to={`/generalSettings/projectManagement/${project.projectUuid}/dataOps`}
-                                            icon={
+                                            leftSection={
                                                 <MantineIcon
                                                     icon={IconDatabaseExport}
                                                 />
                                             }
                                         />
                                     ) : null}
+
+                                    {health?.softDelete?.enabled && (
+                                        <RouterNavLink
+                                            label="Recently deleted"
+                                            exact
+                                            to={`/generalSettings/projectManagement/${project.projectUuid}/recentlyDeleted`}
+                                            leftSection={
+                                                <MantineIcon icon={IconTrash} />
+                                            }
+                                        />
+                                    )}
                                 </Box>
                             ) : null}
                         </Stack>

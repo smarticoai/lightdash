@@ -1,4 +1,4 @@
-import { Group } from '@mantine/core';
+import { Group } from '@mantine-8/core';
 import {
     useCallback,
     useEffect,
@@ -6,17 +6,17 @@ import {
     type FC,
     type PropsWithChildren,
 } from 'react';
+import {
+    Frequency,
+    getFrequencyCronExpression,
+    mapCronExpressionToFrequency,
+} from './cronInputUtils';
 import CustomInputs from './CustomInputs';
 import DailyInputs from './DailyInputs';
 import FrequencySelect from './FrequencySelect';
 import HourlyInputs from './HourlyInputs';
 import MonthlyInputs from './MonthlyInputs';
 import WeeklyInputs from './WeeklyInputs';
-import {
-    Frequency,
-    getFrequencyCronExpression,
-    mapCronExpressionToFrequency,
-} from './cronInputUtils';
 
 type CronInternalInputsProps = {
     name: string;
@@ -41,15 +41,17 @@ export const CronInternalInputs: FC<
     }, [frequency, value]);
 
     const onFrequencyChange = useCallback(
-        (newFrequency: Frequency) => {
-            setFrequency(newFrequency);
-            onChange(getFrequencyCronExpression(newFrequency, value));
+        (newFrequency: Frequency | null | string) => {
+            setFrequency(newFrequency as Frequency);
+            onChange(
+                getFrequencyCronExpression(newFrequency as Frequency, value),
+            );
         },
         [onChange, value],
     );
 
     return (
-        <Group spacing="sm" align="flex-start">
+        <Group gap="sm" align="flex-start">
             <FrequencySelect
                 value={frequency}
                 disabled={disabled}

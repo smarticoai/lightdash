@@ -19,13 +19,15 @@ import {
     type SortField,
 } from '@lightdash/common';
 import { Button, Divider, Group, Popover } from '@mantine-8/core';
-import { IconShare2, IconStack } from '@tabler/icons-react';
+import { IconShare2, IconStack, IconTelescope } from '@tabler/icons-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
+import { useNavigate } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import { useOrganization } from '../../hooks/organization/useOrganization';
 import { useExplore } from '../../hooks/useExplore';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../hooks/useExplorerRoute';
 import { useProjectUuid } from '../../hooks/useProjectUuid';
+import { useCreateShareMutation } from '../../hooks/useShare';
 import {
     getUnderlyingDataResults,
     useUnderlyingDataResults,
@@ -35,11 +37,11 @@ import { useAbilityContext } from '../../providers/Ability/useAbilityContext';
 import useApp from '../../providers/App/useApp';
 import { convertDateFilters } from '../../utils/dateFilter';
 import ErrorState from '../common/ErrorState';
-import LinkButton from '../common/LinkButton';
 import MantineIcon from '../common/MantineIcon';
 import MantineModal from '../common/MantineModal';
 import { type TableColumn } from '../common/Table/types';
 import ExportResults from '../ExportResults';
+import { getZoomedDimFilter } from './dateZoomFilter';
 import UnderlyingDataResultsTable from './UnderlyingDataResultsTable';
 import { useMetricQueryDataContext } from './useMetricQueryDataContext';
 
@@ -105,12 +107,17 @@ const UnderlyingDataModalContent: FC = () => {
     );
 
     const showUnderlyingValues: string[] | undefined = useMemo(() => {
-        return underlyingDataConfig?.item !== undefined &&
+        if (
+            underlyingDataConfig?.item !== undefined &&
             isField(underlyingDataConfig.item) &&
-            isMetric(underlyingDataConfig.item)
-            ? underlyingDataConfig?.item.showUnderlyingValues
-            : undefined;
-    }, [underlyingDataConfig?.item]);
+            isMetric(underlyingDataConfig.item) &&
+            underlyingDataConfig.item.showUnderlyingValues !== undefined
+        ) {
+            return underlyingDataConfig.item.showUnderlyingValues;
+        }
+        // Fallback to base table's default for table calculations and custom metrics
+        return explore?.tables[explore.baseTable]?.defaultShowUnderlyingValues;
+    }, [underlyingDataConfig?.item, explore]);
 
     const sortByUnderlyingValues = useCallback(
         (columnA: TableColumn, columnB: TableColumn) => {
@@ -139,7 +146,7 @@ const UnderlyingDataModalContent: FC = () => {
 
     const filters = useMemo<Filters>(() => {
         if (!underlyingDataConfig) return {};
-        const { item, fieldValues, pivotReference, value } =
+        const { item, fieldValues, pivotReference, value, dateZoom } =
             underlyingDataConfig;
 
         if (item === undefined) return {};
@@ -148,6 +155,14 @@ const UnderlyingDataModalContent: FC = () => {
         const dimensionFilters = !isDimension(item)
             ? Object.entries(fieldValues).reduce((acc, r) => {
                   const [key, { raw }] = r;
+
+                  const isValidDimension = allDimensions.find(
+                      (dimension) => getItemId(dimension) === key,
+                  );
+                  if (!isValidDimension) return acc;
+
+                  const zoomedFilters = getZoomedDimFilter(key, raw, dateZoom);
+                  if (zoomedFilters) return [...acc, ...zoomedFilters];
 
                   const dimensionFilter: FilterRule = {
                       id: uuidv4(),
@@ -160,16 +175,9 @@ const UnderlyingDataModalContent: FC = () => {
                               : FilterOperator.EQUALS,
                       values: raw === null ? undefined : [raw],
                   };
-                  const isValidDimension = allDimensions.find(
-                      (dimension) => getItemId(dimension) === key,
-                  );
-
-                  if (isValidDimension) {
-                      return [...acc, dimensionFilter];
-                  }
-                  return acc;
+                  return [...acc, dimensionFilter];
               }, [] as FilterRule[])
-            : [
+            : (getZoomedDimFilter(getItemId(item), value.raw, dateZoom) ?? [
                   {
                       id: uuidv4(),
                       target: {
@@ -181,7 +189,7 @@ const UnderlyingDataModalContent: FC = () => {
                               : FilterOperator.EQUALS,
                       values: value.raw === null ? undefined : [value.raw],
                   },
-              ];
+              ]);
 
         const pivotFilter: FilterRule[] = (
             pivotReference?.pivotValues || []
@@ -261,12 +269,25 @@ const UnderlyingDataModalContent: FC = () => {
                 config: { layout: {}, eChartsConfig: {} },
             },
         };
-        const { pathname, search } = getExplorerUrlFromCreateSavedChartVersion(
+        return getExplorerUrlFromCreateSavedChartVersion(
             projectUuid,
             createSavedChartVersion,
+            true,
         );
-        return `${pathname}?${search}`;
     }, [resultsData, projectUuid]);
+
+    const navigate = useNavigate();
+    const { mutateAsync: createShareUrl, isLoading: isCreatingShareUrl } =
+        useCreateShareMutation();
+
+    const handleExploreFromHere = useCallback(async () => {
+        if (!exploreFromHereUrl) return;
+        const shareUrl = await createShareUrl({
+            path: exploreFromHereUrl.pathname,
+            params: `?${exploreFromHereUrl.search}`,
+        });
+        void navigate(`/share/${shareUrl.nanoid}`);
+    }, [createShareUrl, exploreFromHereUrl, navigate]);
 
     const getDownloadQueryUuid = useCallback(
         async (limit: number | null) => {
@@ -348,6 +369,7 @@ const UnderlyingDataModalContent: FC = () => {
                                 showTableNames
                                 totalResults={resultsData?.rows.length}
                                 getDownloadQueryUuid={getDownloadQueryUuid}
+                                forceShowLimitSelection
                             />
                         )}
                     </Popover.Dropdown>
@@ -361,15 +383,17 @@ const UnderlyingDataModalContent: FC = () => {
                 })}
             >
                 <Divider orientation="vertical" />
-                <LinkButton
-                    href={exploreFromHereUrl || ''}
-                    forceRefresh
+                <Button
+                    leftSection={<MantineIcon icon={IconTelescope} />}
+                    onClick={handleExploreFromHere}
                     disabled={!exploreFromHereUrl}
+                    loading={isCreatingShareUrl}
                     variant="light"
                     radius="md"
+                    size="compact-sm"
                 >
                     Explore from here
-                </LinkButton>
+                </Button>
             </Can>
         </Group>
     );

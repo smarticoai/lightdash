@@ -1,6 +1,8 @@
 import {
     assertUnreachable,
     getHumanReadableCronExpression,
+    isEmailTarget,
+    isGoogleChatTarget,
     isMsTeamsTarget,
     isSchedulerGsheetsOptions,
     isSlackTarget,
@@ -26,6 +28,7 @@ import {
     IconChartBar,
     IconCheck,
     IconClock,
+    IconCodeDots,
     IconLayoutDashboard,
     IconMail,
     IconRadar,
@@ -55,6 +58,7 @@ import { useSchedulerFilters } from '../../features/scheduler/hooks/useScheduler
 import { useIsTruncated } from '../../hooks/useIsTruncated';
 import { useProject } from '../../hooks/useProject';
 import GSheetsSvg from '../../svgs/google-sheets.svg?react';
+import GoogleChatSvg from '../../svgs/googlechat.svg?react';
 import SlackSvg from '../../svgs/slack.svg?react';
 import MantineIcon from '../common/MantineIcon';
 import ReassignSchedulerOwnerModal from './ReassignSchedulerOwnerModal';
@@ -292,6 +296,8 @@ const SchedulersTable: FC<SchedulersTableProps> = ({
                                 return 'Image';
                             case SchedulerFormat.GSHEETS:
                                 return 'Google Sheets';
+                            case SchedulerFormat.PDF:
+                                return 'PDF';
                             default:
                                 return assertUnreachable(
                                     item.format,
@@ -368,6 +374,18 @@ const SchedulersTable: FC<SchedulersTableProps> = ({
                                         />
                                         <Text fz="xs" c="ldGray.6">
                                             {item.savedChartName}
+                                        </Text>
+                                    </Group>
+                                ) : item.savedSqlName ? (
+                                    <Group gap="two">
+                                        <MantineIcon
+                                            icon={IconCodeDots}
+                                            color="ldGray.6"
+                                            size={12}
+                                            strokeWidth={1.5}
+                                        />
+                                        <Text fz="xs" c="ldGray.6">
+                                            {item.savedSqlName}
                                         </Text>
                                     </Group>
                                 ) : item.dashboardName ? (
@@ -583,16 +601,20 @@ const SchedulersTable: FC<SchedulersTableProps> = ({
                 let emails: string[] = [];
                 let slackChannels: string[] = [];
                 let msTeamsTargets: string[] = [];
+                let googleChatTargets: string[] = [];
                 currentTargets.map((t) => {
                     if (isSlackTarget(t)) {
                         return slackChannels.push(
                             getSlackChannelName(t.channel) || t.channel,
                         );
+                    } else if (isGoogleChatTarget(t)) {
+                        return googleChatTargets.push(t.googleChatWebhook);
                     } else if (isMsTeamsTarget(t)) {
                         return msTeamsTargets.push(t.webhook);
-                    } else {
+                    } else if (isEmailTarget(t)) {
                         return emails.push(t.recipient);
                     }
+                    return undefined;
                 });
 
                 return (
@@ -668,9 +690,34 @@ const SchedulersTable: FC<SchedulersTableProps> = ({
                                     </Group>
                                 </Tooltip>
                             )}
+                        {googleChatTargets.length > 0 && (
+                            <Tooltip
+                                label={googleChatTargets.map((webhook, i) => (
+                                    <Text fz="xs" key={i}>
+                                        {webhook}
+                                    </Text>
+                                ))}
+                            >
+                                <Group gap="two">
+                                    <GoogleChatSvg
+                                        style={{
+                                            margin: '5px 2px',
+                                            width: '12px',
+                                            height: '12px',
+                                            filter: 'grayscale(100%)',
+                                        }}
+                                    />
+                                    <Text fz="xs" c="ldGray.6">
+                                        Google Chat
+                                    </Text>
+                                </Group>
+                            </Tooltip>
+                        )}
                         {item.format !== SchedulerFormat.GSHEETS &&
                             slackChannels.length === 0 &&
-                            emails.length === 0 && (
+                            emails.length === 0 &&
+                            msTeamsTargets.length === 0 &&
+                            googleChatTargets.length === 0 && (
                                 <Text fz="xs" c="ldGray.6">
                                     No destinations
                                 </Text>

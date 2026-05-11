@@ -1,47 +1,55 @@
 import {
     Card,
+    createPolymorphicComponent,
+    Group,
     Menu,
     Stack,
     Text,
-    createPolymorphicComponent,
     type MenuItemProps,
-} from '@mantine/core';
+} from '@mantine-8/core';
 import { type Icon as TablerIconType } from '@tabler/icons-react';
 import { forwardRef, type ReactNode } from 'react';
+import { BetaBadge } from './BetaBadge';
 import MantineIcon, { type MantineIconProps } from './MantineIcon';
 
-interface LargeMenuItemProps extends Omit<MenuItemProps, 'icon'> {
+interface LargeMenuItemProps extends Omit<MenuItemProps, 'leftSection'> {
     icon: TablerIconType;
     iconProps?: Omit<MantineIconProps, 'icon'>;
     title: string;
     description: string | ReactNode;
+    isBeta?: boolean;
 }
 
 const LargeMenuItem: ReturnType<
     typeof createPolymorphicComponent<'button', LargeMenuItemProps>
 > = createPolymorphicComponent<'button', LargeMenuItemProps>(
     forwardRef<HTMLButtonElement, LargeMenuItemProps>(
-        ({ icon, title, description, iconProps, ...rest }, ref) => {
+        ({ icon, title, description, iconProps, isBeta, ...rest }, ref) => {
             return (
-                <Menu.Item<'button'>
+                <Menu.Item
                     ref={ref}
-                    icon={
-                        <Card p="sm" bg="ldDark.6" radius="sm">
+                    leftSection={
+                        <Card p="sm" bg="ldDark.6" radius="md">
                             <MantineIcon
                                 icon={icon}
                                 size="lg"
-                                color="ldDark.9"
+                                color="white"
                                 {...iconProps}
                             />
                         </Card>
                     }
                     {...rest}
                 >
-                    <Stack spacing="xxs">
-                        <Text color="white" fw={600}>
-                            {title}
+                    <Stack gap="xxs">
+                        <Group gap="xs">
+                            <Text c="white" fw={600} fz="sm">
+                                {title}
+                            </Text>
+                            {isBeta && <BetaBadge />}
+                        </Group>
+                        <Text c="ldDark.8" fz="xs">
+                            {description}
                         </Text>
-                        <Text color="dimmed">{description}</Text>
                     </Stack>
                 </Menu.Item>
             );

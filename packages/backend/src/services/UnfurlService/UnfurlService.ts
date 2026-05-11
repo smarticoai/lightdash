@@ -14,6 +14,7 @@ import {
     LightdashMode,
     LightdashPage,
     LightdashRequestMethodHeader,
+    NotFoundError,
     ParameterError,
     QueryHistoryStatus,
     RequestMethod,
@@ -40,10 +41,9 @@ import * as fsPromise from 'fs/promises';
 import { uniq } from 'lodash';
 import { nanoid as useNanoid } from 'nanoid';
 import fetch from 'node-fetch';
-import { PDFDocument } from 'pdf-lib';
-import playwright, { type ElementHandle } from 'playwright';
+import playwright, { type ElementHandle, type Page } from 'playwright';
 import { LightdashAnalytics } from '../../analytics/LightdashAnalytics';
-import { S3Client } from '../../clients/Aws/S3Client';
+import { type FileStorageClient } from '../../clients/FileStorage/FileStorageClient';
 import { SlackClient } from '../../clients/Slack/SlackClient';
 import {
     getUnfurlBlocks,
@@ -58,9 +58,10 @@ import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { SavedChartModel } from '../../models/SavedChartModel';
 import { ShareModel } from '../../models/ShareModel';
 import { SlackAuthenticationModel } from '../../models/SlackAuthenticationModel';
-import { SpaceModel } from '../../models/SpaceModel';
+import { SlackUnfurlImageModel } from '../../models/SlackUnfurlImageModel';
 import { getAuthenticationToken } from '../../routers/headlessBrowser';
 import { BaseService } from '../BaseService';
+import type { SpacePermissionService } from '../SpaceService/SpacePermissionService';
 
 const RESPONSE_TIMEOUT_MS = 180000;
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -70,6 +71,124 @@ const nanoidRegex = new RegExp(nanoid);
 const createQueryEndpointRegex = /\/query/;
 // Matches /query/{uuid} but NOT /query/{uuid}/results (SQL chart endpoint)
 const paginatedQueryEndpointRegex = new RegExp(`/query/${uuid}(?!/results)`);
+
+/**
+ * Crop a PDF to a clip area using a PDF incremental update (PDF spec §7.5.6).
+ * Appends a modified Page object with an updated MediaBox, leaving original
+ * bytes untouched. This is the standard mechanism PDF editors use for
+ * modifications without rewriting the entire file.
+ */
+function cropPdfToClipInternal(
+    buffer: Buffer,
+    clip: { x: number; y: number; width: number; height: number },
+): Buffer {
+    const PX_TO_PT = 72 / 96;
+    const pdfStr = buffer.toString('binary');
+
+    // Find startxref to get the previous xref offset
+    const startxrefIdx = pdfStr.lastIndexOf('startxref');
+    if (startxrefIdx === -1) return buffer;
+    const newlineAfter = pdfStr.indexOf('\n', startxrefIdx + 10);
+    const prevXrefOffset = parseInt(
+        pdfStr.substring(startxrefIdx + 10, newlineAfter),
+        10,
+    );
+
+    // Find the Page object ("/Type /Page" but not "/Type /Pages")
+    let pageObjNum = -1;
+    let pageObjContent = '';
+    let searchPos = 0;
+    while (searchPos < pdfStr.length) {
+        const objIdx = pdfStr.indexOf(' 0 obj\n', searchPos);
+        if (objIdx === -1) break;
+        const lineStart = pdfStr.lastIndexOf('\n', objIdx - 1) + 1;
+        const endObjIdx = pdfStr.indexOf('endobj', objIdx);
+        if (endObjIdx === -1) {
+            searchPos = objIdx + 7;
+            // eslint-disable-next-line no-continue
+            continue;
+        }
+        const content = pdfStr.substring(lineStart, endObjIdx + 6);
+        const typeIdx = content.indexOf('/Type /Page');
+        if (typeIdx !== -1) {
+            const charAfter = content[typeIdx + 11];
+            if (!charAfter || /[\n\r/>]/.test(charAfter)) {
+                pageObjNum = parseInt(pdfStr.substring(lineStart, objIdx), 10);
+                pageObjContent = content;
+                break;
+            }
+        }
+        searchPos = endObjIdx + 6;
+    }
+    if (pageObjNum === -1) return buffer;
+
+    // Get page height from existing MediaBox
+    const mediaBoxMatch = pageObjContent.match(
+        /\/MediaBox\s*\[\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\]/,
+    );
+    if (!mediaBoxMatch) return buffer;
+    const pageHeightPt = parseFloat(mediaBoxMatch[4]);
+
+    // New MediaBox (PDF coords: origin at bottom-left, Y up)
+    const llx = clip.x * PX_TO_PT;
+    const lly = pageHeightPt - (clip.y + clip.height) * PX_TO_PT;
+    const urx = (clip.x + clip.width) * PX_TO_PT;
+    const ury = pageHeightPt - clip.y * PX_TO_PT;
+    const newMediaBox = `[${llx.toFixed(2)} ${lly.toFixed(2)} ${urx.toFixed(2)} ${ury.toFixed(2)}]`;
+
+    // Replace MediaBox in Page object
+    const bracketStart = pageObjContent.indexOf(
+        '[',
+        pageObjContent.indexOf('/MediaBox'),
+    );
+    const bracketEnd = pageObjContent.indexOf(']', bracketStart);
+    if (bracketStart === -1 || bracketEnd === -1) return buffer;
+    const newPageObj =
+        pageObjContent.substring(0, bracketStart) +
+        newMediaBox +
+        pageObjContent.substring(bracketEnd + 1);
+
+    // Parse trailer
+    const trailerIdx = pdfStr.lastIndexOf('trailer');
+    if (trailerIdx === -1) return buffer;
+    const tStart = pdfStr.indexOf('<<', trailerIdx);
+    const tEnd = pdfStr.indexOf('>>', tStart);
+    if (tStart === -1 || tEnd === -1) return buffer;
+    const tDict = pdfStr.substring(tStart + 2, tEnd);
+
+    const sizeMatch = tDict.match(/\/Size\s+(\d+)/);
+    const rootMatch = tDict.match(/\/Root\s+\d+\s+0\s+R/);
+    const infoMatch = tDict.match(/\/Info\s+\d+\s+0\s+R/);
+    if (!sizeMatch || !rootMatch) return buffer;
+
+    // Build incremental update
+    const newObjOffset = buffer.length + 1;
+    let appendix = '\n';
+    appendix += `${newPageObj}\n`;
+    const newXrefOffset = buffer.length + appendix.length;
+    appendix += `xref\n${pageObjNum} 1\n`;
+    appendix += `${String(newObjOffset).padStart(10, '0')} 00000 n \n`;
+    appendix += `trailer\n<</Size ${sizeMatch[1]} ${rootMatch[0]}`;
+    if (infoMatch) appendix += ` ${infoMatch[0]}`;
+    appendix += ` /Prev ${prevXrefOffset}>>\n`;
+    appendix += `startxref\n${newXrefOffset}\n%%EOF\n`;
+
+    return Buffer.from(pdfStr + appendix, 'binary');
+}
+
+function cropPdfToClip(
+    buffer: Buffer,
+    clip: { x: number; y: number; width: number; height: number },
+): Buffer {
+    try {
+        return cropPdfToClipInternal(buffer, clip);
+    } catch (e) {
+        Logger.warn(
+            `Failed to crop PDF, returning uncropped: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return buffer;
+    }
+}
 
 const viewport = {
     width: 1400,
@@ -85,6 +204,7 @@ export enum ScreenshotContext {
     SCHEDULED_DELIVERY = 'scheduled_delivery',
     SLACK = 'slack',
     EXPORT_DASHBOARD = 'export_dashboard',
+    EXPORT_CHART = 'export_chart',
 }
 
 // Default values
@@ -151,14 +271,15 @@ type UnfurlServiceArguments = {
     lightdashConfig: LightdashConfig;
     dashboardModel: DashboardModel;
     savedChartModel: SavedChartModel;
-    spaceModel: SpaceModel;
     shareModel: ShareModel;
-    s3Client: S3Client;
+    fileStorageClient: FileStorageClient;
     slackClient: SlackClient;
     projectModel: ProjectModel;
     downloadFileModel: DownloadFileModel;
+    slackUnfurlImageModel: SlackUnfurlImageModel;
     analytics: LightdashAnalytics;
     slackAuthenticationModel: SlackAuthenticationModel;
+    spacePermissionService: SpacePermissionService;
 };
 
 export class UnfurlService extends BaseService {
@@ -168,11 +289,9 @@ export class UnfurlService extends BaseService {
 
     savedChartModel: SavedChartModel;
 
-    spaceModel: SpaceModel;
-
     shareModel: ShareModel;
 
-    s3Client: S3Client;
+    fileStorageClient: FileStorageClient;
 
     slackClient: SlackClient;
 
@@ -180,35 +299,64 @@ export class UnfurlService extends BaseService {
 
     downloadFileModel: DownloadFileModel;
 
+    slackUnfurlImageModel: SlackUnfurlImageModel;
+
     analytics: LightdashAnalytics;
 
     slackAuthenticationModel: SlackAuthenticationModel;
+
+    spacePermissionService: SpacePermissionService;
 
     constructor({
         lightdashConfig,
         dashboardModel,
         savedChartModel,
-        spaceModel,
         shareModel,
-        s3Client,
+        fileStorageClient,
         projectModel,
         downloadFileModel,
+        slackUnfurlImageModel,
         slackClient,
         analytics,
         slackAuthenticationModel,
+        spacePermissionService,
     }: UnfurlServiceArguments) {
         super();
         this.lightdashConfig = lightdashConfig;
         this.dashboardModel = dashboardModel;
         this.savedChartModel = savedChartModel;
-        this.spaceModel = spaceModel;
         this.shareModel = shareModel;
-        this.s3Client = s3Client;
+        this.fileStorageClient = fileStorageClient;
         this.slackClient = slackClient;
         this.projectModel = projectModel;
         this.downloadFileModel = downloadFileModel;
+        this.slackUnfurlImageModel = slackUnfurlImageModel;
         this.analytics = analytics;
         this.slackAuthenticationModel = slackAuthenticationModel;
+        this.spacePermissionService = spacePermissionService;
+    }
+
+    async getPreviewSignedUrl(previewId: string): Promise<string> {
+        const record = await this.slackUnfurlImageModel.get(previewId);
+
+        const exists = await this.fileStorageClient.objectExists(record.s3_key);
+        if (!exists) {
+            this.logger.info(
+                `Slack unfurl preview object missing from storage: ${previewId}`,
+            );
+            await this.slackUnfurlImageModel
+                .delete(previewId)
+                .catch((deleteError) => {
+                    this.logger.warn(
+                        `Failed to delete orphan slack_unfurl_images row ${previewId}: ${getErrorMessage(
+                            deleteError,
+                        )}`,
+                    );
+                });
+            throw new NotFoundError('Slack unfurl image object missing');
+        }
+
+        return this.fileStorageClient.getFileUrl(record.s3_key, 300);
     }
 
     async getTitleAndDescription(
@@ -334,31 +482,24 @@ export class UnfurlService extends BaseService {
         };
     }
 
-    private async createImagePdf(
+    private async uploadPdf(
         id: string,
-        buffer: Buffer,
+        pdfBuffer: Buffer,
+        title?: string,
     ): Promise<{ source: string; fileName: string }> {
-        // Converts an image to PDF format,
-        // The PDF has the size of the image, not DIN A4
-        const pdfDoc = await PDFDocument.create();
-        const pngImage = await pdfDoc.embedPng(buffer);
-        const page = pdfDoc.addPage([pngImage.width, pngImage.height]);
-        page.drawImage(pngImage);
-        const pdfBytes = await pdfDoc.save();
-
         let source: string;
         let fileName: string;
-        if (this.s3Client.isEnabled()) {
-            const uploadPdfReturn = await this.s3Client.uploadPdf(
-                Buffer.from(pdfBytes),
+        if (this.fileStorageClient.isEnabled()) {
+            const uploadPdfReturn = await this.fileStorageClient.uploadPdf(
+                pdfBuffer,
                 id,
             );
             source = uploadPdfReturn.url;
-            fileName = uploadPdfReturn.fileName;
+            fileName = uploadPdfReturn.fileName ?? `${title ?? 'report'}.pdf`;
         } else {
             fileName = `${id}.pdf`;
             source = `/tmp/${fileName}`;
-            await fsPromise.writeFile(source, pdfBytes);
+            await fsPromise.writeFile(source, pdfBuffer);
         }
 
         return { source, fileName };
@@ -371,6 +512,7 @@ export class UnfurlService extends BaseService {
         authUserUuid,
         gridWidth,
         withPdf = false,
+        outputFormat = 'image',
         selector = undefined,
         context,
         contextId,
@@ -384,6 +526,7 @@ export class UnfurlService extends BaseService {
         authUserUuid: string;
         gridWidth?: number | undefined;
         withPdf?: boolean;
+        outputFormat?: 'image' | 'pdf';
         selector?: string;
         context: ScreenshotContext;
         contextId?: unknown;
@@ -397,7 +540,7 @@ export class UnfurlService extends BaseService {
         const cookie = await this.getUserCookie(authUserUuid);
         const details = await this.unfurlDetails(url, selectedTabs);
 
-        const buffer = await this.saveScreenshot({
+        const screenshotParams = {
             authUserUuid,
             imageId,
             cookie,
@@ -417,20 +560,41 @@ export class UnfurlService extends BaseService {
             selectedTabs,
             sendNowSchedulerFilters,
             sendNowSchedulerParameters,
+        };
+
+        const result = await this.saveScreenshot({
+            ...screenshotParams,
+            outputFormat,
+            withPdf: outputFormat === 'pdf' ? false : withPdf,
         });
 
+        if (result === undefined) {
+            return {};
+        }
+
+        const { imageBuffer, pdfBuffer } = result;
+
         let imageUrl;
-        let pdfFile;
+        if (imageBuffer) {
+            if (this.fileStorageClient.isEnabled()) {
+                imageUrl = await this.fileStorageClient.uploadImage(
+                    imageBuffer,
+                    imageId,
+                );
 
-        if (buffer !== undefined) {
-            if (withPdf) {
-                pdfFile = await this.createImagePdf(imageId, buffer);
-            }
-
-            if (this.s3Client.isEnabled()) {
-                imageUrl = await this.s3Client.uploadImage(buffer, imageId);
+                if (details?.organizationUuid) {
+                    const previewId = useNanoid();
+                    await this.slackUnfurlImageModel.create({
+                        nanoid: previewId,
+                        s3Key: `${imageId}.png`,
+                        organizationUuid: details.organizationUuid,
+                    });
+                    imageUrl = new URL(
+                        `/api/v1/slack/preview/${previewId}`,
+                        this.lightdashConfig.siteUrl,
+                    ).href;
+                }
             } else {
-                // We will share the image saved by puppetteer on our lightdash enpdoint
                 const filePath = `/tmp/${imageId}.png`;
                 const downloadFileId = useNanoid();
                 await this.downloadFileModel.createDownloadFile(
@@ -444,6 +608,11 @@ export class UnfurlService extends BaseService {
                     this.lightdashConfig.siteUrl,
                 ).href;
             }
+        }
+
+        let pdfFile;
+        if (pdfBuffer) {
+            pdfFile = await this.uploadPdf(imageId, pdfBuffer, details?.title);
         }
 
         return {
@@ -461,11 +630,11 @@ export class UnfurlService extends BaseService {
     ): Promise<string> {
         const dashboard =
             await this.dashboardModel.getByIdOrSlug(dashboardUuid);
-        const { isPrivate } = await this.spaceModel.get(dashboard.spaceUuid);
-        const access = await this.spaceModel.getUserSpaceAccess(
-            user.userUuid,
-            dashboard.spaceUuid,
-        );
+        const { inheritsFromOrgOrProject, access } =
+            await this.spacePermissionService.getSpaceAccessContext(
+                user.userUuid,
+                dashboard.spaceUuid,
+            );
 
         validateSelectedTabs(selectedTabs, dashboard.tiles);
 
@@ -511,14 +680,19 @@ export class UnfurlService extends BaseService {
             pageType: LightdashPage.DASHBOARD,
         };
 
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'view',
                 subject('Dashboard', {
                     organizationUuid,
                     projectUuid,
-                    isPrivate,
+                    inheritsFromOrgOrProject,
                     access,
+                    metadata: {
+                        dashboardUuid: dashboard.uuid,
+                        dashboardName: name,
+                    },
                 }),
             )
         ) {
@@ -549,6 +723,131 @@ export class UnfurlService extends BaseService {
         return unfurlImage.imageUrl;
     }
 
+    async exportChart(
+        chartUuidOrSlug: string,
+        user: SessionUser,
+    ): Promise<string> {
+        const chart = await this.savedChartModel.get(chartUuidOrSlug);
+        const { inheritsFromOrgOrProject, access } =
+            await this.spacePermissionService.getSpaceAccessContext(
+                user.userUuid,
+                chart.spaceUuid,
+            );
+
+        const auditedAbility = this.createAuditedAbility(user);
+        if (
+            auditedAbility.cannot(
+                'view',
+                subject('SavedChart', {
+                    organizationUuid: chart.organizationUuid,
+                    projectUuid: chart.projectUuid,
+                    inheritsFromOrgOrProject,
+                    access,
+                    metadata: {
+                        savedChartUuid: chart.uuid,
+                        savedChartName: chart.name,
+                    },
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        const minimalUrl = new URL(
+            `/minimal/projects/${chart.projectUuid}/saved/${chart.uuid}`,
+            this.lightdashConfig.headlessBrowser.internalLightdashHost,
+        ).href;
+
+        this.logger.info(
+            `Exporting chart "${chart.name}" with minimalUrl ${minimalUrl}`,
+        );
+
+        const unfurlImage = await this.unfurlImage({
+            url: minimalUrl,
+            lightdashPage: LightdashPage.CHART,
+            imageId: `chart-image_${snakeCaseName(chart.name)}_${useNanoid()}`,
+            authUserUuid: user.userUuid,
+            context: ScreenshotContext.EXPORT_CHART,
+            selectedTabs: null,
+        });
+        if (unfurlImage.imageUrl === undefined) {
+            throw new Error('Unable to export chart image');
+        }
+        this.logger.info(`Chart "${chart.name}" exported successfully`);
+        return unfurlImage.imageUrl;
+    }
+
+    /**
+     * Reads the always-mounted #lightdash-screenshot-progress element and
+     * logs which tile UUIDs are still unaccounted for, so that on
+     * #lightdash-ready-indicator timeouts we can identify the specific
+     * tile(s) blocking the screenshot.
+     *
+     * Best-effort: never throws. If the element is absent the page either
+     * never mounted the React tree (e.g. JS module-init crash) or pre-dates
+     * the progress indicator deploy, both of which are logged distinctly.
+     */
+    private async logUnreadyTilesOnTimeout(
+        page: Page,
+        url: string,
+        unfurlId: string,
+    ): Promise<void> {
+        try {
+            // Inline JSON parsing instead of a named inner helper — esbuild's
+            // keep-names option (used by tsx in dev) wraps named consts with
+            // __name(...), which fails in the browser context where __name
+            // is undefined. Inline arrow function args don't get this wrapping.
+            const progress = await page.evaluate((selector) => {
+                const el = document.querySelector(selector);
+                if (!el) return null;
+                const expected: string[] = [];
+                const ready: string[] = [];
+                const errored: string[] = [];
+                try {
+                    const v = el.getAttribute('data-tiles-expected');
+                    if (v) expected.push(...(JSON.parse(v) as string[]));
+                } catch {
+                    /* ignore malformed attribute */
+                }
+                try {
+                    const v = el.getAttribute('data-tiles-ready');
+                    if (v) ready.push(...(JSON.parse(v) as string[]));
+                } catch {
+                    /* ignore malformed attribute */
+                }
+                try {
+                    const v = el.getAttribute('data-tiles-errored');
+                    if (v) errored.push(...(JSON.parse(v) as string[]));
+                } catch {
+                    /* ignore malformed attribute */
+                }
+                return { expected, ready, errored };
+            }, SCREENSHOT_SELECTORS.PROGRESS_INDICATOR);
+
+            if (!progress) {
+                this.logger.error(
+                    `Screenshot ready timeout: progress indicator not in DOM. The frontend likely never mounted (JS module-init failure or pre-deploy build) - unfurlId: ${unfurlId}, url: ${url}`,
+                );
+                return;
+            }
+
+            const accounted = new Set([...progress.ready, ...progress.errored]);
+            const unready = progress.expected.filter(
+                (tileUuid) => !accounted.has(tileUuid),
+            );
+
+            this.logger.error(
+                `Screenshot ready timeout: ${unready.length}/${progress.expected.length} tiles never reported ready or errored - unfurlId: ${unfurlId}, url: ${url}, unreadyTileUuids: ${JSON.stringify(unready)}, expectedTileUuids: ${JSON.stringify(progress.expected)}, readyTileUuids: ${JSON.stringify(progress.ready)}, erroredTileUuids: ${JSON.stringify(progress.errored)}`,
+            );
+        } catch (probeError) {
+            this.logger.warn(
+                `Failed to probe screenshot progress indicator on timeout - unfurlId: ${unfurlId}, url: ${url}, error: ${getErrorMessage(
+                    probeError,
+                )}`,
+            );
+        }
+    }
+
     private async saveScreenshot({
         imageId,
         cookie,
@@ -571,6 +870,8 @@ export class UnfurlService extends BaseService {
         selectedTabs,
         sendNowSchedulerFilters,
         sendNowSchedulerParameters,
+        outputFormat = 'image',
+        withPdf = false,
     }: {
         imageId: string;
         cookie: string;
@@ -592,7 +893,9 @@ export class UnfurlService extends BaseService {
         selectedTabs: string[] | null;
         sendNowSchedulerFilters?: DashboardFilterRule[] | undefined;
         sendNowSchedulerParameters?: ParametersValuesMap | undefined;
-    }): Promise<Buffer | undefined> {
+        outputFormat?: 'image' | 'pdf';
+        withPdf?: boolean;
+    }): Promise<{ imageBuffer?: Buffer; pdfBuffer?: Buffer } | undefined> {
         this.logger.info(
             `with tiles ${JSON.stringify(chartTileUuids)} and ${JSON.stringify(
                 sqlChartTileUuids,
@@ -680,6 +983,14 @@ export class UnfurlService extends BaseService {
                                 ? contextId.toString()
                                 : 'undefined',
                         },
+                        // Allow self-signed / untrusted certs when the
+                        // internal Lightdash host is reached through an
+                        // HTTPS ingress whose cert isn't in the browserless
+                        // trust store. Opt-in via env var because it
+                        // disables TLS validation for the entire context.
+                        ignoreHTTPSErrors:
+                            this.lightdashConfig.headlessBrowser
+                                .internalLightdashHostIgnoreHttpsErrors,
                     });
 
                     // Polyfill crypto.randomUUID (needed for Loom iframes)
@@ -755,11 +1066,37 @@ export class UnfurlService extends BaseService {
                     page.on('console', (msg) => {
                         const type = msg.type();
                         if (type === 'error') {
-                            this.logger.warn(
-                                `Headless browser console error - file: ${
-                                    msg.location().url
-                                }, text ${msg.text()}`,
-                            );
+                            const location = msg.location();
+                            const text = msg.text();
+                            // Match across both the message text and the
+                            // resource URL: Chrome puts the URL in
+                            // location.url for resource-fetch failures
+                            // ("Failed to load resource: net::ERR_FAILED")
+                            // and in text for CORS rejections
+                            // ("Access to font at '...' has been blocked").
+                            const surface = `${location.url} ${text}`;
+                            // Suppress known-benign noise (Google Fonts
+                            // CORS/fetch failures, CSP report-only
+                            // directives) so real JS errors dominate the
+                            // error stream.
+                            const isBenign =
+                                /upgrade-insecure-requests.*report-only/i.test(
+                                    surface,
+                                ) ||
+                                /Cross-Origin-Opener-Policy.*ignored/i.test(
+                                    surface,
+                                ) ||
+                                /fonts\.gstatic\.com/i.test(surface);
+
+                            if (isBenign) {
+                                this.logger.debug(
+                                    `Headless browser console error (benign) - file: ${location.url}, text: ${text}`,
+                                );
+                            } else {
+                                this.logger.error(
+                                    `Headless browser console error - unfurlId: ${imageId}, pageUrl: ${url}, file: ${location.url}:${location.lineNumber}:${location.columnNumber}, text: ${text}`,
+                                );
+                            }
                         }
                     });
 
@@ -1024,17 +1361,68 @@ export class UnfurlService extends BaseService {
                         );
                     }
 
-                    this.logger.info('Waiting for screenshot ready indicator');
-                    await page.waitForSelector(
-                        SCREENSHOT_SELECTORS.READY_INDICATOR,
-                        {
-                            state: 'attached',
-                            timeout: RESPONSE_TIMEOUT_MS,
-                        },
-                    );
                     this.logger.info(
-                        'Screenshot ready indicator found - page is ready',
+                        `Waiting for screenshot ready indicator - unfurlId: ${imageId}`,
                     );
+                    try {
+                        await page.waitForSelector(
+                            SCREENSHOT_SELECTORS.READY_INDICATOR,
+                            {
+                                state: 'attached',
+                                timeout: RESPONSE_TIMEOUT_MS,
+                            },
+                        );
+                        this.logger.info(
+                            `Screenshot ready indicator found - page is ready - unfurlId: ${imageId}`,
+                        );
+                    } catch (waitError) {
+                        // Probe the always-mounted progress indicator to find
+                        // out which tiles never reported ready/errored. Logged
+                        // before re-throwing so callers (and retries) can see
+                        // exactly which tile is blocking the indicator.
+                        await this.logUnreadyTilesOnTimeout(page, url, imageId);
+                        throw waitError;
+                    }
+
+                    // Auto-detect CJK language from page content and set
+                    // <html lang="..."> so CSS :lang() rules select the
+                    // correct Noto Sans CJK font variant for screenshots.
+                    const detectedLang = await page.evaluate(() => {
+                        const text = document.body.innerText;
+                        if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text))
+                            return 'ja';
+                        if (/[\uAC00-\uD7AF\u1100-\u11FF]/.test(text))
+                            return 'ko';
+                        if (/[\u4E00-\u9FFF]/.test(text)) {
+                            // Distinguish Simplified vs Traditional Chinese
+                            // by checking for script-specific character variants
+                            const simplified = (
+                                text.match(
+                                    /[\u4EEC\u56FD\u5B66\u5BF9\u8FD9\u8BA9\u8BF4\u4E1C\u7ECF\u5F00]/g,
+                                ) ?? []
+                            ).length;
+                            const traditional = (
+                                text.match(
+                                    /[\u5011\u570B\u5B78\u5C0D\u9019\u8B93\u8AAA\u6771\u7D93\u958B]/g,
+                                ) ?? []
+                            ).length;
+                            return traditional > simplified ? 'zh-TW' : 'zh-CN';
+                        }
+                        return null;
+                    });
+                    if (detectedLang) {
+                        await page.evaluate(
+                            (lang) =>
+                                document.documentElement.setAttribute(
+                                    'lang',
+                                    lang,
+                                ),
+                            detectedLang,
+                        );
+                        this.logger.info(
+                            `Auto-detected CJK language: ${detectedLang}`,
+                        );
+                    }
 
                     const path = `/tmp/${imageId}.png`;
 
@@ -1064,29 +1452,110 @@ export class UnfurlService extends BaseService {
                         await page.waitForTimeout(100);
                     }
 
+                    // Helper: generate PDF from the current page state
+                    const generatePdf = async () => {
+                        const pdfWidth = gridWidth ?? viewport.width;
+                        // Measure the actual content area: use the element's
+                        // bounding box bottom (accounts for position on page)
+                        // but also check children in case the container has
+                        // extra CSS height beyond its content
+                        const contentBottom = await page!.evaluate(
+                            (sel: string) => {
+                                const container = document.querySelector(sel);
+                                if (!container) return 800;
+                                let maxBottom = 0;
+                                for (const child of Array.from(
+                                    container.children,
+                                )) {
+                                    const rect = child.getBoundingClientRect();
+                                    if (
+                                        rect.height > 0 &&
+                                        rect.bottom > maxBottom
+                                    )
+                                        maxBottom = rect.bottom;
+                                }
+                                // Fall back to container's own bottom if no
+                                // children found
+                                if (maxBottom === 0) {
+                                    maxBottom =
+                                        container.getBoundingClientRect()
+                                            .bottom;
+                                }
+                                return Math.ceil(maxBottom);
+                            },
+                            finalSelector,
+                        );
+                        const clip = {
+                            x: 0,
+                            y: 0,
+                            width: pdfWidth,
+                            height: contentBottom,
+                        };
+                        const pdfBytes = await page!.pdf({
+                            width: `${clip.width}px`,
+                            height: `${clip.height}px`,
+                            printBackground: true,
+                            pageRanges: '1',
+                            margin: {
+                                top: 0,
+                                right: 0,
+                                bottom: 0,
+                                left: 0,
+                            },
+                        });
+                        return cropPdfToClip(Buffer.from(pdfBytes), clip);
+                    };
+
+                    // PDF-only output
+                    // Take a screenshot first to force the browser to fully
+                    // paint all canvas elements (e.g. ECharts).  page.pdf()
+                    // alone unreliably captures canvas content.  This matches
+                    // the IMAGE+withPdf path where screenshot precedes PDF.
+                    if (outputFormat === 'pdf') {
+                        if (
+                            lightdashPage === LightdashPage.DASHBOARD ||
+                            lightdashPage === LightdashPage.EXPLORE
+                        ) {
+                            await page.locator(finalSelector).screenshot({
+                                animations: 'disabled',
+                                timeout: RESPONSE_TIMEOUT_MS,
+                            });
+                        } else {
+                            await page.screenshot({
+                                fullPage: true,
+                                animations: 'disabled',
+                            });
+                        }
+                        const pdfBuffer = await generatePdf();
+                        return { pdfBuffer };
+                    }
+
+                    // Take screenshot
+                    let imageBuffer: Buffer;
                     if (
                         lightdashPage === LightdashPage.DASHBOARD ||
                         lightdashPage === LightdashPage.EXPLORE
                     ) {
-                        const imageBuffer = await page
+                        imageBuffer = await page
                             .locator(finalSelector)
                             .screenshot({
                                 path,
                                 animations: 'disabled',
                                 timeout: RESPONSE_TIMEOUT_MS,
                             });
-
-                        return imageBuffer;
+                    } else {
+                        // Full page screenshot for charts
+                        imageBuffer = await page.screenshot({
+                            path,
+                            fullPage: true,
+                            animations: 'disabled',
+                        });
                     }
 
-                    // Full page screenshot for charts
-                    const imageBuffer = await page.screenshot({
-                        path,
-                        fullPage: true,
-                        animations: 'disabled',
-                    });
+                    // Also generate PDF in the same browser session
+                    const pdfBuffer = withPdf ? await generatePdf() : undefined;
 
-                    return imageBuffer;
+                    return { imageBuffer, pdfBuffer };
                 } catch (e) {
                     const errorMessage = getErrorMessage(e);
                     const isQueueFullError = isBrowserQueueFullError(e);
@@ -1118,7 +1587,7 @@ export class UnfurlService extends BaseService {
                         this.logger.info(
                             `Retrying screenshot (attempt ${retryCount + 2}/${
                                 maxRetries + 1
-                            }) after ${delay}ms for url ${url}, type: ${lightdashPage}. Error: ${getErrorMessage(
+                            }) after ${delay}ms for url ${url}, type: ${lightdashPage}, unfurlId: ${imageId}. Error: ${getErrorMessage(
                                 e,
                             )}`,
                         );
@@ -1153,13 +1622,15 @@ export class UnfurlService extends BaseService {
                             selectedTabs,
                             sendNowSchedulerFilters,
                             sendNowSchedulerParameters,
+                            outputFormat,
+                            withPdf,
                         });
                     }
 
                     hasError = true;
 
                     this.logger.error(
-                        `Unable to fetch screenshots for scheduler with url ${url}, of type: ${lightdashPage}. Message: ${getErrorMessage(
+                        `Unable to fetch screenshots for scheduler with url ${url}, of type: ${lightdashPage}, unfurlId: ${imageId}. Message: ${getErrorMessage(
                             e,
                         )}`,
                     );
@@ -1202,7 +1673,7 @@ export class UnfurlService extends BaseService {
 
                     const executionTime = Date.now() - startTime;
                     this.logger.info(
-                        `UnfurlService saveScreenshot took ${executionTime} ms`,
+                        `UnfurlService saveScreenshot took ${executionTime} ms - unfurlId: ${imageId}`,
                     );
                 }
             },
@@ -1367,7 +1838,7 @@ export class UnfurlService extends BaseService {
 
         Logger.debug(`Got link_shared slack event ${event.message_ts}`);
 
-        event.links.map(async (l) => {
+        void event.links.map(async (l) => {
             const eventUserId = context.botUserId;
 
             try {

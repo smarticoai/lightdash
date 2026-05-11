@@ -122,7 +122,11 @@ const ThirdPartyServicesEnabledProvider: FC<React.PropsWithChildren<{}>> = ({
 }) => {
     const { health, user } = useApp();
 
-    useSentry(health?.data?.sentry, user.data);
+    useSentry(
+        health?.data?.sentry,
+        user.data,
+        health?.data?.dashboard?.disableSentryTracking,
+    );
     usePylon();
 
     return (
@@ -138,6 +142,7 @@ const ThirdPartyServicesEnabledProvider: FC<React.PropsWithChildren<{}>> = ({
                     api_host: health.data?.posthog?.feApiHost,
                     autocapture: false,
                     capture_pageview: false,
+                    disable_session_recording: true,
                 }}
             >
                 <PosthogIdentified>

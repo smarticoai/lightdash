@@ -6,6 +6,8 @@ import {
     smoothStream,
     stepCountIs,
     streamText,
+    StreamTextResult,
+    type Output,
 } from 'ai';
 import Logger from '../../../../logging/logger';
 import { getSystemPromptV2 } from '../prompts/systemV2';
@@ -13,9 +15,11 @@ import { getFindContent } from '../tools/findContent';
 import { getFindExplores } from '../tools/findExplores';
 import { getFindFields } from '../tools/findFields';
 import { getGenerateDashboardV2 } from '../tools/generateDashboardV2';
+import { getGetDashboardCharts } from '../tools/getDashboardCharts';
 import { getImproveContext } from '../tools/improveContext';
 import { getProposeChange } from '../tools/proposeChange';
 import { getRunQuery } from '../tools/runQuery';
+import { getRunSavedChart } from '../tools/runSavedChart';
 import { getSearchFieldValues } from '../tools/searchFieldValues';
 import type {
     AiAgentArgs,
@@ -23,7 +27,10 @@ import type {
     AiStreamAgentResponseArgs,
 } from '../types/aiAgent';
 import { AgentContext } from '../utils/AgentContext';
-import { getUserFacingErrorMessage } from '../utils/errorMessages';
+import {
+    AiAgentStepCapReachedError,
+    getUserFacingErrorMessage,
+} from '../utils/errorMessages';
 
 const createAiAgentLogger =
     (debugLoggingEnabled: boolean) => (context: string, message: string) => {
@@ -32,9 +39,11 @@ const createAiAgentLogger =
         }
     };
 
+const STEP_CAP = 40;
+
 export const defaultAgentOptions = {
     toolChoice: 'auto' as const,
-    stopWhen: stepCountIs(20),
+    stopWhen: stepCountIs(STEP_CAP),
     maxRetries: 6, // Increased for Bedrock rate limits
 };
 
@@ -79,6 +88,7 @@ const getAgentTools = (
     });
 
     const findFields = getFindFields({
+        getExplore: dependencies.getExplore,
         findFields: dependencies.findFields,
         updateProgress: dependencies.updateProgress,
         pageSize: args.findFieldsPageSize,
@@ -87,6 +97,12 @@ const getAgentTools = (
     const findContent = getFindContent({
         findContent: dependencies.findContent,
         siteUrl: args.siteUrl,
+    });
+
+    const getDashboardCharts = getGetDashboardCharts({
+        getDashboardCharts: dependencies.getDashboardCharts,
+        siteUrl: args.siteUrl,
+        pageSize: args.getDashboardChartsPageSize,
     });
 
     const runQuery = getRunQuery({
@@ -98,6 +114,14 @@ const getAgentTools = (
         maxLimit: args.maxQueryLimit,
         enableDataAccess: args.enableDataAccess,
         enableSelfImprovement: args.enableSelfImprovement,
+    });
+
+    const runSavedChart = getRunSavedChart({
+        updateProgress: dependencies.updateProgress,
+        runAsyncQuery: dependencies.runAsyncQuery,
+        getSavedChart: dependencies.getSavedChart,
+        maxLimit: args.maxQueryLimit,
+        enableDataAccess: args.enableDataAccess,
     });
 
     const generateDashboard = getGenerateDashboardV2({
@@ -118,9 +142,11 @@ const getAgentTools = (
 
     const tools = {
         findContent,
+        getDashboardCharts,
         findExplores,
         findFields,
         runQuery,
+        runSavedChart,
         generateDashboard,
         ...(args.canManageAgent ? { improveContext } : {}),
         ...(args.enableSelfImprovement && args.canManageAgent
@@ -320,8 +346,12 @@ export const generateAgentResponse = async ({
 
         logger(
             'Generate Agent Response',
-            `Generation complete. Result text length: ${result.text.length}`,
+            `Generation complete. Result text length: ${result.text.length}, finishReason: ${result.finishReason}`,
         );
+
+        if (result.steps.length >= STEP_CAP && !result.text) {
+            throw new AiAgentStepCapReachedError(result.steps.length);
+        }
 
         const totalTime = Date.now() - startTime;
         dependencies.perf.measureGenerateResponseTime(totalTime);
@@ -357,7 +387,8 @@ export const streamAgentResponse = async ({
 }: {
     args: AiStreamAgentResponseArgs;
     dependencies: AiAgentDependencies;
-}) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): Promise<StreamTextResult<any, Output.Output>> => {
     const logger = createAiAgentLogger(args.debugLoggingEnabled);
     logger(
         'Stream Agent Response',
@@ -534,10 +565,10 @@ export const streamAgentResponse = async ({
                         });
                 }
             },
-            onFinish: ({ usage, steps, reasoning }) => {
+            onFinish: ({ usage, steps, reasoning, finishReason }) => {
                 logger(
                     'On Finish',
-                    'Stream finished. Updating prompt with response.',
+                    `Stream finished. Updating prompt with response. finishReason: ${finishReason}, steps: ${steps.length}`,
                 );
 
                 // Extract complete response from all steps instead of just the last text
@@ -545,10 +576,21 @@ export const streamAgentResponse = async ({
                     .flatMap((step) => step.text || [])
                     .join('\n');
 
-                void dependencies.updatePrompt({
-                    response: completeResponse,
-                    promptUuid: args.promptUuid,
-                });
+                const stepCapReached = steps.length >= STEP_CAP;
+
+                if (stepCapReached && !completeResponse) {
+                    void dependencies.updatePrompt({
+                        promptUuid: args.promptUuid,
+                        errorMessage: getUserFacingErrorMessage(
+                            new AiAgentStepCapReachedError(steps.length),
+                        ),
+                    });
+                } else {
+                    void dependencies.updatePrompt({
+                        response: completeResponse,
+                        promptUuid: args.promptUuid,
+                    });
+                }
 
                 logger(
                     'On Finish',
@@ -568,6 +610,8 @@ export const streamAgentResponse = async ({
                             typeof args.model === 'string'
                                 ? args.model
                                 : args.model.modelId,
+                        finishReason,
+                        stepCapReached,
                     },
                 });
                 logger(

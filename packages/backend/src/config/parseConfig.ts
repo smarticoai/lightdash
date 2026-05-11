@@ -7,7 +7,9 @@ import {
     AuthTokenPrefix,
     cleanColorArray,
     CreateDatabricksCredentials,
+    CreateWarehouseCredentials,
     DbtGithubProjectConfig,
+    DbtProjectConfig,
     DbtProjectType,
     DbtVersionOption,
     DbtVersionOptionLatest,
@@ -28,6 +30,7 @@ import {
 } from '@lightdash/common';
 import * as Sentry from '@sentry/core';
 import { type ClientAuthMethod } from 'openid-client';
+import { z } from 'zod';
 import { VERSION } from '../version';
 import {
     aiCopilotConfigSchema,
@@ -323,6 +326,120 @@ const parseEnum = <T>(
     return value as T;
 };
 
+const multiProjectSetupEntrySchema = z.object({
+    name: z.string().min(1, 'Project name cannot be empty'),
+    warehouseConnection: z
+        .object({
+            type: z.nativeEnum(WarehouseTypes, {
+                errorMap: () => ({
+                    message: `Invalid warehouse type. Must be one of: ${Object.values(WarehouseTypes).join(', ')}`,
+                }),
+            }),
+        })
+        .passthrough(),
+    dbtConnection: z
+        .object({
+            type: z.nativeEnum(DbtProjectType, {
+                errorMap: () => ({
+                    message: `Invalid dbt connection type. Must be one of: ${Object.values(DbtProjectType).join(', ')}`,
+                }),
+            }),
+        })
+        .passthrough(),
+    dbtVersion: z.nativeEnum(SupportedDbtVersions).optional(),
+    embed: z
+        .object({
+            secret: z.string().optional(),
+            allowAllDashboards: z.boolean().optional(),
+        })
+        .optional(),
+});
+
+const multiProjectSetupSchema = z.array(multiProjectSetupEntrySchema).refine(
+    (entries) => {
+        const names = entries.map((e) => e.name);
+        return new Set(names).size === names.length;
+    },
+    (entries) => {
+        const names = entries.map((e) => e.name);
+        const duplicate = names.find((name, i) => names.indexOf(name) !== i);
+        return {
+            message: `Duplicate project name "${duplicate}" in LD_SETUP_PROJECTS`,
+        };
+    },
+);
+
+export const getMultiProjectSetupConfig = ():
+    | MultiProjectSetupEntry[]
+    | undefined => {
+    const raw = process.env.LD_SETUP_PROJECTS;
+    if (!raw) return undefined;
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        throw new ParseError(
+            `Failed to parse LD_SETUP_PROJECTS: ${getErrorMessage(e)}`,
+        );
+    }
+
+    if (Array.isArray(parsed) && parsed.length === 0) {
+        return undefined;
+    }
+
+    const result = multiProjectSetupSchema.safeParse(parsed);
+    if (!result.success) {
+        const errorDetails = result.error.errors
+            .map((err) => {
+                const path =
+                    err.path.length > 0
+                        ? `  - ${err.path.join('.')}: ${err.message}`
+                        : `  - ${err.message}`;
+                return path;
+            })
+            .join('\n');
+
+        const exampleConfig = JSON.stringify(
+            [
+                {
+                    name: 'My Project',
+                    warehouseConnection: {
+                        type: 'postgres',
+                        host: 'db.example.com',
+                        port: 5432,
+                        user: 'user',
+                        password: 'password',
+                        dbname: 'mydb',
+                        schema: 'public',
+                    },
+                    dbtConnection: {
+                        type: 'github',
+                        authorization_method: 'personal_access_token',
+                        personal_access_token: 'ghp_...',
+                        repository: 'org/repo',
+                        branch: 'main',
+                        project_sub_path: '/',
+                    },
+                },
+            ],
+            null,
+            2,
+        );
+
+        throw new ParseError(
+            `Invalid LD_SETUP_PROJECTS:\n${errorDetails}\n\n` +
+                `Warehouse types: ${Object.values(WarehouseTypes).join(', ')}\n` +
+                `dbt connection types: ${Object.values(DbtProjectType).join(', ')}\n\n` +
+                `Example:\n${exampleConfig}\n\n` +
+                `See https://docs.lightdash.com/self-host/customize-deployment/environment-variables#initialize-instance for details.`,
+        );
+    }
+
+    // Zod validates structure; the full type comes from the original parsed JSON
+    return parsed as MultiProjectSetupEntry[];
+};
+
 const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
     const parseCompute = (): CreateDatabricksCredentials['compute'] => {
         // This is a stringified array of objects, in JSON format
@@ -335,12 +452,55 @@ const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
     try {
         if (!process.env.LD_SETUP_ADMIN_EMAIL) return undefined;
 
-        const projectPat = process.env.LD_SETUP_PROJECT_PAT;
-        if (!projectPat) {
-            throw new ParameterError(
-                `LD_SETUP_PROJECT_PAT is required for initial setup`,
-                { variant: 'ApiToken' },
-            );
+        // Build project list: either from LD_SETUP_PROJECTS or legacy single-project env vars
+        const multiProjectConfig = getMultiProjectSetupConfig();
+        let projects: MultiProjectSetupEntry[];
+
+        if (multiProjectConfig) {
+            projects = multiProjectConfig;
+        } else {
+            const projectPat = process.env.LD_SETUP_PROJECT_PAT;
+            if (!projectPat) {
+                throw new ParameterError(
+                    `LD_SETUP_PROJECT_PAT is required for initial setup. Set LD_SETUP_PROJECT_PAT for single-project setup, or use LD_SETUP_PROJECTS for multi-project setup.`,
+                    { variant: 'ApiToken' },
+                );
+            }
+
+            projects = [
+                {
+                    name: process.env.LD_SETUP_PROJECT_NAME!,
+                    warehouseConnection: {
+                        type: WarehouseTypes.DATABRICKS,
+                        catalog: process.env.LD_SETUP_PROJECT_CATALOG,
+                        database: process.env.LD_SETUP_PROJECT_SCHEMA!,
+                        serverHostName: process.env.LD_SETUP_PROJECT_HOST!,
+                        httpPath: process.env.LD_SETUP_PROJECT_HTTP_PATH!,
+                        personalAccessToken: projectPat,
+                        requireUserCredentials: undefined,
+                        startOfWeek: parseEnum<WeekDay>(
+                            process.env.LD_SETUP_START_OF_WEEK,
+                            WeekDay,
+                        ),
+                        compute: parseCompute(),
+                    },
+                    dbtConnection: {
+                        type: DbtProjectType.GITHUB,
+                        authorization_method: 'personal_access_token',
+                        personal_access_token: process.env.LD_SETUP_GITHUB_PAT!,
+                        repository: process.env.LD_SETUP_GITHUB_REPOSITORY!,
+                        branch: process.env.LD_SETUP_GITHUB_BRANCH!,
+                        project_sub_path:
+                            process.env.LD_SETUP_GITHUB_PATH || '/',
+                        host_domain: undefined,
+                    },
+                    dbtVersion:
+                        parseEnum<SupportedDbtVersions>(
+                            process.env.LD_SETUP_DBT_VERSION,
+                            SupportedDbtVersions,
+                        ) || DbtVersionOptionLatest.LATEST,
+                },
+            ];
         }
 
         return {
@@ -378,35 +538,7 @@ const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
                       ),
                   }
                 : undefined,
-            project: {
-                name: process.env.LD_SETUP_PROJECT_NAME!,
-                type: WarehouseTypes.DATABRICKS,
-                catalog: process.env.LD_SETUP_PROJECT_CATALOG,
-                database: process.env.LD_SETUP_PROJECT_SCHEMA!,
-                serverHostName: process.env.LD_SETUP_PROJECT_HOST!,
-                httpPath: process.env.LD_SETUP_PROJECT_HTTP_PATH!,
-                personalAccessToken: projectPat,
-                requireUserCredentials: undefined,
-                startOfWeek: parseEnum<WeekDay>(
-                    process.env.LD_SETUP_START_OF_WEEK,
-                    WeekDay,
-                ),
-                compute: parseCompute(),
-                dbtVersion:
-                    parseEnum<SupportedDbtVersions>(
-                        process.env.LD_SETUP_DBT_VERSION,
-                        SupportedDbtVersions,
-                    ) || DbtVersionOptionLatest.LATEST,
-            },
-            dbt: {
-                type: DbtProjectType.GITHUB,
-                authorization_method: 'personal_access_token',
-                personal_access_token: process.env.LD_SETUP_GITHUB_PAT!,
-                repository: process.env.LD_SETUP_GITHUB_REPOSITORY!,
-                branch: process.env.LD_SETUP_GITHUB_BRANCH!,
-                project_sub_path: process.env.LD_SETUP_GITHUB_PATH || '/',
-                host_domain: undefined,
-            },
+            projects,
         };
     } catch (e) {
         // If a variable is not set, we will skip the initial setup
@@ -442,6 +574,8 @@ export const getUpdateSetupConfig = (): LightdashConfig['updateSetup'] => {
     }
 
     return {
+        organizationUuid: process.env.LD_SETUP_ORGANIZATION_UUID,
+        projectUuid: process.env.LD_SETUP_PROJECT_UUID,
         organization: {
             admin: {
                 email: process.env.LD_SETUP_ADMIN_EMAIL,
@@ -479,6 +613,7 @@ export const getUpdateSetupConfig = (): LightdashConfig['updateSetup'] => {
         dbt: {
             personal_access_token: process.env.LD_SETUP_GITHUB_PAT,
         },
+        projects: getMultiProjectSetupConfig(),
         embed: {
             allowAllDashboards:
                 process.env.LD_SETUP_EMBED_ALLOW_ALL_DASHBOARDS === 'true',
@@ -493,6 +628,13 @@ export const parseBaseS3Config = (): LightdashConfig['s3'] => {
     const region = process.env.S3_REGION;
     const accessKey = process.env.S3_ACCESS_KEY;
     const secretKey = process.env.S3_SECRET_KEY;
+    // Browser-facing S3 endpoint used when minting presigned URLs that the
+    // browser will fetch directly (e.g. PUT uploads for app images). In local
+    // dev the internal Docker hostname (http://minio:9000) is unreachable from
+    // the browser, so set this to http://localhost:9000. In production with
+    // real S3 this is typically unnecessary — omit it and the internal endpoint
+    // is used for signing, which already resolves publicly.
+    const publicEndpoint = process.env.S3_PUBLIC_ENDPOINT || undefined;
     const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
     const expirationTime = parseInt(
         process.env.S3_EXPIRATION_TIME || '259200', // 3 days in seconds
@@ -511,6 +653,7 @@ export const parseBaseS3Config = (): LightdashConfig['s3'] => {
 
     return {
         endpoint,
+        publicEndpoint,
         bucket,
         region,
         accessKey,
@@ -565,6 +708,53 @@ export const parseResultsS3Config = (): LightdashConfig['results']['s3'] => {
         accessKey,
         secretKey,
         useCredentialsFrom: baseUseCredentialsFrom,
+    };
+};
+
+export const parsePreAggregateResultsS3Config = ():
+    | Omit<S3Config, 'expirationTime'>
+    | undefined => {
+    const baseS3Config = parseBaseS3Config();
+
+    if (!baseS3Config) {
+        return undefined;
+    }
+
+    const bucket = process.env.PRE_AGGREGATE_RESULTS_S3_BUCKET;
+    const region = process.env.PRE_AGGREGATE_RESULTS_S3_REGION;
+    const accessKey = process.env.PRE_AGGREGATE_RESULTS_S3_ACCESS_KEY;
+    const secretKey = process.env.PRE_AGGREGATE_RESULTS_S3_SECRET_KEY;
+
+    const hasAnyPreAggregateS3Config =
+        bucket || region || accessKey || secretKey;
+
+    if (!hasAnyPreAggregateS3Config) {
+        return undefined;
+    }
+
+    const {
+        endpoint,
+        forcePathStyle,
+        useCredentialsFrom,
+        accessKey: baseAccessKey,
+        secretKey: baseSecretKey,
+    } = baseS3Config;
+
+    if (!endpoint || !bucket || !region) {
+        throw new ParseError(
+            'PRE_AGGREGATE_RESULTS_S3_BUCKET, PRE_AGGREGATE_RESULTS_S3_REGION, and S3_ENDPOINT must be set when configuring pre-aggregate result storage.',
+            {},
+        );
+    }
+
+    return {
+        endpoint,
+        forcePathStyle,
+        bucket,
+        region,
+        accessKey: accessKey || baseAccessKey,
+        secretKey: secretKey || baseSecretKey,
+        useCredentialsFrom,
     };
 };
 
@@ -642,6 +832,8 @@ const getBedrockConfig = () => {
         return {
             apiKey: process.env.BEDROCK_API_KEY,
             region: process.env.BEDROCK_REGION,
+            inferenceProfilePrefix:
+                process.env.BEDROCK_INFERENCE_PROFILE_PREFIX,
             modelName:
                 process.env.BEDROCK_MODEL_NAME || DEFAULT_BEDROCK_MODEL_NAME,
             embeddingModelName: process.env.BEDROCK_EMBEDDING_MODEL,
@@ -656,6 +848,8 @@ const getBedrockConfig = () => {
             secretAccessKey: process.env.BEDROCK_SECRET_ACCESS_KEY,
             sessionToken: process.env.BEDROCK_SESSION_TOKEN,
             region: process.env.BEDROCK_REGION,
+            inferenceProfilePrefix:
+                process.env.BEDROCK_INFERENCE_PROFILE_PREFIX,
             modelName:
                 process.env.BEDROCK_MODEL_NAME || DEFAULT_BEDROCK_MODEL_NAME,
             embeddingModelName: process.env.BEDROCK_EMBEDDING_MODEL,
@@ -762,6 +956,17 @@ export type LoggingConfig = {
     filePath: string;
 };
 
+export type MultiProjectSetupEntry = {
+    name: string;
+    warehouseConnection: CreateWarehouseCredentials;
+    dbtConnection: DbtProjectConfig;
+    dbtVersion?: DbtVersionOption;
+    embed?: {
+        secret?: string;
+        allowAllDashboards?: boolean;
+    };
+};
+
 export type LightdashConfig = {
     lightdashSecret: string;
     secureCookies: boolean;
@@ -811,6 +1016,9 @@ export type LightdashConfig = {
         gcDurationBuckets?: number[];
         eventLoopMonitoringPrecision?: number;
         labels?: Object;
+        eventMetricsEnabled: boolean;
+        eventMetricsConfigPath?: string;
+        allQueryMetricsEnabled: boolean;
     };
     database: {
         connectionUri: string | undefined;
@@ -826,12 +1034,13 @@ export type LightdashConfig = {
         csvCellsLimit: number;
         timezone: string | undefined;
         maxPageSize: number;
-        useSqlPivotResults: boolean | undefined;
-        showExecutionTime: boolean | undefined;
+        retryQueryOnTransientErrors: boolean;
+        enableTimezoneSupport: boolean | undefined;
     };
     pivotTable: {
         maxColumnLimit: number;
     };
+    enableImprovedExcelDates: boolean;
     chart: {
         versionHistory: {
             daysLimit: number;
@@ -840,6 +1049,10 @@ export type LightdashConfig = {
     dashboard: {
         maxTilesPerTab: number;
         maxTabsPerDashboard: number;
+        versionHistory: {
+            daysLimit: number;
+        };
+        disableSentryTracking: boolean;
     };
     // This is the override color palette for the organization
     // TODO: allow override for dark theme
@@ -855,10 +1068,17 @@ export type LightdashConfig = {
         cacheStateTimeSeconds: number;
         s3?: Omit<S3Config, 'expirationTime'>;
     };
+    natsWorker: {
+        enabled: boolean;
+        url: string | undefined;
+        workerConcurrency: number;
+        queueTimeoutMs: number;
+    };
     slack?: SlackConfig;
     scheduler: {
         enabled: boolean;
         concurrency: number;
+        pollInterval: number;
         jobTimeout: number;
         screenshotTimeout?: number;
         tasks: Array<SchedulerTaskName>;
@@ -875,6 +1095,13 @@ export type LightdashConfig = {
     };
     groups: {
         enabled: boolean | undefined;
+    };
+    persistentDownloadUrls: {
+        enabled: boolean;
+        expirationSeconds: number;
+        expirationSecondsEmail: number | undefined;
+        expirationSecondsSlack: number | undefined;
+        expirationSecondsMsTeams: number | undefined;
     };
     extendedUsageAnalytics: {
         enabled: boolean;
@@ -909,13 +1136,16 @@ export type LightdashConfig = {
             enablePostMessage: boolean;
         };
     };
-    scim: {
-        enabled: boolean;
-    };
     serviceAccount: {
         enabled: boolean;
     };
     organizationWarehouseCredentials: {
+        enabled: boolean;
+    };
+    athenaWarehouseIamRoleAuth: {
+        enabled: boolean;
+    };
+    saveCredentialsForm: {
         enabled: boolean;
     };
     github: {
@@ -936,6 +1166,12 @@ export type LightdashConfig = {
     googleCloudPlatform: {
         projectId?: string;
     };
+    managedAgent: {
+        anthropicApiKey: string | null;
+        skillIds: string[];
+        schedule: string;
+        sessionTimeoutMs: number;
+    };
 
     initialSetup?: {
         organization: {
@@ -955,13 +1191,11 @@ export type LightdashConfig = {
             token: string;
             expirationTime: Date | null;
         };
-        project: CreateDatabricksCredentials & {
-            name: string;
-            dbtVersion: DbtVersionOption;
-        };
-        dbt: DbtGithubProjectConfig;
+        projects: MultiProjectSetupEntry[];
     };
     updateSetup?: {
+        organizationUuid?: string;
+        projectUuid?: string;
         organization?: {
             admin: {
                 email?: string;
@@ -981,6 +1215,7 @@ export type LightdashConfig = {
             dbtVersion?: DbtVersionOption;
             personalAccessToken?: CreateDatabricksCredentials['personalAccessToken'];
         };
+        projects?: MultiProjectSetupEntry[];
         serviceAccount?: {
             token: string;
             expirationTime: Date | null;
@@ -998,9 +1233,6 @@ export type LightdashConfig = {
     };
     analyticsEmbedSecret?: string;
 
-    dashboardComments: {
-        enabled: boolean;
-    };
     echarts6: {
         enabled: boolean;
     };
@@ -1018,15 +1250,24 @@ export type LightdashConfig = {
     funnelBuilder: {
         enabled: boolean;
     };
-    metricsCatalog: {
-        echartsVisualizationEnabled: boolean | undefined;
+    softDelete: {
+        enabled: boolean;
+        retentionDays: number;
     };
-    maps: {
-        enabled: boolean | undefined;
-    };
-    nestedSpacesPermissions: {
+    dashboardComments: {
         enabled: boolean;
     };
+    preAggregates: {
+        enabled: boolean;
+        parquetEnabled: boolean;
+        materializationMaxRows: number | null;
+        /** Max memory DuckDB can use for caching parquet data and query intermediates on the shared query instance (e.g. '256MB', '1GB', '2GB'). Only affects pre-aggregate reads, not materializations which use isolated instances. */
+        duckdbQueryMemoryLimit: string | null;
+        s3?: Omit<S3Config, 'expirationTime'>;
+    };
+    appRuntime: AppRuntimeConfig;
+    enabledFeatureFlags: Set<string>;
+    disabledFeatureFlags: Set<string>;
 };
 
 export type SlackConfig = {
@@ -1039,7 +1280,6 @@ export type SlackConfig = {
     socketMode?: boolean;
     channelsCachedTime: number;
     supportUrl: string;
-    multiAgentChannelEnabled: boolean;
     /*
      This is the setting that controls whether we generate image previews for link shares in Slack
      @default true
@@ -1050,6 +1290,7 @@ export type HeadlessBrowserConfig = {
     host?: string;
     port?: string;
     internalLightdashHost: string;
+    internalLightdashHostIgnoreHttpsErrors: boolean;
     browserEndpoint: string;
     maxScreenshotRetries: number;
     retryBaseDelayMs: number;
@@ -1057,6 +1298,14 @@ export type HeadlessBrowserConfig = {
 export type S3Config = {
     region: string;
     endpoint: string;
+    /**
+     * Browser-facing S3 endpoint for presigned URLs that the browser fetches
+     * directly (e.g. image uploads via PUT). In local dev with MinIO, the
+     * internal endpoint (http://minio:9000) isn't reachable from the browser,
+     * so this can be set to http://localhost:9000. In production with real
+     * S3/GCS, this is unnecessary since the endpoint is already public.
+     */
+    publicEndpoint?: string;
     bucket: string;
     expirationTime?: number;
     accessKey?: string;
@@ -1068,6 +1317,36 @@ export type S3Config = {
      */
     useCredentialsFrom?: string[];
 };
+export type AppRuntimeConfig = {
+    enabled: boolean;
+    lightdashOrigin: string;
+    cdnOrigin: string | null;
+    /**
+     * Origin where data-app preview iframes are served, distinct from the
+     * Lightdash app origin (e.g., `https://acme.lightdash.app`). When null,
+     * previews are served same-origin — dev / pre-cutover behavior. The
+     * host filter rejects requests on this hostname unless the path matches
+     * the preview-router prefix.
+     */
+    previewOrigin: string | null;
+    /**
+     * Additional origins allowed in the preview iframe CSP for style-src
+     * and font-src directives. Parsed from a comma-separated env var
+     * (e.g. `https://fonts.googleapis.com,https://fonts.gstatic.com`).
+     */
+    cspAllowedOrigins: string[];
+    s3: S3Config | null;
+    e2bApiKey: string | null;
+    e2bTemplateName: string;
+    /**
+     * Tag identifying which build of `e2bTemplateName` to launch sandboxes
+     * from. Composed into `name:tag` for `Sandbox.create`. Empty string falls
+     * back to E2B's implicit `default` tag — used as a transition state for
+     * deployments that haven't picked up a version-tagged build yet.
+     */
+    e2bTemplateTag: string;
+};
+
 export type IntercomConfig = {
     appId: string;
     apiBase: string;
@@ -1224,11 +1503,118 @@ export type SmtpConfig = {
         name: string;
         email: string;
     };
+    inlineImageCid: boolean;
 };
 
 const DEFAULT_JOB_TIMEOUT = 1000 * 60 * 10; // 10 minutes
 
-console.log('process.env.LIGHTDASH_SECRET', process.env.LIGHTDASH_SECRET);
+const parseAppRuntimeConfig = (siteUrl: string): AppRuntimeConfig => {
+    const enabled = process.env.APPS_RUNTIME_ENABLED === 'true';
+    const appsBucket = process.env.APPS_S3_BUCKET;
+
+    const baseS3Config = parseBaseS3Config();
+
+    let s3: S3Config | null = null;
+
+    if (baseS3Config) {
+        const {
+            endpoint: baseEndpoint,
+            publicEndpoint: basePublicEndpoint,
+            bucket: baseBucket,
+            region: baseRegion,
+            accessKey: baseAccessKey,
+            secretKey: baseSecretKey,
+            forcePathStyle: baseForcePathStyle,
+            useCredentialsFrom: baseUseCredentialsFrom,
+        } = baseS3Config;
+
+        const bucket = appsBucket || baseBucket;
+        const region = process.env.APPS_S3_REGION || baseRegion;
+        const accessKey = process.env.APPS_S3_ACCESS_KEY || baseAccessKey;
+        const secretKey = process.env.APPS_S3_SECRET_KEY || baseSecretKey;
+
+        s3 = {
+            endpoint: baseEndpoint,
+            publicEndpoint: basePublicEndpoint,
+            forcePathStyle: baseForcePathStyle,
+            bucket,
+            region,
+            accessKey,
+            secretKey,
+            useCredentialsFrom: baseUseCredentialsFrom,
+        };
+    }
+
+    return {
+        enabled,
+        lightdashOrigin: process.env.APP_RUNTIME_LIGHTDASH_ORIGIN || siteUrl,
+        cdnOrigin: process.env.APP_RUNTIME_CDN_ORIGIN || null,
+        previewOrigin: process.env.APP_RUNTIME_PREVIEW_ORIGIN || null,
+        cspAllowedOrigins: (process.env.APP_RUNTIME_CSP_ALLOWED_ORIGINS || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+        s3,
+        e2bApiKey: process.env.E2B_API_KEY || null,
+        e2bTemplateName: process.env.E2B_TEMPLATE_NAME || 'lightdash-data-app',
+        // Default to the running Lightdash version so prod always launches
+        // sandboxes from the matching template build (the release workflow
+        // guarantees this tag exists). Operators can override to roll back
+        // or pin during incidents.
+        e2bTemplateTag: process.env.E2B_TEMPLATE_TAG ?? (VERSION as string),
+    };
+};
+
+/**
+ * Map of legacy per-flag env vars to their feature-flag IDs. Deprecated —
+ * operators should migrate to LIGHTDASH_ENABLE_FEATURE_FLAGS /
+ * LIGHTDASH_DISABLE_FEATURE_FLAGS. Entries here translate the legacy var into
+ * the unified allowlists for backward compatibility, so self-hosted
+ * deployments don't regress when a per-flag handler is removed during
+ * PostHog migration. Once an entry has soaked for ~6 months after the
+ * unified pattern is documented, delete it.
+ */
+const LEGACY_ENABLE_ENV_VARS: ReadonlyArray<
+    readonly [envVar: string, flagId: string]
+> = [
+    // Add per migration; truthy env value enables the flag.
+    ['CHANGE_CHART_EXPLORE_ENABLED', 'change-chart-explore'],
+    ['GOOGLE_CHAT_ENABLED', 'google-chat-enabled'],
+    // helm defaults set USE_SQL_PIVOT_RESULTS=true for all cloud deployments;
+    // translating to enabledFeatureFlags ensures both existing and new cloud
+    // instances pick up the DB-backed flag as enabled without needing per-DB
+    // bootstrapping.
+    ['USE_SQL_PIVOT_RESULTS', 'use-sql-pivot-results'],
+    ['USER_IMPERSONATION_ENABLED', 'user-impersonation'],
+    // GROUPS_ENABLED is also read by UserService for group-sync logic (separate
+    // from the feature flag) — keep the config field, but translate the env
+    // var to the unified allowlist for the flag system too.
+    ['GROUPS_ENABLED', 'user-groups-enabled'],
+    ['SHOW_EXECUTION_TIME', 'show-execution-time'],
+    // EMBEDDING_ENABLED is also read by HealthService (exposed via the health
+    // endpoint) and EmbedService (allowAll config). Keep the config field, but
+    // translate the env var to the unified allowlist for the flag system.
+    ['EMBEDDING_ENABLED', 'embedding'],
+    // SERVICE_ACCOUNT_ENABLED is also read by HealthService (exposed via the
+    // health endpoint). Keep the config field, but translate the env var to
+    // the unified allowlist for the flag system.
+    ['SERVICE_ACCOUNT_ENABLED', 'service-accounts'],
+    ['SCIM_ENABLED', 'scim-token-management'],
+    // ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED is also read by HealthService
+    // (exposed via the health endpoint). Keep the config field, but translate
+    // the env var to the unified allowlist for the flag system.
+    [
+        'ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED',
+        'organization-warehouse-credentials',
+    ],
+    ['METRIC_DASHBOARD_FILTERS_ENABLED', 'metric-dashboard-filters'],
+];
+
+const LEGACY_DISABLE_ENV_VARS: ReadonlyArray<
+    readonly [envVar: string, flagId: string]
+> = [
+    // Add per migration; truthy env value disables the flag.
+];
 
 export const parseConfig = (): LightdashConfig => {
     const lightdashSecret = process.env.LIGHTDASH_SECRET;
@@ -1296,11 +1682,41 @@ export const parseConfig = (): LightdashConfig => {
         copilotConfig = copilotConfigParse.data;
     }
 
+    const licenseKey = process.env.LIGHTDASH_LICENSE_KEY || null;
+    const preAggregatesEnabled =
+        licenseKey !== null && process.env.PRE_AGGREGATES_ENABLED === 'true';
+    const preAggregatesS3 = parsePreAggregateResultsS3Config();
+    const natsWorkerEnabled = process.env.NATS_ENABLED === 'true';
+    const natsWorkerUrl = process.env.NATS_URL;
+    const natsWorkerConcurrency =
+        getIntegerFromEnvironmentVariable('NATS_WORKER_CONCURRENCY') ?? 1;
+    const natsWorkerQueueTimeoutMs =
+        getIntegerFromEnvironmentVariable('NATS_QUEUE_TIMEOUT_MS') ?? 180000;
+
+    if (preAggregatesEnabled && !preAggregatesS3) {
+        throw new ParseError('Pre-aggregates require S3 configuration', {});
+    }
+    if (natsWorkerEnabled && !natsWorkerUrl) {
+        throw new ParseError('NATS_URL is required when NATS_ENABLED=true', {});
+    }
+    if (natsWorkerConcurrency <= 0) {
+        throw new ParseError(
+            'NATS_WORKER_CONCURRENCY must be greater than 0',
+            {},
+        );
+    }
+    if (natsWorkerQueueTimeoutMs <= 0) {
+        throw new ParseError(
+            'NATS_QUEUE_TIMEOUT_MS must be greater than 0',
+            {},
+        );
+    }
+
     return {
         mode,
         cookieSameSite: iframeEmbeddingEnabled ? 'none' : 'lax',
         license: {
-            licenseKey: process.env.LIGHTDASH_LICENSE_KEY || null,
+            licenseKey,
         },
         security: {
             contentSecurityPolicy: {
@@ -1335,6 +1751,8 @@ export const parseConfig = (): LightdashConfig => {
                       name: process.env.EMAIL_SMTP_SENDER_NAME || 'Lightdash',
                       email: process.env.EMAIL_SMTP_SENDER_EMAIL || '',
                   },
+                  inlineImageCid:
+                      process.env.EMAIL_SMTP_IMAGE_INLINE_CID === 'true',
               }
             : undefined,
         posthog: process.env.POSTHOG_PROJECT_API_KEY
@@ -1375,6 +1793,10 @@ export const parseConfig = (): LightdashConfig => {
             tracesSampleRate:
                 getFloatFromEnvironmentVariable('SENTRY_TRACES_SAMPLE_RATE') ||
                 0.1,
+            queryTracesSampleRate:
+                getFloatFromEnvironmentVariable(
+                    'SENTRY_QUERY_TRACES_SAMPLE_RATE',
+                ) ?? null, // defaults to null (use global tracesSampleRate), set to 1.0 to capture all query traces
             profilesSampleRate:
                 getFloatFromEnvironmentVariable(
                     'SENTRY_PROFILES_SAMPLE_RATE',
@@ -1558,6 +1980,15 @@ export const parseConfig = (): LightdashConfig => {
             labels: getObjectFromEnvironmentVariable(
                 'LIGHTDASH_PROMETHEUS_LABELS',
             ),
+            eventMetricsEnabled:
+                process.env.LIGHTDASH_PROMETHEUS_EVENT_METRICS_ENABLED ===
+                'true', // defaults to false
+            eventMetricsConfigPath:
+                process.env.LIGHTDASH_CUSTOM_METRICS_CONFIG_PATH ||
+                process.env.CUSTOM_METRICS_CONFIG_PATH,
+            allQueryMetricsEnabled:
+                process.env.LIGHTDASH_PROMETHEUS_ALL_QUERY_METRICS_ENABLED ===
+                'true', // defaults to false, tracks execution duration & S3 upload for all queries (not just pre-aggregate)
         },
         allowMultiOrgs: process.env.ALLOW_MULTIPLE_ORGS === 'true',
         useRedux: process.env.USE_REDUX === 'true',
@@ -1580,11 +2011,13 @@ export const parseConfig = (): LightdashConfig => {
                 getIntegerFromEnvironmentVariable(
                     'LIGHTDASH_QUERY_MAX_PAGE_SIZE',
                 ) || 2500, // Defaults to default limit * 5
-            useSqlPivotResults: process.env.USE_SQL_PIVOT_RESULTS
-                ? process.env.USE_SQL_PIVOT_RESULTS === 'true'
-                : undefined,
-            showExecutionTime: process.env.SHOW_EXECUTION_TIME
-                ? process.env.SHOW_EXECUTION_TIME === 'true'
+            retryQueryOnTransientErrors: process.env
+                .LIGHTDASH_QUERY_RETRY_ON_TRANSIENT_ERRORS
+                ? process.env.LIGHTDASH_QUERY_RETRY_ON_TRANSIENT_ERRORS ===
+                  'true'
+                : false,
+            enableTimezoneSupport: process.env.LIGHTDASH_ENABLE_TIMEZONE_SUPPORT
+                ? process.env.LIGHTDASH_ENABLE_TIMEZONE_SUPPORT === 'true'
                 : undefined,
         },
         chart: {
@@ -1604,6 +2037,15 @@ export const parseConfig = (): LightdashConfig => {
                 getIntegerFromEnvironmentVariable(
                     'LIGHTDASH_DASHBOARD_MAX_TABS_PER_DASHBOARD',
                 ) || 20,
+            versionHistory: {
+                daysLimit:
+                    getIntegerFromEnvironmentVariable(
+                        'LIGHTDASH_DASHBOARD_VERSION_HISTORY_DAYS_LIMIT',
+                    ) || 3,
+            },
+            disableSentryTracking:
+                process.env.LIGHTDASH_DASHBOARD_DISABLE_SENTRY_TRACKING ===
+                'true',
         },
         pivotTable: {
             maxColumnLimit:
@@ -1611,11 +2053,16 @@ export const parseConfig = (): LightdashConfig => {
                     'LIGHTDASH_PIVOT_TABLE_MAX_COLUMN_LIMIT',
                 ) || 200,
         },
+        enableImprovedExcelDates:
+            process.env.LIGHTDASH_ENABLE_IMPROVED_EXCEL_DATES === 'true',
         headlessBrowser: {
             port: process.env.HEADLESS_BROWSER_PORT,
             host: process.env.HEADLESS_BROWSER_HOST,
             internalLightdashHost:
                 process.env.INTERNAL_LIGHTDASH_HOST || siteUrl,
+            internalLightdashHostIgnoreHttpsErrors:
+                process.env.INTERNAL_LIGHTDASH_HOST_IGNORE_HTTPS_ERRORS ===
+                'true',
             browserEndpoint,
             maxScreenshotRetries: parseInt(
                 process.env.HEADLESS_BROWSER_MAX_SCREENSHOT_RETRIES || '5',
@@ -1637,6 +2084,12 @@ export const parseConfig = (): LightdashConfig => {
             ),
             s3: parseResultsS3Config(),
         },
+        natsWorker: {
+            enabled: natsWorkerEnabled,
+            url: natsWorkerUrl,
+            workerConcurrency: natsWorkerConcurrency,
+            queueTimeoutMs: natsWorkerQueueTimeoutMs,
+        },
         slack: {
             signingSecret: process.env.SLACK_SIGNING_SECRET,
             clientId: process.env.SLACK_CLIENT_ID,
@@ -1650,14 +2103,15 @@ export const parseConfig = (): LightdashConfig => {
                 10,
             ), // 10 minutes
             supportUrl: process.env.SLACK_SUPPORT_URL || '',
-            multiAgentChannelEnabled:
-                process.env.SLACK_MULTI_AGENT_CHANNEL_ENABLED === 'true',
             linkShareImagePreviewEnabled:
                 process.env.SLACK_LINK_SHARE_IMAGE_PREVIEW_ENABLED !== 'false',
         },
         scheduler: {
             enabled: process.env.SCHEDULER_ENABLED !== 'false',
             concurrency: parseInt(process.env.SCHEDULER_CONCURRENCY || '3', 10),
+            pollInterval:
+                getIntegerFromEnvironmentVariable('SCHEDULER_POLL_INTERVAL') ||
+                1000,
             jobTimeout: process.env.SCHEDULER_JOB_TIMEOUT
                 ? parseInt(process.env.SCHEDULER_JOB_TIMEOUT, 10)
                 : DEFAULT_JOB_TIMEOUT,
@@ -1695,6 +2149,22 @@ export const parseConfig = (): LightdashConfig => {
             enabled: process.env.GROUPS_ENABLED
                 ? process.env.GROUPS_ENABLED === 'true'
                 : undefined,
+        },
+        persistentDownloadUrls: {
+            enabled: process.env.PERSISTENT_DOWNLOAD_URLS_ENABLED === 'true',
+            expirationSeconds:
+                getIntegerFromEnvironmentVariable(
+                    'PERSISTENT_DOWNLOAD_URL_EXPIRATION_SECONDS',
+                ) ?? 259200, // 3 days, matches S3_EXPIRATION_TIME default
+            expirationSecondsEmail: getIntegerFromEnvironmentVariable(
+                'PERSISTENT_DOWNLOAD_URL_EXPIRATION_SECONDS_EMAIL',
+            ),
+            expirationSecondsSlack: getIntegerFromEnvironmentVariable(
+                'PERSISTENT_DOWNLOAD_URL_EXPIRATION_SECONDS_SLACK',
+            ),
+            expirationSecondsMsTeams: getIntegerFromEnvironmentVariable(
+                'PERSISTENT_DOWNLOAD_URL_EXPIRATION_SECONDS_MSTEAMS',
+            ),
         },
         extendedUsageAnalytics: {
             enabled: process.env.EXTENDED_USAGE_ANALYTICS === 'true',
@@ -1780,9 +2250,6 @@ export const parseConfig = (): LightdashConfig => {
                     'true',
             },
         },
-        scim: {
-            enabled: process.env.SCIM_ENABLED === 'true',
-        },
         serviceAccount: {
             enabled: process.env.SERVICE_ACCOUNT_ENABLED === 'true',
         },
@@ -1790,6 +2257,12 @@ export const parseConfig = (): LightdashConfig => {
             enabled:
                 process.env.ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED ===
                 'true',
+        },
+        athenaWarehouseIamRoleAuth: {
+            enabled: process.env.ATHENA_WAREHOUSE_IAM_ROLE_AUTH === 'true',
+        },
+        saveCredentialsForm: {
+            enabled: process.env.SAVE_CREDENTIALS_FORM_ENABLED === 'true',
         },
         github: {
             appName: process.env.GITHUB_APP_NAME || 'lightdash-app-dev',
@@ -1822,6 +2295,21 @@ export const parseConfig = (): LightdashConfig => {
         googleCloudPlatform: {
             projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
         },
+        managedAgent: {
+            anthropicApiKey:
+                process.env.MANAGED_AGENT_ANTHROPIC_API_KEY ||
+                process.env.ANTHROPIC_API_KEY ||
+                null,
+            skillIds: (process.env.MANAGED_AGENT_SKILL_IDS || '')
+                .split(',')
+                .map((skillId) => skillId.trim())
+                .filter(Boolean),
+            schedule: process.env.MANAGED_AGENT_SCHEDULE || '0 0 * * *',
+            sessionTimeoutMs: parseInt(
+                process.env.MANAGED_AGENT_SESSION_TIMEOUT_MS || '300000',
+                10,
+            ), // 5 minutes default
+        },
         initialSetup: getInitialSetupConfig(),
         updateSetup: getUpdateSetupConfig(),
         mcp: {
@@ -1831,9 +2319,6 @@ export const parseConfig = (): LightdashConfig => {
             enabled: process.env.CUSTOM_ROLES_ENABLED === 'true',
         },
         analyticsEmbedSecret: process.env.ANALYTICS_EMBED_SECRET,
-        dashboardComments: {
-            enabled: process.env.DISABLE_DASHBOARD_COMMENTS !== 'true',
-        },
         echarts6: {
             enabled: process.env.ECHARTS_V6_ENABLED === 'true',
         },
@@ -1841,30 +2326,52 @@ export const parseConfig = (): LightdashConfig => {
             enabled: process.env.EDIT_YAML_IN_UI_ENABLED === 'true',
         },
         partialCompilation: {
-            enabled: process.env.PARTIAL_COMPILATION_ENABLED === 'true',
+            enabled: process.env.PARTIAL_COMPILATION_ENABLED !== 'false',
         },
         funnelBuilder: {
             enabled:
                 process.env.FUNNEL_BUILDER_ENABLED === 'true' ||
                 lightdashMode === LightdashMode.PR,
         },
-        metricsCatalog: {
-            echartsVisualizationEnabled:
-                process.env.METRICS_CATALOG_ECHARTS_VISUALIZATION_ENABLED !==
-                undefined
-                    ? process.env
-                          .METRICS_CATALOG_ECHARTS_VISUALIZATION_ENABLED ===
-                      'true'
-                    : undefined,
+        dashboardComments: {
+            enabled: process.env.DISABLE_DASHBOARD_COMMENTS !== 'true',
         },
-        maps: {
-            enabled:
-                process.env.LIGHTDASH_MAPS_ENABLED === 'true'
-                    ? true
-                    : undefined,
+        softDelete: {
+            enabled: process.env.SOFT_DELETE_ENABLED === 'true',
+            retentionDays:
+                getIntegerFromEnvironmentVariable(
+                    'SOFT_DELETE_RETENTION_DAYS',
+                ) ?? 30,
         },
-        nestedSpacesPermissions: {
-            enabled: process.env.NESTED_SPACES_PERMISSIONS_ENABLED === 'true',
+        preAggregates: {
+            enabled: preAggregatesEnabled,
+            parquetEnabled:
+                process.env.PRE_AGGREGATES_PARQUET_ENABLED === 'true',
+            materializationMaxRows:
+                getIntegerFromEnvironmentVariable('PRE_AGGREGATES_MAX_ROWS') ??
+                null,
+            duckdbQueryMemoryLimit:
+                process.env.PRE_AGGREGATE_DUCKDB_QUERY_MEMORY_LIMIT ?? null,
+            s3: preAggregatesS3,
         },
+        appRuntime: parseAppRuntimeConfig(siteUrl),
+        enabledFeatureFlags: new Set([
+            ...(process.env.LIGHTDASH_ENABLE_FEATURE_FLAGS ?? '')
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            ...LEGACY_ENABLE_ENV_VARS.filter(
+                ([envVar]) => process.env[envVar] === 'true',
+            ).map(([, flagId]) => flagId),
+        ]),
+        disabledFeatureFlags: new Set([
+            ...(process.env.LIGHTDASH_DISABLE_FEATURE_FLAGS ?? '')
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            ...LEGACY_DISABLE_ENV_VARS.filter(
+                ([envVar]) => process.env[envVar] === 'true',
+            ).map(([, flagId]) => flagId),
+        ]),
     };
 };

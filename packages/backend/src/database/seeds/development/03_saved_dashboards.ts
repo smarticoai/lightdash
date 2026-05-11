@@ -9,7 +9,6 @@ import {
     generateSlug,
     SEED_ORG_1_ADMIN,
     SEED_PROJECT,
-    SpaceQuery,
 } from '@lightdash/common';
 import { Knex } from 'knex';
 import { v4 as uuidv4 } from 'uuid';
@@ -42,13 +41,26 @@ async function createDashboardWithAllTileTypes(knex: Knex): Promise<void> {
         database: knex,
     });
 
-    const { queries, uuid: spaceUuid } = await spaceModel.getSpaceWithQueries(
-        SEED_PROJECT.project_uuid,
-        SEED_ORG_1_ADMIN.user_uuid,
-    );
+    const chartModel = new SavedChartModel({
+        database: knex,
+        lightdashConfig,
+    });
 
-    const getChartByName = (name: string): SpaceQuery => {
-        const chart = queries.find(({ name: queryName }) => queryName === name);
+    const [seedSpace] = await spaceModel.find({
+        projectUuid: SEED_PROJECT.project_uuid,
+        slug: 'jaffle-shop',
+    });
+    const spaceUuid = seedSpace?.uuid;
+    if (!spaceUuid) throw new Error('No space found for seeding');
+
+    const savedCharts = await chartModel.find({
+        projectUuid: SEED_PROJECT.project_uuid,
+    });
+
+    const getChartByName = (name: string) => {
+        const chart = savedCharts.find(
+            ({ name: queryName }) => queryName === name,
+        );
         if (!chart) {
             throw new Error(`Could not find seeded chart with name ${name}`);
         }
@@ -252,10 +264,12 @@ async function createDashboardWithDashboardCharts(knex: Knex): Promise<void> {
         database: knex,
     });
 
-    const { space_uuid: spaceUuid } = await spaceModel.getFirstAccessibleSpace(
-        SEED_PROJECT.project_uuid,
-        SEED_ORG_1_ADMIN.user_uuid,
-    );
+    const [seedSpace] = await spaceModel.find({
+        projectUuid: SEED_PROJECT.project_uuid,
+        slug: 'jaffle-shop',
+    });
+    const spaceUuid = seedSpace?.uuid;
+    if (!spaceUuid) throw new Error('No space found for seeding');
 
     // Create dashboard with charts saved in space
     const dashboard = await dashboardModel.create(

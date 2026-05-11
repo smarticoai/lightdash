@@ -33,7 +33,7 @@ import { useCallback, useMemo, useState, type FC } from 'react';
 import FieldSelect from '../../../components/common/FieldSelect';
 import MantineIcon from '../../../components/common/MantineIcon';
 import { getChartIcon } from '../../../components/common/ResourceIcon/utils';
-import useDashboardContext from '../../../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../../../providers/Dashboard/useDashboardTileStatusContext';
 import { FilterActions } from './constants';
 import { getFilterTileRelation } from './utils';
 
@@ -47,7 +47,7 @@ type TileWithTargetFields = {
     tileChartKind?: ChartKind | undefined;
     sortedFilters: Field[] | undefined;
     selectedField: Field | undefined;
-    tabUuid?: string;
+    tabUuid?: string | null;
     hasExactMatch: boolean;
 };
 
@@ -61,7 +61,7 @@ type TileWithTargetColumns = {
     tileChartKind?: ChartKind | undefined;
     sortedFilters: string[];
     selectedField: string | undefined;
-    tabUuid?: string;
+    tabUuid?: string | null;
     hasExactMatch: boolean;
 };
 
@@ -94,7 +94,7 @@ const TileFilterConfiguration: FC<Props> = ({
     const [collapsedTabs, setCollapsedTabs] = useState<Record<string, boolean>>(
         {},
     );
-    const sqlChartTilesMetadata = useDashboardContext(
+    const sqlChartTilesMetadata = useDashboardTileStatusContext(
         (c) => c.sqlChartTilesMetadata,
     );
     const sortTilesByFieldMatch = useCallback(
@@ -527,9 +527,10 @@ const TileFilterConfiguration: FC<Props> = ({
                                             items={
                                                 value.sortedFilters as Field[]
                                             }
-                                            withinPortal={
-                                                popoverProps?.withinPortal
-                                            }
+                                            comboboxProps={{
+                                                withinPortal:
+                                                    popoverProps?.withinPortal,
+                                            }}
                                             onDropdownOpen={
                                                 popoverProps?.onOpen
                                             }

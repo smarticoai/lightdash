@@ -1,6 +1,8 @@
 import {
     ApiJobScheduledResponse,
     AuthorizationError,
+    getErrorMessage,
+    LightdashError,
     RenameChange,
     RenameType,
     SchedulerJobStatus,
@@ -8,10 +10,11 @@ import {
 import fs from 'fs';
 import inquirer from 'inquirer';
 import path from 'path';
-import * as styles from '../styles';
-
+import { v4 as uuidv4 } from 'uuid';
+import { categorizeError, LightdashAnalytics } from '../analytics/analytics';
 import { getConfig } from '../config';
 import GlobalState from '../globalState';
+import * as styles from '../styles';
 import { checkLightdashVersion, lightdashApi } from './dbt/apiClient';
 import { getProject } from './dbt/refresh';
 import {
@@ -74,6 +77,9 @@ export const renameHandler = async (options: RenameHandlerOptions) => {
     GlobalState.setVerbose(options.verbose);
     await checkLightdashVersion();
 
+    const executionId = uuidv4();
+    const startTime = Date.now();
+
     const config = await getConfig();
     if (!config.context?.apiKey || !config.context.serverUrl) {
         throw new AuthorizationError(
@@ -86,9 +92,12 @@ export const renameHandler = async (options: RenameHandlerOptions) => {
         config.context.previewProject ||
         config.context.project;
     if (!projectUuid) {
-        throw new Error(
-            'No project selected. Run lightdash config set-project',
-        );
+        throw new LightdashError({
+            message: 'No project selected. Run lightdash config set-project',
+            name: 'Not Found',
+            statusCode: 404,
+            data: {},
+        });
     }
 
     // Log current project info
@@ -213,8 +222,6 @@ export const renameHandler = async (options: RenameHandlerOptions) => {
         }
 
         if (options.validate && !options.dryRun) {
-            // Can't validate if tests is true, changes need to be committed first
-
             const validationJob = await requestValidation(projectUuid, [], []);
 
             const { jobId } = validationJob;
@@ -224,8 +231,29 @@ export const renameHandler = async (options: RenameHandlerOptions) => {
             const validation = await getValidation(projectUuid, jobId);
             console.info(validation);
         }
+
+        await LightdashAnalytics.track({
+            event: 'rename.completed',
+            properties: {
+                executionId,
+                projectId: projectUuid,
+                renameType: options.type,
+                isDryRun: options.dryRun,
+                chartsUpdated: results.charts.length,
+                dashboardsUpdated: results.dashboards.length,
+                durationMs: Date.now() - startTime,
+            },
+        });
     } catch (e: unknown) {
-        // We lose the error type on the waitUntilFinished method
+        await LightdashAnalytics.track({
+            event: 'rename.error',
+            properties: {
+                executionId,
+                error: getErrorMessage(e),
+                errorCategory: categorizeError(e),
+            },
+        });
+
         const errorString = `${e}`;
         if (errorString.includes(`Rename failed`)) {
             console.error(errorString);

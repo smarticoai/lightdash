@@ -2,6 +2,7 @@
 
 # version control
 .git
+.worktrees/
 
 # dependencies
 node_modules/
@@ -16,7 +17,7 @@ node_modules/
 /packages/e2e/cypress/downloads/**/*
 /packages/e2e/cypress/artifacts/**/*
 # Content as code e2e tests
-packages/e2e/lightdash 
+packages/e2e/lightdash
 
 # eval reports
 /packages/backend/eval-reports/**/*
@@ -39,6 +40,7 @@ lightdash_dev.yml
 /packages/warehouses/dist
 /packages/sdk/dist
 /packages/sdk-test-app/dist
+/packages/backend/src/ee/services/McpService/mcp-chart-app/dist
 
 # CLI binary build artifacts
 /packages/cli/bundle/
@@ -95,6 +97,7 @@ flake.lock
 /examples/full-jaffle-shop-demo/dbt/lightdash
 /examples/lightdash
 /lightdash
+/packages/cli/lightdash/
 
 *storybook.log
 
@@ -108,7 +111,21 @@ data/
 .local/*
 
 CLAUDE.local.md
+AGENTS.override.md
+.playwright-mcp 
+
 http-client.private.env.json
 
 # turbo
 .turbo
+
+# janix
+.janix
+
+# rodney
+.rodney
+
+# HAR replay
+scripts/har-replay-server.ts
+*.har
+agent-harness/cloud/credentials.env

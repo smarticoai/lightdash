@@ -7,7 +7,7 @@ import {
     ApiRegisterUserResponse,
     ApiSuccessEmpty,
     ApiUserAllowedOrganizationsResponse,
-    AuthorizationError,
+    assertRegisteredAccount,
     CreatePersonalAccessToken,
     getRequestMethod,
     LightdashRequestMethodHeader,
@@ -38,6 +38,7 @@ import {
     Tags,
 } from '@tsoa/runtime';
 import express from 'express';
+import { toSessionUser } from '../auth/account';
 import { UserModel } from '../models/UserModel';
 import {
     allowApiKeyAuthentication,
@@ -62,14 +63,26 @@ export class UserController extends BaseController {
     async getAuthenticatedUser(
         @Request() req: express.Request,
     ): Promise<ApiGetAuthenticatedUserResponse> {
-        if (!req.user) {
-            throw new AuthorizationError('User session not found');
-        }
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
+
+        const impersonationSession = req.session?.impersonation;
+        const impersonation = impersonationSession
+            ? {
+                  adminUserUuid: impersonationSession.adminUserUuid,
+                  adminName: impersonationSession.adminName,
+                  impersonatedUserUuid: impersonationSession.targetUserUuid,
+              }
+            : null;
 
         return {
             status: 'ok',
-            results: UserModel.lightdashUserFromSession(req.user),
+            results: {
+                ...UserModel.lightdashUserFromSession(
+                    toSessionUser(req.account),
+                ),
+                impersonation,
+            },
         };
     }
 
@@ -121,9 +134,10 @@ export class UserController extends BaseController {
     async createEmailOneTimePasscode(
         @Request() req: express.Request,
     ): Promise<ApiEmailStatusResponse> {
+        assertRegisteredAccount(req.account);
         const status = await this.services
             .getUserService()
-            .sendOneTimePasscodeToPrimaryEmail(req.user!);
+            .sendOneTimePasscodeToPrimaryEmail(toSessionUser(req.account));
         this.setStatus(200);
         return {
             status: 'ok',
@@ -144,10 +158,11 @@ export class UserController extends BaseController {
         @Request() req: express.Request,
         @Query() passcode?: string,
     ): Promise<ApiEmailStatusResponse> {
+        assertRegisteredAccount(req.account);
         // Throws 404 error if not found
         const status = await this.services
             .getUserService()
-            .getPrimaryEmailStatus(req.user!, passcode);
+            .getPrimaryEmailStatus(toSessionUser(req.account), passcode);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -167,9 +182,10 @@ export class UserController extends BaseController {
     async getOrganizationsUserCanJoin(
         @Request() req: express.Request,
     ): Promise<ApiUserAllowedOrganizationsResponse> {
+        assertRegisteredAccount(req.account);
         const status = await this.services
             .getUserService()
-            .getAllowedOrganizations(req.user!);
+            .getAllowedOrganizations(toSessionUser(req.account));
         this.setStatus(200);
         return {
             status: 'ok',
@@ -195,12 +211,13 @@ export class UserController extends BaseController {
         @Request() req: express.Request,
         @Path() organizationUuid: string,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getUserService()
-            .joinOrg(req.user!, organizationUuid);
+            .joinOrg(toSessionUser(req.account), organizationUuid);
         const sessionUser = await req.services
             .getUserService()
-            .getSessionByUserUuid(req.user!.userUuid);
+            .getSessionByUserUuid(req.account.user.userUuid);
         await new Promise<void>((resolve, reject) => {
             req.login(sessionUser, (err) => {
                 if (err) {
@@ -227,9 +244,10 @@ export class UserController extends BaseController {
     async deleteUser(
         @Request() req: express.Request,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getUserService()
-            .delete(req.user!, req.user!.userUuid);
+            .delete(toSessionUser(req.account), req.account.user.userUuid);
 
         await new Promise<void>((resolve, reject) => {
             req.session.destroy((err) => {
@@ -257,12 +275,13 @@ export class UserController extends BaseController {
         status: 'ok';
         results: UserWarehouseCredentials[];
     }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getUserService()
-                .getWarehouseCredentials(req.user!),
+                .getWarehouseCredentials(toSessionUser(req.account)),
         };
     }
 
@@ -280,12 +299,13 @@ export class UserController extends BaseController {
         status: 'ok';
         results: UserWarehouseCredentials;
     }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getUserService()
-                .createWarehouseCredentials(req.user!, body),
+                .createWarehouseCredentials(toSessionUser(req.account), body),
         };
     }
 
@@ -304,12 +324,17 @@ export class UserController extends BaseController {
         status: 'ok';
         results: UserWarehouseCredentials;
     }> {
+        assertRegisteredAccount(req.account);
         this.setStatus(200);
         return {
             status: 'ok',
             results: await this.services
                 .getUserService()
-                .updateWarehouseCredentials(req.user!, uuid, body),
+                .updateWarehouseCredentials(
+                    toSessionUser(req.account),
+                    uuid,
+                    body,
+                ),
         };
     }
 
@@ -324,9 +349,10 @@ export class UserController extends BaseController {
         @Request() req: express.Request,
         @Path() uuid: string,
     ): Promise<ApiSuccessEmpty> {
+        assertRegisteredAccount(req.account);
         await this.services
             .getUserService()
-            .deleteWarehouseCredentials(req.user!, uuid);
+            .deleteWarehouseCredentials(toSessionUser(req.account), uuid);
         this.setStatus(200);
         return {
             status: 'ok',
@@ -375,7 +401,7 @@ export class UserController extends BaseController {
             status: 'ok',
             results: await this.services
                 .getPersonalAccessTokenService()
-                .getAllPersonalAccessTokens(req.user!),
+                .getAllPersonalAccessTokens(req.account!),
         };
     }
 
@@ -385,7 +411,7 @@ export class UserController extends BaseController {
      */
     @Middlewares([
         // NOTE: We do NOT allow personal access tokens to be created with PAT authentication
-        allowOauthAuthentication, // Allow creating PAT from oauth app tokens
+        allowOauthAuthentication, // Allow creating PAT from OAuth tokens
         unauthorisedInDemo,
     ])
     @SuccessResponse('200', 'Success')
@@ -404,7 +430,7 @@ export class UserController extends BaseController {
             results: await this.services
                 .getPersonalAccessTokenService()
                 .createPersonalAccessToken(
-                    req.user!,
+                    req.account!,
                     body,
                     getRequestMethod(req.header(LightdashRequestMethodHeader)),
                 ),
@@ -426,7 +452,7 @@ export class UserController extends BaseController {
         this.setStatus(200);
         await this.services
             .getPersonalAccessTokenService()
-            .deletePersonalAccessToken(req.user!, personalAccessTokenUuid);
+            .deletePersonalAccessToken(req.account!, personalAccessTokenUuid);
         return {
             status: 'ok',
             results: undefined,
@@ -462,7 +488,7 @@ export class UserController extends BaseController {
             results: await this.services
                 .getPersonalAccessTokenService()
                 .rotatePersonalAccessToken(
-                    req.user!,
+                    req.account!,
                     personalAccessTokenUuid,
                     body,
                 ),

@@ -11,10 +11,9 @@ export enum FeatureFlags {
     /* Send local timezone to the warehouse session */
     EnableUserTimezones = 'enable-user-timezones',
 
-    /**
-     * Enable dashboard comments
-     */
-    DashboardComments = 'dashboard-comments-enabled',
+    /* Gate new timezone features: warehouse session timezone, timezone-aware
+       DATE_TRUNC, result formatting, etc. Temporary — remove once stable. */
+    EnableTimezoneSupport = 'enable-timezone-support',
 
     /**
      * Enable scheduler task that replaces custom metrics after project compile
@@ -44,29 +43,9 @@ export enum FeatureFlags {
     AiCustomViz = 'ai-custom-viz',
 
     /**
-     * Use workers for async query execution
-     */
-    WorkerQueryExecution = 'worker-query-execution',
-
-    /**
      * Enable SQL pivot results conversion to PivotData format
      */
     UseSqlPivotResults = 'use-sql-pivot-results',
-
-    /**
-     * Enable map chart type visualization
-     */
-    Maps = 'maps',
-
-    /**
-     * Enable the unused content dashboard showing least viewed charts and dashboards
-     */
-    UnusedContentDashboard = 'unused-content-dashboard',
-
-    /**
-     * Enable period-over-period comparisons option
-     */
-    PeriodOverPeriod = 'pop',
 
     /**
      * Enable viewing and editing YAML source files in the Explore UI
@@ -74,17 +53,65 @@ export enum FeatureFlags {
     EditYamlInUi = 'edit-yaml-in-ui',
 
     /**
-     * Enable echarts visualization in Metrics Catalog explore modal (V2)
-     * When enabled, uses VisualizationProvider + echarts instead of recharts
+     * Enable Google Chat as a scheduled delivery destination
      */
-    MetricsCatalogEchartsVisualization = 'metrics-catalog-echarts-visualization',
+    GoogleChatEnabled = 'google-chat-enabled',
 
     /**
-     * Enable nested spaces to define their own permissions as well as extending
-     * their parent permissions. When disabled (default), all nested spaces
-     * inherit permissions from their root space.
+     * Enable admin user impersonation. When disabled, impersonation
+     * actions are blocked and active sessions are cleared.
      */
-    NestedSpacesPermissions = 'nested-spaces-permissions',
+    UserImpersonation = 'user-impersonation',
+
+    /**
+     * Enable custom group bins for string dimensions
+     */
+    CustomGroupBins = 'custom-group-bins',
+
+    /**
+     * Enable changing the explore a chart points to from the chart UI
+     */
+    ChangeChartExplore = 'change-chart-explore',
+
+    /**
+     * Keep visited dashboard tabs mounted in the DOM (hidden) for instant
+     * re-switching. Enabled by default; disabled per-org for orgs where
+     * large dashboards spiked browser memory to 3 GB+ from accumulated
+     * tab content.
+     */
+    DashboardTabsInMemory = 'dashboard-tabs-in-memory',
+
+    /**
+     * Enable creating and editing metric filters on dashboards.
+     * When enabled, the "Add filter" UI includes metrics alongside dimensions.
+     * Existing metric filters are always displayed regardless of this flag.
+     */
+    MetricDashboardFilters = 'metric-dashboard-filters',
+
+    /**
+     * Enable data apps feature. Works alongside the APPS_RUNTIME_ENABLED
+     * env var — data apps are enabled if either this flag or the env var
+     * is true. Disabled by default.
+     */
+    EnableDataApps = 'enable-data-apps',
+
+    /**
+     * Enable AI Dashboard Summary feature (generates summaries of dashboard
+     * contents using the AI Copilot).
+     */
+    AiDashboardSummary = 'ai-dashboard-summary',
+
+    /**
+     * Enable Autopilot project health agent.
+     */
+    AiAutopilot = 'ai-autopilot',
+
+    /**
+     * Enable the Hexbin (H3 hexagonal binning) layer type for Map charts.
+     * Gates the option in the Map Type segmented control. Existing charts
+     * already saved with the hexbin layer continue to render either way.
+     */
+    HexbinMap = 'hexbin-map',
 }
 
 export type FeatureFlag = {

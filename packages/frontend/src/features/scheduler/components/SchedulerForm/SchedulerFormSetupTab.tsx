@@ -1,10 +1,11 @@
 import {
-    NotificationFrequency,
-    SchedulerFormat,
-    ThresholdOperator,
+    FeatureFlags,
     formatMinutesOffset,
     getItemId,
     getTzMinutesOffset,
+    NotificationFrequency,
+    SchedulerFormat,
+    ThresholdOperator,
     validateEmail,
     type CustomDimension,
     type Dashboard,
@@ -43,21 +44,23 @@ import {
 } from '@tabler/icons-react';
 import isEqual from 'lodash/isEqual';
 import { useMemo, useState, type FC } from 'react';
-import { CronInternalInputs } from '../../../../components/CronInput';
 import FieldSelect from '../../../../components/common/FieldSelect';
 import FilterNumberInput from '../../../../components/common/Filters/FilterInputs/FilterNumberInput';
 import MantineIcon from '../../../../components/common/MantineIcon';
 import { SlackChannelSelect } from '../../../../components/common/SlackChannelSelect';
 import TimeZonePicker from '../../../../components/common/TimeZonePicker';
+import { CronInternalInputs } from '../../../../components/CronInput';
 import useHealth from '../../../../hooks/health/useHealth';
 import { useGetSlack } from '../../../../hooks/slack/useSlack';
 import { useActiveProjectUuid } from '../../../../hooks/useActiveProject';
 import { useProject } from '../../../../hooks/useProject';
+import { useServerFeatureFlag } from '../../../../hooks/useServerOrClientFeatureFlag';
 import SlackSvg from '../../../../svgs/slack.svg?react';
 import { Limit, SlackStates, Values } from '../types';
+import { useSchedulerFormContext } from './schedulerFormContext';
+import { SchedulerFormGoogleChatInput } from './SchedulerFormGoogleChatInput';
 import { SchedulerFormMicrosoftTeamsInput } from './SchedulerFormMicrosoftTeamsInput';
 import { SchedulerFormSlackError } from './SchedulerFormSlackError';
-import { useSchedulerFormContext } from './schedulerFormContext';
 
 const thresholdOperatorOptions = [
     { label: 'is greater than', value: ThresholdOperator.GREATER_THAN },
@@ -88,6 +91,10 @@ export const SchedulerFormSetupTab: FC<Props> = ({
     const { activeProjectUuid } = useActiveProjectUuid();
     const { data: project } = useProject(activeProjectUuid);
     const health = useHealth();
+    const { data: googleChatFlag } = useServerFeatureFlag(
+        FeatureFlags.GoogleChatEnabled,
+    );
+    const isGoogleChatEnabled = googleChatFlag?.enabled === true;
     const { data: slackInstallation, isInitialLoading } = useGetSlack();
     const organizationHasSlack = !!slackInstallation?.organizationUuid;
 
@@ -144,7 +151,7 @@ export const SchedulerFormSetupTab: FC<Props> = ({
                         label="Alert field"
                         required
                         disabled={isThresholdAlertWithNoFields}
-                        withinPortal
+                        comboboxProps={{ withinPortal: true }}
                         hasGrouping
                         items={Object.values(numericMetrics)}
                         data-testid="Alert/FieldSelect"
@@ -306,6 +313,16 @@ export const SchedulerFormSetupTab: FC<Props> = ({
                                     value: SchedulerFormat.IMAGE,
                                     disabled: isImageDisabled,
                                 },
+                                {
+                                    label: 'PDF',
+                                    value: SchedulerFormat.PDF,
+                                    disabled:
+                                        isImageDisabled ||
+                                        (form.values.msTeamsTargets?.length ??
+                                            0) > 0 ||
+                                        (form.values.googleChatTargets
+                                            ?.length ?? 0) > 0,
+                                },
                             ]}
                             w="50%"
                             {...form.getInputProps('format')}
@@ -337,7 +354,8 @@ export const SchedulerFormSetupTab: FC<Props> = ({
                                 type: 'checkbox',
                             })}
                         />
-                    ) : (
+                    ) : form.getInputProps('format').value ===
+                      SchedulerFormat.PDF ? null : (
                         <Stack gap="xs">
                             {form.values.format === SchedulerFormat.CSV && (
                                 <Tooltip
@@ -605,7 +623,12 @@ export const SchedulerFormSetupTab: FC<Props> = ({
                     </Group>
                     <Stack
                         gap="xs"
-                        mb={health.data?.hasMicrosoftTeams ? '0' : 'sm'}
+                        mb={
+                            health.data?.hasMicrosoftTeams ||
+                            isGoogleChatEnabled
+                                ? '0'
+                                : 'sm'
+                        }
                     >
                         <Group wrap="nowrap" align="flex-start">
                             <Box pt="xxs">
@@ -655,6 +678,14 @@ export const SchedulerFormSetupTab: FC<Props> = ({
                             msTeamTargets={form.values.msTeamsTargets}
                             onChange={(val: string[]) => {
                                 form.setFieldValue('msTeamsTargets', val);
+                            }}
+                        />
+                    )}
+                    {isGoogleChatEnabled && (
+                        <SchedulerFormGoogleChatInput
+                            googleChatTargets={form.values.googleChatTargets}
+                            onChange={(val: string[]) => {
+                                form.setFieldValue('googleChatTargets', val);
                             }}
                         />
                     )}

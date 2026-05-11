@@ -1,5 +1,11 @@
 import {
+    assertUnreachable,
+    CreateWarehouseCredentials,
+    DatabricksAuthenticationType,
+    databricksOauthU2mUserCredentialsSchema,
+    DatabricksTokenError,
     NotFoundError,
+    ProjectType,
     SnowflakeAuthenticationType,
     snowflakeSsoUserCredentialsSchema,
     SnowflakeTokenError,
@@ -11,6 +17,11 @@ import {
 } from '@lightdash/common';
 import { Knex } from 'knex';
 import {
+    normalizeDatabricksHost,
+    normalizeDatabricksHostLenient,
+} from '../../controllers/authentication/strategies/databricksStrategy';
+import { ProjectTableName } from '../../database/entities/projects';
+import {
     DbUserWarehouseCredentials,
     ProjectUserWarehouseCredentialPreferenceTableName,
     UserWarehouseCredentialsTableName,
@@ -20,6 +31,11 @@ import { EncryptionUtil } from '../../utils/EncryptionUtil/EncryptionUtil';
 type UserWarehouseCredentialsModelArguments = {
     database: Knex;
     encryptionUtil: EncryptionUtil;
+};
+
+type DbUserWarehouseCredentialsWithProject = DbUserWarehouseCredentials & {
+    project_name: string | null;
+    project_type: ProjectType | null;
 };
 
 export class UserWarehouseCredentialsModel {
@@ -52,7 +68,7 @@ export class UserWarehouseCredentialsModel {
     }
 
     private convertToUserWarehouseCredentials(
-        data: DbUserWarehouseCredentials,
+        data: DbUserWarehouseCredentialsWithProject,
     ): UserWarehouseCredentials {
         let credentials: UserWarehouseCredentials['credentials'];
         try {
@@ -71,16 +87,35 @@ export class UserWarehouseCredentialsModel {
                         user: credentialsWithSecrets.user,
                     };
                     break;
-                default:
+                case WarehouseTypes.BIGQUERY:
+                case WarehouseTypes.DATABRICKS:
+                case WarehouseTypes.ATHENA:
+                case WarehouseTypes.DUCKDB:
                     credentials = {
                         type: credentialsWithSecrets.type,
                     };
+                    break;
+                default:
+                    return assertUnreachable(
+                        credentialsWithSecrets,
+                        'Unknown warehouse type',
+                    );
             }
         } catch (e) {
             throw new UnexpectedServerError(
                 'Failed to parse warehouse credentials',
             );
         }
+
+        const project =
+            data.project_uuid && data.project_name && data.project_type
+                ? {
+                      projectUuid: data.project_uuid,
+                      name: data.project_name,
+                      type: data.project_type,
+                  }
+                : null;
+
         return {
             uuid: data.user_warehouse_credentials_uuid,
             userUuid: data.user_uuid,
@@ -88,29 +123,137 @@ export class UserWarehouseCredentialsModel {
             createdAt: data.created_at,
             updatedAt: data.updated_at,
             credentials,
+            project,
         };
+    }
+
+    private baseSelectWithProject() {
+        return this.database(UserWarehouseCredentialsTableName)
+            .leftJoin(
+                ProjectTableName,
+                `${ProjectTableName}.project_uuid`,
+                `${UserWarehouseCredentialsTableName}.project_uuid`,
+            )
+            .select(
+                `${UserWarehouseCredentialsTableName}.*`,
+                `${ProjectTableName}.name as project_name`,
+                `${ProjectTableName}.project_type as project_type`,
+            );
     }
 
     async getAllByUserUuid(
         userUuid: string,
     ): Promise<UserWarehouseCredentials[]> {
-        const rows = await this.database(UserWarehouseCredentialsTableName)
-            .select('*')
-            .where('user_uuid', userUuid)
-            .orderBy('created_at');
+        const rows = await this.baseSelectWithProject()
+            .where(`${UserWarehouseCredentialsTableName}.user_uuid`, userUuid)
+            .orderBy(`${UserWarehouseCredentialsTableName}.created_at`);
+
+        return rows.map((r) => this.convertToUserWarehouseCredentials(r));
+    }
+
+    /**
+     * Get credentials for a user scoped to a project.
+     * Returns credentials assigned to this project + unassigned credentials.
+     */
+    async getAllByUserUuidForProject(
+        userUuid: string,
+        projectUuid: string,
+    ): Promise<UserWarehouseCredentials[]> {
+        const rows = await this.baseSelectWithProject()
+            .where(`${UserWarehouseCredentialsTableName}.user_uuid`, userUuid)
+            .andWhere(function assignedOrUnassigned(this) {
+                void this.where(
+                    `${UserWarehouseCredentialsTableName}.project_uuid`,
+                    projectUuid,
+                ).orWhereNull(
+                    `${UserWarehouseCredentialsTableName}.project_uuid`,
+                );
+            })
+            .orderBy(`${UserWarehouseCredentialsTableName}.created_at`);
 
         return rows.map((r) => this.convertToUserWarehouseCredentials(r));
     }
 
     async getByUuid(uuid: string): Promise<UserWarehouseCredentials> {
-        const result = await this.database(UserWarehouseCredentialsTableName)
-            .select('*')
-            .where('user_warehouse_credentials_uuid', uuid)
+        const result = await this.baseSelectWithProject()
+            .where(
+                `${UserWarehouseCredentialsTableName}.user_warehouse_credentials_uuid`,
+                uuid,
+            )
             .first();
+
         if (!result) {
             throw new NotFoundError('Warehouse credentials not found');
         }
         return this.convertToUserWarehouseCredentials(result);
+    }
+
+    async findDatabricksOauthU2mForHostWithSecrets(
+        userUuid: string,
+        serverHostName: string,
+        options?: {
+            projectUuid?: string;
+            includeProjectScoped?: boolean;
+        },
+    ): Promise<UserWarehouseCredentialsWithSecrets | undefined> {
+        const targetHost = normalizeDatabricksHostLenient(serverHostName);
+        if (!targetHost) {
+            return undefined;
+        }
+
+        const query = this.baseSelectWithProject()
+            .where(`${UserWarehouseCredentialsTableName}.user_uuid`, userUuid)
+            .andWhere(
+                `${UserWarehouseCredentialsTableName}.warehouse_type`,
+                WarehouseTypes.DATABRICKS,
+            );
+
+        if (options?.projectUuid) {
+            void query.andWhere(function assignedOrUnassigned(this) {
+                void this.where(
+                    `${UserWarehouseCredentialsTableName}.project_uuid`,
+                    options.projectUuid,
+                ).orWhereNull(
+                    `${UserWarehouseCredentialsTableName}.project_uuid`,
+                );
+            });
+            void query.orderByRaw(
+                `CASE WHEN ${UserWarehouseCredentialsTableName}.project_uuid = ? THEN 0 ELSE 1 END ASC`,
+                [options.projectUuid],
+            );
+        } else if (options?.includeProjectScoped === false) {
+            void query.whereNull(
+                `${UserWarehouseCredentialsTableName}.project_uuid`,
+            );
+        }
+
+        const rows = await query.orderBy(
+            `${UserWarehouseCredentialsTableName}.created_at`,
+            'desc',
+        );
+
+        for (const row of rows) {
+            const credentials =
+                this.convertToUserWarehouseCredentialsWithSecrets(row);
+            if (
+                credentials.credentials.type !== WarehouseTypes.DATABRICKS ||
+                credentials.credentials.authenticationType !==
+                    DatabricksAuthenticationType.OAUTH_U2M ||
+                !credentials.credentials.refreshToken
+            ) {
+                // eslint-disable-next-line no-continue
+                continue;
+            }
+
+            const credentialHost = normalizeDatabricksHostLenient(
+                credentials.credentials.serverHostName,
+            );
+            if (credentialHost === targetHost) {
+                return credentials;
+            }
+        }
+
+        return undefined;
     }
 
     private async _findProjectCredentials(
@@ -118,15 +261,12 @@ export class UserWarehouseCredentialsModel {
         userUuid: string,
         warehouseType: WarehouseTypes,
     ) {
-        const projectPreferredCredentials = await this.database(
-            UserWarehouseCredentialsTableName,
-        )
+        const projectPreferredCredentials = await this.baseSelectWithProject()
             .leftJoin(
                 ProjectUserWarehouseCredentialPreferenceTableName,
                 `${ProjectUserWarehouseCredentialPreferenceTableName}.user_warehouse_credentials_uuid`,
                 `${UserWarehouseCredentialsTableName}.user_warehouse_credentials_uuid`,
             )
-            .select(`*`)
             .where(
                 `${UserWarehouseCredentialsTableName}.warehouse_type`,
                 warehouseType,
@@ -144,12 +284,30 @@ export class UserWarehouseCredentialsModel {
         if (projectPreferredCredentials) {
             return projectPreferredCredentials;
         }
-        // fallback to compatible credentials
-        return this.database(UserWarehouseCredentialsTableName)
-            .select('*')
-            .where('warehouse_type', warehouseType)
-            .andWhere('user_uuid', userUuid)
-            .orderBy('created_at', 'desc') // Get the most recent credentials
+
+        // Fallback: prefer credential assigned to this project, else unassigned
+        return this.baseSelectWithProject()
+            .where(
+                `${UserWarehouseCredentialsTableName}.warehouse_type`,
+                warehouseType,
+            )
+            .andWhere(
+                `${UserWarehouseCredentialsTableName}.user_uuid`,
+                userUuid,
+            )
+            .andWhere(function assignedOrUnassigned(this) {
+                void this.where(
+                    `${UserWarehouseCredentialsTableName}.project_uuid`,
+                    projectUuid,
+                ).orWhereNull(
+                    `${UserWarehouseCredentialsTableName}.project_uuid`,
+                );
+            })
+            .orderByRaw(
+                `CASE WHEN ${UserWarehouseCredentialsTableName}.project_uuid = ? THEN 0 ELSE 1 END ASC`,
+                [projectUuid],
+            )
+            .orderBy(`${UserWarehouseCredentialsTableName}.created_at`, 'desc')
             .first();
     }
 
@@ -202,6 +360,23 @@ export class UserWarehouseCredentialsModel {
                 }
             }
 
+            if (
+                credentialsWithSecrets.credentials.type ===
+                    WarehouseTypes.DATABRICKS &&
+                credentialsWithSecrets.credentials.authenticationType ===
+                    DatabricksAuthenticationType.OAUTH_U2M
+            ) {
+                const result =
+                    databricksOauthU2mUserCredentialsSchema.safeParse(
+                        credentialsWithSecrets.credentials,
+                    );
+                if (!result.success) {
+                    throw new DatabricksTokenError(
+                        `Please reauthenticate to access databricks`,
+                    );
+                }
+            }
+
             return credentialsWithSecrets;
         }
 
@@ -233,6 +408,7 @@ export class UserWarehouseCredentialsModel {
     async create(
         userUuid: string,
         data: UpsertUserWarehouseCredentials,
+        projectUuid?: string,
     ): Promise<string> {
         let encryptedCredentials: Buffer;
         try {
@@ -248,6 +424,7 @@ export class UserWarehouseCredentialsModel {
                 name: data.name,
                 warehouse_type: data.credentials.type,
                 encrypted_credentials: encryptedCredentials,
+                project_uuid: projectUuid ?? null,
             })
             .returning('*');
 
@@ -311,5 +488,59 @@ export class UserWarehouseCredentialsModel {
             .delete()
             .where('user_uuid', userUuid)
             .andWhere('warehouse_type', warehouseType);
+    }
+
+    /** Compare-and-swap on the credential's stored refreshToken. Returns true on swap. */
+    async rotateRefreshToken(
+        userWarehouseCredentialsUuid: string,
+        expectedOldRefreshToken: string,
+        newRefreshToken: string,
+    ): Promise<boolean> {
+        return this.database.transaction(async (trx) => {
+            const row = await trx(UserWarehouseCredentialsTableName)
+                .select('name', 'warehouse_type', 'encrypted_credentials')
+                .where(
+                    'user_warehouse_credentials_uuid',
+                    userWarehouseCredentialsUuid,
+                )
+                .forUpdate()
+                .first();
+            if (!row) {
+                return false;
+            }
+
+            let credentials: CreateWarehouseCredentials;
+            try {
+                credentials = JSON.parse(
+                    this.encryptionUtil.decrypt(row.encrypted_credentials),
+                ) as CreateWarehouseCredentials;
+            } catch {
+                return false;
+            }
+
+            const stored = (credentials as Partial<{ refreshToken: string }>)
+                .refreshToken;
+            if (stored !== expectedOldRefreshToken) {
+                return false;
+            }
+
+            (credentials as { refreshToken: string }).refreshToken =
+                newRefreshToken;
+            const encryptedCredentials = this.encryptionUtil.encrypt(
+                JSON.stringify(credentials),
+            );
+            await trx(UserWarehouseCredentialsTableName)
+                .update({
+                    name: row.name,
+                    warehouse_type: row.warehouse_type,
+                    encrypted_credentials: encryptedCredentials,
+                    updated_at: new Date(),
+                })
+                .where(
+                    'user_warehouse_credentials_uuid',
+                    userWarehouseCredentialsUuid,
+                );
+            return true;
+        });
     }
 }

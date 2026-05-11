@@ -34,6 +34,11 @@ const getTagsForTask: {
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
     }),
+    [SCHEDULER_TASKS.SEND_GOOGLE_CHAT_NOTIFICATION]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
     [SCHEDULER_TASKS.SEND_EMAIL_NOTIFICATION]: (payload) => ({
         'organization.uuid': payload.organizationUuid,
         'user.uuid': payload.userUuid,
@@ -56,14 +61,13 @@ const getTagsForTask: {
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
     }),
-
-    [SCHEDULER_TASKS.UPLOAD_GSHEETS]: (payload) => ({
+    [SCHEDULER_TASKS.SEND_GOOGLE_CHAT_BATCH_NOTIFICATION]: (payload) => ({
         'organization.uuid': payload.organizationUuid,
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
     }),
 
-    [SCHEDULER_TASKS.DOWNLOAD_CSV]: (payload) => ({
+    [SCHEDULER_TASKS.UPLOAD_GSHEETS]: (payload) => ({
         'organization.uuid': payload.organizationUuid,
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
@@ -82,6 +86,11 @@ const getTagsForTask: {
     }),
 
     [SCHEDULER_TASKS.COMPILE_PROJECT]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+    [SCHEDULER_TASKS.MATERIALIZE_PRE_AGGREGATE]: (payload) => ({
         'organization.uuid': payload.organizationUuid,
         'user.uuid': payload.userUuid,
         'project.uuid': payload.projectUuid,
@@ -172,6 +181,17 @@ const getTagsForTask: {
     }),
     [SCHEDULER_TASKS.GENERATE_SLACK_CHANNEL_SYNC_JOBS]: () => ({}),
     [SCHEDULER_TASKS.CHECK_FOR_STUCK_JOBS]: () => ({}),
+    [SCHEDULER_TASKS.CLEAN_DEPLOY_SESSIONS]: () => ({}),
+    [SCHEDULER_TASKS.MANAGED_AGENT_HEARTBEAT]: (payload) => ({
+        'project.uuid': payload.projectUuid,
+        'managed_agent.triggered_by': payload.triggeredBy ?? 'cron',
+    }),
+    [SCHEDULER_TASKS.APP_GENERATE_PIPELINE]: (payload) => ({
+        'organization.uuid': payload.organizationUuid,
+        'user.uuid': payload.userUuid,
+        'project.uuid': payload.projectUuid,
+    }),
+    [SCHEDULER_TASKS.SWEEP_STALE_APP_LOCKS]: () => ({}),
 } as const;
 
 // Generic accessor function

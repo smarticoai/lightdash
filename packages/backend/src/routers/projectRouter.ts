@@ -7,7 +7,6 @@ import {
     TablesConfiguration,
 } from '@lightdash/common';
 import express, { type Router } from 'express';
-
 import path from 'path';
 import {
     allowApiKeyAuthentication,
@@ -29,7 +28,7 @@ projectRouter.patch(
             .getProjectService()
             .updateAndScheduleAsyncWork(
                 getObjectValue(req.params, 'projectUuid'),
-                req.user!,
+                req.account!,
                 req.body,
                 getRequestMethod(req.header(LightdashRequestMethodHeader)),
             )
@@ -37,6 +36,28 @@ projectRouter.patch(
                 res.json({
                     status: 'ok',
                     results,
+                });
+            })
+            .catch(next);
+    },
+);
+
+projectRouter.put(
+    '/warehouse-credentials',
+    allowApiKeyAuthentication,
+    isAuthenticated,
+    unauthorisedInDemo,
+    async (req, res, next) => {
+        req.services
+            .getProjectService()
+            .updateWarehouseCredentials(
+                getObjectValue(req.params, 'projectUuid'),
+                req.account!,
+                { warehouseConnection: req.body.warehouseConnection },
+            )
+            .then(() => {
+                res.json({
+                    status: 'ok',
                 });
             })
             .catch(next);
@@ -202,6 +223,27 @@ projectRouter.get(
         req.services
             .getProjectService()
             .getMostPopularAndRecentlyUpdated(
+                req.user!,
+                getObjectValue(req.params, 'projectUuid'),
+            )
+            .then((results) => {
+                res.json({
+                    status: 'ok',
+                    results,
+                });
+            })
+            .catch(next);
+    },
+);
+
+projectRouter.get(
+    '/verified-content-homepage',
+    allowApiKeyAuthentication,
+    isAuthenticated,
+    async (req, res, next) => {
+        req.services
+            .getProjectService()
+            .getVerifiedContentForHomepage(
                 req.user!,
                 getObjectValue(req.params, 'projectUuid'),
             )

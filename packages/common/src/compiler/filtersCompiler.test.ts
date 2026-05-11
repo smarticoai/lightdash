@@ -1,15 +1,23 @@
+import momentTz from 'moment-timezone';
 import moment from 'moment/moment';
-import { FilterOperator, UnitOfTime } from '../types/filter';
+import { SupportedDbtAdapter } from '../types/dbt';
+import { DimensionType } from '../types/field';
+import { FilterOperator, UnitOfTime, type FilterRule } from '../types/filter';
 import { WeekDay } from '../utils/timeFrames';
 import {
+    createBoundaryDateFormatter,
     renderBooleanFilterSql,
     renderDateFilterSql,
+    renderFilterRuleSql,
     renderFilterRuleSqlFromField,
     renderNumberFilterSql,
     renderStringFilterSql,
+    renderTimestampFilterSql,
 } from './filtersCompiler';
 import {
+    adapterType,
     DimensionSqlMock,
+    disabledFilterMock,
     ExpectedInTheCurrentFilterSQL,
     ExpectedInTheCurrentWeekFilterSQLWithCustomStartOfWeek,
     ExpectedInTheNextCompleteFilterSQL,
@@ -17,6 +25,24 @@ import {
     ExpectedInTheNextFilterSQL,
     ExpectedInThePastCompleteWeekFilterSQLWithCustomStartOfWeek,
     ExpectedNumberFilterSQL,
+    filterInTheCurrentDayDateFormatterMocks,
+    filterInTheCurrentDayTimezoneMocks,
+    filterInTheNextCompletedDayDateFormatterMocks,
+    filterInTheNextCompletedDayDstMocks,
+    filterInTheNextCompletedDayTimezoneMocks,
+    filterInTheNextNonCompletedDayDateFormatterMocks,
+    filterInTheNextNonCompletedDayDstMocks,
+    filterInTheNextNonCompletedDayTimezoneMocks,
+    filterInThePastCompletedDayDateFormatterMocks,
+    filterInThePastCompletedDayDstMocks,
+    filterInThePastCompletedDayTimezoneMocks,
+    filterInThePastNonCompletedDayDateFormatterMocks,
+    filterInThePastNonCompletedDayDstMocks,
+    filterInThePastNonCompletedDayTimezoneMocks,
+    filterNegativeOffsetEdgeCaseCurrentDayMocks,
+    filterNegativeOffsetEdgeCasePastCompletedDayMocks,
+    filterPositiveOffsetEdgeCaseCurrentDayMocks,
+    filterPositiveOffsetEdgeCasePastCompletedDayMocks,
     InBetweenPastTwoYearsFilter,
     InBetweenPastTwoYearsFilterSQL,
     InBetweenPastTwoYearsTimestampFilterSQL,
@@ -47,10 +73,14 @@ import {
     InTheLast1YearFilterSQL,
     InTheNextFilterBase,
     InThePastFilterBase,
+    MonthToDateFilterBase,
     NumberDimensionMock,
     NumberFilterBase,
     NumberFilterBaseWithMultiValues,
     NumberOperatorsWithMultipleValues,
+    QuarterToDateFilterBase,
+    stringFilterDimension,
+    stringFilterRuleMocks,
     TrinoExpectedInTheCurrentFilterSQL,
     TrinoExpectedInTheCurrentWeekFilterSQLWithCustomStartOfWeek,
     TrinoExpectedInTheNextCompleteFilterSQL,
@@ -71,15 +101,12 @@ import {
     TrinoInTheLast1MonthFilterSQL,
     TrinoInTheLast1WeekFilterSQL,
     TrinoInTheLast1YearFilterSQL,
-    adapterType,
-    disabledFilterMock,
-    filterInTheCurrentDayTimezoneMocks,
-    stringFilterDimension,
-    stringFilterRuleMocks,
+    WeekToDateFilterBase,
+    YearToDateFilterBase,
 } from './filtersCompiler.mock';
 
 const formatTimestamp = (date: Date): string =>
-    moment(date).format('YYYY-MM-DD HH:mm:ss');
+    moment(date).format('YYYY-MM-DD HH:mm:ssZ');
 
 describe('Filter SQL', () => {
     beforeAll(() => {
@@ -615,7 +642,7 @@ describe('Filter SQL', () => {
 
     test('should return in between date filter sql for timestamps', () => {
         expect(
-            renderDateFilterSql(
+            renderTimestampFilterSql(
                 DimensionSqlMock,
                 InBetweenPastTwoYearsFilter,
                 adapterType.default,
@@ -626,7 +653,7 @@ describe('Filter SQL', () => {
     });
     test('should return in between date filter sql for timestamps for trino adapter', () => {
         expect(
-            renderDateFilterSql(
+            renderTimestampFilterSql(
                 DimensionSqlMock,
                 InBetweenPastTwoYearsFilter,
                 adapterType.trino,
@@ -634,6 +661,353 @@ describe('Filter SQL', () => {
                 formatTimestamp,
             ),
         ).toStrictEqual(TrinoInBetweenPastTwoYearsTimestampFilterSQL);
+    });
+
+    // To-date filter tests (system time: 04 Apr 2020 06:12:30 GMT)
+    // April 4 2020: dayOfYear=95, dayOfMonth=4, dayInQuarter=3 (Apr1->Apr4), Saturday (dayInWeek=5 with Monday start)
+    test('should return year to date filter sql', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                adapterType.default,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DOY FROM ${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return year to date filter sql for bigquery', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                SupportedDbtAdapter.BIGQUERY,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DAYOFYEAR FROM ${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return year to date filter sql for clickhouse', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                SupportedDbtAdapter.CLICKHOUSE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(toDayOfYear(${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return year to date filter sql for trino', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                SupportedDbtAdapter.TRINO,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DOY FROM ${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return year to date filter sql for snowflake', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                SupportedDbtAdapter.SNOWFLAKE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DOY FROM ${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return year to date filter sql for databricks', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                SupportedDbtAdapter.DATABRICKS,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DOY FROM ${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return year to date filter sql for redshift', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                YearToDateFilterBase,
+                SupportedDbtAdapter.REDSHIFT,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DOY FROM ${DimensionSqlMock}) <= 95)`);
+    });
+
+    test('should return month to date filter sql', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                MonthToDateFilterBase,
+                adapterType.default,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DAY FROM ${DimensionSqlMock}) <= 4)`);
+    });
+
+    test('should return month to date filter sql for bigquery', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                MonthToDateFilterBase,
+                SupportedDbtAdapter.BIGQUERY,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DAY FROM ${DimensionSqlMock}) <= 4)`);
+    });
+
+    test('should return month to date filter sql for clickhouse', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                MonthToDateFilterBase,
+                SupportedDbtAdapter.CLICKHOUSE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(toDayOfMonth(${DimensionSqlMock}) <= 4)`);
+    });
+
+    test('should return month to date filter sql for trino', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                MonthToDateFilterBase,
+                SupportedDbtAdapter.TRINO,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DAY FROM ${DimensionSqlMock}) <= 4)`);
+    });
+
+    test('should return month to date filter sql for snowflake', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                MonthToDateFilterBase,
+                SupportedDbtAdapter.SNOWFLAKE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(`(EXTRACT(DAY FROM ${DimensionSqlMock}) <= 4)`);
+    });
+
+    test('should return quarter to date filter sql', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                QuarterToDateFilterBase,
+                adapterType.default,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(EXTRACT(DAY FROM ${DimensionSqlMock} - DATE_TRUNC('QUARTER', ${DimensionSqlMock})) <= 3)`,
+        );
+    });
+
+    test('should return quarter to date filter sql for trino', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                QuarterToDateFilterBase,
+                adapterType.trino,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(DATE_DIFF('day', DATE_TRUNC('quarter', ${DimensionSqlMock}), ${DimensionSqlMock}) <= 3)`,
+        );
+    });
+
+    test('should return quarter to date filter sql for bigquery', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                QuarterToDateFilterBase,
+                SupportedDbtAdapter.BIGQUERY,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(DATE_DIFF(${DimensionSqlMock}, DATE_TRUNC(${DimensionSqlMock}, QUARTER), DAY) <= 3)`,
+        );
+    });
+
+    test('should return quarter to date filter sql for clickhouse', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                QuarterToDateFilterBase,
+                SupportedDbtAdapter.CLICKHOUSE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(dateDiff('day', toStartOfQuarter(${DimensionSqlMock}), ${DimensionSqlMock}) <= 3)`,
+        );
+    });
+
+    test('should return quarter to date filter sql for athena', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                QuarterToDateFilterBase,
+                SupportedDbtAdapter.ATHENA,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(DATE_DIFF('day', DATE_TRUNC('quarter', ${DimensionSqlMock}), ${DimensionSqlMock}) <= 3)`,
+        );
+    });
+
+    test('should return quarter to date filter sql for snowflake', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                QuarterToDateFilterBase,
+                SupportedDbtAdapter.SNOWFLAKE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(EXTRACT(DAY FROM ${DimensionSqlMock} - DATE_TRUNC('QUARTER', ${DimensionSqlMock})) <= 3)`,
+        );
+    });
+
+    test('should return week to date filter sql (monday start)', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                adapterType.default,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(EXTRACT(DAY FROM ${DimensionSqlMock} - DATE_TRUNC('WEEK', ${DimensionSqlMock})) <= 5)`,
+        );
+    });
+
+    test('should return week to date filter sql for bigquery (sunday start default)', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                SupportedDbtAdapter.BIGQUERY,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(DATE_DIFF(${DimensionSqlMock}, DATE_TRUNC(${DimensionSqlMock}, WEEK(SUNDAY)), DAY) <= 6)`,
+        );
+    });
+
+    test('should return week to date filter sql for clickhouse (sunday start default)', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                SupportedDbtAdapter.CLICKHOUSE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(dateDiff('day', toStartOfWeek(${DimensionSqlMock}, 0), ${DimensionSqlMock}) <= 6)`,
+        );
+    });
+
+    test('should return week to date filter sql for trino', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                SupportedDbtAdapter.TRINO,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(DATE_DIFF('day', DATE_TRUNC('week', ${DimensionSqlMock}), ${DimensionSqlMock}) <= 5)`,
+        );
+    });
+
+    test('should return week to date filter sql for snowflake', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                SupportedDbtAdapter.SNOWFLAKE,
+                'UTC',
+                formatTimestamp,
+            ),
+        ).toStrictEqual(
+            `(EXTRACT(DAY FROM ${DimensionSqlMock} - DATE_TRUNC('WEEK', ${DimensionSqlMock})) <= 5)`,
+        );
+    });
+
+    // Week to date with custom startOfWeek
+    // April 4, 2020 is Saturday. Monday start: dayInWeek=5 (Mon=0..Sat=5). Sunday start: dayInWeek=6 (Sun=0..Sat=6).
+    test('should return week to date filter sql for postgres with sunday start', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                adapterType.default,
+                'UTC',
+                formatTimestamp,
+                WeekDay.SUNDAY,
+            ),
+        ).toStrictEqual(
+            `(EXTRACT(DAY FROM ${DimensionSqlMock} - DATE_TRUNC('WEEK', ${DimensionSqlMock})) <= 6)`,
+        );
+    });
+
+    test('should return week to date filter sql for bigquery with monday start', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                SupportedDbtAdapter.BIGQUERY,
+                'UTC',
+                formatTimestamp,
+                WeekDay.MONDAY,
+            ),
+        ).toStrictEqual(
+            `(DATE_DIFF(${DimensionSqlMock}, DATE_TRUNC(${DimensionSqlMock}, WEEK(MONDAY)), DAY) <= 5)`,
+        );
+    });
+
+    test('should return week to date filter sql for clickhouse with monday start', () => {
+        expect(
+            renderDateFilterSql(
+                DimensionSqlMock,
+                WeekToDateFilterBase,
+                SupportedDbtAdapter.CLICKHOUSE,
+                'UTC',
+                formatTimestamp,
+                WeekDay.MONDAY,
+            ),
+        ).toStrictEqual(
+            `(dateDiff('day', toStartOfWeek(${DimensionSqlMock}, 1), ${DimensionSqlMock}) <= 5)`,
+        );
     });
 
     test.each(filterInTheCurrentDayTimezoneMocks)(
@@ -644,6 +1018,182 @@ describe('Filter SQL', () => {
                 renderDateFilterSql(
                     DimensionSqlMock,
                     InTheCurrentFilterBase,
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInThePastCompletedDayTimezoneMocks)(
+        'should return in the past completed day filter sql for timezone %s',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('04 Apr 2020 06:12:30 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InThePastFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: true,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInTheNextCompletedDayTimezoneMocks)(
+        'should return in the next completed day filter sql for timezone %s',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('04 Apr 2020 06:12:30 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InTheNextFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: true,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInThePastCompletedDayDstMocks)(
+        'should handle DST spring forward for in the past completed day filter (timezone %s)',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('09 Mar 2020 05:00:00 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InThePastFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: true,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInTheNextCompletedDayDstMocks)(
+        'should handle DST spring forward for in the next completed day filter (timezone %s)',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('07 Mar 2020 05:00:00 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InTheNextFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: true,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInThePastNonCompletedDayTimezoneMocks)(
+        'should return in the past non-completed day filter sql for timezone %s',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('04 Apr 2020 06:12:30 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InThePastFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: false,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInTheNextNonCompletedDayTimezoneMocks)(
+        'should return in the next non-completed day filter sql for timezone %s',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('04 Apr 2020 06:12:30 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InTheNextFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: false,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInThePastNonCompletedDayDstMocks)(
+        'should handle DST spring forward for in the past non-completed day filter (timezone %s)',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('09 Mar 2020 05:00:00 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InThePastFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: false,
+                        },
+                    },
+                    adapterType.default,
+                    timezone,
+                    formatTimestamp,
+                ),
+            ).toStrictEqual(expected);
+        },
+    );
+
+    test.each(filterInTheNextNonCompletedDayDstMocks)(
+        'should handle DST spring forward for in the next non-completed day filter (timezone %s)',
+        (timezone, expected) => {
+            jest.setSystemTime(new Date('08 Mar 2020 06:00:00 GMT').getTime());
+            expect(
+                renderDateFilterSql(
+                    DimensionSqlMock,
+                    {
+                        ...InTheNextFilterBase,
+                        settings: {
+                            unitOfTime: UnitOfTime.days,
+                            completed: false,
+                        },
+                    },
                     adapterType.default,
                     timezone,
                     formatTimestamp,
@@ -842,6 +1392,121 @@ describe('Filter SQL', () => {
         ).toBe(stringFilterRuleMocks.endsWithFilterWithNoValSQL);
     });
 
+    describe('case sensitivity hierarchy', () => {
+        const caseFilter: FilterRule = {
+            id: '1',
+            target: { fieldId: 'testField' },
+            operator: FilterOperator.EQUALS,
+            values: ['TestValue'],
+        };
+
+        const mockDimension = disabledFilterMock.field;
+
+        test('should be case sensitive by default', () => {
+            const sql = renderStringFilterSql(
+                'field_name',
+                caseFilter,
+                "'",
+                true, // case sensitive (default)
+            );
+            expect(sql).toBe(`(field_name) IN ('TestValue')`);
+        });
+
+        test('should be case insensitive when caseSensitive is false', () => {
+            const sql = renderStringFilterSql(
+                'field_name',
+                caseFilter,
+                "'",
+                false, // case insensitive
+            );
+            expect(sql).toBe(`(UPPER(field_name)) IN ('TESTVALUE')`);
+        });
+
+        test('field-level caseSensitive overrides explore-level', () => {
+            const fieldWithCaseSensitive = {
+                ...mockDimension,
+                caseSensitive: false, // field-level setting
+            };
+            const sql = renderFilterRuleSqlFromField(
+                caseFilter,
+                fieldWithCaseSensitive,
+                '"',
+                "'",
+                (str: string) => str,
+                WeekDay.MONDAY,
+                SupportedDbtAdapter.POSTGRES,
+                'UTC',
+                true, // explore-level setting (should be overridden)
+            );
+            expect(sql).toContain('UPPER');
+        });
+
+        test('explore-level caseSensitive is used when field has no override', () => {
+            const fieldWithoutCaseSensitive = {
+                ...mockDimension,
+                // No caseSensitive property
+            };
+            const sql = renderFilterRuleSqlFromField(
+                caseFilter,
+                fieldWithoutCaseSensitive,
+                '"',
+                "'",
+                (str: string) => str,
+                WeekDay.MONDAY,
+                SupportedDbtAdapter.POSTGRES,
+                'UTC',
+                false, // explore-level setting
+            );
+            expect(sql).toContain('UPPER');
+        });
+
+        test('filter-rule-level caseSensitive overrides case-sensitive field and explore', () => {
+            const fieldCaseSensitive = {
+                ...mockDimension,
+                caseSensitive: true,
+            };
+            const filterRuleOverride: FilterRule = {
+                ...caseFilter,
+                caseSensitive: false,
+            };
+            const sql = renderFilterRuleSqlFromField(
+                filterRuleOverride,
+                fieldCaseSensitive,
+                '"',
+                "'",
+                (str: string) => str,
+                WeekDay.MONDAY,
+                SupportedDbtAdapter.POSTGRES,
+                'UTC',
+                true, // explore-level is also case-sensitive
+            );
+            expect(sql).toContain('UPPER');
+        });
+
+        test('filter-rule-level caseSensitive=true overrides case-insensitive field', () => {
+            const fieldCaseInsensitive = {
+                ...mockDimension,
+                caseSensitive: false,
+            };
+            const filterRuleOverride: FilterRule = {
+                ...caseFilter,
+                caseSensitive: true,
+            };
+            const sql = renderFilterRuleSqlFromField(
+                filterRuleOverride,
+                fieldCaseInsensitive,
+                '"',
+                "'",
+                (str: string) => str,
+                WeekDay.MONDAY,
+                SupportedDbtAdapter.POSTGRES,
+                'UTC',
+                false,
+            );
+            expect(sql).not.toContain('UPPER');
+        });
+    });
+
     test('should return 1=1 if filter is disabled', () => {
         expect(
             renderFilterRuleSqlFromField(
@@ -855,6 +1520,262 @@ describe('Filter SQL', () => {
                 disabledFilterMock.timezone,
             ),
         ).toBe('1=1');
+    });
+});
+
+describe('case sensitivity', () => {
+    test('should apply UPPER() when caseSensitive is false for EQUALS', () => {
+        const filter = {
+            ...stringFilterRuleMocks.equalsFilterWithSingleUnescapedValue,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(`(UPPER(${stringFilterDimension})) IN ('BOB')`);
+    });
+
+    test('should not apply UPPER() when caseSensitive is true for EQUALS', () => {
+        const filter = {
+            ...stringFilterRuleMocks.equalsFilterWithSingleUnescapedValue,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                true, // caseSensitive = true (default)
+            ),
+        ).toBe(`(${stringFilterDimension}) IN ('Bob')`);
+    });
+
+    test('should apply UPPER() when caseSensitive is false for NOT_EQUALS', () => {
+        const filter = {
+            id: 'test',
+            target: { fieldId: 'test' },
+            operator: FilterOperator.NOT_EQUALS,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(
+            `((UPPER(${stringFilterDimension})) NOT IN ('BOB') OR (${stringFilterDimension}) IS NULL)`,
+        );
+    });
+
+    test('should apply UPPER() when caseSensitive is false for STARTS_WITH', () => {
+        const filter = {
+            ...stringFilterRuleMocks.startsWithFilterWithSingleVal,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(`UPPER(${stringFilterDimension}) LIKE 'BOB%'`);
+    });
+
+    test('should apply UPPER() when caseSensitive is false for ENDS_WITH', () => {
+        const filter = {
+            ...stringFilterRuleMocks.endsWithFilterWithSingleVal,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(`UPPER(${stringFilterDimension}) LIKE '%BOB'`);
+    });
+    test('should apply UPPER() when caseSensitive is false for INCLUDE', () => {
+        const filter = {
+            ...stringFilterRuleMocks.includeFilterWithSingleVal,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(`UPPER(${stringFilterDimension}) LIKE UPPER('%Bob%')`);
+    });
+    test('should not apply UPPER() when caseSensitive is true for INCLUDE', () => {
+        const filter = {
+            ...stringFilterRuleMocks.includeFilterWithSingleVal,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                true, // caseSensitive = true (default)
+            ),
+        ).toBe(`(${stringFilterDimension}) LIKE '%Bob%'`);
+    });
+    test('should apply UPPER() when caseSensitive is false for INCLUDE with multiple values', () => {
+        const filter = {
+            ...stringFilterRuleMocks.includeFilterWithMultiVal,
+            values: ['Tom', 'Jerry'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(`(UPPER(${stringFilterDimension}) LIKE UPPER('%Tom%')
+  OR
+  UPPER(${stringFilterDimension}) LIKE UPPER('%Jerry%'))`);
+    });
+    test('should apply UPPER() when caseSensitive is false for NOT_INCLUDE', () => {
+        const filter = {
+            ...stringFilterRuleMocks.notIncludeFilterWithSingleVal,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(
+            `(UPPER(${stringFilterDimension}) NOT LIKE UPPER('%Bob%') OR (${stringFilterDimension}) IS NULL)`,
+        );
+    });
+    test('should not apply UPPER() when caseSensitive is true for NOT_INCLUDE', () => {
+        const filter = {
+            ...stringFilterRuleMocks.notIncludeFilterWithSingleVal,
+            values: ['Bob'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                true, // caseSensitive = true (default)
+            ),
+        ).toBe(
+            `((${stringFilterDimension}) NOT LIKE '%Bob%' OR (${stringFilterDimension}) IS NULL)`,
+        );
+    });
+    test('should apply UPPER() when caseSensitive is false for NOT_INCLUDE with multiple values', () => {
+        const filter = {
+            ...stringFilterRuleMocks.notIncludeFilterWithMultiVal,
+            values: ['Tom', 'Jerry'],
+        };
+        expect(
+            renderStringFilterSql(
+                stringFilterDimension,
+                filter,
+                "'",
+                false, // caseSensitive = false
+            ),
+        ).toBe(`(UPPER(${stringFilterDimension}) NOT LIKE UPPER('%Tom%')
+  AND
+  UPPER(${stringFilterDimension}) NOT LIKE UPPER('%Jerry%') OR (${stringFilterDimension}) IS NULL)`);
+    });
+
+    test.each<[FilterOperator, string]>([
+        [FilterOperator.EQUALS, `(UPPER(${stringFilterDimension})) IN ('1')`],
+        [
+            FilterOperator.NOT_EQUALS,
+            `((UPPER(${stringFilterDimension})) NOT IN ('1') OR (${stringFilterDimension}) IS NULL)`,
+        ],
+        [
+            FilterOperator.STARTS_WITH,
+            `UPPER(${stringFilterDimension}) LIKE '1%'`,
+        ],
+        [FilterOperator.ENDS_WITH, `UPPER(${stringFilterDimension}) LIKE '%1'`],
+    ])(
+        'should coerce numeric values to strings when caseSensitive is false for %s',
+        (operator, expectedSql) => {
+            const filter: FilterRule = {
+                id: 'test',
+                target: { fieldId: 'test' },
+                operator,
+                values: [1],
+            };
+            expect(
+                renderStringFilterSql(
+                    stringFilterDimension,
+                    filter,
+                    "'",
+                    false, // caseSensitive = false
+                ),
+            ).toBe(expectedSql);
+        },
+    );
+
+    test('should respect field-level caseSensitive over explore-level', () => {
+        const field = {
+            ...disabledFilterMock.field,
+            caseSensitive: false, // field level setting
+        };
+        const filter = {
+            id: 'test',
+            target: { fieldId: 'test' },
+            operator: FilterOperator.EQUALS,
+            values: ['Bob'],
+        };
+        expect(
+            renderFilterRuleSqlFromField(
+                filter,
+                field,
+                disabledFilterMock.fieldQuoteChar,
+                disabledFilterMock.stringQuoteChar,
+                (v) => v,
+                disabledFilterMock.startOfWeek,
+                disabledFilterMock.adapterType,
+                disabledFilterMock.timezone,
+                true, // explore level setting (should be overridden)
+            ),
+        ).toBe(`(UPPER("payments".payment_method)) IN ('BOB')`);
+    });
+
+    test('should use explore-level caseSensitive when field-level is undefined', () => {
+        const field = {
+            ...disabledFilterMock.field,
+            // no caseSensitive defined at field level
+        };
+        const filter = {
+            id: 'test',
+            target: { fieldId: 'test' },
+            operator: FilterOperator.EQUALS,
+            values: ['Bob'],
+        };
+        expect(
+            renderFilterRuleSqlFromField(
+                filter,
+                field,
+                disabledFilterMock.fieldQuoteChar,
+                disabledFilterMock.stringQuoteChar,
+                (v) => v,
+                disabledFilterMock.startOfWeek,
+                disabledFilterMock.adapterType,
+                disabledFilterMock.timezone,
+                false, // explore level setting
+            ),
+        ).toBe(`(UPPER("payments".payment_method)) IN ('BOB')`);
     });
 });
 
@@ -1322,6 +2243,563 @@ describe('Number Filter SQL Injection Prevention', () => {
                 values: [5],
             };
             expect(renderNumberFilterSql(dimensionSql, filter)).toBe('true');
+        });
+    });
+
+    describe('timezone-aware date formatter boundaries with positive-offset timezones', () => {
+        test.each(filterInThePastCompletedDayDateFormatterMocks)(
+            'inThePast completed day (tz-aware formatter) for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 06:12:30 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InThePastFilterBase,
+                            settings: {
+                                unitOfTime: UnitOfTime.days,
+                                completed: true,
+                            },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+
+        test.each(filterInTheCurrentDayDateFormatterMocks)(
+            'inTheCurrent day (tz-aware formatter) for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 06:12:30 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InTheCurrentFilterBase,
+                            settings: { unitOfTime: UnitOfTime.days },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+
+        test.each(filterInThePastNonCompletedDayDateFormatterMocks)(
+            'inThePast non-completed day (tz-aware formatter) for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 06:12:30 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InThePastFilterBase,
+                            settings: {
+                                unitOfTime: UnitOfTime.days,
+                                completed: false,
+                            },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+
+        test.each(filterInTheNextCompletedDayDateFormatterMocks)(
+            'inTheNext completed day (tz-aware formatter) for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 06:12:30 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InTheNextFilterBase,
+                            settings: {
+                                unitOfTime: UnitOfTime.days,
+                                completed: true,
+                            },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+
+        test.each(filterInTheNextNonCompletedDayDateFormatterMocks)(
+            'inTheNext non-completed day (tz-aware formatter) for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 06:12:30 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InTheNextFilterBase,
+                            settings: {
+                                unitOfTime: UnitOfTime.days,
+                                completed: false,
+                            },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+    });
+
+    describe('negative-offset edge case near midnight UTC', () => {
+        test.each(filterNegativeOffsetEdgeCaseCurrentDayMocks)(
+            'inTheCurrent day near midnight UTC for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 02:00:00 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InTheCurrentFilterBase,
+                            settings: { unitOfTime: UnitOfTime.days },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+
+        test.each(filterNegativeOffsetEdgeCasePastCompletedDayMocks)(
+            'inThePast completed day near midnight UTC for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 02:00:00 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InThePastFilterBase,
+                            settings: {
+                                unitOfTime: UnitOfTime.days,
+                                completed: true,
+                            },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+    });
+
+    describe('positive-offset edge case near end of UTC day', () => {
+        test.each(filterPositiveOffsetEdgeCaseCurrentDayMocks)(
+            'inTheCurrent day late UTC for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 22:00:00 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InTheCurrentFilterBase,
+                            settings: { unitOfTime: UnitOfTime.days },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+
+        test.each(filterPositiveOffsetEdgeCasePastCompletedDayMocks)(
+            'inThePast completed day late UTC for timezone %s',
+            (timezone, expected) => {
+                jest.setSystemTime(
+                    new Date('04 Apr 2020 22:00:00 GMT').getTime(),
+                );
+                expect(
+                    renderDateFilterSql(
+                        DimensionSqlMock,
+                        {
+                            ...InThePastFilterBase,
+                            settings: {
+                                unitOfTime: UnitOfTime.days,
+                                completed: true,
+                            },
+                        },
+                        adapterType.default,
+                        timezone,
+                        createBoundaryDateFormatter(timezone),
+                    ),
+                ).toStrictEqual(expected);
+            },
+        );
+    });
+});
+
+describe('DATE dimension filters are server-timezone-independent', () => {
+    // Regression: the default boundaryFormatter (formatDate) used moment(date)
+    // which formats in the server's local timezone. On a server with a positive
+    // UTC offset, endOf('day') in UTC (23:59 UTC) gets shifted to the next
+    // calendar day, producing a 2-day filter range instead of 1.
+    const systemTime = new Date('10 Apr 2026 14:00:00 GMT');
+
+    beforeEach(() => {
+        jest.setSystemTime(systemTime.getTime());
+    });
+
+    afterEach(() => {
+        // Reset moment default timezone so other tests are unaffected
+        momentTz.tz.setDefault();
+    });
+
+    test.each([
+        ['UTC', 'UTC'],
+        ['Europe/Moscow', 'UTC'],
+        ['Asia/Tokyo', 'UTC'],
+        ['America/New_York', 'UTC'],
+        ['Pacific/Auckland', 'UTC'],
+    ])(
+        'inTheCurrent day for DATE dimension produces single-day range regardless of server TZ=%s',
+        (serverTz, projectTz) => {
+            // Simulate a server running in a non-UTC timezone
+            momentTz.tz.setDefault(serverTz);
+
+            const sql = renderFilterRuleSql(
+                {
+                    id: 'id',
+                    target: { fieldId: 'fieldId' },
+                    operator: FilterOperator.IN_THE_CURRENT,
+                    values: [1],
+                    settings: { unitOfTime: UnitOfTime.days },
+                },
+                DimensionType.DATE,
+                DimensionSqlMock,
+                "'",
+                (s: string) => s,
+                null,
+                SupportedDbtAdapter.POSTGRES,
+                projectTz,
+            );
+
+            // Both boundaries must be the same UTC date — no 2-day range
+            expect(sql).toBe(
+                `((${DimensionSqlMock}) >= ('2026-04-10') AND (${DimensionSqlMock}) <= ('2026-04-10'))`,
+            );
+        },
+    );
+
+    test.each([
+        ['Europe/Moscow', 'UTC'],
+        ['Asia/Tokyo', 'UTC'],
+        ['America/New_York', 'UTC'],
+    ])(
+        'inThePast 1 completed day for DATE dimension is server-TZ-independent (server TZ=%s)',
+        (serverTz, projectTz) => {
+            momentTz.tz.setDefault(serverTz);
+
+            const sql = renderFilterRuleSql(
+                {
+                    id: 'id',
+                    target: { fieldId: 'fieldId' },
+                    operator: FilterOperator.IN_THE_PAST,
+                    values: [1],
+                    settings: {
+                        unitOfTime: UnitOfTime.days,
+                        completed: true,
+                    },
+                },
+                DimensionType.DATE,
+                DimensionSqlMock,
+                "'",
+                (s: string) => s,
+                null,
+                SupportedDbtAdapter.POSTGRES,
+                projectTz,
+            );
+
+            // Yesterday in UTC: April 9
+            expect(sql).toBe(
+                `((${DimensionSqlMock}) >= ('2026-04-09') AND (${DimensionSqlMock}) < ('2026-04-10'))`,
+            );
+        },
+    );
+});
+
+describe('useTimezoneAwareDateTrunc parameter — filter literal wrapping', () => {
+    const equalsFilter: FilterRule<FilterOperator, unknown> = {
+        id: 'id',
+        target: { fieldId: 'fieldId' },
+        operator: FilterOperator.EQUALS,
+        values: ['2024-01-15'],
+    };
+
+    test('DATE-over-TIMESTAMP filter wraps literal in project TZ when parameter is true', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.POSTGRES,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.TIMESTAMP,
+        );
+        expect(sql).toContain("AT TIME ZONE 'Asia/Tokyo'");
+        expect(sql).toContain("'2024-01-15'::timestamp");
+    });
+
+    test('DATE filter leaves literal bare when parameter is omitted', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.POSTGRES,
+            'Asia/Tokyo',
+        );
+        expect(sql).not.toContain('AT TIME ZONE');
+    });
+
+    test('DATE filter over a DATE base emits a bare literal even when parameter is true', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.POSTGRES,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.DATE,
+        );
+        expect(sql).not.toContain('AT TIME ZONE');
+        expect(sql).not.toContain('::timestamp');
+    });
+
+    test('BigQuery DATE-over-TIMESTAMP filter emits TIMESTAMP(literal, tz)', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.BIGQUERY,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.TIMESTAMP,
+        );
+        expect(sql).toContain("TIMESTAMP('2024-01-15', 'Asia/Tokyo')");
+        expect(sql).not.toContain('::timestamp');
+    });
+
+    test('BigQuery DATE filter over a DATE base emits a bare literal (no TIMESTAMP wrap)', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.BIGQUERY,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.DATE,
+        );
+        expect(sql).not.toContain('TIMESTAMP(');
+        expect(sql).toContain("'2024-01-15'");
+    });
+
+    test('ClickHouse DATE-over-TIMESTAMP filter anchors literal with toDateTime(literal, tz)', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.CLICKHOUSE,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.TIMESTAMP,
+        );
+        expect(sql).toContain("toDateTime('2024-01-15', 'Asia/Tokyo')");
+        expect(sql).not.toContain('::timestamp');
+    });
+
+    test('ClickHouse DATE filter over a DATE base emits a bare literal (no toDateTime wrap)', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.DATE,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.CLICKHOUSE,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.DATE,
+        );
+        expect(sql).not.toContain('toDateTime(');
+    });
+
+    test('TIMESTAMP filter does not wrap literal even when parameter is true', () => {
+        const sql = renderFilterRuleSql(
+            equalsFilter,
+            DimensionType.TIMESTAMP,
+            DimensionSqlMock,
+            "'",
+            (s: string) => s,
+            null,
+            SupportedDbtAdapter.POSTGRES,
+            'Asia/Tokyo',
+            true,
+            undefined,
+            true,
+            DimensionType.TIMESTAMP,
+        );
+        expect(sql).not.toContain("AT TIME ZONE 'Asia/Tokyo'");
+    });
+
+    describe('relative filters', () => {
+        beforeEach(() => {
+            jest.setSystemTime(new Date('2026-04-22 00:00:00 GMT').getTime());
+        });
+
+        const renderWithParam = (
+            filter: FilterRule<FilterOperator, unknown>,
+            useTimezoneAwareDateTrunc: boolean,
+            baseTimeIntervalDimensionType: DimensionType = DimensionType.TIMESTAMP,
+        ) =>
+            renderFilterRuleSql(
+                filter,
+                DimensionType.DATE,
+                DimensionSqlMock,
+                "'",
+                (s: string) => s,
+                null,
+                SupportedDbtAdapter.POSTGRES,
+                'Asia/Tokyo',
+                true,
+                undefined,
+                useTimezoneAwareDateTrunc,
+                baseTimeIntervalDimensionType,
+            );
+
+        test('inThePast completed day wraps boundaries in project TZ', () => {
+            const filter: FilterRule<FilterOperator, unknown> = {
+                id: 'id',
+                target: { fieldId: 'fieldId' },
+                operator: FilterOperator.IN_THE_PAST,
+                values: [1],
+                settings: { unitOfTime: UnitOfTime.days, completed: true },
+            };
+            const sql = renderWithParam(filter, true);
+            expect(sql).toContain("AT TIME ZONE 'Asia/Tokyo'");
+            expect(sql).toContain("'2026-04-21'::timestamp");
+        });
+
+        test('inTheCurrent day wraps boundaries in project TZ', () => {
+            const filter: FilterRule<FilterOperator, unknown> = {
+                id: 'id',
+                target: { fieldId: 'fieldId' },
+                operator: FilterOperator.IN_THE_CURRENT,
+                values: [1],
+                settings: { unitOfTime: UnitOfTime.days },
+            };
+            const sql = renderWithParam(filter, true);
+            expect(sql).toContain("AT TIME ZONE 'Asia/Tokyo'");
+            expect(sql).toContain("'2026-04-22'::timestamp");
+        });
+
+        test('inTheNext day wraps boundaries in project TZ', () => {
+            const filter: FilterRule<FilterOperator, unknown> = {
+                id: 'id',
+                target: { fieldId: 'fieldId' },
+                operator: FilterOperator.IN_THE_NEXT,
+                values: [1],
+                settings: { unitOfTime: UnitOfTime.days, completed: false },
+            };
+            const sql = renderWithParam(filter, true);
+            expect(sql).toContain("AT TIME ZONE 'Asia/Tokyo'");
+        });
+
+        test('inThePast completed day leaves boundaries bare when parameter is omitted', () => {
+            const filter: FilterRule<FilterOperator, unknown> = {
+                id: 'id',
+                target: { fieldId: 'fieldId' },
+                operator: FilterOperator.IN_THE_PAST,
+                values: [1],
+                settings: { unitOfTime: UnitOfTime.days, completed: true },
+            };
+            const sql = renderWithParam(filter, false);
+            expect(sql).not.toContain('AT TIME ZONE');
+        });
+
+        test('inThePast completed weeks on a DATE-backed dimension does not wrap BigQuery literals in TIMESTAMP', () => {
+            const filter: FilterRule<FilterOperator, unknown> = {
+                id: 'id',
+                target: { fieldId: 'fieldId' },
+                operator: FilterOperator.IN_THE_PAST,
+                values: [14],
+                settings: { unitOfTime: UnitOfTime.weeks, completed: true },
+            };
+            const sql = renderFilterRuleSql(
+                filter,
+                DimensionType.DATE,
+                DimensionSqlMock,
+                "'",
+                (s: string) => s,
+                null,
+                SupportedDbtAdapter.BIGQUERY,
+                'Asia/Tokyo',
+                true,
+                undefined,
+                true,
+                DimensionType.DATE,
+            );
+            expect(sql).not.toContain('TIMESTAMP(');
         });
     });
 });

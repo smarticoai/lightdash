@@ -9,12 +9,15 @@ import {
 import * as Sentry from '@sentry/node';
 import { Knex } from 'knex';
 import {
+    AnalyticsAppViewsTableName,
     AnalyticsChartViewsTableName,
     AnalyticsDashboardViewsTableName,
 } from '../database/entities/analytics';
+import { AppsTableName } from '../database/entities/apps';
 import { DashboardsTableName } from '../database/entities/dashboards';
 import { ProjectTableName } from '../database/entities/projects';
 import { SavedChartsTableName } from '../database/entities/savedCharts';
+import { SavedSqlTableName } from '../database/entities/savedSql';
 import { SpaceTableName } from '../database/entities/spaces';
 import { UserTableName } from '../database/entities/users';
 import {
@@ -108,7 +111,7 @@ export class AnalyticsModel {
                 chart_uuid: chartUuid,
                 user_uuid: userUuid,
             }); */
-            await trx(`saved_sql`)
+            await trx(SavedSqlTableName)
                 .update({
                     views_count: trx.raw(
                         'views_count + 1',
@@ -152,6 +155,22 @@ export class AnalyticsModel {
                     ) as unknown as Date, // update first_viewed_at if it is null
                 })
                 .where('dashboard_uuid', dashboardUuid);
+        });
+    }
+
+    async addAppViewEvent(appId: string, userUuid: string): Promise<void> {
+        await this.database.transaction(async (trx) => {
+            await trx(AnalyticsAppViewsTableName).insert({
+                app_id: appId,
+                user_uuid: userUuid,
+            });
+            await trx(AppsTableName)
+                .update({
+                    views_count: trx.raw(
+                        'views_count + 1',
+                    ) as unknown as number,
+                })
+                .where('app_id', appId);
         });
     }
 
@@ -203,6 +222,7 @@ export class AnalyticsModel {
                 user_uuid: string;
                 first_name: string;
                 last_name: string;
+                dashboard_uuid: string;
                 dashboard_name: string;
                 count: number;
             }[];
@@ -248,6 +268,7 @@ export class AnalyticsModel {
                     firstName: row.first_name,
                     lastName: row.last_name,
                     count: row.count,
+                    dashboardUuid: row.dashboard_uuid,
                     dashboardName: row.dashboard_name,
                 }),
             ),
@@ -289,11 +310,13 @@ export class AnalyticsModel {
                     `${SpaceTableName}.name as space_name`,
                 )
                 .from(AnalyticsChartViewsTableName)
-                .leftJoin(
-                    SavedChartsTableName,
-                    `${SavedChartsTableName}.saved_query_uuid`,
-                    `${AnalyticsChartViewsTableName}.chart_uuid`,
-                )
+                .leftJoin(SavedChartsTableName, function nonDeletedChartJoin() {
+                    this.on(
+                        `${SavedChartsTableName}.saved_query_uuid`,
+                        '=',
+                        `${AnalyticsChartViewsTableName}.chart_uuid`,
+                    ).andOnNull(`${SavedChartsTableName}.deleted_at`);
+                })
                 .leftJoin(
                     UserTableName,
                     `${UserTableName}.user_uuid`,
@@ -309,7 +332,8 @@ export class AnalyticsModel {
                     `${ProjectTableName}.project_id`,
                     `${SpaceTableName}.project_id`,
                 )
-                .where(`${ProjectTableName}.project_uuid`, projectUuid);
+                .where(`${ProjectTableName}.project_uuid`, projectUuid)
+                .whereNull(`${SpaceTableName}.deleted_at`);
 
             const dashboardViews = trx
                 .select<RawViewType[]>(
@@ -345,7 +369,8 @@ export class AnalyticsModel {
                     `${ProjectTableName}.project_id`,
                     `${SpaceTableName}.project_id`,
                 )
-                .where(`${ProjectTableName}.project_uuid`, projectUuid);
+                .where(`${ProjectTableName}.project_uuid`, projectUuid)
+                .whereNull(`${SpaceTableName}.deleted_at`);
 
             return chartViews
                 .union(dashboardViews)
@@ -418,6 +443,50 @@ export class AnalyticsModel {
 
                 return { charts, dashboards };
             },
+        );
+    }
+
+    async getLastViewedAtForCharts(
+        chartUuids: string[],
+    ): Promise<Map<string, Date>> {
+        if (chartUuids.length === 0) {
+            return new Map();
+        }
+
+        const rows = await this.database(AnalyticsChartViewsTableName)
+            .select('chart_uuid')
+            .max<{ chart_uuid: string; last_viewed_at: Date }[]>({
+                last_viewed_at: 'timestamp',
+            })
+            .whereIn('chart_uuid', chartUuids)
+            .groupBy('chart_uuid');
+
+        return new Map(
+            rows
+                .filter((row) => row.last_viewed_at)
+                .map((row) => [row.chart_uuid, row.last_viewed_at]),
+        );
+    }
+
+    async getLastViewedAtForDashboards(
+        dashboardUuids: string[],
+    ): Promise<Map<string, Date>> {
+        if (dashboardUuids.length === 0) {
+            return new Map();
+        }
+
+        const rows = await this.database(AnalyticsDashboardViewsTableName)
+            .select('dashboard_uuid')
+            .max<{ dashboard_uuid: string; last_viewed_at: Date }[]>({
+                last_viewed_at: 'timestamp',
+            })
+            .whereIn('dashboard_uuid', dashboardUuids)
+            .groupBy('dashboard_uuid');
+
+        return new Map(
+            rows
+                .filter((row) => row.last_viewed_at)
+                .map((row) => [row.dashboard_uuid, row.last_viewed_at]),
         );
     }
 }

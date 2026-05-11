@@ -1,8 +1,8 @@
-import { Group, Input } from '@mantine/core';
+import { Group, Input } from '@mantine-8/core';
 import React, { type FC } from 'react';
+import { getWeeklyCronExpression, parseCronExpression } from './cronInputUtils';
 import TimePicker from './TimePicker';
 import WeekDaySelect from './WeekDaySelect';
-import { getWeeklyCronExpression, parseCronExpression } from './cronInputUtils';
 
 const WeeklyInputs: FC<{
     disabled?: boolean;
@@ -21,7 +21,7 @@ const WeeklyInputs: FC<{
         );
     };
     return (
-        <Group noWrap spacing="sm">
+        <Group wrap="nowrap" gap="sm">
             <Input.Label>on</Input.Label>
             <WeekDaySelect value={weekDay} onChange={onDayChange} />
             <Input.Label>at</Input.Label>

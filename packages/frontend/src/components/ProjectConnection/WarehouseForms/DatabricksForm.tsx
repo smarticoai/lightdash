@@ -1,5 +1,6 @@
 import {
     DatabricksAuthenticationType,
+    FeatureFlags,
     WarehouseTypes,
 } from '@lightdash/common';
 import {
@@ -22,13 +23,15 @@ import {
     useDatabricksLoginPopup,
     useIsDatabricksAuthenticated,
 } from '../../../hooks/useDatabricks';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import MantineIcon from '../../common/MantineIcon';
+import TimeZonePicker from '../../common/TimeZonePicker';
 import FormCollapseButton from '../FormCollapseButton';
+import { useFormContext } from '../formContext';
 import BooleanSwitch from '../Inputs/BooleanSwitch';
 import FormSection from '../Inputs/FormSection';
 import StartOfWeekSelect from '../Inputs/StartOfWeekSelect';
 import { getWarehouseIcon } from '../ProjectConnectFlow/utils';
-import { useFormContext } from '../formContext';
 import { useProjectFormContext } from '../useProjectFormContext';
 import { DatabricksDefaultValues } from './defaultValues';
 import { getSsoLabel, PERSONAL_ACCESS_TOKEN_LABEL } from './util';
@@ -66,11 +69,12 @@ export const DatabricksSchemaInput: FC<{
 export const DatabricksSSOInput: FC<{
     isAuthenticated: boolean;
     disabled: boolean;
+    disabledTooltip?: string;
     openLoginPopup: () => void;
-}> = ({ isAuthenticated, disabled, openLoginPopup }) => {
+}> = ({ isAuthenticated, disabled, disabledTooltip, openLoginPopup }) => {
     if (isAuthenticated) return null;
 
-    return (
+    const button = (
         <Button
             onClick={() => {
                 openLoginPopup();
@@ -80,10 +84,21 @@ export const DatabricksSSOInput: FC<{
             disabled={disabled}
             leftIcon={getWarehouseIcon(WarehouseTypes.DATABRICKS, 'sm')}
             sx={{ ':hover': { textDecoration: 'underline' } }}
+            fullWidth
         >
             Sign in with Databricks
         </Button>
     );
+
+    if (disabled && disabledTooltip) {
+        return (
+            <Tooltip label={disabledTooltip} withArrow>
+                <div>{button}</div>
+            </Tooltip>
+        );
+    }
+
+    return button;
 };
 
 const DatabricksForm: FC<{
@@ -92,15 +107,34 @@ const DatabricksForm: FC<{
     const form = useFormContext();
     const [isOpen, toggleOpen] = useToggle(false);
     const { savedProject } = useProjectFormContext();
+    const { data: timezoneSupportFlag } = useServerFeatureFlag(
+        FeatureFlags.EnableTimezoneSupport,
+    );
+    const isTimezoneSupportEnabled = timezoneSupportFlag?.enabled ?? false;
     const requireSecrets: boolean =
         savedProject?.warehouseConnection?.type !== WarehouseTypes.DATABRICKS;
+
+    const serverHostNameForLogin =
+        form.values.warehouse.type === WarehouseTypes.DATABRICKS
+            ? form.values.warehouse.serverHostName
+            : undefined;
+    const isServerHostNameProvided = !!serverHostNameForLogin?.trim();
+    const databricksSsoDisabledTooltip = !isServerHostNameProvided
+        ? 'Enter server host name to enable Databricks sign-in'
+        : undefined;
 
     const {
         data,
         isLoading: isLoadingAuth,
         error: databricksAuthError,
         refetch: refetchAuth,
-    } = useIsDatabricksAuthenticated();
+    } = useIsDatabricksAuthenticated({
+        projectUuid: savedProject?.projectUuid,
+        serverHostName:
+            !savedProject?.projectUuid && isServerHostNameProvided
+                ? serverHostNameForLogin
+                : undefined,
+    });
 
     const isSso =
         form.values.warehouse?.type === WarehouseTypes.DATABRICKS &&
@@ -114,6 +148,9 @@ const DatabricksForm: FC<{
         onLogin: async () => {
             await refetchAuth();
         },
+        projectUuid: savedProject?.projectUuid,
+        projectName: savedProject?.name || form.values.name,
+        serverHostName: serverHostNameForLogin,
     });
 
     if (form.values.warehouse?.type !== WarehouseTypes.DATABRICKS) {
@@ -141,23 +178,24 @@ const DatabricksForm: FC<{
         form.values.warehouse.authenticationType ?? defaultAuthType;
 
     // Build authentication options based on SSO availability
-    const authOptions = isSsoEnabled
-        ? [
-              {
-                  value: DatabricksAuthenticationType.OAUTH_U2M,
-                  label: getSsoLabel(WarehouseTypes.DATABRICKS),
-              },
-              {
-                  value: DatabricksAuthenticationType.PERSONAL_ACCESS_TOKEN,
-                  label: PERSONAL_ACCESS_TOKEN_LABEL,
-              },
-          ]
-        : [
-              {
-                  value: DatabricksAuthenticationType.PERSONAL_ACCESS_TOKEN,
-                  label: PERSONAL_ACCESS_TOKEN_LABEL,
-              },
-          ];
+    const authOptions = [
+        ...(isSsoEnabled
+            ? [
+                  {
+                      value: DatabricksAuthenticationType.OAUTH_U2M,
+                      label: getSsoLabel(WarehouseTypes.DATABRICKS),
+                  },
+              ]
+            : []),
+        {
+            value: DatabricksAuthenticationType.PERSONAL_ACCESS_TOKEN,
+            label: PERSONAL_ACCESS_TOKEN_LABEL,
+        },
+        {
+            value: DatabricksAuthenticationType.OAUTH_M2M,
+            label: 'OAuth Machine-to-Machine (Service Principal)',
+        },
+    ];
 
     const computes = form.values.warehouse?.compute ?? [];
     const addCompute = () => {
@@ -283,14 +321,45 @@ const DatabricksForm: FC<{
                         }
                         disabled={disabled}
                     />
-                ) : (
-                    !isLoadingAuth && (
-                        <DatabricksSSOInput
-                            isAuthenticated={isAuthenticated}
+                ) : authenticationType ===
+                  DatabricksAuthenticationType.OAUTH_M2M ? (
+                    <Stack spacing="sm">
+                        <PasswordInput
+                            name="warehouse.oauthClientId"
+                            {...form.getInputProps('warehouse.oauthClientId')}
+                            label="OAuth Client ID"
+                            description="Service principal client ID (UUID)."
+                            required={requireSecrets}
+                            placeholder={
+                                disabled || !requireSecrets
+                                    ? '**************'
+                                    : undefined
+                            }
                             disabled={disabled}
-                            openLoginPopup={openLoginPopup}
                         />
-                    )
+                        <PasswordInput
+                            name="warehouse.oauthClientSecret"
+                            {...form.getInputProps(
+                                'warehouse.oauthClientSecret',
+                            )}
+                            label="OAuth Client Secret"
+                            description="Service principal client secret."
+                            required={requireSecrets}
+                            placeholder={
+                                disabled || !requireSecrets
+                                    ? '**************'
+                                    : undefined
+                            }
+                            disabled={disabled}
+                        />
+                    </Stack>
+                ) : (
+                    <DatabricksSSOInput
+                        isAuthenticated={isAuthenticated}
+                        disabled={disabled || !isServerHostNameProvided}
+                        disabledTooltip={databricksSsoDisabledTooltip}
+                        openLoginPopup={openLoginPopup}
+                    />
                 )}
 
                 <TextInput
@@ -315,6 +384,21 @@ const DatabricksForm: FC<{
                                 { type: 'checkbox' },
                             )}
                         />
+                        {isTimezoneSupportEnabled && (
+                            <TimeZonePicker
+                                size="sm"
+                                maw="100%"
+                                label="Data timezone"
+                                description="The timezone your warehouse stores ambiguous timestamps in. Defaults to UTC if not set."
+                                searchable
+                                clearable
+                                placeholder="Not set (uses warehouse default)"
+                                disabled={disabled}
+                                {...form.getInputProps(
+                                    'warehouse.dataTimezone',
+                                )}
+                            />
+                        )}
                         <StartOfWeekSelect disabled={disabled} />
                         <Stack spacing="xs">
                             <Stack spacing={0}>

@@ -10,10 +10,10 @@ import {
 } from '@lightdash/common';
 import OAuth2Server from '@node-oauth/oauth2-server';
 import { ErrorRequestHandler, Request, RequestHandler } from 'express';
-
 import passport from 'passport';
 import { URL } from 'url';
 import { fromApiKey, fromOauth } from '../../auth/account/account';
+import { requestContextFromExpress } from '../../auth/account/requestContext';
 import { buildAccountExistsWarning } from '../../auth/account/warnAccountExists';
 import { lightdashConfig } from '../../config/lightdashConfig';
 import { authenticateServiceAccount } from '../../ee/authentication';
@@ -21,7 +21,15 @@ import Logger from '../../logging/logger';
 
 export const isAuthenticated: RequestHandler = (req, res, next) => {
     if (req.account?.isAuthenticated() || req.user?.userUuid) {
-        if (req.account?.user?.isActive || req.user?.isActive) {
+        // Service-account principals run on a dedicated user row that is
+        // intentionally `is_active = false` (defense-in-depth against any
+        // login path). The `isActive` gate is for human deactivation, so
+        // skip it for the service-account auth type.
+        if (
+            req.account?.authentication?.type === 'service-account' ||
+            req.account?.user?.isActive ||
+            req.user?.isActive
+        ) {
             next();
         } else {
             // Destroy session if user is deactivated and return error
@@ -46,6 +54,11 @@ export const unauthorisedInDemo: RequestHandler = (req, res, next) => {
     }
 };
 
+/*
+This middleware allows ONLY OAuth bearer token authentication (no PAT, no service account).
+Used for endpoints that intentionally exclude PAT auth, e.g. creating a PAT from an OAuth token.
+For most endpoints, use allowApiKeyAuthentication which includes OAuth + all other auth methods.
+*/
 export const allowOauthAuthentication: RequestHandler = (req, res, next) => {
     if (req.isAuthenticated()) {
         next();
@@ -58,7 +71,6 @@ export const allowOauthAuthentication: RequestHandler = (req, res, next) => {
         .getOauthService()
         .authenticate(oauthReq, oauthRes)
         .then((token) => {
-            // attach token info to the authInfo request
             req.services
                 .getUserService()
                 .findSessionUser({
@@ -72,31 +84,29 @@ export const allowOauthAuthentication: RequestHandler = (req, res, next) => {
                             req.account?.authentication?.type,
                         );
                     }
+                    req.user = user;
                     if (user) {
                         req.account = fromOauth(user, token);
+                        const requestContext = requestContextFromExpress(req);
+                        req.account.requestContext = requestContext;
+                        req.user!.requestContext = requestContext;
                     }
-                    req.user = user;
                     next();
                 })
                 .catch((userError) => {
-                    // This was a valid oauth token, but the user was not found in the database
-                    // in this case, we will throw an error
                     next(userError);
                 });
         })
-        .catch((error) => {
-            // This middleware might be trying to authenticate with a non Oauth token
-            // in that case, we will not throw an error, and we will continue with the next middleware
-            Logger.warn(
-                `OAuth authentication failed: ${JSON.stringify(error)}`,
-            );
+        .catch(() => {
+            // Not an OAuth token — continue without authenticating
             next();
         });
 };
+
 /*
-This middleware is used to enable Api tokens and service accounts
-We first check service accounts (bearer header),
-then we check Personal access tokens (ApiKey header), which can throw an error if the token is invalid
+This middleware is used to enable OAuth, Api tokens, and service accounts.
+We first try OAuth (bearer header), then service accounts (bearer header),
+then Personal access tokens (ApiKey header), which can throw an error if the token is invalid.
 */
 export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
     if (req.isAuthenticated()) {
@@ -104,56 +114,105 @@ export const allowApiKeyAuthentication: RequestHandler = (req, res, next) => {
         return;
     }
 
-    const authenticateWithPat = () => {
+    const authenticateWithServiceAccountOrPat = () => {
         if (req.isAuthenticated()) {
             next();
             return;
         }
-        const authorizationHeader =
-            typeof req.headers.authorization === 'string'
-                ? req.headers.authorization
-                : undefined;
-        const hasApiKeyHeader =
-            authorizationHeader?.startsWith('ApiKey ') === true;
-        // SMR-START
-        const hasSmrJwtHeader =
-            typeof (req.headers).jwt === 'string' &&
-            ((req.headers).jwt as string).length > 0;
-        // SMR-END
-        if (!hasApiKeyHeader && !hasSmrJwtHeader) {
-            // Permissive: no PAT header present, continue without attempting PAT
-            next();
-            return;
-        }
-        if (!lightdashConfig.auth.pat.enabled) {
-            throw new AuthorizationError('Personal access tokens are disabled');
-        }
-        passport.authenticate('headerapikey', { session: false })(
-            req,
-            res,
-            () => {
-                if (req?.account?.isAuthenticated()) {
-                    Logger.warn(
-                        buildAccountExistsWarning('ApiKey'),
-                        req.account?.authentication?.type,
-                    );
-                }
 
-                if (req.user) {
-                    req.account = fromApiKey(
-                        req.user!,
-                        authorizationHeader || '',
-                    );
-                }
+        const authenticateWithPat = () => {
+            if (req.isAuthenticated()) {
                 next();
-            },
-        );
+                return;
+            }
+            const authorizationHeader =
+                typeof req.headers.authorization === 'string'
+                    ? req.headers.authorization
+                    : undefined;
+            const hasApiKeyHeader =
+                authorizationHeader?.startsWith('ApiKey ') === true;
+            const hasSmrJwtHeader =
+                typeof req.headers.jwt === 'string' &&
+                req.headers.jwt.length > 0;
+            if (!hasApiKeyHeader && !hasSmrJwtHeader) {
+                next();
+                return;
+            }
+            if (!lightdashConfig.auth.pat.enabled) {
+                throw new AuthorizationError(
+                    'Personal access tokens are disabled',
+                );
+            }
+            passport.authenticate('headerapikey', { session: false })(
+                req,
+                res,
+                () => {
+                    if (req?.account?.isAuthenticated()) {
+                        Logger.warn(
+                            buildAccountExistsWarning('ApiKey'),
+                            req.account?.authentication?.type,
+                        );
+                    }
+
+                    if (req.user) {
+                        req.account = fromApiKey(
+                            req.user!,
+                            authorizationHeader || '',
+                        );
+                        const requestContext = requestContextFromExpress(req);
+                        req.account.requestContext = requestContext;
+                        req.user.requestContext = requestContext;
+                    }
+                    next();
+                },
+            );
+        };
+        try {
+            authenticateServiceAccount(req, res, authenticateWithPat);
+        } catch (e) {
+            authenticateWithPat();
+        }
     };
-    try {
-        authenticateServiceAccount(req, res, authenticateWithPat);
-    } catch (e) {
-        authenticateWithPat();
-    }
+
+    // Try OAuth bearer token first
+    const oauthReq = new OAuth2Server.Request(req);
+    const oauthRes = new OAuth2Server.Response(res);
+
+    req.services
+        .getOauthService()
+        .authenticate(oauthReq, oauthRes)
+        .then((token) => {
+            req.services
+                .getUserService()
+                .findSessionUser({
+                    id: token.user.userUuid,
+                    organization: token.user.organizationUuid,
+                })
+                .then((user) => {
+                    if (req.account?.isAuthenticated()) {
+                        Logger.warn(
+                            buildAccountExistsWarning('OAuth'),
+                            req.account?.authentication?.type,
+                        );
+                    }
+                    req.user = user;
+                    if (user) {
+                        req.account = fromOauth(user, token);
+                        const requestContext = requestContextFromExpress(req);
+                        req.account.requestContext = requestContext;
+                        req.user!.requestContext = requestContext;
+                    }
+                    next();
+                })
+                .catch((userError) => {
+                    // Valid oauth token but user not found — throw
+                    next(userError);
+                });
+        })
+        .catch(() => {
+            // Not an OAuth token — try service account and PAT
+            authenticateWithServiceAccountOrPat();
+        });
 };
 
 export const storeOIDCRedirect: RequestHandler = (req, res, next) => {
@@ -183,7 +242,7 @@ export const storeOIDCRedirect: RequestHandler = (req, res, next) => {
 };
 
 export const storeSlackContext: RequestHandler = (req, res, next) => {
-    const { team, channel, message, thread_ts: threadTs } = req.query;
+    const { team, channel, message, thread_ts: threadTs, trigger } = req.query;
     req.session.slack = {};
 
     if (typeof team === 'string') {
@@ -197,6 +256,9 @@ export const storeSlackContext: RequestHandler = (req, res, next) => {
     }
     if (typeof threadTs === 'string') {
         req.session.slack.threadTs = threadTs;
+    }
+    if (trigger === 'vote' || trigger === 'app_mention') {
+        req.session.slack.trigger = trigger;
     }
 
     next();

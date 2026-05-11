@@ -1,36 +1,48 @@
 import { subject } from '@casl/ability';
-import { ActionIcon, Box, Menu } from '@mantine/core';
+import { ContentType } from '@lightdash/common';
+import { Menu } from '@mantine-8/core';
+import { ActionIcon, Box } from '@mantine/core';
 import {
     IconEdit,
     IconFolderSymlink,
     IconPin,
     IconPinned,
+    IconStar,
+    IconStarFilled,
     IconTrash,
+    IconUsers,
 } from '@tabler/icons-react';
 import React from 'react';
 import { useProjectUuid } from '../../../hooks/useProjectUuid';
 import useApp from '../../../providers/App/useApp';
+import useFavoritesContext from '../../../providers/Favorites/useFavoritesContext';
 import MantineIcon from '../../common/MantineIcon';
 
 interface Props {
     isPinned: boolean;
+    spaceUuid: string;
     onRename: () => void;
     onDelete: () => void;
     onTogglePin: () => void;
     onTransferToSpace: () => void;
+    onShare: () => void;
 }
 
 export const SpaceBrowserMenu: React.FC<React.PropsWithChildren<Props>> = ({
     isPinned,
+    spaceUuid,
     onRename,
     onDelete,
     onTogglePin,
     onTransferToSpace,
+    onShare,
     children,
 }) => {
     const { user } = useApp();
     const organizationUuid = user.data?.organizationUuid;
     const projectUuid = useProjectUuid();
+    const favoritesContext = useFavoritesContext();
+    const isFavorited = favoritesContext?.isFavorited(spaceUuid) ?? false;
 
     return (
         <Menu
@@ -48,13 +60,41 @@ export const SpaceBrowserMenu: React.FC<React.PropsWithChildren<Props>> = ({
                 </Box>
             </Menu.Target>
             <Menu.Dropdown>
+                {favoritesContext && (
+                    <>
+                        <Menu.Item
+                            component="button"
+                            role="menuitem"
+                            leftSection={
+                                isFavorited ? (
+                                    <MantineIcon icon={IconStarFilled} />
+                                ) : (
+                                    <MantineIcon icon={IconStar} />
+                                )
+                            }
+                            onClick={() =>
+                                favoritesContext.toggleFavorite(
+                                    ContentType.SPACE,
+                                    spaceUuid,
+                                )
+                            }
+                        >
+                            {isFavorited
+                                ? 'Remove from favorites'
+                                : 'Add to favorites'}
+                        </Menu.Item>
+
+                        <Menu.Divider />
+                    </>
+                )}
+
                 <Menu.Item
                     component="button"
                     role="menuitem"
-                    icon={<MantineIcon icon={IconEdit} />}
+                    leftSection={<MantineIcon icon={IconEdit} />}
                     onClick={onRename}
                 >
-                    Rename
+                    Update space
                 </Menu.Item>
 
                 {user.data?.ability.can(
@@ -67,7 +107,7 @@ export const SpaceBrowserMenu: React.FC<React.PropsWithChildren<Props>> = ({
                     <Menu.Item
                         component="button"
                         role="menuitem"
-                        icon={
+                        leftSection={
                             isPinned ? (
                                 <MantineIcon icon={IconPinned} />
                             ) : (
@@ -85,12 +125,21 @@ export const SpaceBrowserMenu: React.FC<React.PropsWithChildren<Props>> = ({
                 <Menu.Item
                     component="button"
                     role="menuitem"
-                    icon={<IconFolderSymlink size={18} />}
+                    leftSection={<IconFolderSymlink size={18} />}
                     onClick={() => {
                         onTransferToSpace();
                     }}
                 >
                     Move
+                </Menu.Item>
+
+                <Menu.Item
+                    component="button"
+                    role="menuitem"
+                    leftSection={<IconUsers size={18} />}
+                    onClick={onShare}
+                >
+                    Share
                 </Menu.Item>
 
                 <Menu.Divider />
@@ -99,7 +148,7 @@ export const SpaceBrowserMenu: React.FC<React.PropsWithChildren<Props>> = ({
                     component="button"
                     role="menuitem"
                     color="red"
-                    icon={<MantineIcon icon={IconTrash} />}
+                    leftSection={<MantineIcon icon={IconTrash} />}
                     onClick={onDelete}
                 >
                     Delete space

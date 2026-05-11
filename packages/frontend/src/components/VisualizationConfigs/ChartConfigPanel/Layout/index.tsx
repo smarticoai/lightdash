@@ -10,6 +10,7 @@ import {
     type Field,
     type TableCalculation,
 } from '@lightdash/common';
+import { NumberInput } from '@mantine-8/core';
 import {
     ActionIcon,
     CloseButton,
@@ -22,13 +23,14 @@ import {
 import { IconRotate360 } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
 import { EMPTY_X_AXIS } from '../../../../hooks/cartesianChartConfig/useCartesianChartConfig';
-import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/types';
-import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
 import FieldSelect from '../../../common/FieldSelect';
 import MantineIcon from '../../../common/MantineIcon';
-import { MAX_PIVOTS } from '../../TableConfigPanel/constants';
+import { isCartesianVisualizationConfig } from '../../../LightdashVisualization/types';
+import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
 import { AddButton } from '../../common/AddButton';
 import { Config } from '../../common/Config';
+import { RowLimitControls } from '../../common/RowLimitControls';
+import { MAX_PIVOTS } from '../../TableConfigPanel/constants';
 
 type Props = {
     items: (Field | TableCalculation | CustomDimension)[];
@@ -192,7 +194,19 @@ export const Layout: FC<Props> = ({ items }) => {
         updateYField,
         removeSingleSeries,
         addSingleSeries,
+        rowLimit,
+        setRowLimit,
+        columnLimit,
+        setColumnLimit,
     } = visualizationConfig.chartConfig;
+
+    const handleColumnLimitChange = (value: string | number) => {
+        if (typeof value === 'number') {
+            setColumnLimit(value);
+        } else {
+            setColumnLimit(undefined);
+        }
+    };
 
     return (
         <Stack>
@@ -213,13 +227,29 @@ export const Layout: FC<Props> = ({ items }) => {
                                     <MantineIcon icon={IconRotate360} />
                                 </ActionIcon>
                             </Tooltip>
-                            {dirtyLayout?.xField === EMPTY_X_AXIS && (
-                                <AddButton
-                                    onClick={() =>
-                                        setXField(getItemId(items[0]))
-                                    }
-                                />
-                            )}
+                            {dirtyLayout?.xField === EMPTY_X_AXIS &&
+                                (() => {
+                                    const availableXField = items.find(
+                                        (item) =>
+                                            !pivotDimensions?.includes(
+                                                getItemId(item),
+                                            ),
+                                    );
+                                    return (
+                                        <AddButton
+                                            disabled={!availableXField}
+                                            onClick={() => {
+                                                if (availableXField) {
+                                                    setXField(
+                                                        getItemId(
+                                                            availableXField,
+                                                        ),
+                                                    );
+                                                }
+                                            }}
+                                        />
+                                    );
+                                })()}
                         </Group>
                     </Config.Group>
                     {dirtyLayout?.xField !== EMPTY_X_AXIS && (
@@ -227,6 +257,7 @@ export const Layout: FC<Props> = ({ items }) => {
                             data-testid="x-axis-field-select"
                             item={xAxisField}
                             items={items}
+                            inactiveItemIds={pivotDimensions}
                             onChange={handleOnChangeOfXAxisField}
                             rightSection={
                                 <CloseButton
@@ -448,6 +479,34 @@ export const Layout: FC<Props> = ({ items }) => {
                     )}
                 </Config.Section>
             </Config>
+
+            <Config>
+                <Config.Section>
+                    <Config.Heading>Data</Config.Heading>
+                    <RowLimitControls
+                        rowLimit={rowLimit}
+                        onRowLimitChange={setRowLimit}
+                    />
+                </Config.Section>
+            </Config>
+            {pivotDimensions && pivotDimensions.length > 0 && (
+                <Config>
+                    <Config.Section>
+                        <Config.Heading>Column limit</Config.Heading>
+                        <NumberInput
+                            size="xs"
+                            min={1}
+                            max={200}
+                            step={1}
+                            allowDecimal={false}
+                            clampBehavior="strict"
+                            placeholder="No limit"
+                            value={columnLimit ?? ''}
+                            onChange={handleColumnLimitChange}
+                        />
+                    </Config.Section>
+                </Config>
+            )}
         </Stack>
     );
 };

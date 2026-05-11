@@ -1,12 +1,8 @@
 import { type DashboardLoomTile } from '@lightdash/common';
-import { Box } from '@mantine/core';
-// SMR-START
+import { Box } from '@mantine-8/core';
 import React, { useMemo, useState, type FC } from 'react';
-// SMR-END
 import { DashboardTileComments } from '../../features/comments';
-// SMR-START
 import { useTileCaptureSnapshot } from '../../hooks/dashboard/SMRuseTileCaptureSnapshot';
-// SMR-END
 import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
 import TileBase from './TileBase/index';
 import { getLoomId } from './TileForms/utils';

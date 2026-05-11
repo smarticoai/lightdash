@@ -8,15 +8,19 @@ import { IconUnlink } from '@tabler/icons-react';
 import { useEffect, useMemo, type FC } from 'react';
 import { Responsive, WidthProvider, type Layout } from 'react-grid-layout';
 import { useLocation, useNavigate } from 'react-router';
+// eslint-disable-next-line css-modules/no-unused-class
+import { dashboardCSSVars } from '../../../../../components/common/Dashboard/dashboard.constants';
+import { LockedDashboardModal } from '../../../../../components/common/modal/LockedDashboardModal';
+import SuboptimalState from '../../../../../components/common/SuboptimalState/SuboptimalState';
 import LoomTile from '../../../../../components/DashboardTiles/DashboardLoomTile';
 import SqlChartTile from '../../../../../components/DashboardTiles/DashboardSqlChartTile';
-import SuboptimalState from '../../../../../components/common/SuboptimalState/SuboptimalState';
-import { LockedDashboardModal } from '../../../../../components/common/modal/LockedDashboardModal';
 import {
     getReactGridLayoutConfig,
     getResponsiveGridLayoutProps,
     type ResponsiveGridLayoutProps,
 } from '../../../../../features/dashboardTabs/gridUtils';
+// eslint-disable-next-line css-modules/no-unused-class
+import tabStyles from '../../../../../features/dashboardTabs/tabs.module.css';
 import useDashboardContext from '../../../../../providers/Dashboard/useDashboardContext';
 import useEmbed from '../../../../providers/Embed/useEmbed';
 import { useEmbedDashboard } from '../hooks';
@@ -24,10 +28,6 @@ import EmbedDashboardChartTile from './EmbedDashboardChartTile';
 import EmbedDashboardHeader from './EmbedDashboardHeader';
 import { EmbedHeadingTile } from './EmbedHeadingTile';
 import { EmbedMarkdownTile } from './EmbedMarkdownTile';
-
-// eslint-disable-next-line css-modules/no-unused-class
-import { dashboardCSSVars } from '../../../../../components/common/Dashboard/dashboard.constants';
-import tabStyles from '../../../../../features/dashboardTabs/tabs.module.css';
 import '../../../../../styles/react-grid.css';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -37,6 +37,8 @@ const EmbedDashboardGrid: FC<{
     layouts: { lg: Layout[]; md: Layout[]; sm: Layout[] };
     dashboard: any;
     projectUuid: string;
+    paletteColors?: string[];
+    paletteDarkColors?: string[] | null;
     hasRequiredDashboardFiltersToSet: boolean;
     isTabEmpty?: boolean;
     gridProps: ResponsiveGridLayoutProps;
@@ -45,6 +47,8 @@ const EmbedDashboardGrid: FC<{
     layouts,
     dashboard,
     projectUuid,
+    paletteColors,
+    paletteDarkColors,
     hasRequiredDashboardFiltersToSet,
     isTabEmpty,
     gridProps,
@@ -76,6 +80,8 @@ const EmbedDashboardGrid: FC<{
                             <EmbedDashboardChartTile
                                 projectUuid={projectUuid}
                                 dashboardSlug={dashboard.slug}
+                                paletteColors={paletteColors}
+                                paletteDarkColors={paletteDarkColors}
                                 key={tile.uuid}
                                 minimal
                                 tile={tile}
@@ -146,7 +152,7 @@ const EmbedDashboard: FC<{
     const dashboardTabs = useDashboardContext((c) => c.dashboardTabs);
     const setDashboardTabs = useDashboardContext((c) => c.setDashboardTabs);
 
-    const { embedToken, mode } = useEmbed();
+    const { embedToken, mode, paletteUuid } = useEmbed();
     const navigate = useNavigate();
     const { pathname, search } = useLocation();
 
@@ -154,8 +160,10 @@ const EmbedDashboard: FC<{
         throw new Error('Embed token is required');
     }
 
-    const { data: dashboard, error: dashboardError } =
-        useEmbedDashboard(projectUuid);
+    const { data: dashboard, error: dashboardError } = useEmbedDashboard(
+        projectUuid,
+        paletteUuid,
+    );
 
     useEffect(() => {
         if (dashboard) {
@@ -317,13 +325,15 @@ const EmbedDashboard: FC<{
 
     return (
         <div
-            style={
-                containerStyles ?? {
+            // Used by EmbedDashboardExportPdf to temporarily set height:auto for multipage PDF printing
+            id="embed-scroll-container"
+            style={{
+                ...dashboardCSSVars,
+                ...(containerStyles ?? {
                     height: '100vh',
                     overflowY: 'auto',
-                    ...dashboardCSSVars,
-                }
-            }
+                }),
+            }}
         >
             <EmbedDashboardHeader
                 dashboard={dashboard}
@@ -360,6 +370,10 @@ const EmbedDashboard: FC<{
                         layouts={layouts}
                         dashboard={dashboard}
                         projectUuid={projectUuid}
+                        paletteColors={dashboard.selectedPalette?.colors}
+                        paletteDarkColors={
+                            dashboard.selectedPalette?.darkColors
+                        }
                         hasRequiredDashboardFiltersToSet={
                             hasRequiredDashboardFiltersToSet
                         }
@@ -373,6 +387,8 @@ const EmbedDashboard: FC<{
                     layouts={layouts}
                     dashboard={dashboard}
                     projectUuid={projectUuid}
+                    paletteColors={dashboard.selectedPalette?.colors}
+                    paletteDarkColors={dashboard.selectedPalette?.darkColors}
                     hasRequiredDashboardFiltersToSet={
                         hasRequiredDashboardFiltersToSet
                     }

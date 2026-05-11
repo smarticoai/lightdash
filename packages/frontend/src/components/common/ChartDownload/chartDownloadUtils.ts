@@ -13,7 +13,12 @@ export const CHART_TYPES_WITHOUT_IMAGE_EXPORT = [
     ChartType.CUSTOM,
     ChartType.BIG_NUMBER,
     ChartType.TABLE,
+    ChartType.MAP,
 ];
+
+export const CHART_TYPES_WITHOUT_DATA_EXPORT: ChartType[] = Object.values(
+    ChartType,
+).filter((type) => type !== ChartType.TABLE);
 
 export enum DownloadType {
     JPEG = 'JPEG',
@@ -31,11 +36,14 @@ export const base64SvgToBase64Image = async (
 ): Promise<string> => {
     return new Promise((resolve, reject) => {
         const img = document.createElement('img');
+        img.onerror = () => {
+            reject(new Error('Unable to load chart SVG for rasterization'));
+        };
         img.onload = () => {
             document.body.appendChild(img);
-            const canvas = document.createElement('canvas');
             const ratio = img.clientWidth / img.clientHeight || 1;
             document.body.removeChild(img);
+            const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = width / ratio;
             const ctx = canvas.getContext('2d');
@@ -52,10 +60,10 @@ export const base64SvgToBase64Image = async (
                     const data = canvas.toDataURL(`image/${type}`);
                     resolve(data);
                 } catch (e: any) {
-                    reject();
+                    reject(e);
                 }
             } else {
-                reject();
+                reject(new Error('Could not get canvas context'));
             }
         };
         img.src = originalBase64;

@@ -10,7 +10,7 @@ import {
     type ResultValue,
     type TableCalculation,
 } from '@lightdash/common';
-import { Menu, Text } from '@mantine/core';
+import { Menu, Text } from '@mantine-8/core';
 import { useClipboard } from '@mantine/hooks';
 import { IconCopy, IconEye, IconFilter, IconStack } from '@tabler/icons-react';
 import mapValues from 'lodash/mapValues';
@@ -22,10 +22,10 @@ import { Can } from '../../../providers/Ability';
 import useApp from '../../../providers/App/useApp';
 import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
-import DrillDownMenuItem from '../../MetricQueryData/DrillDownMenuItem';
-import { useMetricQueryDataContext } from '../../MetricQueryData/useMetricQueryDataContext';
 import MantineIcon from '../../common/MantineIcon';
 import { type CellContextMenuProps } from '../../common/Table/types';
+import DrillDownMenuItem from '../../MetricQueryData/DrillDownMenuItem';
+import { useMetricQueryDataContext } from '../../MetricQueryData/useMetricQueryDataContext';
 import UrlMenuItems from './UrlMenuItems';
 
 const CellContextMenu: FC<
@@ -125,14 +125,14 @@ const CellContextMenu: FC<
             )}
             {isField(item) && (item.urls || []).length > 0 && <Menu.Divider />}
             <Menu.Item
-                icon={<MantineIcon icon={IconCopy} />}
+                leftSection={<MantineIcon icon={IconCopy} />}
                 onClick={handleCopyToClipboard}
             >
                 Copy value
             </Menu.Item>
             {parseResult !== null && (
                 <Menu.Item
-                    icon={<MantineIcon icon={IconEye} />}
+                    leftSection={<MantineIcon icon={IconEye} />}
                     onClick={() =>
                         onExpand(
                             item && 'displayName' in item
@@ -157,7 +157,7 @@ const CellContextMenu: FC<
                         })}
                     >
                         <Menu.Item
-                            icon={<MantineIcon icon={IconStack} />}
+                            leftSection={<MantineIcon icon={IconStack} />}
                             onClick={handleViewUnderlyingData}
                         >
                             View underlying data
@@ -173,13 +173,15 @@ const CellContextMenu: FC<
             >
                 {isEditMode && item && isFilterableField(item) && (
                     <Menu.Item
-                        icon={<MantineIcon icon={IconFilter} />}
+                        leftSection={<MantineIcon icon={IconFilter} />}
                         onClick={handleFilterByValue}
                     >
-                        Filter by{' '}
-                        <Text span fw={500}>
-                            {value.formatted}
-                        </Text>
+                        <>
+                            Filter by{' '}
+                            <Text span fz="inherit" lh="inherit" fw="bold">
+                                {value.formatted}
+                            </Text>
+                        </>
                     </Menu.Item>
                 )}
 

@@ -36,15 +36,22 @@ export class OpenIdIdentityModel {
             createdAt: identity.created_at,
             userUuid: identity.user_uuid,
             email: identity.email,
+            teamId: identity.team_id,
         };
     }
 
     private getOpenIdQueryBuilder() {
         return this.database('openid_identities')
             .leftJoin('users', 'openid_identities.user_id', 'users.user_id')
-            .select<
-                Array<DbOpenIdIdentity & Pick<DbUser, 'user_uuid'>>
-            >('openid_identities.issuer', 'openid_identities.issuer_type', 'openid_identities.subject', 'openid_identities.created_at', 'users.user_uuid', 'openid_identities.email');
+            .select<Array<DbOpenIdIdentity & Pick<DbUser, 'user_uuid'>>>(
+                'openid_identities.issuer',
+                'openid_identities.issuer_type',
+                'openid_identities.subject',
+                'openid_identities.created_at',
+                'users.user_uuid',
+                'openid_identities.email',
+                'openid_identities.team_id',
+            );
     }
 
     async findIdentitiesByEmail(email: string): Promise<OpenIdIdentity[]> {
@@ -71,17 +78,10 @@ export class OpenIdIdentityModel {
     async findIdentityByOpenId(
         issuerType: OpenIdIdentityIssuerType,
         subject: string,
-        teamId?: string,
     ): Promise<OpenIdIdentity | null> {
-        const query = this.getOpenIdQueryBuilder()
+        const [identity] = await this.getOpenIdQueryBuilder()
             .where('issuer_type', issuerType)
             .andWhere('subject', subject);
-
-        if (teamId) {
-            void query.andWhere(`${OpenIdIdentitiesTableName}.team_id`, teamId);
-        }
-
-        const [identity] = await query;
 
         if (identity === undefined) {
             return null;

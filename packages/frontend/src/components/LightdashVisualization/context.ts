@@ -26,6 +26,7 @@ type VisualizationContext = {
         | (InfiniteQueryResults & {
               metricQuery?: MetricQuery;
               fields?: ItemsMap;
+              resolvedTimezone?: string;
           })
         | undefined;
     isLoading: boolean;
@@ -53,8 +54,11 @@ type VisualizationContext = {
     containerWidth?: number;
     containerHeight?: number;
     isDashboard?: boolean;
+    isEditMode?: boolean;
     // Touch device detection for tooltip positioning
     isTouchDevice: boolean;
+    // Resolved timezone for formatting (undefined when EnableTimezoneSupport flag is off)
+    resolvedTimezone?: string;
 };
 
 const Context = createContext<VisualizationContext | undefined>(undefined);

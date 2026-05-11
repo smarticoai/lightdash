@@ -1,4 +1,5 @@
 import assertUnreachable from '../utils/assertUnreachable';
+import { type ContentVerificationInfo } from './contentVerification';
 import { type Dashboard } from './dashboard';
 import { type Table } from './explore';
 import { type Dimension, type Metric } from './field';
@@ -22,6 +23,8 @@ export type DashboardSearchResult = Pick<
     'uuid' | 'name' | 'description' | 'spaceUuid' | 'projectUuid'
 > & {
     validationErrors: {
+        validationUuid: ValidationErrorDashboardResponse['validationUuid'];
+        /** @deprecated Use validationUuid. Null for post-migration validations. */
         validationId: ValidationErrorDashboardResponse['validationId'];
     }[];
     viewsCount: number;
@@ -44,6 +47,7 @@ export type DashboardSearchResult = Pick<
         chartType: ChartKind;
         viewsCount: number;
     }[];
+    verification: ContentVerificationInfo | null;
 } & RankedItem;
 
 export type SavedChartSearchResult = Pick<
@@ -52,6 +56,8 @@ export type SavedChartSearchResult = Pick<
 > & {
     chartType: ChartKind;
     validationErrors: {
+        validationUuid: ValidationErrorChartResponse['validationUuid'];
+        /** @deprecated Use validationUuid. Null for post-migration validations. */
         validationId: ValidationErrorChartResponse['validationId'];
     }[];
     chartSource: 'saved';
@@ -68,6 +74,7 @@ export type SavedChartSearchResult = Pick<
         lastName: string;
         userUuid: string;
     } | null;
+    verification: ContentVerificationInfo | null;
 } & RankedItem;
 
 export type SqlChartSearchResult = Pick<
@@ -92,6 +99,7 @@ export type SqlChartSearchResult = Pick<
         lastName: string;
         userUuid: string;
     } | null;
+    verification: ContentVerificationInfo | null;
 } & RankedItem;
 
 export type AllChartsSearchResult = Pick<
@@ -114,11 +122,12 @@ export type AllChartsSearchResult = Pick<
             lastName: string;
             userUuid: string;
         } | null;
+        verification: ContentVerificationInfo | null;
     } & RankedItem;
 
 export type TableSearchResult = Pick<
     Table,
-    'name' | 'label' | 'description' | 'requiredAttributes'
+    'name' | 'label' | 'description' | 'requiredAttributes' | 'anyAttributes'
 > & {
     explore: string;
     exploreLabel: string;
@@ -130,6 +139,8 @@ export type TableErrorSearchResult = Pick<
     'explore' | 'exploreLabel'
 > & {
     validationErrors: {
+        validationUuid: ValidationErrorTableResponse['validationUuid'];
+        /** @deprecated Use validationUuid. Null for post-migration validations. */
         validationId: ValidationErrorTableResponse['validationId'];
     }[];
 };
@@ -145,10 +156,12 @@ export type FieldSearchResult = Pick<
     | 'tableLabel'
 > & {
     requiredAttributes?: Record<string, string | string[]>;
+    anyAttributes?: Record<string, string | string[]>;
     tablesRequiredAttributes?: Record<
         string,
         Record<string, string | string[]>
     >;
+    tablesAnyAttributes?: Record<string, Record<string, string | string[]>>;
     explore: string;
     exploreLabel: string;
     regexMatchCount: number;
@@ -203,8 +216,7 @@ export const isSqlChartSearchResult = (
 
 export const isDashboardSearchResult = (
     value: SearchResult,
-): value is DashboardSearchResult =>
-    'charts' in value && value.charts.length > 0;
+): value is DashboardSearchResult => 'charts' in value;
 
 export type SearchResults = {
     spaces: SpaceSearchResult[];

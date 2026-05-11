@@ -1,4 +1,5 @@
 import { type WeekDay } from '../utils/timeFrames';
+import { type ProjectDefaults } from './lightdashProjectConfig';
 import { type ProjectGroupAccess } from './projectGroupAccess';
 
 export enum ProjectType {
@@ -25,6 +26,8 @@ export enum WarehouseTypes {
     DATABRICKS = 'databricks',
     TRINO = 'trino',
     CLICKHOUSE = 'clickhouse',
+    ATHENA = 'athena',
+    DUCKDB = 'duckdb',
 }
 
 export type SshTunnelConfiguration = {
@@ -55,7 +58,9 @@ export type CreateBigqueryCredentials = {
     location: string | undefined;
     maximumBytesBilled: number | undefined;
     startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
     executionProject?: string;
+    accessUrl?: string;
 };
 export const sensitiveCredentialsFieldNames = [
     'user',
@@ -72,6 +77,8 @@ export const sensitiveCredentialsFieldNames = [
     'refreshToken',
     'oauthClientId',
     'oauthClientSecret',
+    'accessKeyId',
+    'secretAccessKey',
 ] as const;
 export type SensitiveCredentialsFieldNames =
     (typeof sensitiveCredentialsFieldNames)[number];
@@ -84,6 +91,11 @@ export enum DatabricksAuthenticationType {
     PERSONAL_ACCESS_TOKEN = 'personal_access_token',
     OAUTH_M2M = 'oauth_m2m',
     OAUTH_U2M = 'oauth_u2m',
+}
+
+export enum AthenaAuthenticationType {
+    ACCESS_KEY = 'access_key',
+    IAM_ROLE = 'iam_role',
 }
 
 export type CreateDatabricksCredentials = {
@@ -101,6 +113,7 @@ export type CreateDatabricksCredentials = {
     oauthClientSecret?: string; // OAuth M2M client secret (Service Principal)
     requireUserCredentials?: boolean;
     startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
     compute?: Array<{
         name: string;
         httpPath: string;
@@ -136,6 +149,7 @@ export type CreatePostgresCredentials = SshTunnelConfiguration &
         searchPath?: string;
         role?: string;
         startOfWeek?: WeekDay | null;
+        dataTimezone?: string;
         timeoutSeconds?: number;
     };
 export type PostgresCredentials = Omit<
@@ -154,6 +168,7 @@ export type CreateTrinoCredentials = {
     http_scheme: string;
     source?: string;
     startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
 };
 export type TrinoCredentials = Omit<
     CreateTrinoCredentials,
@@ -169,12 +184,54 @@ export type CreateClickhouseCredentials = {
     schema: string;
     secure?: boolean;
     startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
     timeoutSeconds?: number;
 };
 export type ClickhouseCredentials = Omit<
     CreateClickhouseCredentials,
     SensitiveCredentialsFieldNames
 >;
+
+export type CreateAthenaCredentials = {
+    type: WarehouseTypes.ATHENA;
+    region: string;
+    database: string;
+    schema: string;
+    s3StagingDir: string;
+    s3DataDir?: string;
+    authenticationType?: AthenaAuthenticationType;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    assumeRoleArn?: string;
+    assumeRoleExternalId?: string;
+    workGroup?: string;
+    threads?: number;
+    numRetries?: number;
+    requireUserCredentials?: boolean;
+    startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
+};
+
+export type AthenaCredentials = Omit<
+    CreateAthenaCredentials,
+    SensitiveCredentialsFieldNames
+>;
+
+export type CreateDuckdbCredentials = {
+    type: WarehouseTypes.DUCKDB;
+    database: string;
+    schema: string;
+    token: string;
+    threads?: number;
+    requireUserCredentials?: boolean;
+    startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
+};
+export type DuckdbCredentials = Omit<
+    CreateDuckdbCredentials,
+    SensitiveCredentialsFieldNames
+>;
+
 export type CreateRedshiftCredentials = SshTunnelConfiguration & {
     type: WarehouseTypes.REDSHIFT;
     host: string;
@@ -189,6 +246,7 @@ export type CreateRedshiftCredentials = SshTunnelConfiguration & {
     sslmode?: string;
     ra3Node?: boolean;
     startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
     timeoutSeconds?: number;
 };
 export type RedshiftCredentials = Omit<
@@ -202,6 +260,7 @@ export enum SnowflakeAuthenticationType {
     PRIVATE_KEY = 'private_key',
     SSO = 'sso',
     EXTERNAL_BROWSER = 'external_browser',
+    NONE = 'none',
 }
 
 export type CreateSnowflakeCredentials = {
@@ -224,8 +283,10 @@ export type CreateSnowflakeCredentials = {
     queryTag?: string;
     accessUrl?: string;
     startOfWeek?: WeekDay | null;
+    dataTimezone?: string;
     quotedIdentifiersIgnoreCase?: boolean;
     disableTimestampConversion?: boolean; // Disable timestamp conversion to UTC - only disable if all timestamp values are already in UTC
+    timeoutSeconds?: number;
     override?: boolean;
     organizationWarehouseCredentialsUuid?: string;
 };
@@ -240,7 +301,9 @@ export type CreateWarehouseCredentials =
     | CreateSnowflakeCredentials
     | CreateDatabricksCredentials
     | CreateTrinoCredentials
-    | CreateClickhouseCredentials;
+    | CreateClickhouseCredentials
+    | CreateAthenaCredentials
+    | CreateDuckdbCredentials;
 export type WarehouseCredentials =
     | SnowflakeCredentials
     | RedshiftCredentials
@@ -248,7 +311,24 @@ export type WarehouseCredentials =
     | BigqueryCredentials
     | DatabricksCredentials
     | TrinoCredentials
-    | ClickhouseCredentials;
+    | ClickhouseCredentials
+    | AthenaCredentials
+    | DuckdbCredentials;
+
+// Returns the timezone the column data is in when the query runs.
+// Snowflake's dbt translator wraps timestamps with CONVERT_TIMEZONE('UTC', col),
+// so columns are UTC unless `disableTimestampConversion` opts out of that wrap.
+export const getColumnTimezone = (
+    credentials: CreateWarehouseCredentials | WarehouseCredentials,
+): string => {
+    if (
+        credentials.type === WarehouseTypes.SNOWFLAKE &&
+        !credentials.disableTimestampConversion
+    ) {
+        return 'UTC';
+    }
+    return credentials.dataTimezone ?? 'UTC';
+};
 
 export type CreatePostgresLikeCredentials =
     | CreateRedshiftCredentials
@@ -502,7 +582,9 @@ export const maybeOverrideDbtConnection = <T extends DbtProjectConfig>(
         ...(isGitProjectType(connection) && overrides.branch
             ? { branch: overrides.branch }
             : undefined),
-        ...(!isRemoteType(connection) && overrides.environment
+        ...(!isRemoteType(connection) &&
+        overrides.environment &&
+        overrides.environment.length > 0
             ? { environment: overrides.environment }
             : undefined),
     };
@@ -519,8 +601,12 @@ export type Project = {
     upstreamProjectUuid?: string;
     dbtVersion: DbtVersionOption;
     schedulerTimezone: string;
+    queryTimezone: string | null;
     createdByUserUuid: string | null;
     organizationWarehouseCredentialsUuid?: string;
+    hasDefaultUserSpaces: boolean;
+    projectDefaults?: ProjectDefaults;
+    colorPaletteUuid: string | null;
 };
 
 export type ProjectSummary = Pick<
@@ -556,4 +642,8 @@ export type PreviewContentMapping = {
 
 export type UpdateSchedulerSettings = {
     schedulerTimezone: string;
+};
+
+export type UpdateQueryTimezoneSettings = {
+    queryTimezone: string | null;
 };

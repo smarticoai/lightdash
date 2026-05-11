@@ -30,7 +30,10 @@ export type UserActivity = {
         average_number_of_weekly_queries_per_user: string;
     }[];
     dashboardViews: ActivityViews[];
-    userMostViewedDashboards: (UserWithCount & { dashboardName: string })[];
+    userMostViewedDashboards: (UserWithCount & {
+        dashboardName: string;
+        dashboardUuid: string;
+    })[];
     chartViews: ActivityViews[];
 };
 
@@ -62,11 +65,6 @@ export type UnusedContent = {
     dashboards: UnusedContentItem[];
 };
 
-export type ApiUnusedContent = {
-    status: 'ok';
-    results: UnusedContent;
-};
-
 export type ViewStatistics = {
     views: number;
     firstViewedAt: Date | string | null;
@@ -88,6 +86,7 @@ export enum QueryExecutionContext {
     GSHEETS = 'gsheets',
     SCHEDULED_GSHEETS_CHART = 'scheduledGsheetsChart',
     SCHEDULED_GSHEETS_DASHBOARD = 'scheduledGsheetsDashboard',
+    SCHEDULED_GSHEETS_SQL_CHART = 'scheduledGsheetsSqlChart',
     SCHEDULED_CHART = 'scheduledChart',
     SCHEDULED_DASHBOARD = 'scheduledDashboard',
     CALCULATE_TOTAL = 'calculateTotal',
@@ -98,4 +97,6 @@ export enum QueryExecutionContext {
     API = 'api',
     CLI = 'cli',
     METRICS_EXPLORER = 'metricsExplorer',
+    PRE_AGGREGATE_MATERIALIZATION = 'preAggregateMaterialization',
+    DATA_APP_SAMPLE = 'dataAppSample',
 }

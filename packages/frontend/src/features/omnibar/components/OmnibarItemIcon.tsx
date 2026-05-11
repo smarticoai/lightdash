@@ -1,5 +1,5 @@
-import { Anchor } from '@mantine/core';
-import { IconAlertTriangleFilled } from '@tabler/icons-react';
+import { Anchor } from '@mantine-8/core';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import { type FC } from 'react';
 import { Link } from 'react-router';
 import {
@@ -36,7 +36,7 @@ export const OmnibarItemIconWithIndicator: FC<
         <ResourceIndicator
             iconProps={{
                 color: 'red',
-                icon: IconAlertTriangleFilled,
+                icon: IconAlertTriangle,
             }}
             tooltipProps={{
                 maw: 300,
@@ -58,9 +58,10 @@ export const OmnibarItemIconWithIndicator: FC<
                             }
                             to={{
                                 pathname: `/generalSettings/projectManagement/${projectUuid}/validator`,
-                                search: `?validationId=${item.item.validationErrors[0].validationId}`,
+                                search: `?validationUuid=${item.item.validationErrors[0].validationUuid}`,
                             }}
-                            color="blue.4"
+                            c="blue.4"
+                            fz="xs"
                         >
                             here
                         </Anchor>

@@ -20,9 +20,11 @@ export const ToolNameSchema = z.enum([
     'searchFieldValues',
     'findDashboards',
     'findCharts',
+    'getDashboardCharts',
     'improveContext',
     'proposeChange',
     'runQuery',
+    'runSavedChart',
 ]);
 
 export type ToolName = z.infer<typeof ToolNameSchema>;
@@ -44,8 +46,10 @@ export const TOOL_DISPLAY_MESSAGES = ToolDisplayMessagesSchema.parse({
     generateTimeSeriesVizConfig: 'Generating a line chart',
     generateDashboard: 'Generating a dashboard',
     findCharts: 'Finding relevant charts',
+    getDashboardCharts: 'Looking up dashboard charts',
     improveContext: 'Improving context',
     runQuery: 'Generating visualization',
+    runSavedChart: 'Running saved chart',
 });
 
 // after-tool-call messages
@@ -61,8 +65,10 @@ export const TOOL_DISPLAY_MESSAGES_AFTER_TOOL_CALL =
         generateTimeSeriesVizConfig: 'Generated a line chart',
         generateDashboard: 'Generated a dashboard',
         findCharts: 'Found relevant charts',
+        getDashboardCharts: 'Found dashboard charts',
         improveContext: 'Improved context',
         runQuery: 'Generated visualization',
+        runSavedChart: 'Ran saved chart',
     });
 
 export const AVAILABLE_VISUALIZATION_TYPES = VisualizationTools;

@@ -25,10 +25,13 @@ function useEmbed(): EmbedContext {
             embedToken: undefined,
             filters: undefined,
             projectUuid: undefined,
+            paletteUuid: undefined,
             languageMap: undefined,
             onExplore: (_options: { chart: SavedChart }) => {},
             t: (_input: string) => undefined,
             mode: 'direct',
+            theme: 'light',
+            backgroundColor: null,
         };
     }
 

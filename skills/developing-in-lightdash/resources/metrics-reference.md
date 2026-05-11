@@ -46,7 +46,9 @@ models:
 | `count` | Count all rows | No |
 | `count_distinct` | Count unique values | No |
 | `sum` | Sum of values | No |
+| `sum_distinct` | Sum after de-duplicating rows by `distinct_keys` | No (needs `distinct_keys:`) |
 | `average` | Mean of values | No |
+| `average_distinct` | Mean (average) after de-duplicating rows by `distinct_keys` | No (needs `distinct_keys:`) |
 | `min` | Minimum value | No |
 | `max` | Maximum value | No |
 | `percentile` | Percentile value | No (needs `percentile:`) |
@@ -114,6 +116,55 @@ metrics:
     label: "P95 Response Time"
 ```
 
+### Distinct Aggregation Configuration
+
+`sum_distinct` and `average_distinct` aggregate a column **after de-duplicating rows by one or more dimensions**. Useful for wide tables where a value is repeated across multiple rows (e.g. an order total denormalized onto every line item) and you want to count it only once per `distinct_keys` value.
+
+`distinct_keys` accepts a single dimension reference or a list:
+
+```yaml
+columns:
+  - name: order_total
+    meta:
+      dimension:
+        type: number
+      metrics:
+        # Single key — sum each order_id once
+        revenue:
+          type: sum_distinct
+          distinct_keys: order_id
+
+        # Composite key — array form
+        revenue_by_order_and_currency:
+          type: sum_distinct
+          distinct_keys:
+            - order_id
+            - currency_code
+
+        # Same syntax for averages
+        average_order_value:
+          type: average_distinct
+          distinct_keys: order_id
+```
+
+Defined at the model level with `sql:` (not tied to a single column):
+
+```yaml
+models:
+  - name: order_lines
+    meta:
+      metrics:
+        revenue:
+          type: sum_distinct
+          sql: "${TABLE}.order_total"
+          distinct_keys: order_id
+
+        average_order_value:
+          type: average_distinct
+          sql: "${TABLE}.order_total"
+          distinct_keys: order_id
+```
+
 ### Metric Filters
 
 Apply filters to specific metrics:
@@ -139,6 +190,24 @@ metrics:
 - Comparison: `"> 100"`, `"< 50"`, `">= 10"`, `"<= 100"`
 - Multiple values: `["value1", "value2"]`
 - Null checks: `"null"`, `"!null"`
+- Date intervals: `"inThePast N days"`, `"inTheNext N months"` (supports: `days`, `weeks`, `months`, `years`)
+
+**Date filter examples:**
+
+```yaml
+metrics:
+  recent_orders:
+    type: count
+    filters:
+      - created_at: "inThePast 30 days"
+
+  upcoming_renewals:
+    type: count
+    filters:
+      - renewal_date: "inTheNext 7 days"
+```
+
+**Important:** `inTheCurrent` is NOT a valid operator in metric definition filters. It is only available in chart and dashboard filters. If you need current-period logic in a metric, use custom SQL with date truncation instead.
 
 ### Show Underlying Values
 
@@ -157,12 +226,28 @@ metrics:
 
 ### Organization
 
+Use `groups` to organize metrics in the sidebar:
+
 ```yaml
 metrics:
   total_revenue:
     type: sum
-    group_label: "Revenue Metrics"
+    groups:
+      - "Revenue Metrics"
 ```
+
+For hierarchical grouping, add multiple levels:
+
+```yaml
+metrics:
+  total_revenue:
+    type: sum
+    groups:
+      - "Financial"
+      - "Revenue"
+```
+
+> **Note:** `group_label` is deprecated. Use `groups` instead.
 
 ### URLs
 
@@ -284,7 +369,8 @@ columns:
             - order_id
             - customer_name
             - amount
-          group_label: "Revenue"
+          groups:
+            - "Revenue"
 
         average_order_value:
           type: average
@@ -292,13 +378,15 @@ columns:
           description: "Mean order amount"
           format: "usd"
           round: 2
-          group_label: "Revenue"
+          groups:
+            - "Revenue"
 
         max_order:
           type: max
           label: "Largest Order"
           format: "usd"
-          group_label: "Revenue"
+          groups:
+            - "Revenue"
 
   - name: order_id
     meta:
@@ -308,13 +396,15 @@ columns:
         order_count:
           type: count
           label: "Total Orders"
-          group_label: "Volume"
+          groups:
+            - "Volume"
 
         unique_customers:
           type: count_distinct
           sql: "${TABLE}.customer_id"
           label: "Unique Customers"
-          group_label: "Volume"
+          groups:
+            - "Volume"
 ```
 
 ### SaaS Metrics
@@ -426,7 +516,7 @@ models:
 3. **Set appropriate rounding**: Usually 0-2 decimal places
 4. **Use format presets**: Consistent display across metrics
 5. **Configure show_underlying_values**: Enable useful drill-down
-6. **Group related metrics**: Use group_label for organization
+6. **Group related metrics**: Use `groups` for organization (supports hierarchical grouping)
 7. **Handle division by zero**: Use NULLIF in custom SQL
 8. **Use filters for variants**: Create filtered versions of metrics
 9. **Add AI hints**: Help AI assistants use metrics correctly

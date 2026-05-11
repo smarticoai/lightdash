@@ -1,4 +1,4 @@
-import { assertUnreachable, ChartKind } from '@lightdash/common';
+import { ChartKind } from '@lightdash/common';
 import {
     IconChartArea,
     IconChartAreaLine,
@@ -10,6 +10,7 @@ import {
     IconCode,
     IconFilter,
     IconGauge,
+    IconGitMerge,
     IconMap,
     IconSquareNumber1,
     IconTable,
@@ -46,10 +47,9 @@ export const getChartIcon = (chartKind: ChartKind | undefined) => {
             return IconCode;
         case ChartKind.MAP:
             return IconMap;
+        case ChartKind.SANKEY:
+            return IconGitMerge;
         default:
-            return assertUnreachable(
-                chartKind,
-                `Chart type ${chartKind} not supported`,
-            );
+            return IconChartBar;
     }
 };

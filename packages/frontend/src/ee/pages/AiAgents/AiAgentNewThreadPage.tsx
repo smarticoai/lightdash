@@ -10,16 +10,19 @@ import {
     Title,
 } from '@mantine-8/core';
 import { IconInfoCircle } from '@tabler/icons-react';
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
-import { useOutletContext, useParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useState, type FC } from 'react';
+import { useOutletContext, useParams, useSearchParams } from 'react-router';
 import { LightdashUserAvatar } from '../../../components/Avatar';
 import MantineIcon from '../../../components/common/MantineIcon';
 import { getModelKey } from '../../../components/common/ModelSelector/utils';
 import { AgentChatInput } from '../../features/aiCopilot/components/ChatElements/AgentChatInput';
 import { ChatElementsUtils } from '../../features/aiCopilot/components/ChatElements/utils';
 import { DefaultAgentButton } from '../../features/aiCopilot/components/DefaultAgentButton/DefaultAgentButton';
+import { usePendingPrompt } from '../../features/aiCopilot/components/PendingPromptContext/PendingPromptContext';
+import { PinnedContextCard } from '../../features/aiCopilot/components/PinnedContextCard/PinnedContextCard';
 import { SuggestedQuestions } from '../../features/aiCopilot/components/SuggestedQuestions/SuggestedQuestions';
 import { useModelOptions } from '../../features/aiCopilot/hooks/useModelOptions';
+import { usePinnedContext } from '../../features/aiCopilot/hooks/usePinnedContext';
 import {
     useCreateAgentThreadMutation,
     useVerifiedQuestions,
@@ -28,6 +31,16 @@ import { type AgentContext } from './AgentPage';
 
 const AiAgentNewThreadPage: FC = () => {
     const { agentUuid, projectUuid } = useParams();
+    const [searchParams] = useSearchParams();
+    const chartUuid = searchParams.get('chartUuid');
+    const dashboardUuid = searchParams.get('dashboardUuid');
+
+    const { contextInput, previewItems } = usePinnedContext({
+        projectUuid,
+        chartUuid,
+        dashboardUuid,
+    });
+
     const { mutateAsync: createAgentThread, isLoading: isCreatingThread } =
         useCreateAgentThreadMutation(agentUuid, projectUuid!);
     const { agent } = useOutletContext<AgentContext>();
@@ -72,10 +85,16 @@ const AiAgentNewThreadPage: FC = () => {
     );
     const showExtendedThinking = selectedModel?.supportsReasoning ?? false;
 
+    const { pendingPrompt, setPendingPrompt } = usePendingPrompt();
+
     const onSubmit = useCallback(
         (prompt: string) => {
+            setPendingPrompt('');
             void createAgentThread({
                 prompt,
+                context: contextInput.length > 0 ? contextInput : undefined,
+                optimisticContext:
+                    previewItems.length > 0 ? previewItems : undefined,
                 modelConfig: selectedModel
                     ? {
                           modelName: selectedModel.name,
@@ -88,7 +107,10 @@ const AiAgentNewThreadPage: FC = () => {
             });
         },
         [
+            setPendingPrompt,
             createAgentThread,
+            contextInput,
+            previewItems,
             selectedModel,
             showExtendedThinking,
             extendedThinking,
@@ -181,6 +203,27 @@ const AiAgentNewThreadPage: FC = () => {
                         />
                     )}
 
+                    {previewItems.length > 0 && projectUuid && (
+                        <Stack gap="xs">
+                            <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+                                Pinned context
+                            </Text>
+                            <Group gap="xs" wrap="wrap">
+                                {previewItems.map((item) => (
+                                    <PinnedContextCard
+                                        key={`${item.type}-${
+                                            item.type === 'chart'
+                                                ? item.chartUuid
+                                                : item.dashboardUuid
+                                        }`}
+                                        item={item}
+                                        projectUuid={projectUuid}
+                                    />
+                                ))}
+                            </Group>
+                        </Stack>
+                    )}
+
                     <AgentChatInput
                         onSubmit={onSubmit}
                         loading={isCreatingThread}
@@ -196,6 +239,8 @@ const AiAgentNewThreadPage: FC = () => {
                                 ? setExtendedThinking
                                 : undefined
                         }
+                        defaultValue={pendingPrompt}
+                        onValueChange={setPendingPrompt}
                     />
                 </Stack>
             </Stack>

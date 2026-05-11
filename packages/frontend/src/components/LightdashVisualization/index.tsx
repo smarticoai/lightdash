@@ -1,7 +1,16 @@
 import { assertUnreachable, ChartType } from '@lightdash/common';
-import { Anchor, Text } from '@mantine/core';
+import { Anchor, Skeleton, Text } from '@mantine-8/core';
 import { IconChartBarOff } from '@tabler/icons-react';
-import { forwardRef, Fragment, lazy, memo, Suspense } from 'react';
+import {
+    forwardRef,
+    Fragment,
+    lazy,
+    memo,
+    Suspense,
+    useEffect,
+    useRef,
+    useState,
+} from 'react';
 import { EmptyState } from '../common/EmptyState';
 import MantineIcon from '../common/MantineIcon';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
@@ -10,6 +19,7 @@ import FunnelChart from '../FunnelChart';
 import SimpleChart from '../SimpleChart';
 import SimpleGauge from '../SimpleGauge';
 import SimplePieChart from '../SimplePieChart';
+import SimpleSankey from '../SimpleSankey';
 import SimpleStatistic from '../SimpleStatistic';
 import SimpleTable from '../SimpleTable';
 import SimpleTreemap from '../SimpleTreemap';
@@ -17,6 +27,51 @@ import { useVisualizationContext } from './useVisualizationContext';
 
 // Lazy load SimpleMap to avoid bundling Leaflet in the main chunk
 const LazySimpleMap = lazy(() => import('../SimpleMap'));
+
+/**
+ * Defers rendering of chart content until the tile is visible in the viewport.
+ * On dashboards, all tiles mount (so react-query fires all API calls in parallel),
+ * but only visible tiles render the heavy chart component (ECharts, tables, etc.).
+ * When the user scrolls, the data is already cached, so charts render instantly.
+ *
+ * Skipped when:
+ * - Not on a dashboard (explorer, chart view)
+ * - Screenshot mode (onScreenshotReady is set) — must render all tiles for capture
+ */
+function useDeferredVisibility(enabled: boolean) {
+    const sentinelRef = useRef<HTMLDivElement>(null);
+    const [isVisible, setIsVisible] = useState(!enabled);
+
+    useEffect(() => {
+        if (!enabled || isVisible) return;
+
+        const el = sentinelRef.current;
+        if (!el) return;
+
+        // Synchronous check before setting up observer — catches above-fold
+        // tiles before IntersectionObserver's async callback fires.
+        const rect = el.getBoundingClientRect();
+        if (rect.top < window.innerHeight + 200) {
+            setIsVisible(true);
+            return;
+        }
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setIsVisible(true);
+                    observer.disconnect();
+                }
+            },
+            { rootMargin: '200px' },
+        );
+
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [enabled, isVisible]);
+
+    return { sentinelRef, isVisible };
+}
 
 interface LightdashVisualizationProps {
     isDashboard?: boolean;
@@ -44,6 +99,10 @@ const LightdashVisualization = memo(
         ) => {
             const { visualizationConfig, minimal, apiErrorDetail } =
                 useVisualizationContext();
+
+            const { sentinelRef, isVisible } = useDeferredVisibility(
+                isDashboard && !minimal,
+            );
 
             if (!visualizationConfig) {
                 return null;
@@ -76,7 +135,6 @@ const LightdashVisualization = memo(
                                     </Text>
                                     {apiErrorDetail.data.documentationUrl && (
                                         <Fragment>
-                                            <br />
                                             <Anchor
                                                 href={
                                                     apiErrorDetail.data
@@ -84,6 +142,8 @@ const LightdashVisualization = memo(
                                                 }
                                                 target="_blank"
                                                 rel="noreferrer"
+                                                fz="xs"
+                                                fw="bold"
                                             >
                                                 Learn how to resolve this in our
                                                 documentation →
@@ -199,6 +259,16 @@ const LightdashVisualization = memo(
                         />
                     );
                     break;
+                case ChartType.SANKEY:
+                    chartContent = (
+                        <SimpleSankey
+                            isInDashboard={!!isDashboard}
+                            $shouldExpand
+                            onScreenshotReady={onScreenshotReady}
+                            onScreenshotError={onScreenshotError}
+                        />
+                    );
+                    break;
                 default:
                     return assertUnreachable(
                         visualizationConfig,
@@ -221,7 +291,13 @@ const LightdashVisualization = memo(
                         flexDirection: 'column',
                     }}
                 >
-                    {chartContent}
+                    {isVisible ? (
+                        chartContent
+                    ) : (
+                        <div ref={sentinelRef} style={{ flex: 1 }}>
+                            <Skeleton h="100%" w="100%" />
+                        </div>
+                    )}
                 </div>
             );
         },

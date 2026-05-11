@@ -20,20 +20,33 @@ import {
     IconInfoCircle,
     IconSettings,
     IconSparkles,
+    IconWindowMinimize,
 } from '@tabler/icons-react';
-import { type FC, useState } from 'react';
-import { Link, Navigate, Outlet, useParams } from 'react-router';
+import { useState, type FC } from 'react';
+import {
+    Link,
+    Navigate,
+    Outlet,
+    useNavigate,
+    useParams,
+    useSearchParams,
+} from 'react-router';
 import MantineIcon from '../../../components/common/MantineIcon';
 import { AgentSelector } from '../../features/aiCopilot/components/AgentSelector';
 import { AiAgentPageLayout } from '../../features/aiCopilot/components/AiAgentPageLayout/AiAgentPageLayout';
 import { SidebarButton } from '../../features/aiCopilot/components/AiAgentPageLayout/SidebarButton';
+import { launcherSession } from '../../features/aiCopilot/components/Launcher/launcherSession';
+import { useLauncherDock } from '../../features/aiCopilot/components/Launcher/useLauncherDock';
 import { useAiAgentPermission } from '../../features/aiCopilot/hooks/useAiAgentPermission';
 import { useAiOrganizationSettings } from '../../features/aiCopilot/hooks/useAiOrganizationSettings';
 import {
     useProjectAiAgent as useAiAgent,
+    useAiAgentThread,
     useAiAgentThreads,
     useProjectAiAgents,
 } from '../../features/aiCopilot/hooks/useProjectAiAgents';
+import { store as aiAgentStore } from '../../features/aiCopilot/store';
+import { openPanel } from '../../features/aiCopilot/store/aiAgentLauncherSlice';
 
 const INITIAL_MAX_THREADS = 10;
 const MAX_THREADS_INCREMENT = 10;
@@ -82,10 +95,10 @@ const AgentSidebar: FC<{
     threadUuid?: string;
     isAgentSidebarCollapsed: boolean;
 }> = ({ agent, projectUuid, threadUuid, isAgentSidebarCollapsed }) => {
-    const organizationSettingsQuery = useAiOrganizationSettings();
+    const aiOrganizationSettingsQuery = useAiOrganizationSettings();
     const isTrial =
-        organizationSettingsQuery.isSuccess &&
-        organizationSettingsQuery.data?.isTrial;
+        aiOrganizationSettingsQuery.isSuccess &&
+        aiOrganizationSettingsQuery.data.isTrial;
     const { data: threads } = useAiAgentThreads(projectUuid, agent.uuid);
     const [showMaxItems, setShowMaxItems] = useState(INITIAL_MAX_THREADS);
 
@@ -120,14 +133,7 @@ const AgentSidebar: FC<{
 
                     <Stack gap={2}>
                         {threads.length === 0 && (
-                            <Paper
-                                withBorder
-                                style={{
-                                    borderStyle: 'dashed',
-                                    backgroundColor: 'transparent',
-                                }}
-                                p="sm"
-                            >
+                            <Paper variant="dotted" p="sm">
                                 <Text
                                     truncate="end"
                                     size="sm"
@@ -212,6 +218,8 @@ const AgentSidebar: FC<{
 
 const AgentPage = () => {
     const { agentUuid, threadUuid, projectUuid } = useParams();
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
     const canManageAgents = useAiAgentPermission({
         action: 'manage',
         projectUuid,
@@ -229,6 +237,60 @@ const AgentPage = () => {
         projectUuid!,
         agentUuid!,
     );
+
+    const { data: thread } = useAiAgentThread(
+        projectUuid!,
+        agentUuid,
+        threadUuid,
+    );
+
+    const [canMinimize] = useState(() =>
+        launcherSession.isExpandedFromBubble(),
+    );
+
+    const { addItem: addDockItem } = useLauncherDock(projectUuid);
+
+    const handleMinimize = () => {
+        if (!agent || !projectUuid) return;
+        if (threadUuid) {
+            const dockTitle =
+                thread?.title ||
+                thread?.firstMessage?.message ||
+                'Conversation';
+            addDockItem({
+                threadId: threadUuid,
+                agentUuid: agent.uuid,
+                title: dockTitle,
+            });
+            aiAgentStore.dispatch(
+                openPanel({
+                    threadId: threadUuid,
+                    agentUuid: agent.uuid,
+                }),
+            );
+        } else {
+            const chartUuid = searchParams.get('chartUuid');
+            const dashboardUuid = searchParams.get('dashboardUuid');
+            const pendingContext =
+                chartUuid || dashboardUuid
+                    ? {
+                          chartUuid: chartUuid ?? undefined,
+                          dashboardUuid: dashboardUuid ?? undefined,
+                      }
+                    : null;
+            aiAgentStore.dispatch(
+                openPanel({
+                    threadId: null,
+                    agentUuid: agent.uuid,
+                    pendingContext,
+                }),
+            );
+        }
+        void navigate(
+            launcherSession.consumeLastNonAgentUrl() ??
+                `/projects/${projectUuid}/home`,
+        );
+    };
 
     if (isLoadingAgent) {
         return (
@@ -273,24 +335,50 @@ const AgentPage = () => {
                         )}
                     </Box>
 
-                    {canManageAgents && (
-                        <Button
-                            component={Link}
-                            variant="default"
-                            to={`/projects/${projectUuid}/ai-agents/${agent.uuid}/edit`}
-                            leftSection={<MantineIcon icon={IconSettings} />}
-                            styles={(theme) => ({
-                                root: {
-                                    borderColor: theme.colors.ldGray[2],
-                                    boxShadow: `var(--mantine-shadow-subtle)`,
-                                    color: theme.colors.ldGray[9],
-                                    fontSize: theme.fontSizes.xs,
-                                },
-                            })}
-                        >
-                            Settings
-                        </Button>
-                    )}
+                    <Group gap="xs">
+                        {canMinimize && (
+                            <Button
+                                variant="default"
+                                onClick={handleMinimize}
+                                leftSection={
+                                    <MantineIcon
+                                        icon={IconWindowMinimize}
+                                        style={{ transform: 'scaleX(-1)' }}
+                                    />
+                                }
+                                styles={(theme) => ({
+                                    root: {
+                                        borderColor: theme.colors.ldGray[2],
+                                        boxShadow: `var(--mantine-shadow-subtle)`,
+                                        color: theme.colors.ldGray[9],
+                                        fontSize: theme.fontSizes.xs,
+                                    },
+                                })}
+                            >
+                                Minimize
+                            </Button>
+                        )}
+                        {canManageAgents && (
+                            <Button
+                                component={Link}
+                                variant="default"
+                                to={`/projects/${projectUuid}/ai-agents/${agent.uuid}/edit`}
+                                leftSection={
+                                    <MantineIcon icon={IconSettings} />
+                                }
+                                styles={(theme) => ({
+                                    root: {
+                                        borderColor: theme.colors.ldGray[2],
+                                        boxShadow: `var(--mantine-shadow-subtle)`,
+                                        color: theme.colors.ldGray[9],
+                                        fontSize: theme.fontSizes.xs,
+                                    },
+                                })}
+                            >
+                                Settings
+                            </Button>
+                        )}
+                    </Group>
                 </Group>
             }
         >

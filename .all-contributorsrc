@@ -1726,6 +1726,33 @@
         "doc",
         "code"
       ]
+    },
+    {
+      "login": "ota2000",
+      "name": "arakaki",
+      "avatar_url": "https://avatars.githubusercontent.com/u/16278388?v=4",
+      "profile": "http://ota2000.com",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "shu22203",
+      "name": "Shu Murakami",
+      "avatar_url": "https://avatars.githubusercontent.com/u/9993362?v=4",
+      "profile": "https://github.com/shu22203",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "manish160993",
+      "name": "Manish Biyani",
+      "avatar_url": "https://avatars.githubusercontent.com/u/31579600?v=4",
+      "profile": "https://github.com/manish160993",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,

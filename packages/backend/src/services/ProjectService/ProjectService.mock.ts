@@ -90,6 +90,10 @@ export const buildAccount = ({
         isRegisteredUser: () => userType === 'registered',
         isJwtUser: () => accountType === 'jwt',
         isAnonymousUser: () => userType === 'anonymous',
+        isServiceAccount: () => accountType === 'service-account',
+        isPatUser: () => accountType === 'pat',
+        isOauthUser: () => accountType === 'oauth',
+        isAuthenticated: () => true,
     }) as unknown as Account;
 
 export const validExplore: Explore = {
@@ -186,6 +190,18 @@ export const virtualExplore: Explore = {
     name: 'virtual_explore',
     label: 'Virtual Explore',
     type: ExploreType.VIRTUAL,
+    tags: [],
+};
+
+export const preAggregateExplore: Explore = {
+    ...validExplore,
+    name: '__preagg__valid_explore__rollup',
+    label: 'Pre-agg Explore',
+    type: ExploreType.PRE_AGGREGATE,
+    preAggregateSource: {
+        sourceExploreName: 'valid_explore',
+        preAggregateName: 'rollup',
+    },
     tags: [],
 };
 
@@ -319,7 +335,10 @@ export const projectWithSensitiveFields: Project = {
         environment_id: 'environment_id',
     },
     schedulerTimezone: 'UTC',
+    queryTimezone: null,
     createdByUserUuid: sessionAccount.user.id,
+    hasDefaultUserSpaces: false,
+    colorPaletteUuid: null,
 };
 
 export const projectSummary: ProjectSummary = {
@@ -333,6 +352,7 @@ export const defaultProject: OrganizationProject = {
     name: 'name',
     type: ProjectType.DEFAULT,
     createdByUserUuid: sessionAccount.user.id,
+    createdByUserName: 'Test User',
     createdAt: new Date('2024-01-01T00:00:00Z'),
     upstreamProjectUuid: null,
     warehouseType: WarehouseTypes.POSTGRES,
@@ -345,8 +365,9 @@ export const spacesWithSavedCharts: Space[] = [
         slug: 'space',
         parentSpaceUuid: null,
         path: 'space',
-
-        isPrivate: false,
+        inheritParentPermissions: true,
+        projectMemberAccessRole: null,
+        inheritsFromOrgOrProject: true,
         uuid: 'uuid',
         pinnedListUuid: null,
         pinnedListOrder: null,
@@ -368,6 +389,7 @@ export const spacesWithSavedCharts: Space[] = [
                 spaceName: 'spaceName',
                 organizationUuid: 'organizationUuid',
                 slug: 'saved-chart-name',
+                verification: null,
             },
         ],
         projectUuid,
@@ -375,6 +397,7 @@ export const spacesWithSavedCharts: Space[] = [
         childSpaces: [],
         access: [],
         groupsAccess: [],
+        colorPaletteUuid: null,
     },
 ];
 
@@ -385,17 +408,19 @@ export const spacesWithNoSavedCharts: Space[] = [
         slug: 'space',
         parentSpaceUuid: null,
         path: 'space',
-
         uuid: 'uuid',
         pinnedListUuid: null,
         pinnedListOrder: null,
         queries: [],
         projectUuid,
-        isPrivate: false,
+        inheritParentPermissions: true,
+        projectMemberAccessRole: null,
+        inheritsFromOrgOrProject: true,
         dashboards: [],
         access: [],
         groupsAccess: [],
         childSpaces: [],
+        colorPaletteUuid: null,
     },
 ];
 
@@ -457,8 +482,8 @@ export const lightdashConfigWithNoSMTP: Pick<
         defaultLimit: 500,
         csvCellsLimit: 100,
         timezone: undefined,
-        useSqlPivotResults: false,
-        showExecutionTime: false,
+        retryQueryOnTransientErrors: false,
+        enableTimezoneSupport: undefined,
     },
 };
 
@@ -575,6 +600,7 @@ export const exploreToSummaryWithAttributes = (
         schemaName: baseTable.schema,
         description: baseTable.description,
         type: explore.type,
+        preAggregateSource: explore.preAggregateSource,
         baseTableRequiredAttributes: baseTable.requiredAttributes,
         ...(explore.warnings ? { warnings: explore.warnings } : {}),
     };

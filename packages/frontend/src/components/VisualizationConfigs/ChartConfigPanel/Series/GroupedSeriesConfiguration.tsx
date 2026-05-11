@@ -23,6 +23,7 @@ import { Box, Checkbox, Group, Select, Stack, Switch } from '@mantine/core';
 import React, { useCallback, type FC } from 'react';
 import { createPortal } from 'react-dom';
 import type useCartesianChartConfig from '../../../../hooks/cartesianChartConfig/useCartesianChartConfig';
+import { useVisualizationContext } from '../../../LightdashVisualization/useVisualizationContext';
 import { Config } from '../../common/Config';
 import { GrabIcon } from '../../common/GrabIcon';
 import { ChartTypeSelect } from './ChartTypeSelect';
@@ -51,9 +52,10 @@ const getFormatterValue = (
     value: any,
     key: string,
     items: Array<Field | TableCalculation | CustomDimension>,
+    timezone?: string,
 ) => {
     const item = items.find((i) => getItemId(i) === key);
-    return formatItemValue(item, value, true);
+    return formatItemValue(item, value, true, undefined, timezone);
 };
 
 type DraggablePortalHandlerProps = {
@@ -73,6 +75,7 @@ type GroupedSeriesConfigurationProps = {
     item: Field | TableCalculation | CustomDimension;
     items: Array<Field | TableCalculation | CustomDimension>;
     dragHandleProps?: DraggableProvidedDragHandleProps | null;
+    isDragDisabled?: boolean;
     updateAllGroupedSeries: (fieldKey: string, series: Partial<Series>) => void;
     series: Series[];
 } & Pick<
@@ -89,9 +92,12 @@ const GroupedSeriesConfiguration: FC<GroupedSeriesConfigurationProps> = ({
     updateSingleSeries,
     updateAllGroupedSeries,
     dragHandleProps,
+    isDragDisabled,
     updateSeries,
     series,
 }) => {
+    const { resolvedTimezone } = useVisualizationContext();
+
     const [openSeriesId, setOpenSeriesId] = React.useState<
         string | undefined
     >();
@@ -147,7 +153,11 @@ const GroupedSeriesConfiguration: FC<GroupedSeriesConfigurationProps> = ({
         <Config>
             <Config.Section>
                 <Group noWrap spacing="two">
-                    <GrabIcon dragHandleProps={dragHandleProps} />
+                    <GrabIcon
+                        dragHandleProps={dragHandleProps}
+                        disabled={isDragDisabled}
+                        disabledTooltip="Series order is automatically determined by the sort applied to the grouped dimension"
+                    />
 
                     <Config.Heading>
                         {getItemLabelWithoutTableName(item)} (grouped)
@@ -302,6 +312,7 @@ const GroupedSeriesConfiguration: FC<GroupedSeriesConfigurationProps> = ({
                                                             value,
                                                             field,
                                                             items,
+                                                            resolvedTimezone,
                                                         );
                                                     return acc
                                                         ? `${acc} - ${formattedValue}`
@@ -316,6 +327,7 @@ const GroupedSeriesConfiguration: FC<GroupedSeriesConfigurationProps> = ({
                                                     singleSeries,
                                                 )}
                                                 index={i}
+                                                isDragDisabled={isDragDisabled}
                                             >
                                                 {(
                                                     {
@@ -342,6 +354,9 @@ const GroupedSeriesConfiguration: FC<GroupedSeriesConfigurationProps> = ({
                                                                 <SingleSeriesConfiguration
                                                                     dragHandleProps={
                                                                         groupedDragHandleProps
+                                                                    }
+                                                                    isDragDisabled={
+                                                                        isDragDisabled
                                                                     }
                                                                     isCollapsable
                                                                     layout={

@@ -27,6 +27,7 @@ import MantineIcon from '../../../components/common/MantineIcon';
 import MantineModal from '../../../components/common/MantineModal';
 import DocumentationHelpButton from '../../../components/DocumentationHelpButton';
 import { useDashboardQuery } from '../../../hooks/dashboard/useDashboard';
+import { useProjectUuid } from '../../../hooks/useProjectUuid';
 import useUser from '../../../hooks/user/useUser';
 import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
@@ -110,9 +111,14 @@ const useSchedulerFormModal = ({
         [isEditMode, scheduler.data, isChart, resourceUuid],
     );
 
+    const projectUuid = useProjectUuid();
     const isDashboard = formResource?.type === 'dashboard';
-    const { data: dashboard } = useDashboardQuery(formResource?.uuid, {
-        enabled: !!isDashboard && !!formResource?.uuid,
+    const { data: dashboard } = useDashboardQuery({
+        uuidOrSlug: formResource?.uuid,
+        projectUuid,
+        useQueryOptions: {
+            enabled: !!isDashboard && !!formResource?.uuid,
+        },
     });
 
     const isDashboardTabsAvailable =
@@ -255,7 +261,6 @@ const useSchedulerFormModal = ({
             createMutation,
             resourceUuid,
             formResource?.type,
-            form,
         ],
     );
 
@@ -277,10 +282,19 @@ const useSchedulerFormModal = ({
             ? {
                   savedChartUuid: scheduler.data?.savedChartUuid ?? null,
                   dashboardUuid: scheduler.data?.dashboardUuid ?? null,
+                  savedSqlUuid: scheduler.data?.savedSqlUuid ?? null,
               }
             : isChart
-              ? { savedChartUuid: resourceUuid, dashboardUuid: null }
-              : { dashboardUuid: resourceUuid, savedChartUuid: null };
+              ? {
+                    savedChartUuid: resourceUuid,
+                    dashboardUuid: null,
+                    savedSqlUuid: null,
+                }
+              : {
+                    dashboardUuid: resourceUuid,
+                    savedChartUuid: null,
+                    savedSqlUuid: null,
+                };
 
         const unsavedScheduler: CreateSchedulerAndTargets = {
             ...schedulerData,
@@ -443,9 +457,12 @@ export const SchedulerModalCreateOrEdit: FC<Props> = ({
                                                 0 ||
                                                 form.values.msTeamsTargets
                                                     ?.length ||
+                                                0 ||
+                                                form.values.googleChatTargets
+                                                    ?.length ||
                                                 0) &&
-                                                requiredFiltersWithoutValues.length ===
-                                                    0,
+                                            requiredFiltersWithoutValues.length ===
+                                                0,
                                         )
                                     }
                                 >

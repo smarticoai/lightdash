@@ -1,4 +1,5 @@
 import {
+    BinType,
     CompiledMetricQuery,
     CompileError,
     CustomDimensionType,
@@ -6,9 +7,15 @@ import {
     MetricType,
     TableCalculation,
     TableCalculationTemplateType,
+    VizIndexType,
     WindowFunctionType,
+    type FormulaTableCalculation,
+    type PivotConfiguration,
 } from '@lightdash/common';
-import { compileMetricQuery } from './queryCompiler';
+import {
+    compileMetricQuery,
+    compilePostCalculationMetric,
+} from './queryCompiler';
 import {
     EXPLORE,
     METRIC_QUERY_DUPLICATE_NAME,
@@ -556,6 +563,82 @@ test('Should compile PERCENT_OF_COLUMN_TOTAL template without partitionBy', () =
     );
 });
 
+test('Should compile PERCENT_CHANGE_FROM_PREVIOUS template with partitionBy', () => {
+    const metricQueryWithPartitionBy = {
+        ...METRIC_QUERY_VALID_REFERENCES,
+        dimensions: ['table1_dim_1', 'table3_dim_3'],
+        tableCalculations: [
+            {
+                name: 'pct_change_by_category',
+                displayName: 'Pct Change by Category',
+                template: {
+                    type: TableCalculationTemplateType.PERCENT_CHANGE_FROM_PREVIOUS,
+                    fieldId: 'table_3_metric_1',
+                    orderBy: [
+                        { fieldId: 'table3_dim_3', order: 'asc' as const },
+                    ],
+                    partitionBy: ['table1_dim_1'],
+                },
+            } as TableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery: metricQueryWithPartitionBy,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const pctChange = result.compiledTableCalculations.find(
+        (c) => c.name === 'pct_change_by_category',
+    );
+
+    expect(pctChange?.compiledSql).toBe(
+        '(CAST("table_3_metric_1" AS FLOAT) / CAST(NULLIF(LAG("table_3_metric_1") OVER(PARTITION BY "table1_dim_1" ORDER BY "table3_dim_3" ASC ), 0) AS FLOAT)) - 1',
+    );
+
+    expect(pctChange?.dependsOn).toEqual([]);
+});
+
+test('Should compile PERCENT_CHANGE_FROM_PREVIOUS template with multiple partitionBy fields', () => {
+    const metricQueryWithMultiplePartitions = {
+        ...METRIC_QUERY_VALID_REFERENCES,
+        dimensions: ['table1_dim_1', 'table_2_dim_2', 'table3_dim_3'],
+        tableCalculations: [
+            {
+                name: 'pct_change_multi_partition',
+                displayName: 'Pct Change Multi Partition',
+                template: {
+                    type: TableCalculationTemplateType.PERCENT_CHANGE_FROM_PREVIOUS,
+                    fieldId: 'table_3_metric_1',
+                    orderBy: [
+                        { fieldId: 'table3_dim_3', order: 'asc' as const },
+                    ],
+                    partitionBy: ['table1_dim_1', 'table_2_dim_2'],
+                },
+            } as TableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery: metricQueryWithMultiplePartitions,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const pctChange = result.compiledTableCalculations.find(
+        (c) => c.name === 'pct_change_multi_partition',
+    );
+
+    expect(pctChange?.compiledSql).toBe(
+        '(CAST("table_3_metric_1" AS FLOAT) / CAST(NULLIF(LAG("table_3_metric_1") OVER(PARTITION BY "table1_dim_1", "table_2_dim_2" ORDER BY "table3_dim_3" ASC ), 0) AS FLOAT)) - 1',
+    );
+
+    expect(pctChange?.dependsOn).toEqual([]);
+});
+
 test('Should compile WINDOW_FUNCTION template with ROW_NUMBER', () => {
     const metricQueryWithRowNumber = {
         ...METRIC_QUERY_VALID_REFERENCES,
@@ -885,4 +968,352 @@ test('Should compile WINDOW_FUNCTION template with RANGE frame type', () => {
     expect(rangeSum?.compiledSql).toBe(
         'SUM("table_3_metric_1") OVER (ORDER BY "table1_dim_1" ASC RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)',
     );
+});
+
+test('Should compile template table calculations using _order for custom bin dimensions', () => {
+    const metricQueryWithCustomBin = {
+        ...METRIC_QUERY_VALID_REFERENCES,
+        dimensions: ['table1_dim_1', 'age_range'],
+        sorts: [{ fieldId: 'age_range', descending: false }],
+        customDimensions: [
+            {
+                id: 'age_range',
+                name: 'Age range',
+                type: CustomDimensionType.BIN as const,
+                dimensionId: 'table1_dim_1',
+                table: 'table1',
+                binType: BinType.FIXED_WIDTH as const,
+                binWidth: 10,
+            },
+        ],
+        tableCalculations: [
+            {
+                name: 'running_total_over_bins',
+                displayName: 'Running total over bins',
+                template: {
+                    type: TableCalculationTemplateType.RUNNING_TOTAL,
+                    fieldId: 'table_3_metric_1',
+                },
+            } as TableCalculation,
+            {
+                name: 'row_number_over_bins',
+                displayName: 'Row number over bins',
+                template: {
+                    type: TableCalculationTemplateType.WINDOW_FUNCTION,
+                    windowFunction: WindowFunctionType.ROW_NUMBER,
+                    fieldId: null,
+                    orderBy: [{ fieldId: 'age_range', order: 'asc' }],
+                    partitionBy: [],
+                },
+            } as TableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery: metricQueryWithCustomBin,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    expect(
+        result.compiledTableCalculations.find(
+            (c) => c.name === 'running_total_over_bins',
+        )?.compiledSql,
+    ).toBe(
+        'SUM("table_3_metric_1") OVER (ORDER BY "age_range_order" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)',
+    );
+
+    expect(
+        result.compiledTableCalculations.find(
+            (c) => c.name === 'row_number_over_bins',
+        )?.compiledSql,
+    ).toBe('ROW_NUMBER() OVER (ORDER BY "age_range_order" ASC)');
+});
+
+// --- Formula table calculation tests ---
+
+test('Should compile a basic formula table calculation', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'formula_calc',
+                displayName: 'Formula Calc',
+                formula: '=table1_dim_1',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const formulaCalc = result.compiledTableCalculations.find(
+        (c) => c.name === 'formula_calc',
+    );
+
+    expect(formulaCalc?.compiledSql).toBe('"table1_dim_1"');
+    expect(formulaCalc?.dependsOn).toEqual([]);
+});
+
+test('Should compile a formula with arithmetic and function calls', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'formula_calc',
+                displayName: 'Formula Calc',
+                formula: '=IF(table_3_metric_1 > 100, table_3_metric_1 * 2, 0)',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const formulaCalc = result.compiledTableCalculations.find(
+        (c) => c.name === 'formula_calc',
+    );
+
+    expect(formulaCalc?.compiledSql).toBe(
+        'CASE WHEN ("table_3_metric_1" > 100) THEN ("table_3_metric_1" * 2) ELSE 0 END',
+    );
+});
+
+test('Should throw error when formula references unknown column', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'bad_formula',
+                displayName: 'Bad Formula',
+                formula: '=nonexistent_field + 1',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    expect(() =>
+        compileMetricQuery({
+            explore: EXPLORE,
+            metricQuery,
+            warehouseSqlBuilder: warehouseClientMock,
+            availableParameters: [],
+        }),
+    ).toThrow();
+});
+
+test('Should compile a formula that references another table calculation', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'base_calc',
+                displayName: 'Base Calc',
+                sql: '${table_3.metric_1} + 10',
+            },
+            {
+                name: 'formula_on_calc',
+                displayName: 'Formula on Calc',
+                formula: '=base_calc * 2',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const formulaCalc = result.compiledTableCalculations.find(
+        (c) => c.name === 'formula_on_calc',
+    );
+
+    expect(formulaCalc?.compiledSql).toBe('("base_calc" * 2)');
+    expect(formulaCalc?.dependsOn).toEqual(['base_calc']);
+});
+
+test('Should compile a formula aggregate as a window aggregate', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'formula_sum',
+                displayName: 'Formula Sum',
+                formula: '=SUM(table_3_metric_1)',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const formulaCalc = result.compiledTableCalculations.find(
+        (c) => c.name === 'formula_sum',
+    );
+
+    expect(formulaCalc?.compiledSql).toBe('SUM("table_3_metric_1") OVER ()');
+});
+
+test('Should throw error when formula aggregate references unknown column', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'bad_sum',
+                displayName: 'Bad Sum',
+                formula: '=SUM(nonexistent_field)',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    expect(() =>
+        compileMetricQuery({
+            explore: EXPLORE,
+            metricQuery,
+            warehouseSqlBuilder: warehouseClientMock,
+            availableParameters: [],
+        }),
+    ).toThrow();
+});
+
+test('Should compile a formula SUMIF as a window aggregate', () => {
+    const metricQuery = {
+        ...METRIC_QUERY_NO_CALCS,
+        tableCalculations: [
+            {
+                name: 'formula_sumif',
+                displayName: 'Formula SumIf',
+                formula: '=SUMIF(table_3_metric_1, table_3_metric_1 > 100)',
+            } satisfies FormulaTableCalculation,
+        ],
+    };
+
+    const result = compileMetricQuery({
+        explore: EXPLORE,
+        metricQuery,
+        warehouseSqlBuilder: warehouseClientMock,
+        availableParameters: [],
+    });
+
+    const formulaCalc = result.compiledTableCalculations.find(
+        (c) => c.name === 'formula_sumif',
+    );
+
+    expect(formulaCalc?.compiledSql).toBe(
+        'SUM(CASE WHEN ("table_3_metric_1" > 100) THEN "table_3_metric_1" END) OVER ()',
+    );
+});
+
+describe('compilePostCalculationMetric', () => {
+    const sql = '"metric"';
+    const orderByClause = 'ORDER BY "week"';
+
+    const pivotedConfig: PivotConfiguration = {
+        indexColumn: { reference: 'week', type: VizIndexType.CATEGORY },
+        groupByColumns: [{ reference: 'employee' }],
+        valuesColumns: [],
+        sortBy: undefined,
+    };
+
+    const regularTableConfig: PivotConfiguration = {
+        indexColumn: { reference: 'week', type: VizIndexType.CATEGORY },
+        groupByColumns: [],
+        valuesColumns: [],
+        sortBy: undefined,
+    };
+
+    test('PERCENT_OF_TOTAL with no pivot configuration uses grand total', () => {
+        const result = compilePostCalculationMetric({
+            warehouseSqlBuilder: warehouseClientMock,
+            type: MetricType.PERCENT_OF_TOTAL,
+            sql,
+        });
+        expect(result).toBe(
+            '(CAST("metric" AS FLOAT) / CAST(NULLIF(SUM("metric") OVER(), 0) AS FLOAT))',
+        );
+    });
+
+    test('PERCENT_OF_TOTAL with row dimensions but no pivot uses grand total', () => {
+        // Regular table view (indexColumn set, no groupByColumns) — must NOT
+        // partition by the row dim, otherwise every row becomes 100%.
+        const result = compilePostCalculationMetric({
+            warehouseSqlBuilder: warehouseClientMock,
+            type: MetricType.PERCENT_OF_TOTAL,
+            sql,
+            pivotConfiguration: regularTableConfig,
+        });
+        expect(result).toBe(
+            '(CAST("metric" AS FLOAT) / CAST(NULLIF(SUM("metric") OVER(), 0) AS FLOAT))',
+        );
+    });
+
+    test('PERCENT_OF_TOTAL with pivot partitions by indexColumn (row total)', () => {
+        const result = compilePostCalculationMetric({
+            warehouseSqlBuilder: warehouseClientMock,
+            type: MetricType.PERCENT_OF_TOTAL,
+            sql,
+            pivotConfiguration: pivotedConfig,
+        });
+        expect(result).toBe(
+            '(CAST("metric" AS FLOAT) / CAST(NULLIF(SUM("metric") OVER(PARTITION BY "week"), 0) AS FLOAT))',
+        );
+    });
+
+    test('PERCENT_OF_TOTAL with pivot and array indexColumn partitions by all', () => {
+        const result = compilePostCalculationMetric({
+            warehouseSqlBuilder: warehouseClientMock,
+            type: MetricType.PERCENT_OF_TOTAL,
+            sql,
+            pivotConfiguration: {
+                ...pivotedConfig,
+                indexColumn: [
+                    { reference: 'week', type: VizIndexType.CATEGORY },
+                    { reference: 'region', type: VizIndexType.CATEGORY },
+                ],
+            },
+        });
+        expect(result).toBe(
+            '(CAST("metric" AS FLOAT) / CAST(NULLIF(SUM("metric") OVER(PARTITION BY "week", "region"), 0) AS FLOAT))',
+        );
+    });
+
+    test('RUNNING_TOTAL with pivot partitions by groupByColumns', () => {
+        const result = compilePostCalculationMetric({
+            warehouseSqlBuilder: warehouseClientMock,
+            type: MetricType.RUNNING_TOTAL,
+            sql,
+            pivotConfiguration: pivotedConfig,
+            orderByClause,
+        });
+        expect(result).toBe(
+            'SUM("metric") OVER (PARTITION BY "employee"ORDER BY "week" ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)',
+        );
+    });
+
+    test('PERCENT_OF_PREVIOUS with pivot partitions by groupByColumns', () => {
+        const result = compilePostCalculationMetric({
+            warehouseSqlBuilder: warehouseClientMock,
+            type: MetricType.PERCENT_OF_PREVIOUS,
+            sql,
+            pivotConfiguration: pivotedConfig,
+            orderByClause,
+        });
+        expect(result).toBe(
+            '(CAST("metric" AS FLOAT) / CAST(NULLIF(LAG("metric") OVER(PARTITION BY "employee"ORDER BY "week"), 0) AS FLOAT)) - 1',
+        );
+    });
 });

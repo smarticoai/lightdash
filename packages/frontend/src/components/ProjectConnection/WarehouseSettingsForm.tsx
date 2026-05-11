@@ -2,10 +2,12 @@ import { WarehouseTypes } from '@lightdash/common';
 import { Select } from '@mantine/core';
 import { type FC } from 'react';
 import { useFormContext } from './formContext';
+import AthenaForm from './WarehouseForms/AthenaForm';
 import BigQueryForm from './WarehouseForms/BigQueryForm';
 import ClickhouseForm from './WarehouseForms/ClickhouseForm';
 import DatabricksForm from './WarehouseForms/DatabricksForm';
 import { warehouseDefaultValues } from './WarehouseForms/defaultValues';
+import DuckdbForm from './WarehouseForms/DuckdbForm';
 import PostgresForm from './WarehouseForms/PostgresForm';
 import RedshiftForm from './WarehouseForms/RedshiftForm';
 import SnowflakeForm from './WarehouseForms/SnowflakeForm';
@@ -19,6 +21,8 @@ const WarehouseTypeLabels = {
     [WarehouseTypes.DATABRICKS]: 'Databricks',
     [WarehouseTypes.TRINO]: 'Trino',
     [WarehouseTypes.CLICKHOUSE]: 'ClickHouse',
+    [WarehouseTypes.ATHENA]: 'Athena',
+    [WarehouseTypes.DUCKDB]: 'MotherDuck',
 };
 
 const WarehouseTypeForms = {
@@ -29,6 +33,8 @@ const WarehouseTypeForms = {
     [WarehouseTypes.DATABRICKS]: DatabricksForm,
     [WarehouseTypes.TRINO]: TrinoForm,
     [WarehouseTypes.CLICKHOUSE]: ClickhouseForm,
+    [WarehouseTypes.ATHENA]: AthenaForm,
+    [WarehouseTypes.DUCKDB]: DuckdbForm,
 };
 
 interface WarehouseSettingsFormProps {

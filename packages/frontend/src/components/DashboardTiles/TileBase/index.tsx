@@ -10,15 +10,17 @@ import {
     Card,
     Flex,
     Group,
+    Menu,
     Paper,
     rem,
     Text,
     Tooltip,
 } from '@mantine-8/core';
 import { useDebouncedValue, useHover, useToggle } from '@mantine-8/hooks';
-import { clsx, Menu } from '@mantine/core';
+import { clsx } from '@mantine/core';
 import {
     IconArrowAutofitContent,
+    IconCircleCheckFilled,
     IconDots,
     IconEdit,
     IconGripVertical,
@@ -40,6 +42,7 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
     isEditMode,
     title,
     titleLeftIcon,
+    verification = null,
     chartName,
     description = null,
     tile,
@@ -93,6 +96,8 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
         tile.type === DashboardTileTypes.MARKDOWN && !title;
 
     const hasMenuContent = isEditMode || !!extraMenuItems;
+    const isVerified = verification !== null && verification !== undefined;
+    const hasHeaderContent = hasMenuContent || isVerified;
 
     return (
         <div ref={containerRef} className={styles.tileWrapper}>
@@ -113,7 +118,7 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
             {((containerHovered && !titleHovered && !chartHovered) ||
                 isMenuOpen ||
                 lockHeaderVisibility) &&
-                hasMenuContent && (
+                hasHeaderContent && (
                     <Paper
                         p={5}
                         className={clsx('non-draggable', styles.tileTooltip)}
@@ -132,6 +137,26 @@ const TileBase = <T extends Dashboard['tiles'][number]>({
                             )}
 
                             {extraHeaderElement}
+
+                            {isVerified && (
+                                <Tooltip
+                                    label={
+                                        verification?.verifiedBy
+                                            ? `Verified by ${verification.verifiedBy.firstName} ${verification.verifiedBy.lastName}`
+                                            : 'Verified'
+                                    }
+                                    withArrow
+                                    withinPortal
+                                >
+                                    <IconCircleCheckFilled
+                                        size={14}
+                                        style={{
+                                            flexShrink: 0,
+                                            color: 'var(--mantine-color-green-6)',
+                                        }}
+                                    />
+                                </Tooltip>
+                            )}
 
                             {hasMenuContent && (
                                 <Menu

@@ -14,6 +14,53 @@ import {
 } from '../plottedData/getPlottedData';
 import type { InfiniteQueryResults } from '../useQueryResults';
 
+type RowKeyValue = ReturnType<
+    typeof getPivotedData | typeof getPivotedDataFromPivotDetails
+>['rowKeyMap'][string];
+
+const getPivotGroupKey = (
+    pivotValues: Array<{ field: string; value: unknown }>,
+): string => pivotValues.map((pv) => `${pv.field}:${pv.value}`).join('|');
+
+const limitToFirstNPivotGroups = (
+    rowKeyValues: RowKeyValue[],
+    limit: number,
+): RowKeyValue[] => {
+    const seenGroups = new Set<string>();
+    return rowKeyValues.filter((rowKey) => {
+        if (typeof rowKey === 'string') return true;
+        const groupKey = rowKey.pivotValues
+            ? getPivotGroupKey(rowKey.pivotValues)
+            : undefined;
+        if (groupKey && !seenGroups.has(groupKey)) {
+            if (seenGroups.size >= limit) return false;
+            seenGroups.add(groupKey);
+        }
+        return true;
+    });
+};
+
+const hasSamePivotFields = (
+    series: Series,
+    expectedSeriesMap: Record<string, Series>,
+): boolean => {
+    const pivotValues = series.encode.yRef.pivotValues;
+    if (!pivotValues || pivotValues.length === 0) return false;
+
+    return Object.values(expectedSeriesMap).some((expectedSeries) => {
+        const expectedPivots = expectedSeries.encode.yRef.pivotValues;
+        return (
+            expectedSeries.encode.yRef.field === series.encode.yRef.field &&
+            expectedSeries.encode.xRef.field === series.encode.xRef.field &&
+            !!expectedPivots &&
+            expectedPivots.length === pivotValues.length &&
+            pivotValues.every((pv) =>
+                expectedPivots.some((epv) => epv.field === pv.field),
+            )
+        );
+    });
+};
+
 export type GetExpectedSeriesMapArgs = {
     defaultSmooth?: boolean;
     defaultShowSymbol?: boolean;
@@ -27,6 +74,7 @@ export type GetExpectedSeriesMapArgs = {
     availableDimensions: string[];
     defaultLabel?: Series['label'];
     itemsMap: ItemsMap | undefined;
+    columnLimit?: number;
 };
 
 export const getExpectedSeriesMap = ({
@@ -42,6 +90,7 @@ export const getExpectedSeriesMap = ({
     availableDimensions,
     defaultLabel,
     itemsMap,
+    columnLimit,
 }: GetExpectedSeriesMapArgs) => {
     let expectedSeriesMap: Record<string, Series>;
 
@@ -68,35 +117,41 @@ export const getExpectedSeriesMap = ({
                   ),
               );
 
-        expectedSeriesMap = Object.values(rowKeyMap).reduce<
-            Record<string, Series>
-        >((acc, rowKey) => {
-            let series: Series;
-            if (typeof rowKey === 'string') {
-                series = {
-                    ...defaultProperties,
-                    encode: {
-                        xRef: { field: xField },
-                        yRef: {
-                            field: rowKey,
+        let rowKeyValues = Object.values(rowKeyMap);
+        if (columnLimit !== undefined && columnLimit > 0) {
+            rowKeyValues = limitToFirstNPivotGroups(rowKeyValues, columnLimit);
+        }
+
+        expectedSeriesMap = rowKeyValues.reduce<Record<string, Series>>(
+            (acc, rowKey) => {
+                let series: Series;
+                if (typeof rowKey === 'string') {
+                    series = {
+                        ...defaultProperties,
+                        encode: {
+                            xRef: { field: xField },
+                            yRef: {
+                                field: rowKey,
+                            },
                         },
-                    },
-                };
-            } else {
-                series = {
-                    ...defaultProperties,
-                    encode: {
-                        xRef: { field: xField },
-                        yRef: rowKey,
-                    },
-                    stack:
-                        defaultAreaStyle || isStacked
-                            ? rowKey.field
-                            : undefined,
-                };
-            }
-            return { ...acc, [getSeriesId(series)]: series };
-        }, {});
+                    };
+                } else {
+                    series = {
+                        ...defaultProperties,
+                        encode: {
+                            xRef: { field: xField },
+                            yRef: rowKey,
+                        },
+                        stack:
+                            defaultAreaStyle || isStacked
+                                ? rowKey.field
+                                : undefined,
+                    };
+                }
+                return { ...acc, [getSeriesId(series)]: series };
+            },
+            {},
+        );
     } else {
         expectedSeriesMap = (yFields || []).reduce<Record<string, Series>>(
             (sum, yField) => {
@@ -124,11 +179,13 @@ export const getExpectedSeriesMap = ({
 type MergeExistingAndExpectedSeriesArgs = {
     expectedSeriesMap: Record<string, Series>;
     existingSeries: Series[];
+    sortedByPivot: boolean;
 };
 
 export const mergeExistingAndExpectedSeries = ({
     expectedSeriesMap,
     existingSeries,
+    sortedByPivot,
 }: MergeExistingAndExpectedSeriesArgs) => {
     const { existingValidSeries, existingValidSeriesIds } =
         existingSeries.reduce<{
@@ -138,18 +195,12 @@ export const mergeExistingAndExpectedSeries = ({
             (sum, series) => {
                 const id = getSeriesId(series);
 
-                // this results in a string without the pivot values
-                //e.g. 'orders_order_date_month|orders_average_order_size.orders_is_completed.true' -> 'orders_order_date_month|orders_average_order_size.orders_is_completed'
-                // used to check if the series is not expected but part of the same pivot of expected series
-                const idWithoutPivotValues = id.replace(/\.[^.]+$/, '');
-
                 const isSeriesExpected =
                     Object.keys(expectedSeriesMap).includes(id);
 
                 const isSeriesFilteredOut =
-                    Object.keys(expectedSeriesMap).some((expectedId) =>
-                        expectedId.startsWith(idWithoutPivotValues),
-                    ) && !isSeriesExpected;
+                    !isSeriesExpected &&
+                    hasSamePivotFields(series, expectedSeriesMap);
 
                 if (!isSeriesExpected && !isSeriesFilteredOut) {
                     return { ...sum };
@@ -174,60 +225,56 @@ export const mergeExistingAndExpectedSeries = ({
         return Object.values(expectedSeriesMap);
     }
 
-    // add missing series in the correct order (next to series of the same group)
-    return Object.entries(expectedSeriesMap).reduce<Series[]>(
+    // add missing series, inheriting properties from existing series in the same group
+    const mergedSeries = Object.entries(expectedSeriesMap).reduce<Series[]>(
         (acc, [expectedSeriesId, expectedSeries]) => {
             // Don't add the expected series if there is a valid one already
             if (existingValidSeriesIds.includes(expectedSeriesId)) {
-                return [...acc];
+                return acc;
             }
 
             let seriesToAdd = expectedSeries;
 
-            // Add series to the end of its group
+            // For pivot series, inherit yAxisIndex from existing series with same field
             if (
                 seriesToAdd.encode.yRef.pivotValues &&
                 seriesToAdd.encode.yRef.pivotValues.length > 0
             ) {
-                // Find a series with the same field to inherit properties like yAxisIndex
                 const seriesInSameGroup = acc.find(
                     (series) =>
                         seriesToAdd.encode.yRef.field ===
                         series.encode.yRef.field,
                 );
 
-                // Inherit yAxisIndex from existing series with same field
-                const seriesWithInheritedProps = seriesInSameGroup
-                    ? {
-                          ...seriesToAdd,
-                          yAxisIndex: seriesInSameGroup.yAxisIndex,
-                      }
-                    : seriesToAdd;
-
-                const lastSeriesInGroupIndex = acc
-                    .reverse()
-                    .findIndex(
-                        (series) =>
-                            seriesToAdd.encode.yRef.field ===
-                            series.encode.yRef.field,
-                    );
-                if (lastSeriesInGroupIndex >= 0) {
-                    return [
-                        // part of the array before the specified index
-                        ...acc.slice(0, lastSeriesInGroupIndex),
-                        // inserted item
-                        seriesWithInheritedProps,
-                        // part of the array after the specified index
-                        ...acc.slice(lastSeriesInGroupIndex),
-                    ].reverse();
+                if (seriesInSameGroup) {
+                    seriesToAdd = {
+                        ...seriesToAdd,
+                        yAxisIndex: seriesInSameGroup.yAxisIndex,
+                    };
                 }
-                return [...acc.reverse(), seriesWithInheritedProps];
             }
-            // Add series to the end
+
             return [...acc, seriesToAdd];
         },
         existingValidSeries,
     );
+
+    // Reorder series to match expectedSeriesMap order only when sorted by
+    // a pivot dimension. This respects the query sort for grouped dimensions
+    // while preserving manual series ordering when sorting by other fields.
+    if (!sortedByPivot) {
+        return mergedSeries;
+    }
+
+    const expectedSeriesIds = Object.keys(expectedSeriesMap);
+    return [...mergedSeries].sort((a, b) => {
+        const aIndex = expectedSeriesIds.indexOf(getSeriesId(a));
+        const bIndex = expectedSeriesIds.indexOf(getSeriesId(b));
+        if (aIndex === -1 && bIndex === -1) return 0;
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+    });
 };
 
 export const getSeriesGroupedByField = (series: Series[]) => {

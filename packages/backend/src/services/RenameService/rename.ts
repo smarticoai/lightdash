@@ -28,6 +28,8 @@ import {
     SavedChartDAO,
     SchedulerAndTargets,
     TableCalculationTemplateType,
+    type ConditionalFormattingConfig,
+    type SankeyChartConfig,
 } from '@lightdash/common';
 
 /* There are different methods to replace model names
@@ -263,6 +265,36 @@ export const renameChartConfigType = (
         replaceReference,
     }: ReturnType<typeof createRenameFactory>,
 ): ChartConfig => {
+    const renameConditionalFormattings = (
+        conditionalFormattings: ConditionalFormattingConfig[] | undefined,
+    ) =>
+        conditionalFormattings?.map((config) => ({
+            ...config,
+            target: config.target
+                ? {
+                      ...config.target,
+                      fieldId: replaceId(config.target.fieldId),
+                  }
+                : null,
+            ...('rules' in config && {
+                rules: config.rules.map((rule) =>
+                    'compareTarget' in rule
+                        ? {
+                              ...rule,
+                              compareTarget: rule.compareTarget
+                                  ? {
+                                        ...rule.compareTarget,
+                                        fieldId: replaceId(
+                                            rule.compareTarget.fieldId,
+                                        ),
+                                    }
+                                  : null,
+                          }
+                        : rule,
+                ),
+            }),
+        }));
+
     const chartType = chartConfig.type;
     switch (chartType) {
         case ChartType.CARTESIAN:
@@ -319,6 +351,9 @@ export const renameChartConfigType = (
                               ) // Not exactly a reference, since the format is different (eg: ${payment.amount} vs ${payment_amount})
                             : undefined,
                     },
+                    conditionalFormattings: renameConditionalFormattings(
+                        chartConfig.config?.conditionalFormattings,
+                    ),
                     metadata: chartConfig.config?.metadata
                         ? Object.fromEntries(
                               Object.entries(chartConfig.config?.metadata).map(
@@ -359,22 +394,9 @@ export const renameChartConfigType = (
                             ([key, value]) => [replaceId(key), value],
                         ),
                     ), // replaceKeys<ColumnProperties>(chartConfig.config?.columns || {})
-                    conditionalFormattings: chartConfig.config
-                        ?.conditionalFormattings
-                        ? chartConfig.config?.conditionalFormattings.map(
-                              (cd) => ({
-                                  ...cd,
-                                  target: cd.target
-                                      ? {
-                                            ...cd.target,
-                                            fieldId: replaceId(
-                                                cd.target.fieldId,
-                                            ),
-                                        }
-                                      : null,
-                              }),
-                          )
-                        : undefined,
+                    conditionalFormattings: renameConditionalFormattings(
+                        chartConfig.config?.conditionalFormattings,
+                    ),
                 },
             };
 
@@ -448,6 +470,24 @@ export const renameChartConfigType = (
                 },
             };
 
+        case ChartType.SANKEY: {
+            const sankeyConfig = chartConfig as SankeyChartConfig;
+            return {
+                ...sankeyConfig,
+                config: {
+                    ...sankeyConfig.config,
+                    sourceFieldId: replaceOptionalId(
+                        sankeyConfig.config?.sourceFieldId,
+                    ),
+                    targetFieldId: replaceOptionalId(
+                        sankeyConfig.config?.targetFieldId,
+                    ),
+                    metricFieldId: replaceOptionalId(
+                        sankeyConfig.config?.metricFieldId,
+                    ),
+                },
+            };
+        }
         default:
             assertUnreachable(
                 chartType,
@@ -491,9 +531,7 @@ export const renameFilterGroups = (
         };
     }
 
-    throw new Error(
-        `Invalid filter format ${JSON.stringify(filters)}, ${filters}`,
-    );
+    return assertUnreachable(filters, 'Invalid filter format');
 };
 
 export const renameFilters = (
@@ -655,6 +693,7 @@ export const getNameChanges = ({
     toFieldName?: string;
 }): NameChanges => {
     if (from === to) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- ParameterError extends Error
         throw new ParameterError(
             'Old and new names are the same, nothing to rename',
         );
@@ -664,6 +703,7 @@ export const getNameChanges = ({
         // Both must start with the same table prefix, this means the fieldId is only a field rename
 
         if (!from.startsWith(`${table}_`) && to.startsWith(`${table}_`)) {
+            // eslint-disable-next-line @typescript-eslint/only-throw-error -- ParameterError extends Error
             throw new ParameterError(
                 'New name does not start with the same table prefix as the old name',
             );
@@ -786,9 +826,13 @@ export const renameDashboard = (
 
     let hasChanges = false;
 
-    const containsModelName = buildModelNameChecker([
-        addSuffixIfPrefix(nameChanges.from, isPrefix),
-    ]);
+    const searchTerms = isPrefix
+        ? [
+              addSuffixIfPrefix(nameChanges.from, true), // "model_" for fieldId matches
+              nameChanges.from, // "model" for tableName matches
+          ]
+        : [nameChanges.from];
+    const containsModelName = buildModelNameChecker(searchTerms);
 
     if (!containsModelName(dashboard)) {
         return { updatedDashboard: dashboard, hasChanges: false };
@@ -887,7 +931,7 @@ export const renameDashboardScheduler = (
         hasChanges = true;
 
         const updateTarget = (target: DashboardFieldTarget) => {
-            /* sample target filter:    
+            /* sample target filter:
                 "target": {
                     "fieldId": "purchases_payment_method",
                     "fieldName": "payment_method",

@@ -36,23 +36,21 @@ import {
 } from '../../hooks/useChartColorConfig/utils';
 import usePivotDimensions from '../../hooks/usePivotDimensions';
 import { type InfiniteQueryResults } from '../../hooks/useQueryResults';
-import {
-    useClientFeatureFlag,
-    useServerFeatureFlag,
-} from '../../hooks/useServerOrClientFeatureFlag';
+import { useServerFeatureFlag } from '../../hooks/useServerOrClientFeatureFlag';
 import { type EChartsReact } from '../EChartsReactWrapper';
 import { type EchartsSeriesClickEvent } from '../SimpleChart';
+import Context from './context';
+import { type useVisualizationContext } from './useVisualizationContext';
 import VisualizationBigNumberConfig from './VisualizationBigNumberConfig';
 import VisualizationCartesianConfig from './VisualizationConfigCartesian';
 import VisualizationConfigFunnel from './VisualizationConfigFunnel';
 import VisualizationGaugeConfig from './VisualizationConfigGauge';
 import VisualizationMapConfig from './VisualizationConfigMap';
 import VisualizationPieConfig from './VisualizationConfigPie';
+import VisualizationConfigSankey from './VisualizationConfigSankey';
 import VisualizationTableConfig from './VisualizationConfigTable';
 import VisualizationTreemapConfig from './VisualizationConfigTreemap';
 import VisualizationCustomConfig from './VisualizationCustomConfig';
-import Context from './context';
-import { type useVisualizationContext } from './useVisualizationContext';
 
 export type VisualizationProviderProps = {
     minimal?: boolean;
@@ -62,6 +60,7 @@ export type VisualizationProviderProps = {
     resultsData: InfiniteQueryResults & {
         metricQuery?: MetricQuery;
         fields?: ItemsMap;
+        resolvedTimezone?: string;
     };
     parameters?: ParametersValuesMap;
     isLoading: boolean;
@@ -85,6 +84,7 @@ export type VisualizationProviderProps = {
     containerWidth?: number;
     containerHeight?: number;
     isDashboard?: boolean;
+    isEditMode?: boolean;
     dateZoom?: DateZoom;
 };
 
@@ -116,6 +116,7 @@ const VisualizationProvider: FC<
     containerWidth,
     containerHeight,
     isDashboard,
+    isEditMode,
     dateZoom,
 }) => {
     const itemsMap = useMemo(() => {
@@ -142,7 +143,11 @@ const VisualizationProvider: FC<
         };
     }, [setEchartsRef]);
     const [lastValidResultsData, setLastValidResultsData] = useState<
-        InfiniteQueryResults & { metricQuery?: MetricQuery; fields?: ItemsMap }
+        InfiniteQueryResults & {
+            metricQuery?: MetricQuery;
+            fields?: ItemsMap;
+            resolvedTimezone?: string;
+        }
     >();
 
     const { data: useSqlPivotResults } = useServerFeatureFlag(
@@ -255,9 +260,11 @@ const VisualizationProvider: FC<
         [calculateKeyColorAssignment, itemsMap],
     );
 
-    const isCalculateSeriesColorEnabled = useClientFeatureFlag(
+    const { data: calculateSeriesColorFlag } = useServerFeatureFlag(
         FeatureFlags.CalculateSeriesColor,
     );
+    const isCalculateSeriesColorEnabled =
+        calculateSeriesColorFlag?.enabled ?? false;
 
     /**
      * Gets a shared color for a given series.
@@ -359,7 +366,9 @@ const VisualizationProvider: FC<
         containerWidth,
         containerHeight,
         isDashboard,
+        isEditMode,
         isTouchDevice,
+        resolvedTimezone: lastValidResultsData?.resolvedTimezone,
     };
 
     switch (chartConfig.type) {
@@ -542,6 +551,26 @@ const VisualizationProvider: FC<
                         </Context.Provider>
                     )}
                 </VisualizationCustomConfig>
+            );
+        case ChartType.SANKEY:
+            return (
+                <VisualizationConfigSankey
+                    itemsMap={itemsMap}
+                    resultsData={lastValidResultsData}
+                    initialChartConfig={chartConfig.config}
+                    onChartConfigChange={handleChartConfigChange}
+                    colorPalette={colorPalette}
+                    tableCalculationsMetadata={tableCalculationsMetadata}
+                    parameters={parameters}
+                >
+                    {({ visualizationConfig }) => (
+                        <Context.Provider
+                            value={{ ...value, visualizationConfig }}
+                        >
+                            {children}
+                        </Context.Provider>
+                    )}
+                </VisualizationConfigSankey>
             );
         default:
             return assertUnreachable(chartConfig, 'Unknown chart type');

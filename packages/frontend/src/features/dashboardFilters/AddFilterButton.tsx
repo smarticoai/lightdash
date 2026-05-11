@@ -1,4 +1,4 @@
-import { type DashboardFilterRule } from '@lightdash/common';
+import { FeatureFlags, type DashboardFilterRule } from '@lightdash/common';
 import {
     Button,
     Divider,
@@ -8,14 +8,17 @@ import {
     Tooltip,
 } from '@mantine-8/core';
 import { useDisclosure, useId } from '@mantine-8/hooks';
-import { IconRotate2 } from '@tabler/icons-react';
-import { type FC, useCallback, useMemo } from 'react';
+import { IconEye, IconEyeOff, IconRotate2 } from '@tabler/icons-react';
+import { useCallback, useMemo, type FC } from 'react';
 import MantineIcon from '../../components/common/MantineIcon';
+import { useServerFeatureFlag } from '../../hooks/useServerOrClientFeatureFlag';
 import useDashboardContext from '../../providers/Dashboard/useDashboardContext';
+import useDashboardTileStatusContext from '../../providers/Dashboard/useDashboardTileStatusContext';
 import FilterConfiguration from './FilterConfiguration';
 
 type Props = {
     isEditMode: boolean;
+    activeTabUuid: string | undefined;
     openPopoverId: string | undefined;
     onPopoverOpen: (popoverId: string) => void;
     onPopoverClose: () => void;
@@ -25,6 +28,7 @@ type Props = {
 
 const AddFilterButton: FC<Props> = ({
     isEditMode,
+    activeTabUuid,
     openPopoverId,
     onPopoverOpen,
     onPopoverClose,
@@ -32,12 +36,26 @@ const AddFilterButton: FC<Props> = ({
     onResetDashboardFilters,
 }) => {
     const popoverId = useId();
+    const isAddFilterDisabled = useDashboardContext(
+        (c) => c.isAddFilterDisabled,
+    );
+    const setIsAddFilterDisabled = useDashboardContext(
+        (c) => c.setIsAddFilterDisabled,
+    );
     const dashboardTiles = useDashboardContext((c) => c.dashboardTiles);
     const dashboardTabs = useDashboardContext((c) => c.dashboardTabs);
     const allFilterableFields = useDashboardContext(
         (c) => c.allFilterableFields,
     );
-    const sqlChartTilesMetadata = useDashboardContext(
+    const allFilterableMetrics = useDashboardContext(
+        (c) => c.allFilterableMetrics,
+    );
+    const { data: metricDashboardFiltersFlag } = useServerFeatureFlag(
+        FeatureFlags.MetricDashboardFilters,
+    );
+    const isMetricFiltersEnabled =
+        metricDashboardFiltersFlag?.enabled ?? import.meta.env.DEV;
+    const sqlChartTilesMetadata = useDashboardTileStatusContext(
         (c) => c.sqlChartTilesMetadata,
     );
     const disabled = useMemo(() => {
@@ -59,7 +77,8 @@ const AddFilterButton: FC<Props> = ({
     const haveFiltersChanged = useDashboardContext(
         (c) =>
             c.haveFiltersChanged ||
-            c.dashboardTemporaryFilters.dimensions.length > 0,
+            c.dashboardTemporaryFilters.dimensions.length > 0 ||
+            c.dashboardTemporaryFilters.metrics.length > 0,
     );
 
     const setHaveFiltersChanged = useDashboardContext(
@@ -85,6 +104,35 @@ const AddFilterButton: FC<Props> = ({
     );
 
     const showResetFiltersButton = !isEditMode && haveFiltersChanged;
+    const hasAttachedButton = showResetFiltersButton || isEditMode;
+
+    if (isAddFilterDisabled && !isEditMode) {
+        if (showResetFiltersButton)
+            return (
+                <Tooltip label="Reset all filters" withinPortal>
+                    <Button
+                        aria-label="Reset all filters"
+                        size="xs"
+                        variant="default"
+                        radius="md"
+                        color="gray"
+                        onClick={() => {
+                            setHaveFiltersChanged(false);
+                            onResetDashboardFilters();
+                        }}
+                        styles={{
+                            root: {
+                                borderRadius: '100px',
+                                borderStyle: 'dashed',
+                            },
+                        }}
+                    >
+                        <MantineIcon icon={IconRotate2} />
+                    </Button>
+                </Tooltip>
+            );
+        return null;
+    }
 
     return (
         <Group gap={0}>
@@ -124,7 +172,7 @@ const AddFilterButton: FC<Props> = ({
                         <Button
                             size="xs"
                             variant="default"
-                            radius="md"
+                            radius={100}
                             disabled={disabled}
                             loading={
                                 isLoadingDashboardFilters ||
@@ -133,19 +181,13 @@ const AddFilterButton: FC<Props> = ({
                             styles={{
                                 root: {
                                     borderStyle: 'dashed',
-                                    borderRadius: '100px',
-                                    ...(showResetFiltersButton
+                                    ...(hasAttachedButton
                                         ? {
                                               borderRightWidth: '0px',
                                               borderTopRightRadius: '0px',
                                               borderBottomRightRadius: '0px',
                                           }
-                                        : {
-                                              borderRightStyle: 'dashed',
-                                              borderRightWidth: '1px',
-                                              borderTopRightRadius: '100px',
-                                              borderBottomRightRadius: '100px',
-                                          }),
+                                        : {}),
                                 },
                             }}
                             onClick={() =>
@@ -164,7 +206,13 @@ const AddFilterButton: FC<Props> = ({
                         <FilterConfiguration
                             isCreatingNew={true}
                             isEditMode={isEditMode}
-                            fields={allFilterableFields || []}
+                            activeTabUuid={activeTabUuid}
+                            fields={[
+                                ...(allFilterableFields || []),
+                                ...(isMetricFiltersEnabled
+                                    ? (allFilterableMetrics ?? [])
+                                    : []),
+                            ]}
                             tiles={dashboardTiles}
                             tabs={dashboardTabs}
                             availableTileFilters={
@@ -179,6 +227,47 @@ const AddFilterButton: FC<Props> = ({
                     )}
                 </Popover.Dropdown>
             </Popover>
+
+            {isEditMode && (
+                <>
+                    <Divider orientation="vertical" />
+
+                    <Tooltip
+                        label={
+                            isAddFilterDisabled
+                                ? 'Hidden from viewers. Click to show.'
+                                : 'Visible to viewers. Click to hide.'
+                        }
+                        withinPortal
+                    >
+                        <Button
+                            aria-label="Toggle filter visibility for viewers"
+                            size="xs"
+                            variant="default"
+                            color="gray"
+                            onClick={() =>
+                                setIsAddFilterDisabled(!isAddFilterDisabled)
+                            }
+                            styles={{
+                                root: {
+                                    borderLeft: '0px',
+                                    borderStartStartRadius: '0px',
+                                    borderEndStartRadius: '0px',
+                                    borderStartEndRadius: '100px',
+                                    borderEndEndRadius: '100px',
+                                    borderStyle: 'dashed',
+                                },
+                            }}
+                        >
+                            <MantineIcon
+                                icon={
+                                    isAddFilterDisabled ? IconEyeOff : IconEye
+                                }
+                            />
+                        </Button>
+                    </Tooltip>
+                </>
+            )}
 
             {showResetFiltersButton && (
                 <>

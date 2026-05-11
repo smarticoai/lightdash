@@ -6,40 +6,46 @@ import {
     FeatureFlags,
     ForbiddenError,
     GenerateChartMetadataRequest,
-    GenerateTableCalculationRequest,
-    GenerateTooltipRequest,
     GeneratedChartMetadata,
+    GeneratedFormulaTableCalculation,
     GeneratedTableCalculation,
     GeneratedTooltip,
+    GenerateFormulaTableCalculationRequest,
+    GenerateTableCalculationRequest,
+    GenerateTooltipRequest,
+    getErrorMessage,
+    getItemId,
+    isDashboardChartTileType,
+    isField,
     ItemsMap,
     QueryExecutionContext,
     SessionUser,
     TableCalculationType,
     UnexpectedServerError,
-    getErrorMessage,
-    getItemId,
-    isDashboardChartTileType,
-    isField,
 } from '@lightdash/common';
-import { LanguageModel } from 'ai';
 import { LightdashAnalytics } from '../../../analytics/LightdashAnalytics';
 import { fromSession } from '../../../auth/account';
 import { LightdashConfig } from '../../../config/parseConfig';
 import { DashboardModel } from '../../../models/DashboardModel/DashboardModel';
-import { isFeatureFlagEnabled } from '../../../postHog';
 import { FeatureFlagService } from '../../../services/FeatureFlag/FeatureFlagService';
 import { ProjectService } from '../../../services/ProjectService/ProjectService';
 import {
+    ConvertSqlToFormulaGenerated,
     CustomVizGenerated,
     DashboardSummaryCreated,
     DashboardSummaryViewed,
     GenerateChartMetadataGenerated,
+    GenerateFormulaTableCalculationGenerated,
     GenerateTableCalculationGenerated,
     GenerateTooltipGenerated,
 } from '../../analytics';
 import OpenAi from '../../clients/OpenAi';
 import { DashboardSummaryModel } from '../../models/DashboardSummaryModel';
 import { generateChartMetadata as generateChartMetadataFromContext } from '../ai/agents/chartMetadataGenerator';
+import {
+    generateFormulaTableCalculation as generateFormulaTableCalculationFromContext,
+    sanitizeCustomFormat as sanitizeFormulaCustomFormat,
+} from '../ai/agents/formulaTableCalculationGenerator';
 import {
     generateTableCalculation as generateTableCalculationFromContext,
     sanitizeCustomFormat,
@@ -109,9 +115,9 @@ export class AiService {
      * 2. Falls back to AI Copilot if the feature flag is enabled for the user,
      *    using their configured model.
      *
-     * @returns The language model
+     * @returns The full AiModel with model, callOptions, and providerOptions
      */
-    private async getAmbientAiModel(user: SessionUser): Promise<LanguageModel> {
+    private async getAmbientAiModel(user: SessionUser) {
         const anthropicConfig =
             this.lightdashConfig.ai.copilot.providers.anthropic;
 
@@ -122,10 +128,9 @@ export class AiService {
                     'claude-haiku-4-5 preset not found',
                 );
             }
-            const aiModel = getAnthropicModel(anthropicConfig, preset, {
+            return getAnthropicModel(anthropicConfig, preset, {
                 enableReasoning: false,
             });
-            return aiModel.model;
         }
 
         const aiCopilotFlag = await this.featureFlagService.get({
@@ -137,23 +142,19 @@ export class AiService {
             throw new ForbiddenError('Ambient AI is not available');
         }
 
-        const aiModel = getModel(this.lightdashConfig.ai.copilot, {
+        return getModel(this.lightdashConfig.ai.copilot, {
             enableReasoning: false,
             useFastModel: true,
         });
-        return aiModel.model;
     }
 
-    private static async throwOnFeatureDisabled(user: SessionUser) {
-        const isAIDashboardSummaryEnabled = await isFeatureFlagEnabled(
-            'ai-dashboard-summary' as FeatureFlags,
+    private async throwOnFeatureDisabled(user: SessionUser) {
+        const { enabled } = await this.featureFlagService.get({
             user,
-            {
-                throwOnTimeout: true,
-            },
-        );
+            featureFlagId: FeatureFlags.AiDashboardSummary,
+        });
 
-        if (!isAIDashboardSummaryEnabled) {
+        if (!enabled) {
             throw new Error('AI Dashboard summary feature not enabled!');
         }
     }
@@ -238,15 +239,12 @@ export class AiService {
         }[];
         currentVizConfig: string;
     }) {
-        const isAICustomVizEnabled = await isFeatureFlagEnabled(
-            FeatureFlags.AiCustomViz,
+        const aiCustomVizFlag = await this.featureFlagService.get({
             user,
-            {
-                throwOnTimeout: true,
-            },
-        );
+            featureFlagId: FeatureFlags.AiCustomViz,
+        });
 
-        if (!isAICustomVizEnabled) {
+        if (!aiCustomVizFlag.enabled) {
             throw new Error('AI Custom viz feature not enabled!');
         }
         let openAiResponse: {
@@ -313,7 +311,7 @@ export class AiService {
         dashboardUuid: string,
         opts: Pick<DashboardSummary, 'context' | 'tone' | 'audiences'>,
     ) {
-        await AiService.throwOnFeatureDisabled(user);
+        await this.throwOnFeatureDisabled(user);
         const startTime = new Date().getTime();
         const dashboard =
             await this.dashboardModel.getByIdOrSlug(dashboardUuid);
@@ -422,7 +420,7 @@ export class AiService {
         projectUuid: string,
         dashboardUuidOrSlug: string,
     ) {
-        await AiService.throwOnFeatureDisabled(user);
+        await this.throwOnFeatureDisabled(user);
 
         const dashboard =
             await this.dashboardModel.getByIdOrSlug(dashboardUuidOrSlug);
@@ -448,9 +446,9 @@ export class AiService {
         projectUuid: string,
         payload: GenerateChartMetadataRequest,
     ): Promise<GeneratedChartMetadata> {
-        const model = await this.getAmbientAiModel(user);
+        const modelOptions = await this.getAmbientAiModel(user);
 
-        const result = await generateChartMetadataFromContext(model, {
+        const result = await generateChartMetadataFromContext(modelOptions, {
             tableName: payload.tableName,
             chartType: payload.chartType,
             dimensions: payload.dimensions,
@@ -478,7 +476,7 @@ export class AiService {
         projectUuid: string,
         payload: GenerateTableCalculationRequest,
     ): Promise<GeneratedTableCalculation> {
-        const model = await this.getAmbientAiModel(user);
+        const modelOptions = await this.getAmbientAiModel(user);
         const project = await this.projectService.getProject(
             projectUuid,
             fromSession(user),
@@ -489,7 +487,7 @@ export class AiService {
             throw new ForbiddenError('Warehouse type is not available');
         }
 
-        const result = await generateTableCalculationFromContext(model, {
+        const result = await generateTableCalculationFromContext(modelOptions, {
             prompt: payload.prompt,
             tableName: payload.tableName,
             warehouseType,
@@ -512,7 +510,49 @@ export class AiService {
             sql: result.sql,
             displayName: result.displayName,
             type: result.type as TableCalculationType,
-            format: sanitizeCustomFormat(result.format),
+            format: sanitizeCustomFormat(result.format ?? undefined),
+        };
+    }
+
+    async generateFormulaTableCalculation(
+        user: SessionUser,
+        projectUuid: string,
+        payload: GenerateFormulaTableCalculationRequest,
+    ): Promise<GeneratedFormulaTableCalculation> {
+        const modelOptions = await this.getAmbientAiModel(user);
+
+        const result = await generateFormulaTableCalculationFromContext(
+            modelOptions,
+            payload,
+        );
+
+        if (payload.mode === 'convert-sql') {
+            this.analytics.track<ConvertSqlToFormulaGenerated>({
+                userId: user.userUuid,
+                event: 'ai.formula_table_calculation.converted_from_sql',
+                properties: {
+                    organizationId: user.organizationUuid!,
+                    projectId: projectUuid,
+                    userId: user.userUuid,
+                },
+            });
+        } else {
+            this.analytics.track<GenerateFormulaTableCalculationGenerated>({
+                userId: user.userUuid,
+                event: 'ai.formula_table_calculation.generated',
+                properties: {
+                    organizationId: user.organizationUuid!,
+                    projectId: projectUuid,
+                    userId: user.userUuid,
+                },
+            });
+        }
+
+        return {
+            formula: result.formula,
+            displayName: result.displayName,
+            type: result.type as TableCalculationType,
+            format: sanitizeFormulaCustomFormat(result.format ?? undefined),
         };
     }
 
@@ -521,9 +561,9 @@ export class AiService {
         projectUuid: string,
         payload: GenerateTooltipRequest,
     ): Promise<GeneratedTooltip> {
-        const model = await this.getAmbientAiModel(user);
+        const modelOptions = await this.getAmbientAiModel(user);
 
-        const result = await generateTooltipFromContext(model, {
+        const result = await generateTooltipFromContext(modelOptions, {
             prompt: payload.prompt,
             fieldsContext: payload.fieldsContext,
             currentHtml: payload.currentHtml,

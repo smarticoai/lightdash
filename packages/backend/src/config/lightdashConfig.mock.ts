@@ -97,9 +97,16 @@ export const lightdashConfigMock: LightdashConfig = {
         enabled: false,
         port: 9090,
         path: '/metrics',
+        eventMetricsEnabled: false,
+        allQueryMetricsEnabled: false,
     },
     chart: { versionHistory: { daysLimit: 0 } },
-    dashboard: { maxTilesPerTab: 50, maxTabsPerDashboard: 20 },
+    dashboard: {
+        maxTilesPerTab: 50,
+        maxTabsPerDashboard: 20,
+        versionHistory: { daysLimit: 0 },
+        disableSentryTracking: false,
+    },
     database: {
         connectionUri: undefined,
         maxConnections: undefined,
@@ -128,6 +135,7 @@ export const lightdashConfigMock: LightdashConfig = {
     },
     maxPayloadSize: '',
     pivotTable: { maxColumnLimit: 0 },
+    enableImprovedExcelDates: false,
     posthog: undefined,
     s3: {
         endpoint: 'mock_endpoint',
@@ -144,6 +152,12 @@ export const lightdashConfigMock: LightdashConfig = {
             region: 'mock_region',
         },
     },
+    natsWorker: {
+        enabled: false,
+        url: undefined,
+        workerConcurrency: 1,
+        queueTimeoutMs: 180000,
+    },
     rudder: {
         writeKey: '',
         dataPlaneUrl: '',
@@ -151,6 +165,7 @@ export const lightdashConfigMock: LightdashConfig = {
     scheduler: {
         concurrency: 0,
         enabled: false,
+        pollInterval: 1000,
         jobTimeout: 0,
         tasks: ALL_TASK_NAMES,
         queryHistory: {
@@ -176,6 +191,7 @@ export const lightdashConfigMock: LightdashConfig = {
         release: '',
         environment: '',
         tracesSampleRate: 0,
+        queryTracesSampleRate: null,
         profilesSampleRate: 0,
         anr: {
             enabled: false,
@@ -204,8 +220,8 @@ export const lightdashConfigMock: LightdashConfig = {
         defaultLimit: 500,
         csvCellsLimit: 100000,
         timezone: undefined,
-        useSqlPivotResults: false,
-        showExecutionTime: false,
+        retryQueryOnTransientErrors: true,
+        enableTimezoneSupport: undefined,
     },
     ai: {
         copilot: {
@@ -220,7 +236,7 @@ export const lightdashConfigMock: LightdashConfig = {
             providers: {
                 openai: {
                     apiKey: 'mock_api_key',
-                    modelName: 'gpt-4.1-2025-04-14',
+                    modelName: 'gpt-5.4',
                     embeddingModelName: 'text-embedding-3-small',
                     zeroDataRetention: false,
                 },
@@ -239,9 +255,6 @@ export const lightdashConfigMock: LightdashConfig = {
             charts: false,
         },
         events: undefined,
-    },
-    scim: {
-        enabled: false,
     },
     security: {
         contentSecurityPolicy: {
@@ -265,6 +278,7 @@ export const lightdashConfigMock: LightdashConfig = {
     },
     headlessBrowser: {
         internalLightdashHost: 'https://test.lightdash.cloud',
+        internalLightdashHostIgnoreHttpsErrors: false,
         browserEndpoint: 'ws://headless-browser:3000',
         maxScreenshotRetries: 5,
         retryBaseDelayMs: 3000,
@@ -282,17 +296,26 @@ export const lightdashConfigMock: LightdashConfig = {
     organizationWarehouseCredentials: {
         enabled: false,
     },
+    athenaWarehouseIamRoleAuth: {
+        enabled: false,
+    },
+    saveCredentialsForm: {
+        enabled: false,
+    },
     googleCloudPlatform: {
         projectId: 'test-project-id',
+    },
+    managedAgent: {
+        anthropicApiKey: null,
+        skillIds: [],
+        schedule: '0 0 * * *',
+        sessionTimeoutMs: 300000,
     },
     mcp: {
         enabled: true,
     },
     customRoles: {
         enabled: false,
-    },
-    dashboardComments: {
-        enabled: true,
     },
     echarts6: {
         enabled: false,
@@ -301,18 +324,47 @@ export const lightdashConfigMock: LightdashConfig = {
         enabled: false,
     },
     partialCompilation: {
-        enabled: false,
+        enabled: true,
     },
     funnelBuilder: {
         enabled: false,
     },
-    metricsCatalog: {
-        echartsVisualizationEnabled: false,
-    },
-    maps: {
+    persistentDownloadUrls: {
         enabled: false,
+        expirationSeconds: 259200,
+        expirationSecondsEmail: undefined,
+        expirationSecondsSlack: undefined,
+        expirationSecondsMsTeams: undefined,
     },
-    nestedSpacesPermissions: {
+    softDelete: {
         enabled: false,
+        retentionDays: 30,
     },
+    dashboardComments: {
+        enabled: true,
+    },
+    preAggregates: {
+        enabled: false,
+        parquetEnabled: false,
+        materializationMaxRows: null,
+        duckdbQueryMemoryLimit: null,
+        s3: {
+            endpoint: 'mock_endpoint',
+            bucket: 'mock_preagg_bucket',
+            region: 'mock_region',
+        },
+    },
+    appRuntime: {
+        enabled: false,
+        lightdashOrigin: 'https://test.lightdash.cloud',
+        cdnOrigin: null,
+        previewOrigin: null,
+        cspAllowedOrigins: [],
+        s3: null,
+        e2bApiKey: null,
+        e2bTemplateName: 'lightdash-data-app',
+        e2bTemplateTag: '',
+    },
+    enabledFeatureFlags: new Set<string>(),
+    disabledFeatureFlags: new Set<string>(),
 };

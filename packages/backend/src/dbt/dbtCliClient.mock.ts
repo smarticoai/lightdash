@@ -28,7 +28,10 @@ export const expectedCommandOptions = [
 ];
 
 export const cliMocks = {
-    success: { all: 'success message' } as Partial<ExecaReturnValue>,
+    success: {
+        all: 'success message',
+        stdout: '{"info": {"code": "Z049"}, "data": {"msg": "{\\"unique_id\\": \\"model.project.test_model\\"}"}}\n',
+    } as Partial<ExecaReturnValue>,
     error: {
         shortMessage: 'error message',
         all: 'all error messages',
@@ -37,7 +40,7 @@ export const cliMocks = {
 export const cliMockImplementation = {
     success: async () => cliMocks.success,
     error: async () => {
-        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        // eslint-disable-next-line @typescript-eslint/only-throw-error, @typescript-eslint/no-throw-literal
         throw cliMocks.error;
     },
 };

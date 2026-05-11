@@ -29,7 +29,7 @@ Useful resources for answering your questions:
 -   [Issues](https://github.com/lightdash/lightdash/issues)
 
 If you cannot find an answer to your question then please join
-our [slack community](https://join.slack.com/t/lightdash-community/shared_invite/zt-2wgtavou8-VRhwXI%7EQbjCAHQs0WBac3w) and head for the `#help` channel.
+our [slack community](http://go.lightdash.com/community) and head for the `#help` channel.
 
 ## How to report a bug
 
@@ -66,7 +66,7 @@ Enhancement suggestions are tracked as [GitHub issues](https://github.com/lightd
 
 Before contributing to Lightdash you must complete the following steps:
 
-1. **Join our Slack community** Head over to our [Slack Community](https://join.slack.com/t/lightdash-community/shared_invite/zt-2wgtavou8-VRhwXI%7EQbjCAHQs0WBac3w) and introduce yourself in the `#community-contributors` channel.
+1. **Join our Slack community** Head over to our [Slack Community](http://go.lightdash.com/community) and introduce yourself in the `#community-contributors` channel.
 2. **Pick an issue** Browse through the existing [issues](https://github.com/lightdash/lightdash/issues?q=state%3Aopen%20label%3A%22%F0%9F%91%8B%20open-contribution%22) and choose one that's labeled `open-contribution`.
 3. **Claim your issue** Post in the `#community-contributors` Slack channel using this template:
 
@@ -160,7 +160,7 @@ We use `squash & merge` to keep the main branch history clean.
 
 #### Styleguides
 
-Our styleguides should be enforced via a pre-commit hook that runs prettier & eslint.
+Our styleguides should be enforced via a pre-commit hook that runs oxfmt & eslint.
 The reviewers can still request adhoc changes for situations that haven't been experienced before.
 
 ## Setup Development Environment
@@ -243,7 +243,7 @@ export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
 pnpm dev # http://localhost:3000
 
 # Log in dev mode
-# When navigating to http://localhost:3000 you will be prompt to the login page, you can use our demo login details:
+# When navigating to http://localhost:3000 you will be prompted to the login page, you can use our demo login details:
 
 # Email-Address: demo@lightdash.com
 # Password: demo_password!
@@ -340,6 +340,81 @@ The development environment includes Prometheus for monitoring Lightdash metrics
 
 The Prometheus configuration automatically scrapes Lightdash metrics every 5 seconds from the backend service.
 
+#### Testing Email Locally with Mailpit
+
+The development environment includes Mailpit for testing email functionality locally without sending real emails. To use it:
+
+1. **Start the development environment** (Mailpit is included by default):
+
+    ```shell
+    docker compose -p lightdash-app -f docker/docker-compose.dev.yml --env-file .env.development.local up --detach --remove-orphans
+    ```
+
+2. **Access the Mailpit Web UI**:
+
+    - Navigate to http://localhost:8025
+    - All emails sent from Lightdash will appear here
+    - You can view full email content, headers, and HTML rendering
+
+3. **Email Configuration** (pre-configured in `.env.development`):
+
+    - SMTP Host: `mailpit` (Docker hostname)
+    - SMTP Port: `1025`
+    - No authentication required for local development
+
+4. **Test email features**:
+    - Scheduled email deliveries
+    - User invitation emails
+    - Sharing alerts via email
+    - Password reset emails
+
+#### Testing Email Locally with Mailpit (without Docker)
+
+If you're running Lightdash without Docker, you can install and run Mailpit directly:
+
+1. **Install Mailpit**:
+
+    **macOS (using Homebrew):**
+
+    ```shell
+    brew install mailpit
+    ```
+
+    **Linux/macOS (using install script):**
+
+    ```shell
+    sudo bash < <(curl -sL https://raw.githubusercontent.com/axllent/mailpit/develop/install.sh)
+    ```
+
+    **Other options:** See the [Mailpit installation guide](https://github.com/axllent/mailpit#installation) for more methods including Arch Linux (AUR), FreeBSD, or downloading static binaries.
+
+2. **Run Mailpit**:
+
+    ```shell
+    mailpit
+    ```
+
+    Or run as a background service on macOS:
+
+    ```shell
+    brew services start mailpit
+    ```
+
+3. **Configure Lightdash** in your `.env.development.local`:
+
+    ```shell
+    SMTP_HOST=localhost
+    SMTP_PORT=1025
+    SMTP_SECURE=false
+    SMTP_ALLOW_INVALID_CERT=false
+    SMTP_SENDER_EMAIL=lightdash@localhost.com
+    SMTP_SENDER_NAME=Lightdash
+    ```
+
+4. **Access the Mailpit Web UI**:
+    - Navigate to http://localhost:8025
+    - All emails sent from Lightdash will appear here
+
 #### Downloading files stored in local docker container MinIO
 
 When developing using the docker compose setup there's a MinIO container already setup to serve as the S3 compatible
@@ -434,7 +509,7 @@ pnpm load:env ./scripts/seed-lightdash.sh
 pnpm load:env pnpm dev
 
 # Log in dev mode
-When navigating to http://localhost:3000 you will be prompt to the login page, you can use our demo login details:
+When navigating to http://localhost:3000 you will be prompted to the login page, you can use our demo login details:
 
 Email-Address: demo@lightdash.com
 Password: demo_password!
@@ -521,7 +596,7 @@ everything should work as expected.
 #### Running Lightdash without docker and headless browser on Linux
 
 If you are running lightdash without docker, you will have to run headless browser in a way that it is able to connect
-to your lightdash endpoint in localhost. You can achive this on Linux by doing:
+to your lightdash endpoint in localhost. You can achieve this on Linux by doing:
 
 ```shell
 docker run -e PORT=3001 --name=lightdash-headless --network 'host' -it --rm ghcr.io/browserless/chromium:v2.24.3

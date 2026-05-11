@@ -1,11 +1,11 @@
 // Mock schema file with comments, different multi-line strings, different types of quotes, different types of arrays
 import {
     BinType,
-    type CustomBinDimension,
     CustomDimensionType,
-    type CustomSqlDimension,
     DimensionType,
     MetricType,
+    type CustomBinDimension,
+    type CustomSqlDimension,
 } from '../../types/field';
 import { type AdditionalMetric } from '../../types/metricQuery';
 
@@ -180,19 +180,15 @@ models:
             fixed_width_id:
               label: Fixed width name
               type: string
-              sql: CONCAT(FLOOR(\${TABLE}.dim_a / 10) * 10, ' - ', (FLOOR(\${TABLE}.dim_a / 10)
-                + 1) * 10 - 1)
+              sql: CONCAT(FLOOR(\${TABLE}.dim_a / 10) * 10, ' - ', (FLOOR(\${TABLE}.dim_a / 10) + 1) * 10 - 1)
             range_id:
               label: Range name
               type: string
-              sql: >-
+              sql: |-
                 CASE
                             WHEN \${TABLE}.dim_a IS NULL THEN NULL
-                WHEN \${TABLE}.dim_a >= 0 AND \${TABLE}.dim_a < 10 THEN CONCAT(0,
-                '-', 10)
-
-                WHEN \${TABLE}.dim_a >= 11 AND \${TABLE}.dim_a < 20 THEN
-                CONCAT(11, '-', 20)
+                WHEN \${TABLE}.dim_a >= 0 AND \${TABLE}.dim_a < 10 THEN CONCAT(0, '-', 10)
+                WHEN \${TABLE}.dim_a >= 11 AND \${TABLE}.dim_a < 20 THEN CONCAT(11, '-', 20)
                             END
   - name: table_b
     description: >-

@@ -24,7 +24,8 @@ export const jwtStrategy = ({
             try {
                 const user = await userService.loginWithPersonalAccessToken(
                     jwtDecoded.auth_token,
-                    true
+                    undefined,
+                    true,
                 );
                 return done(null, user);
             } catch (error) {

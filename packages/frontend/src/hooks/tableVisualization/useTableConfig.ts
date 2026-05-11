@@ -18,6 +18,7 @@ import {
     type ParametersValuesMap,
     type PivotConfig,
     type PivotData,
+    type RowLimit,
     type TableChart,
 } from '@lightdash/common';
 import { createWorkerFactory, useWorker } from '@shopify/react-web-worker';
@@ -39,6 +40,7 @@ const useTableConfig = (
         | (InfiniteQueryResults & {
               metricQuery?: MetricQuery;
               fields?: ItemsMap;
+              resolvedTimezone?: string;
           })
         | undefined,
     itemsMap: ItemsMap | undefined,
@@ -82,6 +84,10 @@ const useTableConfig = (
 
     const [metricsAsRows, setMetricsAsRows] = useState<boolean>(
         tableChartConfig?.metricsAsRows || false,
+    );
+
+    const [rowLimit, setRowLimit] = useState<RowLimit | undefined>(
+        tableChartConfig?.rowLimit,
     );
 
     useEffect(() => {
@@ -172,6 +178,11 @@ const useTableConfig = (
         [columnProperties],
     );
 
+    const getColumnWidth = useCallback(
+        (fieldId: string) => columnProperties[fieldId]?.width,
+        [columnProperties],
+    );
+
     const isPivotTableEnabled =
         resultsData?.metricQuery &&
         resultsData.metricQuery.metrics.length > 0 &&
@@ -220,6 +231,7 @@ const useTableConfig = (
                   explore: resultsData?.metricQuery?.exploreName,
                   fieldIds: selectedItemIds,
                   itemsMap,
+                  invalidateCache,
                   showColumnCalculation:
                       tableChartConfig?.showColumnCalculation,
                   embedToken,
@@ -248,6 +260,7 @@ const useTableConfig = (
                   embedToken,
                   parameters,
                   dateZoom,
+                  invalidateCache,
               },
     );
 
@@ -267,6 +280,7 @@ const useTableConfig = (
             showTableNames,
             getFieldLabelOverride,
             isColumnFrozen,
+            getColumnWidth,
             columnOrder,
             totals: totalCalculations,
             groupedSubtotals,
@@ -280,6 +294,7 @@ const useTableConfig = (
         isColumnVisible,
         showTableNames,
         isColumnFrozen,
+        getColumnWidth,
         getFieldLabelOverride,
         totalCalculations,
         groupedSubtotals,
@@ -600,6 +615,8 @@ const useTableConfig = (
         resultsData,
     ]);
 
+    const exposedColumnProperties = columnProperties;
+
     const validConfig: TableChart = useMemo(
         () => ({
             showColumnCalculation,
@@ -611,6 +628,7 @@ const useTableConfig = (
             hideRowNumbers,
             conditionalFormattings,
             metricsAsRows,
+            rowLimit,
         }),
         [
             showColumnCalculation,
@@ -622,6 +640,7 @@ const useTableConfig = (
             columnProperties,
             conditionalFormattings,
             metricsAsRows,
+            rowLimit,
         ],
     );
 
@@ -642,7 +661,8 @@ const useTableConfig = (
             setShowResultsTotal,
             showSubtotals,
             setShowSubtotals,
-            columnProperties,
+
+            columnProperties: exposedColumnProperties,
             setColumnProperties,
             updateColumnProperty,
             columns,
@@ -661,6 +681,8 @@ const useTableConfig = (
             isPivotTableEnabled,
             canUseSubtotals,
             groupedSubtotals,
+            rowLimit,
+            setRowLimit,
         }),
         [
             selectedItemIds,
@@ -678,7 +700,8 @@ const useTableConfig = (
             setShowResultsTotal,
             showSubtotals,
             setShowSubtotals,
-            columnProperties,
+
+            exposedColumnProperties,
             setColumnProperties,
             updateColumnProperty,
             columns,
@@ -697,6 +720,8 @@ const useTableConfig = (
             isPivotTableEnabled,
             canUseSubtotals,
             groupedSubtotals,
+            rowLimit,
+            setRowLimit,
         ],
     );
 };

@@ -1,4 +1,5 @@
 import ora from 'ora';
+import { v4 as uuidv4 } from 'uuid';
 import { Config } from './config';
 import * as styles from './styles';
 
@@ -10,12 +11,31 @@ type PromptAnswer = {
 class GlobalState {
     private verbose: boolean = false;
 
+    private nonInteractive: boolean = false;
+
     private activeSpinner: ora.Ora | undefined;
 
     private savedPromptAnswers: PromptAnswer;
 
+    private sessionId: string | null = null;
+
     constructor() {
         this.savedPromptAnswers = {};
+    }
+
+    getSessionId(): string {
+        if (!this.sessionId) {
+            this.sessionId = uuidv4();
+        }
+        return this.sessionId;
+    }
+
+    setNonInteractive(value: boolean) {
+        this.nonInteractive = value;
+    }
+
+    isNonInteractive(): boolean {
+        return this.nonInteractive || process.env.CI === 'true';
     }
 
     getActiveSpinner() {

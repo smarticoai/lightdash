@@ -10,11 +10,13 @@ const EmbedDashboardFilters: FC = () => {
     const [openPopoverId, setPopoverId] = useState<string>();
 
     const projectUuid = useDashboardContext((c) => c.projectUuid);
+    const activeTab = useDashboardContext((c) => c.activeTab);
 
     const haveFiltersChanged = useDashboardContext(
         (c) =>
             c.haveFiltersChanged ||
-            c.dashboardTemporaryFilters.dimensions.length > 0,
+            c.dashboardTemporaryFilters.dimensions.length > 0 ||
+            c.dashboardTemporaryFilters.metrics.length > 0,
     );
     const setHaveFiltersChanged = useDashboardContext(
         (c) => c.setHaveFiltersChanged,
@@ -75,7 +77,7 @@ const EmbedDashboardFilters: FC = () => {
                     onPopoverOpen={handlePopoverOpen}
                     onPopoverClose={handlePopoverClose}
                     openPopoverId={openPopoverId}
-                    activeTabUuid={undefined}
+                    activeTabUuid={activeTab?.uuid}
                 />
             </Flex>
         </FiltersProvider>

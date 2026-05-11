@@ -1,6 +1,6 @@
 import { subject } from '@casl/ability';
-import { FeatureFlags, isTimeZone } from '@lightdash/common';
-import { Badge, Box, Button, Group, Tooltip } from '@mantine/core';
+import { FeatureFlags, getTimezoneLabel, isTimeZone } from '@lightdash/common';
+import { Badge, Box, Button, Group, Tooltip } from '@mantine-8/core';
 import { IconAlertCircle, IconArrowLeft } from '@tabler/icons-react';
 import { memo, useEffect, useMemo, type FC } from 'react';
 import useEmbed from '../../../ee/providers/Embed/useEmbed';
@@ -17,17 +17,18 @@ import {
 import useDashboardStorage from '../../../hooks/dashboard/useDashboardStorage';
 import { useExplorerQuery } from '../../../hooks/useExplorerQuery';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../../hooks/useExplorerRoute';
+import { useProject } from '../../../hooks/useProject';
 import { useProjectUuid } from '../../../hooks/useProjectUuid';
-import { useClientFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import useCreateInAnySpaceAccess from '../../../hooks/user/useCreateInAnySpaceAccess';
+import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFlag';
 import { Can } from '../../../providers/Ability';
 import { useAbilityContext } from '../../../providers/Ability/useAbilityContext';
 import useApp from '../../../providers/App/useApp';
-import { RefreshButton } from '../../RefreshButton';
-import RefreshDbtButton from '../../RefreshDbtButton';
 import MantineIcon from '../../common/MantineIcon';
 import ShareShortLinkButton from '../../common/ShareShortLinkButton';
 import TimeZonePicker from '../../common/TimeZonePicker';
+import { RefreshButton } from '../../RefreshButton';
+import RefreshDbtButton from '../../RefreshDbtButton';
 import SaveChartButton from '../SaveChartButton';
 import QueryWarnings from './QueryWarnings';
 
@@ -57,7 +58,9 @@ const ExplorerHeader: FC = memo(() => {
     const unsavedChartVersion = useExplorerSelector(selectUnsavedChartVersion);
 
     const handleSetTimeZone = (timezone: string | null) => {
-        if (timezone && isTimeZone(timezone)) {
+        if (timezone === null) {
+            dispatch(explorerActions.setTimeZone(undefined));
+        } else if (isTimeZone(timezone)) {
             dispatch(explorerActions.setTimeZone(timezone));
         }
     };
@@ -127,18 +130,29 @@ const ExplorerHeader: FC = memo(() => {
         };
     }, [getHasDashboardChanges]);
 
-    const userTimeZonesEnabled = useClientFeatureFlag(
+    const { data: enableUserTimezonesFlag } = useServerFeatureFlag(
         FeatureFlags.EnableUserTimezones,
     );
+    const userTimeZonesEnabled = enableUserTimezonesFlag?.enabled ?? false;
+
+    const { data: project } = useProject(projectUuid);
+    const timezonePlaceholder = useMemo(() => {
+        const tz = project?.queryTimezone;
+        if (tz) {
+            const label = getTimezoneLabel(tz);
+            return label ? `Project: ${label}` : `Project: ${tz}`;
+        }
+        return 'Select timezone';
+    }, [project?.queryTimezone]);
 
     const userCanManageCompileProject = ability.can('manage', 'CompileProject');
 
     return (
-        <Group position="apart">
+        <Group justify="space-between">
             {typeof onBackToDashboard === 'function' && (
                 <Button
                     variant="light"
-                    leftIcon={<MantineIcon icon={IconArrowLeft} />}
+                    leftSection={<MantineIcon icon={IconArrowLeft} />}
                     onClick={onBackToDashboard}
                 >
                     Back to Dashboard
@@ -149,10 +163,10 @@ const ExplorerHeader: FC = memo(() => {
                 <RefreshDbtButton />
             </Box>
 
-            <Group spacing="xs">
+            <Group gap="xs">
                 {showLimitWarning && (
                     <Tooltip
-                        width={400}
+                        w={400}
                         label={`Query limit of ${limit} reached. There may be additional results that have not been displayed. To see more, increase the query limit or try narrowing filters.`}
                         multiline
                         position={'bottom'}
@@ -167,7 +181,7 @@ const ExplorerHeader: FC = memo(() => {
                             color="yellow"
                             variant="outline"
                             tt="none"
-                            sx={{ cursor: 'help' }}
+                            style={{ cursor: 'help' }}
                         >
                             Results may be incomplete
                         </Badge>
@@ -183,7 +197,9 @@ const ExplorerHeader: FC = memo(() => {
                 {userTimeZonesEnabled && (
                     <TimeZonePicker
                         onChange={handleSetTimeZone}
-                        value={selectedTimezone as string}
+                        value={selectedTimezone ?? null}
+                        placeholder={timezonePlaceholder}
+                        clearable
                     />
                 )}
 
@@ -198,7 +214,6 @@ const ExplorerHeader: FC = memo(() => {
                     >
                         <div>
                             <SaveChartButton
-                                isExplorer
                                 disabled={buttonDisabledMessage !== null}
                             />
                         </div>

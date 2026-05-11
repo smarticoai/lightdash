@@ -15,6 +15,7 @@ import {
     Filters,
     ItemsMap,
     KnexPaginateArgs,
+    SavedChart,
     SlackPrompt,
     ToolFindContentArgs,
     ToolFindFieldsArgs,
@@ -61,17 +62,34 @@ export type FindFieldFn = (
     args: KnexPaginateArgs & {
         table: ToolFindFieldsArgs['table'];
         fieldSearchQuery: ToolFindFieldsArgs['fieldSearchQueries'][number];
+        explore: Explore;
     },
 ) => Promise<{
     fields: CatalogField[];
     pagination: Pagination | undefined;
-    explore?: Explore;
 }>;
+
+export type GetExploreFn = (args: { table: string }) => Promise<Explore>;
 
 export type FindContentFn = (args: {
     searchQuery: ToolFindContentArgs['searchQueries'][number];
 }) => Promise<{
     content: (AllChartsSearchResult | DashboardSearchResult)[];
+}>;
+
+export type GetDashboardChartsFn = (args: {
+    dashboardUuid: string;
+    page: number;
+    pageSize: number;
+}) => Promise<{
+    dashboardName: string;
+    charts: DashboardSearchResult['charts'];
+    pagination: {
+        page: number;
+        pageSize: number;
+        totalResults: number;
+        totalPageCount: number;
+    };
 }>;
 
 export type UpdateProgressFn = (progress: string) => Promise<void>;
@@ -86,6 +104,8 @@ export type RunAsyncQueryFn = (
     cacheMetadata: CacheMetadata;
     fields: ItemsMap;
 }>;
+
+export type GetSavedChartFn = (chartUuid: string) => Promise<SavedChart>;
 
 export type SendFileFn = (args: PostSlackFile) => Promise<void>;
 

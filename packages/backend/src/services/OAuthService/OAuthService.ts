@@ -1,4 +1,12 @@
-import { ParameterError, UserWithOrganizationUuid } from '@lightdash/common';
+import { subject } from '@casl/ability';
+import {
+    ForbiddenError,
+    NotFoundError,
+    ParameterError,
+    UserWithOrganizationUuid,
+    type Account,
+    type OAuthClientSummary,
+} from '@lightdash/common';
 import OAuth2Server from '@node-oauth/oauth2-server';
 import { LightdashConfig } from '../../config/parseConfig';
 import { OAuth2Model } from '../../models/OAuth2Model';
@@ -103,7 +111,6 @@ export class OAuthService extends BaseService {
         grantTypes?: string[];
         scopes?: string[];
     }) {
-        // Validate redirect URIs
         for (const uri of redirectUris) {
             try {
                 // eslint-disable-next-line no-new
@@ -119,5 +126,143 @@ export class OAuthService extends BaseService {
             grantTypes,
             scopes,
         });
+    }
+
+    public async listClients(account: Account): Promise<OAuthClientSummary[]> {
+        const auditedAbility = this.createAuditedAbility(account);
+        if (
+            !account.organization.organizationUuid ||
+            auditedAbility.cannot(
+                'manage',
+                subject('Organization', {
+                    organizationUuid: account.organization.organizationUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError(
+                'You do not have permission to manage OAuth clients',
+            );
+        }
+        return this.oauthModel.listClientsByOrganization(
+            account.organization.organizationUuid,
+        );
+    }
+
+    public async createAdminClient(
+        account: Account,
+        {
+            clientName,
+            redirectUris,
+        }: {
+            clientName: string;
+            redirectUris: string[];
+        },
+    ) {
+        const auditedAbility = this.createAuditedAbility(account);
+        if (
+            !account.organization.organizationUuid ||
+            auditedAbility.cannot(
+                'manage',
+                subject('Organization', {
+                    organizationUuid: account.organization.organizationUuid,
+                }),
+            )
+        ) {
+            throw new ForbiddenError(
+                'You do not have permission to manage OAuth clients',
+            );
+        }
+        // Validate redirect URIs
+        for (const uri of redirectUris) {
+            try {
+                // eslint-disable-next-line no-new
+                new URL(uri);
+            } catch {
+                throw new ParameterError(`Invalid redirect URI ${uri}`);
+            }
+        }
+
+        return this.oauthModel.createClient({
+            clientName,
+            redirectUris,
+            organizationUuid: account.organization.organizationUuid,
+            createdByUserUuid: account.user.id,
+        });
+    }
+
+    public async updateClient(
+        account: Account,
+        clientId: string,
+        {
+            clientName,
+            redirectUris,
+        }: {
+            clientName: string;
+            redirectUris: string[];
+        },
+    ): Promise<OAuthClientSummary> {
+        const auditedAbility = this.createAuditedAbility(account);
+        if (
+            !account.organization.organizationUuid ||
+            auditedAbility.cannot(
+                'manage',
+                subject('Organization', {
+                    organizationUuid: account.organization.organizationUuid,
+                    metadata: { clientId },
+                }),
+            )
+        ) {
+            throw new ForbiddenError(
+                'You do not have permission to manage OAuth clients',
+            );
+        }
+        // Validate redirect URIs
+        for (const uri of redirectUris) {
+            try {
+                // eslint-disable-next-line no-new
+                new URL(uri);
+            } catch {
+                throw new ParameterError(`Invalid redirect URI ${uri}`);
+            }
+        }
+
+        const updated = await this.oauthModel.updateClient(
+            clientId,
+            account.organization.organizationUuid,
+            { clientName, redirectUris },
+        );
+        if (!updated) {
+            throw new NotFoundError('OAuth client not found');
+        }
+        return updated;
+    }
+
+    public async deleteClient(
+        account: Account,
+        clientId: string,
+    ): Promise<void> {
+        const auditedAbility = this.createAuditedAbility(account);
+        if (
+            !account.organization.organizationUuid ||
+            auditedAbility.cannot(
+                'manage',
+                subject('Organization', {
+                    organizationUuid: account.organization.organizationUuid,
+                    metadata: { clientId },
+                }),
+            )
+        ) {
+            throw new ForbiddenError(
+                'You do not have permission to manage OAuth clients',
+            );
+        }
+
+        const deleted = await this.oauthModel.deleteClient(
+            clientId,
+            account.organization.organizationUuid,
+        );
+        if (!deleted) {
+            throw new NotFoundError('OAuth client not found');
+        }
     }
 }

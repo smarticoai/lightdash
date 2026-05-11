@@ -241,12 +241,12 @@ export async function seed(knex: Knex): Promise<void> {
     const [{ space_uuid: spaceUuid }] = await knex('spaces')
         .insert({
             ...SEED_SPACE,
-            is_private: false,
             project_id: projectId,
             slug: spaceSlug,
             parent_space_uuid: null,
             path: getLtreePathFromSlug(spaceSlug),
             inherit_parent_permissions: true,
+            is_default_user_space: false,
         })
         .returning(['space_id', 'space_uuid']);
 

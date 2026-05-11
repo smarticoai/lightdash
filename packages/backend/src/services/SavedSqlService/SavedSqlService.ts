@@ -3,8 +3,11 @@ import {
     AbilityAction,
     ApiCreateSqlChart,
     BulkActionable,
+    CreateSchedulerAndTargetsWithoutIds,
     CreateSqlChart,
     ForbiddenError,
+    isValidFrequency,
+    isValidTimezone,
     isVizBarChartConfig,
     isVizLineChartConfig,
     isVizPieChartConfig,
@@ -13,9 +16,8 @@ import {
     ParameterError,
     Project,
     QueryExecutionContext,
+    SchedulerAndTargets,
     SessionUser,
-    SpaceShare,
-    SpaceSummary,
     SqlChart,
     SqlRunnerPivotQueryBody,
     UpdateSqlChart,
@@ -27,48 +29,62 @@ import {
     CreateSqlChartVersionEvent,
     LightdashAnalytics,
 } from '../../analytics/LightdashAnalytics';
+import { LightdashConfig } from '../../config/parseConfig';
 import { AnalyticsModel } from '../../models/AnalyticsModel';
 import { ProjectModel } from '../../models/ProjectModel/ProjectModel';
 import { SavedSqlModel } from '../../models/SavedSqlModel';
-import { SpaceModel } from '../../models/SpaceModel';
+import { SchedulerModel } from '../../models/SchedulerModel';
 import { SchedulerClient } from '../../scheduler/SchedulerClient';
 import { BaseService } from '../BaseService';
+import type {
+    SoftDeletableService,
+    SoftDeleteOptions,
+} from '../SoftDeletableService';
+import { SpacePermissionService } from '../SpaceService/SpacePermissionService';
 
 type SavedSqlServiceArguments = {
+    lightdashConfig: LightdashConfig;
     analytics: LightdashAnalytics;
     projectModel: ProjectModel;
-    spaceModel: SpaceModel;
     savedSqlModel: SavedSqlModel;
     schedulerClient: SchedulerClient;
+    schedulerModel: SchedulerModel;
     analyticsModel: AnalyticsModel;
+    spacePermissionService: SpacePermissionService;
 };
 
 // TODO: Rename to SqlRunnerService
 
 export class SavedSqlService
     extends BaseService
-    implements BulkActionable<Knex>
+    implements BulkActionable<Knex>, SoftDeletableService
 {
+    private readonly lightdashConfig: LightdashConfig;
+
     private readonly analytics: LightdashAnalytics;
 
     private readonly projectModel: ProjectModel;
-
-    private readonly spaceModel: SpaceModel;
 
     private readonly savedSqlModel: SavedSqlModel;
 
     private readonly schedulerClient: SchedulerClient;
 
+    private readonly schedulerModel: SchedulerModel;
+
     private readonly analyticsModel: AnalyticsModel;
+
+    private readonly spacePermissionService: SpacePermissionService;
 
     constructor(args: SavedSqlServiceArguments) {
         super();
+        this.lightdashConfig = args.lightdashConfig;
         this.analytics = args.analytics;
         this.projectModel = args.projectModel;
-        this.spaceModel = args.spaceModel;
         this.savedSqlModel = args.savedSqlModel;
         this.schedulerClient = args.schedulerClient;
+        this.schedulerModel = args.schedulerModel;
         this.analyticsModel = args.analyticsModel;
+        this.spacePermissionService = args.spacePermissionService;
     }
 
     static getCreateVersionEventProperties(
@@ -124,7 +140,7 @@ export class SavedSqlService
                   savedSqlUuid: string;
                   spaceUuid?: string;
               },
-    ): Promise<SpaceShare[]> {
+    ) {
         let { spaceUuid } = resource;
 
         if (resource.savedSqlUuid !== null) {
@@ -146,55 +162,52 @@ export class SavedSqlService
             throw new NotFoundError('Space is required');
         }
 
-        const space = await this.spaceModel.getSpaceSummary(spaceUuid);
-        const spaceAccess = await this.spaceModel.getUserSpaceAccess(
-            actor.user.userUuid,
-            spaceUuid,
-        );
+        const needsNewSpaceCheck =
+            resource.spaceUuid && spaceUuid !== resource.spaceUuid;
 
-        const hasPermission = actor.user.ability.can(
-            action,
-            subject('SavedChart', {
-                organizationUuid: space.organizationUuid,
-                projectUuid: actor.projectUuid,
-                isPrivate: space.isPrivate,
-                access: spaceAccess,
-            }),
-        );
+        const ctx = needsNewSpaceCheck
+            ? await this.spacePermissionService.getSpacesAccessContext(
+                  actor.user.userUuid,
+                  [spaceUuid, resource.spaceUuid!],
+              )
+            : await this.spacePermissionService.getSpacesAccessContext(
+                  actor.user.userUuid,
+                  [spaceUuid],
+              );
 
-        if (!hasPermission) {
+        const auditedAbility = this.createAuditedAbility(actor.user);
+
+        if (
+            auditedAbility.cannot(
+                action,
+                subject('SavedChart', {
+                    ...ctx[spaceUuid],
+                    metadata: { savedSqlUuid: resource.savedSqlUuid ?? '' },
+                }),
+            )
+        ) {
             throw new ForbiddenError(
                 `You don't have access to ${action} this Saved SQL chart`,
             );
         }
 
-        if (resource.spaceUuid && spaceUuid !== resource.spaceUuid) {
-            const newSpace = await this.spaceModel.getSpaceSummary(
-                resource.spaceUuid,
-            );
-            const newSpaceAccess = await this.spaceModel.getUserSpaceAccess(
-                actor.user.userUuid,
-                resource.spaceUuid,
-            );
-
-            const hasPermissionInNewSpace = actor.user.ability.can(
-                action,
-                subject('SavedChart', {
-                    organizationUuid: newSpace.organizationUuid,
-                    projectUuid: actor.projectUuid,
-                    isPrivate: newSpace.isPrivate,
-                    access: newSpaceAccess,
-                }),
-            );
-
-            if (!hasPermissionInNewSpace) {
+        if (needsNewSpaceCheck) {
+            if (
+                auditedAbility.cannot(
+                    action,
+                    subject('SavedChart', {
+                        ...ctx[resource.spaceUuid!],
+                        metadata: { savedSqlUuid: resource.savedSqlUuid ?? '' },
+                    }),
+                )
+            ) {
                 throw new ForbiddenError(
                     `You don't have access to ${action} this Saved SQL chart in the new space`,
                 );
             }
         }
 
-        return spaceAccess;
+        return ctx[spaceUuid];
     }
 
     async getSqlChart(
@@ -214,7 +227,7 @@ export class SavedSqlService
             throw new Error('Either savedSqlUuid or slug must be provided');
         }
 
-        const spaceAccess = await this.hasAccess(
+        const spaceCtx = await this.hasAccess(
             'view',
             {
                 user,
@@ -234,12 +247,21 @@ export class SavedSqlService
                 organizationId: savedChart.organization.organizationUuid,
             },
         });
+
+        const resolvedColorPalette =
+            await this.savedSqlModel.resolveColorPalette({
+                projectUuid: savedChart.project.projectUuid,
+                dashboardUuid: savedChart.dashboard?.uuid,
+                spaceUuid: savedChart.space.uuid,
+            });
+
         return {
             ...savedChart,
             space: {
                 ...savedChart.space,
-                userAccess: spaceAccess[0],
+                userAccess: spaceCtx.access[0],
             },
+            resolvedColorPalette,
         };
     }
 
@@ -250,10 +272,14 @@ export class SavedSqlService
     ): Promise<ApiCreateSqlChart['results']> {
         const { organizationUuid } =
             await this.projectModel.getSummary(projectUuid);
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
-                subject('CustomSql', { organizationUuid, projectUuid }),
+                subject('CustomSql', {
+                    organizationUuid,
+                    projectUuid,
+                }),
             )
         ) {
             throw new ForbiddenError();
@@ -309,10 +335,15 @@ export class SavedSqlService
     ): Promise<{ savedSqlUuid: string; savedSqlVersionUuid: string | null }> {
         const { organizationUuid } =
             await this.projectModel.getSummary(projectUuid);
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
-                subject('CustomSql', { organizationUuid, projectUuid }),
+                subject('CustomSql', {
+                    organizationUuid,
+                    projectUuid,
+                    metadata: { savedSqlUuid },
+                }),
             )
         ) {
             throw new ForbiddenError();
@@ -370,21 +401,38 @@ export class SavedSqlService
         return updatedChart;
     }
 
-    async deleteSqlChart(
+    async delete(
         user: SessionUser,
-        projectUuid: string,
         savedSqlUuid: string,
+        options?: SoftDeleteOptions,
     ): Promise<void> {
-        const savedChart = await this.savedSqlModel.getByUuid(savedSqlUuid, {
-            projectUuid,
-        });
-        await this.hasAccess(
-            'delete',
-            { user, projectUuid },
-            { savedSqlUuid: savedChart.savedSqlUuid },
-        );
+        const savedChart = await this.savedSqlModel.getByUuid(savedSqlUuid, {});
+        const { projectUuid } = savedChart.project;
 
-        await this.savedSqlModel.delete(savedSqlUuid);
+        if (options?.bypassPermissions) {
+            this.logBypassEvent(user, 'delete', {
+                type: 'SavedChart',
+                metadata: { savedSqlUuid },
+                organizationUuid: savedChart.organization.organizationUuid,
+                projectUuid,
+            });
+        } else {
+            await this.hasAccess(
+                'delete',
+                { user, projectUuid },
+                { savedSqlUuid: savedChart.savedSqlUuid },
+            );
+        }
+
+        if (this.lightdashConfig.softDelete.enabled) {
+            await this.softDelete(user, savedSqlUuid, {
+                bypassPermissions: true, // perms checked above
+            });
+        } else {
+            await this.permanentDelete(user, savedSqlUuid, {
+                bypassPermissions: true, // perms checked above
+            });
+        }
 
         this.analytics.track({
             event: 'sql_chart.deleted',
@@ -393,8 +441,149 @@ export class SavedSqlService
                 chartId: savedChart.savedSqlUuid,
                 projectId: savedChart.project.projectUuid,
                 organizationId: savedChart.organization.organizationUuid,
+                softDelete: this.lightdashConfig.softDelete.enabled,
             },
         });
+    }
+
+    async softDelete(
+        user: SessionUser,
+        savedSqlUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        if (options?.bypassPermissions) {
+            this.logBypassEvent(user, 'delete', {
+                type: 'SavedChart',
+                metadata: { savedSqlUuid },
+                organizationUuid: user.organizationUuid ?? 'unknown',
+            });
+        } else {
+            const savedChart = await this.savedSqlModel.getByUuid(
+                savedSqlUuid,
+                {},
+            );
+            await this.hasAccess(
+                'delete',
+                { user, projectUuid: savedChart.project.projectUuid },
+                { savedSqlUuid: savedChart.savedSqlUuid },
+            );
+        }
+
+        await this.savedSqlModel.softDelete(savedSqlUuid, user.userUuid);
+    }
+
+    async restore(
+        user: SessionUser,
+        savedSqlUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        const savedChart = await this.savedSqlModel.getByUuid(savedSqlUuid, {
+            deleted: true,
+        });
+        const { projectUuid } = savedChart.project;
+        const { organizationUuid } = savedChart.organization;
+
+        if (options?.bypassPermissions) {
+            this.logBypassEvent(user, 'manage', {
+                type: 'DeletedContent',
+                metadata: { savedSqlUuid },
+                organizationUuid,
+                projectUuid,
+            });
+        } else {
+            const auditedAbility = this.createAuditedAbility(user);
+            if (
+                auditedAbility.cannot(
+                    'view',
+                    subject('Project', {
+                        organizationUuid,
+                        projectUuid,
+                        metadata: { projectUuid },
+                    }),
+                )
+            ) {
+                throw new ForbiddenError();
+            }
+
+            const isAdmin = auditedAbility.can(
+                'manage',
+                subject('DeletedContent', {
+                    organizationUuid,
+                    projectUuid,
+                    metadata: { savedSqlUuid },
+                }),
+            );
+
+            if (!isAdmin && savedChart.createdBy?.userUuid !== user.userUuid) {
+                throw new ForbiddenError(
+                    'You can only restore content you deleted',
+                );
+            }
+        }
+
+        await this.savedSqlModel.restore(savedSqlUuid);
+
+        this.analytics.track({
+            event: 'sql_chart.restored',
+            userId: user.userUuid,
+            properties: {
+                chartId: savedChart.savedSqlUuid,
+                projectId: projectUuid,
+                organizationId: organizationUuid,
+            },
+        });
+    }
+
+    async permanentDelete(
+        user: SessionUser,
+        savedSqlUuid: string,
+        options?: SoftDeleteOptions,
+    ): Promise<void> {
+        if (options?.bypassPermissions) {
+            this.logBypassEvent(user, 'manage', {
+                type: 'DeletedContent',
+                metadata: { savedSqlUuid },
+                organizationUuid: user.organizationUuid ?? 'unknown',
+            });
+        } else {
+            const savedChart = await this.savedSqlModel.getByUuid(
+                savedSqlUuid,
+                { deleted: true },
+            );
+            const { projectUuid } = savedChart.project;
+            const { organizationUuid } = savedChart.organization;
+
+            const auditedAbility = this.createAuditedAbility(user);
+            if (
+                auditedAbility.cannot(
+                    'view',
+                    subject('Project', {
+                        organizationUuid,
+                        projectUuid,
+                        metadata: { projectUuid },
+                    }),
+                )
+            ) {
+                throw new ForbiddenError();
+            }
+
+            const isAdmin = auditedAbility.can(
+                'manage',
+                subject('DeletedContent', {
+                    organizationUuid,
+                    projectUuid,
+                    metadata: { savedSqlUuid },
+                }),
+            );
+
+            if (!isAdmin && savedChart.createdBy?.userUuid !== user.userUuid) {
+                throw new ForbiddenError(
+                    'You can only permanently delete content you deleted',
+                );
+            }
+        }
+
+        await this.savedSqlModel.permanentDelete(savedSqlUuid);
     }
 
     async getResultJobFromSql(
@@ -405,12 +594,16 @@ export class SavedSqlService
     ): Promise<{ jobId: string }> {
         const { organizationUuid } =
             await this.projectModel.getSummary(projectUuid);
+        const auditedAbility = this.createAuditedAbility(user);
         if (
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'create',
-                subject('Job', { organizationUuid, projectUuid }),
+                subject('Job', {
+                    organizationUuid,
+                    projectUuid,
+                }),
             ) ||
-            user.ability.cannot(
+            auditedAbility.cannot(
                 'manage',
                 subject('SqlRunner', {
                     organizationUuid,
@@ -458,21 +651,27 @@ export class SavedSqlService
                 { user, projectUuid },
                 { savedSqlUuid: savedChart.savedSqlUuid },
             );
-        } else if (
+        } else {
             // If it's not a saved chart, check if the user has access to run a pivot query
-            user.ability.cannot(
-                'create',
-                subject('Job', { organizationUuid, projectUuid }),
-            ) ||
-            user.ability.cannot(
-                'manage',
-                subject('SqlRunner', {
-                    organizationUuid,
-                    projectUuid,
-                }),
-            )
-        ) {
-            throw new ForbiddenError();
+            const auditedAbility = this.createAuditedAbility(user);
+            if (
+                auditedAbility.cannot(
+                    'create',
+                    subject('Job', {
+                        organizationUuid,
+                        projectUuid,
+                    }),
+                ) ||
+                auditedAbility.cannot(
+                    'manage',
+                    subject('SqlRunner', {
+                        organizationUuid,
+                        projectUuid,
+                    }),
+                )
+            ) {
+                throw new ForbiddenError();
+            }
         }
         const jobId = await this.schedulerClient.runSqlPivotQuery({
             savedSqlUuid: savedChart?.savedSqlUuid,
@@ -569,6 +768,12 @@ export class SavedSqlService
                 { user, projectUuid },
                 { savedSqlUuid, spaceUuid: targetSpaceUuid },
             );
+        } else {
+            this.logBypassEvent(user, 'update', {
+                type: 'SavedChart',
+                metadata: { savedSqlUuid },
+                organizationUuid: user.organizationUuid ?? 'unknown',
+            });
         }
 
         await this.savedSqlModel.moveToSpace(
@@ -591,5 +796,98 @@ export class SavedSqlService
                 },
             });
         }
+    }
+
+    private async hasChartSpaceAccess(
+        user: SessionUser,
+        spaceUuid: string,
+    ): Promise<boolean> {
+        try {
+            return await this.spacePermissionService.can(
+                'view',
+                user,
+                spaceUuid,
+            );
+        } catch (e) {
+            return false;
+        }
+    }
+
+    private async checkCreateScheduledDeliveryAccess(
+        user: SessionUser,
+        projectUuid: string,
+        savedSqlUuid: string,
+    ): Promise<{ organizationUuid: string; spaceUuid: string }> {
+        const sqlChart = await this.savedSqlModel.getByUuid(savedSqlUuid, {
+            projectUuid,
+        });
+        const { organizationUuid } = sqlChart.organization;
+        const spaceUuid = sqlChart.space.uuid;
+
+        const auditedAbility = this.createAuditedAbility(user);
+        if (
+            auditedAbility.cannot(
+                'create',
+                subject('ScheduledDeliveries', {
+                    organizationUuid,
+                    projectUuid,
+                    metadata: { savedSqlUuid },
+                }),
+            )
+        ) {
+            throw new ForbiddenError();
+        }
+
+        if (!(await this.hasChartSpaceAccess(user, spaceUuid))) {
+            throw new ForbiddenError(
+                "You don't have access to the space this chart belongs to",
+            );
+        }
+
+        return { organizationUuid, spaceUuid };
+    }
+
+    async getSchedulers(
+        user: SessionUser,
+        projectUuid: string,
+        savedSqlUuid: string,
+    ): Promise<SchedulerAndTargets[]> {
+        await this.checkCreateScheduledDeliveryAccess(
+            user,
+            projectUuid,
+            savedSqlUuid,
+        );
+        return this.schedulerModel.getSqlChartSchedulers(savedSqlUuid);
+    }
+
+    async createScheduler(
+        user: SessionUser,
+        projectUuid: string,
+        savedSqlUuid: string,
+        newScheduler: CreateSchedulerAndTargetsWithoutIds,
+    ): Promise<SchedulerAndTargets> {
+        await this.checkCreateScheduledDeliveryAccess(
+            user,
+            projectUuid,
+            savedSqlUuid,
+        );
+
+        if (!isValidFrequency(newScheduler.cron)) {
+            throw new ParameterError(
+                'Frequency not allowed, custom input is limited to hourly',
+            );
+        }
+
+        if (!isValidTimezone(newScheduler.timezone)) {
+            throw new ParameterError('Timezone string is not valid');
+        }
+
+        return this.schedulerModel.createScheduler({
+            ...newScheduler,
+            createdBy: user.userUuid,
+            savedChartUuid: null,
+            dashboardUuid: null,
+            savedSqlUuid,
+        });
     }
 }
