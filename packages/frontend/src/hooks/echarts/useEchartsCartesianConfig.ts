@@ -198,6 +198,26 @@ type GetAxisTypeArg = {
     rightAxisYId?: string;
     leftAxisYId?: string;
 };
+
+// SMR-START: ECharts temporal-axis rendering workaround for bar + stacked area
+export const shouldForceCategoryTemporalXAxis = (
+    series: Series[] | undefined,
+): boolean => {
+    if (!series || series.length === 0) return false;
+
+    const hasBarSeries = series.some(
+        (serie) => serie.type === CartesianSeriesType.BAR,
+    );
+    const hasStackedAreaSeries = series.some(
+        (serie) =>
+            (serie.type === CartesianSeriesType.AREA || !!serie.areaStyle) &&
+            !!serie.stack,
+    );
+
+    return hasBarSeries || hasStackedAreaSeries;
+};
+// SMR-END
+
 const getAxisType = ({
     validCartesianConfig,
     itemsMap,
@@ -225,6 +245,15 @@ const getAxisType = ({
     const inferAxisType = (axisId?: string, isXAxis: boolean = false) => {
         const field = axisId ? itemsMap[axisId] : undefined;
         const axisType = getAxisTypeFromField(field);
+        // SMR-START: Force temporal x-axis to category for affected chart types
+        const shouldForceCategoryForSeries =
+            isXAxis &&
+            axisType === 'time' &&
+            !hasReferenceLine(axisId, isXAxis) &&
+            shouldForceCategoryTemporalXAxis(
+                validCartesianConfig.eChartsConfig.series,
+            );
+        // SMR-END
         const shouldUseCategory =
             axisType === 'time' &&
             !hasReferenceLine(axisId, isXAxis) &&
@@ -233,7 +262,9 @@ const getAxisType = ({
             TIME_INTERVALS_FOR_CATEGORY_AXIS.includes(
                 field.timeInterval as TimeFrames,
             );
-        return shouldUseCategory ? 'category' : axisType;
+        return shouldUseCategory || shouldForceCategoryForSeries
+            ? 'category'
+            : axisType;
     };
 
     const topAxisType = inferAxisType(topAxisXId, true);

@@ -4,6 +4,7 @@ import {
     type EChartsSeries,
     type Field,
     type ResultRow,
+    type Series,
 } from '@lightdash/common';
 import { describe, expect, test, vi } from 'vitest';
 import {
@@ -13,6 +14,7 @@ import {
     getCategoryDateAxisConfig,
     getMinAndMaxValues,
     padDatasetForContinuousAxis,
+    shouldForceCategoryTemporalXAxis,
 } from './useEchartsCartesianConfig';
 
 vi.mock('./../../providers/TrackingProvider');
@@ -638,5 +640,54 @@ describe('padDatasetForContinuousAxis', () => {
         expect(result[1][xField]).toBe('2023-04-01T00:00:00Z');
         expect(result[1].value).toBe(20);
         expect(result[1].extra).toBe('b');
+    });
+});
+
+describe('shouldForceCategoryTemporalXAxis', () => {
+    const makeSeries = ({
+        type,
+        stack,
+        areaStyle,
+    }: {
+        type: CartesianSeriesType;
+        stack?: string;
+        areaStyle?: Record<string, unknown>;
+    }): Series => ({
+        type,
+        ...(stack ? { stack } : {}),
+        ...(areaStyle ? { areaStyle } : {}),
+        encode: {
+            xRef: { field: 'date', pivotValues: [] },
+            yRef: { field: 'metric', pivotValues: [] },
+        },
+    });
+
+    test('returns false when no series', () => {
+        expect(shouldForceCategoryTemporalXAxis(undefined)).toBe(false);
+        expect(shouldForceCategoryTemporalXAxis([])).toBe(false);
+    });
+
+    test('returns true for bar charts', () => {
+        const series = [makeSeries({ type: CartesianSeriesType.BAR })];
+
+        expect(shouldForceCategoryTemporalXAxis(series)).toBe(true);
+    });
+
+    test('returns true for stacked area charts', () => {
+        const series = [
+            makeSeries({
+                type: CartesianSeriesType.AREA,
+                stack: 'stack-a',
+                areaStyle: {},
+            }),
+        ];
+
+        expect(shouldForceCategoryTemporalXAxis(series)).toBe(true);
+    });
+
+    test('returns false for non-stacked area charts', () => {
+        const series = [makeSeries({ type: CartesianSeriesType.AREA })];
+
+        expect(shouldForceCategoryTemporalXAxis(series)).toBe(false);
     });
 });
