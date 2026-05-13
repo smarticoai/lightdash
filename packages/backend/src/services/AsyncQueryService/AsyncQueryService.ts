@@ -106,6 +106,7 @@ import {
     type ResultColumns,
     type RunQueryTags,
     type SpaceSummaryBase,
+    type UserAttributeValueMap,
     type WarehouseExecuteAsyncQuery,
     type WarehouseResults,
     type WarehouseSqlBuilder,
@@ -2876,6 +2877,13 @@ export class AsyncQueryService extends ProjectService {
                 ? { ...baseUserAttributes, ...userAttributeOverrides }
                 : baseUserAttributes;
 
+        // SMR-START
+        AsyncQueryService.applySmrBigQueryProjectIdOverride(
+            explore,
+            userAttributes,
+        );
+        // SMR-END
+
         const availableParameterDefinitions = await this.getAvailableParameters(
             projectUuid,
             explore,
@@ -2959,6 +2967,36 @@ export class AsyncQueryService extends ProjectService {
             useTimezoneAwareDateTrunc,
         };
     }
+
+    // SMR-START
+    private static applySmrBigQueryProjectIdOverride(
+        explore: Explore,
+        userAttributes: UserAttributeValueMap,
+    ): void {
+        if (!explore.tables || !userAttributes?.bq_project_id) {
+            return;
+        }
+
+        const rawBqProjectId = userAttributes.bq_project_id;
+        const bqProjectId = Array.isArray(rawBqProjectId)
+            ? rawBqProjectId[0]
+            : rawBqProjectId;
+        if (!bqProjectId) {
+            return;
+        }
+
+        const sourceProjectId = process.env.SMR_BQ_PROJECT || 'project-not-defined';
+        for (const [, compiledTable] of Object.entries(explore.tables)) {
+            compiledTable.database = bqProjectId;
+            if (typeof compiledTable.sqlTable === 'string') {
+                compiledTable.sqlTable = compiledTable.sqlTable.replace(
+                    sourceProjectId,
+                    bqProjectId,
+                );
+            }
+        }
+    }
+    // SMR-END
 
     private async executePreparedAsyncQuery(
         // TODO: remove metric query, fields, etc from args once they are no longer needed in the database

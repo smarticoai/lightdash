@@ -29,6 +29,7 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
     - `packages/frontend/src/pages/VerifyEmail.tsx`
 - Multi-project BigQuery override:
     - `packages/backend/src/services/ProjectService/ProjectService.ts`
+    - `packages/backend/src/services/AsyncQueryService/AsyncQueryService.ts` (v2 async query paths, including `/query/field-values`)
 - Query/result caching integration:
     - `packages/backend/src/services/CacheService/CacheService.ts`
     - `packages/backend/src/services/Smartico/NodeCache.ts`
@@ -65,6 +66,8 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
     - `dockerfile`
     - `.smr`
     - `.husky/pre-commit`
+- Chart rendering guardrails:
+    - `packages/frontend/src/hooks/echarts/useEchartsCartesianConfig.ts` (SMR axis override for temporal X-axis in bar + stacked area)
 
 ### `getTabAiPrompt` and dashboard versions
 
@@ -96,6 +99,32 @@ Each dashboard save creates new `dashboard_tabs` rows per version while **reusin
 - **Tab UUID + multiple `dashboard_tabs` rows**:
     - Any new query joining `dashboard_tabs` by `uuid` only must define which version row wins (usually latest `dashboard_version_id` or latest `created_at`).
 
+## Post-merge fixes (May 2026)
+
+These were real regressions found after upstream merge and fixed in this fork:
+
+- **Embedded token header regression**:
+    - Smartico token must be sent in `jwt` header in embedded mode (not `lightdash-embed-token`).
+    - File: `packages/frontend/src/api.ts`.
+- **Dashboard provider runtime regression**:
+    - `DashboardProvider` leaked screenshot helpers from another context, causing runtime error (`markTileScreenshotReady is not defined`).
+    - Files:
+        - `packages/frontend/src/providers/Dashboard/DashboardProvider.tsx`
+        - `packages/frontend/src/providers/Dashboard/types.ts`
+- **Optional EE services should degrade gracefully**:
+    - Missing `aiAgentService` now returns `NotFoundError` instead of bubbling `MissingConfigError`.
+    - File: `packages/backend/src/ee/controllers/aiAgentController.ts`.
+- **Field-values BigQuery project override regression (critical)**:
+    - Frontend `/api/v2/.../query/field-values` uses `AsyncQueryService`, so BQ override must exist there too.
+    - Added SMR BQ project rewrite in `prepareMetricQueryAsyncQueryArgs`.
+    - File: `packages/backend/src/services/AsyncQueryService/AsyncQueryService.ts`.
+- **Chart temporal-axis rendering fix for ECharts edge cases**:
+    - Force temporal X-axis to `category` for bar and stacked-area cases (covers mixed bar+line with bar present), while preserving reference-line safety.
+    - Wrapped with `SMR-START/SMR-END`.
+    - Files:
+        - `packages/frontend/src/hooks/echarts/useEchartsCartesianConfig.ts`
+        - `packages/frontend/src/hooks/echarts/useEchartsCartesianConfig.test.ts`
+
 ## Rebase from community (semantic-preserving workflow)
 
 Use this flow when syncing from community Lightdash:
@@ -124,11 +153,44 @@ Use this flow when syncing from community Lightdash:
     - Embedded JWT path works end-to-end.
     - PAT auth still works end-to-end.
     - Embedded pages hide expected controls.
+    - Embedded frontend sends `jwt` header and backend accepts Smartico JWT flow.
     - Currency substitution works where expected.
-    - User `bq_project_id` correctly rewrites compiled table/database.
+    - User `bq_project_id` correctly rewrites compiled table/database in both:
+        - `ProjectService` sync query paths
+        - `AsyncQueryService` v2 async paths (especially `/query/field-values`)
     - Async query cache reads/writes still function.
     - Per-tab AI: tab modal loads/saves `smartico_*` fields; reload shows persisted values; stream uses **latest** prompt for the tab UUID; chart/SQL tiles still populate capture snapshots (`SMRuseTileCaptureSnapshot` types align with `RawResultRow`).
+    - Optional EE services are non-fatal when not configured (`embedService`, `aiAgentService`).
+    - Dashboard page does not throw provider/context runtime errors.
+    - Chart/table parity sanity check on temporal dimensions:
+        - stacked bar
+        - stacked area
+        - mixed bar+line
     - Production Docker build still succeeds.
+
+### Merge execution improvements (based on this cycle)
+
+Use this stricter order on future rebases:
+
+1. **Contracts first**
+    - Merge shared types/entities/model mappings before touching services.
+    - Immediately typecheck `common`, then `backend`.
+2. **Auth + transport next**
+    - Validate Smartico JWT header behavior and PAT behavior before service wiring.
+    - Smoke test both v1 and v2 APIs that frontend actually calls.
+3. **Core async paths before UI**
+    - Reconcile `AsyncQueryService` and `ProjectService` together for any Smartico query rewrite logic.
+    - Do not assume fixes in one service apply to the other.
+4. **Frontend runtime pass**
+    - After conflict resolution, run dashboard-level smoke tests:
+        - tile render
+        - chart render
+        - embedded mode
+        - no console/runtime reference errors
+5. **EE optional-service guard pass**
+    - Any service fetched from repository that may be absent in CE must fail gracefully.
+6. **Final semantic parity checklist in PR**
+    - Keep a short explicit list of Smartico invariants and confirm each with evidence.
 
 5. Compare final branch against previous Smartico behavior
     - `git diff --name-status <old-smartico-branch>..<new-rebase-branch>`
