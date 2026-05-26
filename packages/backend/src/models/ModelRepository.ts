@@ -44,6 +44,9 @@ import { RolesModel } from './RolesModel';
 import { SavedChartModel } from './SavedChartModel';
 import { SavedSqlModel } from './SavedSqlModel';
 import { SchedulerModel } from './SchedulerModel';
+// SMR-START
+import { SmrAiUsageModel } from './SmrAiUsageModel/SmrAiUsageModel';
+// SMR-END
 import { SearchModel } from './SearchModel';
 import { SessionModel } from './SessionModel';
 import { ShareModel } from './ShareModel';
@@ -100,6 +103,9 @@ export type ModelManifest = {
     rolesModel: RolesModel;
     savedChartModel: SavedChartModel;
     schedulerModel: SchedulerModel;
+    // SMR-START
+    smrAiUsageModel: SmrAiUsageModel;
+    // SMR-END
     searchModel: SearchModel;
     sessionModel: SessionModel;
     shareModel: ShareModel;
@@ -504,6 +510,15 @@ export class ModelRepository
             () => new SchedulerModel({ database: this.database }),
         );
     }
+
+    // SMR-START
+    public getSmrAiUsageModel(): SmrAiUsageModel {
+        return this.getModel(
+            'smrAiUsageModel',
+            () => new SmrAiUsageModel({ database: this.database }),
+        );
+    }
+    // SMR-END
 
     public getSearchModel(): SearchModel {
         return this.getModel(

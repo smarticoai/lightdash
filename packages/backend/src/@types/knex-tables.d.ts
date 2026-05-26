@@ -195,6 +195,12 @@ import {
     QueryHistoryTable,
     QueryHistoryTableName,
 } from '../database/entities/queryHistory';
+// SMR-START
+import {
+    SmrAiUsageTable,
+    SmrAiUsageTableName,
+} from '../database/entities/smrAiUsage';
+// SMR-END
 import {
     RolesTableName,
     RoleTable,
@@ -491,6 +497,9 @@ declare module 'knex/types/tables' {
         [OrganizationColorPaletteTableName]: OrganizationColorPaletteTable;
         [OrganizationWarehouseCredentialsTableName]: OrganizationWarehouseCredentialsTable;
         [QueryHistoryTableName]: QueryHistoryTable;
+        // SMR-START
+        [SmrAiUsageTableName]: SmrAiUsageTable;
+        // SMR-END
         [PreAggregateDefinitionsTableName]: PreAggregateDefinitionsTable;
         [PreAggregateDailyStatsTableName]: PreAggregateDailyStatsTable;
         [PreAggregateMaterializationsTableName]: PreAggregateMaterializationsTable;

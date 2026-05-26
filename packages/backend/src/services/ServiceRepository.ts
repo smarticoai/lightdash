@@ -403,6 +403,7 @@ export class ServiceRepository
                     lightdashConfig: this.context.lightdashConfig,
                     dashboardService: this.getDashboardService(),
                     dashboardModel: this.models.getDashboardModel(),
+                    smrAiUsageModel: this.models.getSmrAiUsageModel(),
                 }),
         );
     }

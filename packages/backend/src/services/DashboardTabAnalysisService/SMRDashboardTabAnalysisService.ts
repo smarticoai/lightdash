@@ -10,8 +10,36 @@ import crypto from 'crypto';
 import type { Response } from 'express';
 import type { LightdashConfig } from '../../config/parseConfig';
 import type { DashboardModel } from '../../models/DashboardModel/DashboardModel';
+import type { SmrAiUsageModel } from '../../models/SmrAiUsageModel/SmrAiUsageModel';
 import { BaseService } from '../BaseService';
 import { DashboardService } from '../DashboardService/DashboardService';
+
+type ModelPricing = { inputPerMillion: number; outputPerMillion: number };
+
+const MODEL_PRICING_USD: Record<string, ModelPricing> = {
+    'gemini-2.5-flash': { inputPerMillion: 0.3, outputPerMillion: 2.5 },
+    'gemini-2.5-flash-lite': { inputPerMillion: 0.1, outputPerMillion: 0.4 },
+    'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 10.0 },
+};
+
+const computeCostUsd = (
+    modelName: string,
+    inputTokens: number | undefined,
+    outputTokens: number | undefined,
+): number | null => {
+    const pricing = MODEL_PRICING_USD[modelName];
+    if (!pricing) {
+        return null;
+    }
+    if (inputTokens === undefined && outputTokens === undefined) {
+        return null;
+    }
+    const inputCost =
+        ((inputTokens ?? 0) * pricing.inputPerMillion) / 1_000_000;
+    const outputCost =
+        ((outputTokens ?? 0) * pricing.outputPerMillion) / 1_000_000;
+    return inputCost + outputCost;
+};
 
 export class DashboardTabAnalysisService extends BaseService {
     private static readonly MAX_CACHE_ENTRIES = 100;
@@ -33,19 +61,77 @@ export class DashboardTabAnalysisService extends BaseService {
 
     private readonly dashboardModel: DashboardModel;
 
+    private readonly smrAiUsageModel: SmrAiUsageModel;
+
     constructor({
         lightdashConfig,
         dashboardService,
         dashboardModel,
+        smrAiUsageModel,
     }: {
         lightdashConfig: LightdashConfig;
         dashboardService: DashboardService;
         dashboardModel: DashboardModel;
+        smrAiUsageModel: SmrAiUsageModel;
     }) {
         super({ serviceName: 'DashboardTabAnalysisService' });
         this.lightdashConfig = lightdashConfig;
         this.dashboardService = dashboardService;
         this.dashboardModel = dashboardModel;
+        this.smrAiUsageModel = smrAiUsageModel;
+    }
+
+    private async recordUsage(params: {
+        user: SessionUser;
+        labelId: number | null;
+        projectUuid: string;
+        dashboardUuid: string;
+        dashboardTabUuid: string | null;
+        modelName: string;
+        promptTokens: number | null;
+        completionTokens: number | null;
+        totalTokens: number | null;
+        costUsd: number | null;
+        cacheHit: boolean;
+        durationMs: number;
+        errorMessage: string | null;
+    }): Promise<void> {
+        try {
+            await this.smrAiUsageModel.logUsage({
+                labelId: params.labelId,
+                userUuid: params.user.userUuid,
+                organizationUuid: params.user.organizationUuid ?? null,
+                projectUuid: params.projectUuid,
+                dashboardUuid: params.dashboardUuid,
+                dashboardTabUuid: params.dashboardTabUuid,
+                modelName: params.modelName,
+                promptTokens: params.promptTokens,
+                completionTokens: params.completionTokens,
+                totalTokens: params.totalTokens,
+                costUsd: params.costUsd,
+                cacheHit: params.cacheHit,
+                durationMs: params.durationMs,
+                errorMessage: params.errorMessage,
+            });
+        } catch (err) {
+            this.logger.error('Failed to log dashboard tab AI usage', {
+                error: err,
+                dashboardUuid: params.dashboardUuid,
+                projectUuid: params.projectUuid,
+            });
+        }
+    }
+
+    private async resolveLabelId(user: SessionUser): Promise<number | null> {
+        try {
+            return await this.smrAiUsageModel.getLabelIdForUser(user.userId);
+        } catch (err) {
+            this.logger.error('Failed to resolve label_id for AI usage', {
+                error: err,
+                userUuid: user.userUuid,
+            });
+            return null;
+        }
     }
 
     async streamActiveTabAnalysis(
@@ -137,6 +223,9 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('X-Accel-Buffering', 'no');
 
+        const startedAt = Date.now();
+        const labelId = await this.resolveLabelId(user);
+
         if (cachedResponse) {
             this.logger.info('Dashboard tab analysis cache hit', {
                 dashboardUuid,
@@ -146,6 +235,21 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
             });
             res.write(cachedResponse);
             res.end();
+            await this.recordUsage({
+                user,
+                labelId,
+                projectUuid,
+                dashboardUuid,
+                dashboardTabUuid: activeTab.uuid,
+                modelName: geminiConfig.modelName,
+                promptTokens: null,
+                completionTokens: null,
+                totalTokens: null,
+                costUsd: 0,
+                cacheHit: true,
+                durationMs: Date.now() - startedAt,
+                errorMessage: null,
+            });
             return;
         }
         this.logger.info('Dashboard tab analysis cache miss', {
@@ -179,11 +283,54 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
                 fullResponse,
             );
             res.end();
+
+            const usage = await result.usage;
+            const inputTokens = usage.inputTokens ?? null;
+            const outputTokens = usage.outputTokens ?? null;
+            const totalTokens =
+                inputTokens !== null || outputTokens !== null
+                    ? (inputTokens ?? 0) + (outputTokens ?? 0)
+                    : null;
+            await this.recordUsage({
+                user,
+                labelId,
+                projectUuid,
+                dashboardUuid,
+                dashboardTabUuid: activeTab.uuid,
+                modelName: geminiConfig.modelName,
+                promptTokens: inputTokens,
+                completionTokens: outputTokens,
+                totalTokens,
+                costUsd: computeCostUsd(
+                    geminiConfig.modelName,
+                    usage.inputTokens,
+                    usage.outputTokens,
+                ),
+                cacheHit: false,
+                durationMs: Date.now() - startedAt,
+                errorMessage: null,
+            });
         } catch (err) {
             this.logger.error('Gemini stream failed', {
                 error: err,
                 dashboardUuid,
                 projectUuid,
+            });
+            await this.recordUsage({
+                user,
+                labelId,
+                projectUuid,
+                dashboardUuid,
+                dashboardTabUuid: activeTab.uuid,
+                modelName: geminiConfig.modelName,
+                promptTokens: null,
+                completionTokens: null,
+                totalTokens: null,
+                costUsd: null,
+                cacheHit: false,
+                durationMs: Date.now() - startedAt,
+                errorMessage:
+                    err instanceof Error ? err.message : String(err),
             });
             if (!res.headersSent) {
                 throw err;
