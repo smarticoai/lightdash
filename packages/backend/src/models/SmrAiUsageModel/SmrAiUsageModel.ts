@@ -12,6 +12,7 @@ type SmrAiUsageModelArguments = {
 
 export type LogAiUsageParams = {
     labelId: number | null;
+    inputMessage: string;
     userUuid: string | null;
     organizationUuid: string | null;
     projectUuid: string | null;
@@ -63,6 +64,7 @@ export class SmrAiUsageModel {
     async logUsage(params: LogAiUsageParams): Promise<void> {
         await this.database(SmrAiUsageTableName).insert({
             label_id: params.labelId,
+            input_message: params.inputMessage,
             user_uuid: params.userUuid,
             organization_uuid: params.organizationUuid,
             project_uuid: params.projectUuid,

@@ -8,6 +8,7 @@ export type DbSmrAiUsage = {
     created_at: Date;
 
     label_id: number | null;
+    input_message: string | null;
     user_uuid: string | null;
     organization_uuid: string | null;
     project_uuid: string | null;

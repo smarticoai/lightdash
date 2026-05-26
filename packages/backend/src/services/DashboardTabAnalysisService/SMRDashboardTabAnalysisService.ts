@@ -86,6 +86,7 @@ export class DashboardTabAnalysisService extends BaseService {
     private async recordUsage(params: {
         user: SessionUser;
         labelId: number | null;
+        inputMessage: string;
         projectUuid: string;
         dashboardUuid: string;
         dashboardTabUuid: string | null;
@@ -101,6 +102,7 @@ export class DashboardTabAnalysisService extends BaseService {
         try {
             await this.smrAiUsageModel.logUsage({
                 labelId: params.labelId,
+                inputMessage: params.inputMessage,
                 userUuid: params.user.userUuid,
                 organizationUuid: params.user.organizationUuid ?? null,
                 projectUuid: params.projectUuid,
@@ -206,6 +208,7 @@ export class DashboardTabAnalysisService extends BaseService {
 
         const normalizedPayloadForCache =
             DashboardTabAnalysisService.normalizePayloadForCache(payload);
+        const inputMessage = JSON.stringify(normalizedPayloadForCache);
         const userMessage = JSON.stringify(normalizedPayloadForCache, null, 2);
         const systemPrompt = `${tabConfig.aiAnalysisPrompt}
 
@@ -240,6 +243,7 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
             await this.recordUsage({
                 user,
                 labelId,
+                inputMessage,
                 projectUuid,
                 dashboardUuid,
                 dashboardTabUuid: activeTab.uuid,
@@ -296,6 +300,7 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
             await this.recordUsage({
                 user,
                 labelId,
+                inputMessage,
                 projectUuid,
                 dashboardUuid,
                 dashboardTabUuid: activeTab.uuid,
@@ -321,6 +326,7 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
             await this.recordUsage({
                 user,
                 labelId,
+                inputMessage,
                 projectUuid,
                 dashboardUuid,
                 dashboardTabUuid: activeTab.uuid,
