@@ -2218,7 +2218,7 @@ export const parseConfig = (): LightdashConfig => {
                     return undefined;
                 }
                 const modelName =
-                    process.env.GEMINI_MODEL || 'gemini-2.5-flash-preview-04-17';
+                    process.env.GEMINI_MODEL || 'gemini-2.5-flash';
                 return { apiKey, modelName };
             })(),
             // SMR-END
