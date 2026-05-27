@@ -429,10 +429,10 @@ export const getMultiProjectSetupConfig = ():
 
         throw new ParseError(
             `Invalid LD_SETUP_PROJECTS:\n${errorDetails}\n\n` +
-                `Warehouse types: ${Object.values(WarehouseTypes).join(', ')}\n` +
-                `dbt connection types: ${Object.values(DbtProjectType).join(', ')}\n\n` +
-                `Example:\n${exampleConfig}\n\n` +
-                `See https://docs.lightdash.com/self-host/customize-deployment/environment-variables#initialize-instance for details.`,
+            `Warehouse types: ${Object.values(WarehouseTypes).join(', ')}\n` +
+            `dbt connection types: ${Object.values(DbtProjectType).join(', ')}\n\n` +
+            `Example:\n${exampleConfig}\n\n` +
+            `See https://docs.lightdash.com/self-host/customize-deployment/environment-variables#initialize-instance for details.`,
         );
     }
 
@@ -522,21 +522,21 @@ const getInitialSetupConfig = (): LightdashConfig['initialSetup'] => {
             // TODO: Does this need validation as well?
             apiKey: process.env.LD_SETUP_ADMIN_API_KEY
                 ? {
-                      token: process.env.LD_SETUP_ADMIN_API_KEY,
-                      expirationTime: parseApiExpiration(
-                          'LD_SETUP_API_KEY_EXPIRATION',
-                      ),
-                  }
+                    token: process.env.LD_SETUP_ADMIN_API_KEY,
+                    expirationTime: parseApiExpiration(
+                        'LD_SETUP_API_KEY_EXPIRATION',
+                    ),
+                }
                 : undefined,
             serviceAccount: isApiValidToken(
                 TokenEnvironmentVariable.SERVICE_ACCOUNT,
             )
                 ? {
-                      token: process.env.LD_SETUP_SERVICE_ACCOUNT_TOKEN!,
-                      expirationTime: parseApiExpiration(
-                          'LD_SETUP_SERVICE_ACCOUNT_EXPIRATION',
-                      ),
-                  }
+                    token: process.env.LD_SETUP_SERVICE_ACCOUNT_TOKEN!,
+                    expirationTime: parseApiExpiration(
+                        'LD_SETUP_SERVICE_ACCOUNT_EXPIRATION',
+                    ),
+                }
                 : undefined,
             projects,
         };
@@ -604,11 +604,11 @@ export const getUpdateSetupConfig = (): LightdashConfig['updateSetup'] => {
             TokenEnvironmentVariable.SERVICE_ACCOUNT,
         )
             ? {
-                  token: process.env.LD_SETUP_SERVICE_ACCOUNT_TOKEN!,
-                  expirationTime: parseApiExpiration(
-                      'LD_SETUP_SERVICE_ACCOUNT_EXPIRATION',
-                  ),
-              }
+                token: process.env.LD_SETUP_SERVICE_ACCOUNT_TOKEN!,
+                expirationTime: parseApiExpiration(
+                    'LD_SETUP_SERVICE_ACCOUNT_EXPIRATION',
+                ),
+            }
             : undefined,
         dbt: {
             personal_access_token: process.env.LD_SETUP_GITHUB_PAT,
@@ -879,60 +879,60 @@ export const getAiConfig = () => ({
     providers: {
         azure: process.env.AZURE_AI_API_KEY
             ? {
-                  endpoint: process.env.AZURE_AI_ENDPOINT,
-                  apiKey: process.env.AZURE_AI_API_KEY,
-                  apiVersion: process.env.AZURE_AI_API_VERSION,
-                  deploymentName: process.env.AZURE_AI_DEPLOYMENT_NAME,
-                  deploymentSupportsReasoning:
-                      process.env.AZURE_AI_DEPLOYMENT_SUPPORTS_REASONING ===
-                      'true',
-                  embeddingDeploymentName:
-                      process.env.AZURE_EMBEDDING_DEPLOYMENT_NAME,
-                  useDeploymentBasedUrls:
-                      process.env.AZURE_USE_DEPLOYMENT_BASED_URLS !== 'false',
-              }
+                endpoint: process.env.AZURE_AI_ENDPOINT,
+                apiKey: process.env.AZURE_AI_API_KEY,
+                apiVersion: process.env.AZURE_AI_API_VERSION,
+                deploymentName: process.env.AZURE_AI_DEPLOYMENT_NAME,
+                deploymentSupportsReasoning:
+                    process.env.AZURE_AI_DEPLOYMENT_SUPPORTS_REASONING ===
+                    'true',
+                embeddingDeploymentName:
+                    process.env.AZURE_EMBEDDING_DEPLOYMENT_NAME,
+                useDeploymentBasedUrls:
+                    process.env.AZURE_USE_DEPLOYMENT_BASED_URLS !== 'false',
+            }
             : undefined,
         openai: process.env.OPENAI_API_KEY
             ? {
-                  apiKey: process.env.OPENAI_API_KEY,
-                  modelName:
-                      process.env.OPENAI_MODEL_NAME ||
-                      DEFAULT_OPENAI_MODEL_NAME,
-                  embeddingModelName:
-                      process.env.OPENAI_EMBEDDING_MODEL ||
-                      DEFAULT_OPENAI_EMBEDDING_MODEL,
-                  baseUrl: process.env.OPENAI_BASE_URL,
-                  availableModels: getArrayFromCommaSeparatedList(
-                      'OPENAI_AVAILABLE_MODELS',
-                  ),
-                  zeroDataRetention:
-                      process.env.OPENAI_ZERO_DATA_RETENTION === 'true',
-              }
+                apiKey: process.env.OPENAI_API_KEY,
+                modelName:
+                    process.env.OPENAI_MODEL_NAME ||
+                    DEFAULT_OPENAI_MODEL_NAME,
+                embeddingModelName:
+                    process.env.OPENAI_EMBEDDING_MODEL ||
+                    DEFAULT_OPENAI_EMBEDDING_MODEL,
+                baseUrl: process.env.OPENAI_BASE_URL,
+                availableModels: getArrayFromCommaSeparatedList(
+                    'OPENAI_AVAILABLE_MODELS',
+                ),
+                zeroDataRetention:
+                    process.env.OPENAI_ZERO_DATA_RETENTION === 'true',
+            }
             : undefined,
         anthropic:
             process.env.ANTHROPIC_API_KEY &&
-            process.env.ANTHROPIC_API_KEY !== 'undefined'
+                process.env.ANTHROPIC_API_KEY !== 'undefined'
                 ? {
-                      apiKey: process.env.ANTHROPIC_API_KEY,
-                      modelName:
-                          process.env.ANTHROPIC_MODEL_NAME ||
-                          DEFAULT_ANTHROPIC_MODEL_NAME,
-                      availableModels: getArrayFromCommaSeparatedList(
-                          'ANTHROPIC_AVAILABLE_MODELS',
-                      ),
-                  }
+                    apiKey: process.env.ANTHROPIC_API_KEY,
+                    modelName:
+                        process.env.ANTHROPIC_MODEL_NAME ||
+                        DEFAULT_ANTHROPIC_MODEL_NAME,
+                    availableModels: getArrayFromCommaSeparatedList(
+                        'ANTHROPIC_AVAILABLE_MODELS',
+                    ),
+                }
                 : undefined,
         openrouter: process.env.OPENROUTER_API_KEY
             ? {
-                  apiKey: process.env.OPENROUTER_API_KEY,
-                  modelName:
-                      process.env.OPENROUTER_MODEL_NAME ||
-                      DEFAULT_OPENROUTER_MODEL_NAME,
-                  sortOrder: process.env.OPENROUTER_SORT_ORDER,
-                  allowedProviders: getArrayFromCommaSeparatedList(
-                      'OPENROUTER_ALLOWED_PROVIDERS',
-                  ),
-              }
+                apiKey: process.env.OPENROUTER_API_KEY,
+                modelName:
+                    process.env.OPENROUTER_MODEL_NAME ||
+                    DEFAULT_OPENROUTER_MODEL_NAME,
+                sortOrder: process.env.OPENROUTER_SORT_ORDER,
+                allowedProviders: getArrayFromCommaSeparatedList(
+                    'OPENROUTER_ALLOWED_PROVIDERS',
+                ),
+            }
             : undefined,
         bedrock: getBedrockConfig(),
     },
@@ -1113,11 +1113,11 @@ export type LightdashConfig = {
         analyticsDashboardUuid?: string;
         // SMR-START
         geminiDashboardTabAnalysis:
-            | {
-                  apiKey: string;
-                  modelName: string;
-              }
-            | undefined;
+        | {
+            apiKey: string;
+            modelName: string;
+        }
+        | undefined;
         // SMR-END
     };
     embedding: {
@@ -1577,44 +1577,44 @@ const parseAppRuntimeConfig = (siteUrl: string): AppRuntimeConfig => {
 const LEGACY_ENABLE_ENV_VARS: ReadonlyArray<
     readonly [envVar: string, flagId: string]
 > = [
-    // Add per migration; truthy env value enables the flag.
-    ['CHANGE_CHART_EXPLORE_ENABLED', 'change-chart-explore'],
-    ['GOOGLE_CHAT_ENABLED', 'google-chat-enabled'],
-    // helm defaults set USE_SQL_PIVOT_RESULTS=true for all cloud deployments;
-    // translating to enabledFeatureFlags ensures both existing and new cloud
-    // instances pick up the DB-backed flag as enabled without needing per-DB
-    // bootstrapping.
-    ['USE_SQL_PIVOT_RESULTS', 'use-sql-pivot-results'],
-    ['USER_IMPERSONATION_ENABLED', 'user-impersonation'],
-    // GROUPS_ENABLED is also read by UserService for group-sync logic (separate
-    // from the feature flag) — keep the config field, but translate the env
-    // var to the unified allowlist for the flag system too.
-    ['GROUPS_ENABLED', 'user-groups-enabled'],
-    ['SHOW_EXECUTION_TIME', 'show-execution-time'],
-    // EMBEDDING_ENABLED is also read by HealthService (exposed via the health
-    // endpoint) and EmbedService (allowAll config). Keep the config field, but
-    // translate the env var to the unified allowlist for the flag system.
-    ['EMBEDDING_ENABLED', 'embedding'],
-    // SERVICE_ACCOUNT_ENABLED is also read by HealthService (exposed via the
-    // health endpoint). Keep the config field, but translate the env var to
-    // the unified allowlist for the flag system.
-    ['SERVICE_ACCOUNT_ENABLED', 'service-accounts'],
-    ['SCIM_ENABLED', 'scim-token-management'],
-    // ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED is also read by HealthService
-    // (exposed via the health endpoint). Keep the config field, but translate
-    // the env var to the unified allowlist for the flag system.
-    [
-        'ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED',
-        'organization-warehouse-credentials',
-    ],
-    ['METRIC_DASHBOARD_FILTERS_ENABLED', 'metric-dashboard-filters'],
-];
+        // Add per migration; truthy env value enables the flag.
+        ['CHANGE_CHART_EXPLORE_ENABLED', 'change-chart-explore'],
+        ['GOOGLE_CHAT_ENABLED', 'google-chat-enabled'],
+        // helm defaults set USE_SQL_PIVOT_RESULTS=true for all cloud deployments;
+        // translating to enabledFeatureFlags ensures both existing and new cloud
+        // instances pick up the DB-backed flag as enabled without needing per-DB
+        // bootstrapping.
+        ['USE_SQL_PIVOT_RESULTS', 'use-sql-pivot-results'],
+        ['USER_IMPERSONATION_ENABLED', 'user-impersonation'],
+        // GROUPS_ENABLED is also read by UserService for group-sync logic (separate
+        // from the feature flag) — keep the config field, but translate the env
+        // var to the unified allowlist for the flag system too.
+        ['GROUPS_ENABLED', 'user-groups-enabled'],
+        ['SHOW_EXECUTION_TIME', 'show-execution-time'],
+        // EMBEDDING_ENABLED is also read by HealthService (exposed via the health
+        // endpoint) and EmbedService (allowAll config). Keep the config field, but
+        // translate the env var to the unified allowlist for the flag system.
+        ['EMBEDDING_ENABLED', 'embedding'],
+        // SERVICE_ACCOUNT_ENABLED is also read by HealthService (exposed via the
+        // health endpoint). Keep the config field, but translate the env var to
+        // the unified allowlist for the flag system.
+        ['SERVICE_ACCOUNT_ENABLED', 'service-accounts'],
+        ['SCIM_ENABLED', 'scim-token-management'],
+        // ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED is also read by HealthService
+        // (exposed via the health endpoint). Keep the config field, but translate
+        // the env var to the unified allowlist for the flag system.
+        [
+            'ORGANIZATION_WAREHOUSE_CREDENTIALS_ENABLED',
+            'organization-warehouse-credentials',
+        ],
+        ['METRIC_DASHBOARD_FILTERS_ENABLED', 'metric-dashboard-filters'],
+    ];
 
 const LEGACY_DISABLE_ENV_VARS: ReadonlyArray<
     readonly [envVar: string, flagId: string]
 > = [
-    // Add per migration; truthy env value disables the flag.
-];
+        // Add per migration; truthy env value disables the flag.
+    ];
 
 export const parseConfig = (): LightdashConfig => {
     const lightdashSecret = process.env.LIGHTDASH_SECRET;
@@ -1736,47 +1736,47 @@ export const parseConfig = (): LightdashConfig => {
         },
         smtp: process.env.EMAIL_SMTP_HOST
             ? {
-                  host: process.env.EMAIL_SMTP_HOST,
-                  port: parseInt(process.env.EMAIL_SMTP_PORT || '587', 10),
-                  secure: process.env.EMAIL_SMTP_SECURE !== 'false', // defaults to true
-                  allowInvalidCertificate:
-                      process.env.EMAIL_SMTP_ALLOW_INVALID_CERT === 'true',
-                  useAuth: process.env.EMAIL_SMTP_USE_AUTH !== 'false', // defaults to true
-                  auth: {
-                      user: process.env.EMAIL_SMTP_USER || '',
-                      pass: process.env.EMAIL_SMTP_PASSWORD,
-                      accessToken: process.env.EMAIL_SMTP_ACCESS_TOKEN,
-                  },
-                  sender: {
-                      name: process.env.EMAIL_SMTP_SENDER_NAME || 'Lightdash',
-                      email: process.env.EMAIL_SMTP_SENDER_EMAIL || '',
-                  },
-                  inlineImageCid:
-                      process.env.EMAIL_SMTP_IMAGE_INLINE_CID === 'true',
-              }
+                host: process.env.EMAIL_SMTP_HOST,
+                port: parseInt(process.env.EMAIL_SMTP_PORT || '587', 10),
+                secure: process.env.EMAIL_SMTP_SECURE !== 'false', // defaults to true
+                allowInvalidCertificate:
+                    process.env.EMAIL_SMTP_ALLOW_INVALID_CERT === 'true',
+                useAuth: process.env.EMAIL_SMTP_USE_AUTH !== 'false', // defaults to true
+                auth: {
+                    user: process.env.EMAIL_SMTP_USER || '',
+                    pass: process.env.EMAIL_SMTP_PASSWORD,
+                    accessToken: process.env.EMAIL_SMTP_ACCESS_TOKEN,
+                },
+                sender: {
+                    name: process.env.EMAIL_SMTP_SENDER_NAME || 'Lightdash',
+                    email: process.env.EMAIL_SMTP_SENDER_EMAIL || '',
+                },
+                inlineImageCid:
+                    process.env.EMAIL_SMTP_IMAGE_INLINE_CID === 'true',
+            }
             : undefined,
         posthog: process.env.POSTHOG_PROJECT_API_KEY
             ? {
-                  projectApiKey: process.env.POSTHOG_PROJECT_API_KEY,
-                  feApiHost:
-                      process.env.POSTHOG_FE_API_HOST ||
-                      'https://us.i.posthog.com',
-                  beApiHost:
-                      process.env.POSTHOG_BE_API_HOST ||
-                      'https://us.i.posthog.com',
-              }
+                projectApiKey: process.env.POSTHOG_PROJECT_API_KEY,
+                feApiHost:
+                    process.env.POSTHOG_FE_API_HOST ||
+                    'https://us.i.posthog.com',
+                beApiHost:
+                    process.env.POSTHOG_BE_API_HOST ||
+                    'https://us.i.posthog.com',
+            }
             : undefined,
         rudder: {
             writeKey:
                 process.env.RUDDERSTACK_ANALYTICS_DISABLED === 'true'
                     ? undefined
                     : process.env.RUDDERSTACK_WRITE_KEY ||
-                      '',
+                    '',
             dataPlaneUrl:
                 process.env.RUDDERSTACK_ANALYTICS_DISABLED === 'true'
                     ? undefined
                     : process.env.RUDDERSTACK_DATA_PLANE_URL ||
-                      'https://analytics.lightdash.com',
+                    'https://analytics.lightdash.com',
         },
         sentry: {
             backend: {
@@ -1885,7 +1885,7 @@ export const parseConfig = (): LightdashConfig => {
                 ),
                 openIdConnectMetadataEndpoint:
                     process.env.AUTH_AZURE_AD_OIDC_METADATA_ENDPOINT ||
-                    process.env.AUTH_AZURE_AD_OAUTH_TENANT_ID
+                        process.env.AUTH_AZURE_AD_OAUTH_TENANT_ID
                         ? `https://login.microsoftonline.com/${process.env.AUTH_AZURE_AD_OAUTH_TENANT_ID}/v2.0/.well-known/openid-configuration`
                         : undefined,
             },
@@ -2014,7 +2014,7 @@ export const parseConfig = (): LightdashConfig => {
             retryQueryOnTransientErrors: process.env
                 .LIGHTDASH_QUERY_RETRY_ON_TRANSIENT_ERRORS
                 ? process.env.LIGHTDASH_QUERY_RETRY_ON_TRANSIENT_ERRORS ===
-                  'true'
+                'true'
                 : false,
             enableTimezoneSupport: process.env.LIGHTDASH_ENABLE_TIMEZONE_SUPPORT
                 ? process.env.LIGHTDASH_ENABLE_TIMEZONE_SUPPORT === 'true'
@@ -2172,9 +2172,9 @@ export const parseConfig = (): LightdashConfig => {
         logging: {
             level: parseLoggingLevel(
                 process.env.LIGHTDASH_LOG_LEVEL ||
-                    ((process.env.NODE_ENV || 'development') === 'development'
-                        ? 'debug'
-                        : 'http'),
+                ((process.env.NODE_ENV || 'development') === 'development'
+                    ? 'debug'
+                    : 'http'),
             ),
             format: parseLoggingFormat(
                 process.env.LIGHTDASH_LOG_FORMAT || 'pretty',
@@ -2187,14 +2187,14 @@ export const parseConfig = (): LightdashConfig => {
                 process.env.LIGHTDASH_LOG_CONSOLE_FORMAT === undefined
                     ? undefined
                     : parseLoggingFormat(
-                          process.env.LIGHTDASH_LOG_CONSOLE_FORMAT,
-                      ),
+                        process.env.LIGHTDASH_LOG_CONSOLE_FORMAT,
+                    ),
             consoleLevel:
                 process.env.LIGHTDASH_LOG_CONSOLE_LEVEL === undefined
                     ? undefined
                     : parseLoggingLevel(
-                          process.env.LIGHTDASH_LOG_CONSOLE_LEVEL,
-                      ),
+                        process.env.LIGHTDASH_LOG_CONSOLE_LEVEL,
+                    ),
             fileFormat:
                 process.env.LIGHTDASH_LOG_FILE_FORMAT === undefined
                     ? undefined
@@ -2218,7 +2218,7 @@ export const parseConfig = (): LightdashConfig => {
                     return undefined;
                 }
                 const modelName =
-                    process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+                    process.env.GEMINI_MODEL || 'gemini-3.5-flash';
                 return { apiKey, modelName };
             })(),
             // SMR-END

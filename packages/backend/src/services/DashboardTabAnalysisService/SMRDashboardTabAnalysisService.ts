@@ -20,8 +20,8 @@ const MODEL_PRICING_USD: Record<string, ModelPricing> = {
     'gemini-2.5-flash': { inputPerMillion: 0.3, outputPerMillion: 2.5 },
     'gemini-2.5-flash-lite': { inputPerMillion: 0.1, outputPerMillion: 0.4 },
     'gemini-2.5-pro': { inputPerMillion: 1.25, outputPerMillion: 10.0 },
-    'gemini-3-flash-preview': { inputPerMillion: 0.5, outputPerMillion: 2.5 },
-    'gemini-3.5-flash': { inputPerMillion: 2.7, outputPerMillion: 2.7 },
+    'gemini-3-flash-preview': { inputPerMillion: 0.5, outputPerMillion: 3 },
+    'gemini-3.5-flash': { inputPerMillion: 1.5, outputPerMillion: 9 },
 };
 
 const computeCostUsd = (
@@ -178,8 +178,8 @@ export class DashboardTabAnalysisService extends BaseService {
 
         const activeTab =
             typeof payload === 'object' &&
-            payload !== null &&
-            'activeTab' in payload
+                payload !== null &&
+                'activeTab' in payload
                 ? (payload as { activeTab?: { uuid?: string } }).activeTab
                 : undefined;
 
@@ -367,12 +367,12 @@ Use markdown formatting where it improves readability. Apply bold, italic, and u
             .update(
                 JSON.stringify(
                     DashboardTabAnalysisService.sortObjectKeysDeep({
-                    dashboardUuid,
-                    projectUuid,
-                    activeTabUuid,
-                    modelName,
-                    systemPrompt,
-                    userMessage,
+                        dashboardUuid,
+                        projectUuid,
+                        activeTabUuid,
+                        modelName,
+                        systemPrompt,
+                        userMessage,
                     }),
                 ),
             )
