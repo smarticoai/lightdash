@@ -1,5 +1,6 @@
 ---
 description: Smartico fork deltas and upstream rebase playbook
+alwaysApply: true
 ---
 
 # Smartico Fork Guide
@@ -22,7 +23,8 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
 - Embedded UI behavior:
     - `packages/frontend/src/components/common/Page/Page.tsx`
     - `packages/frontend/src/components/NavBar/MainNavBarContent.tsx`
-    - `packages/frontend/src/components/common/Dashboard/ShareLinkButton.tsx`
+    - `packages/frontend/src/components/common/Dashboard/ShareLinkButton.tsx` (unused fork variant — dead code; the header uses the generic `components/common/ShareLinkButton.tsx`)
+    - `packages/frontend/src/components/common/Dashboard/DashboardHeader.tsx` (copy-link button gated with `!smrIsEmbeddedMode()` so it hides in embedded mode; also the AI-analysis entry noted below)
     - `packages/frontend/src/components/common/PageHeader/DashboardInfoOverlay.tsx`
     - `packages/frontend/src/pages/Invite.tsx`
     - `packages/frontend/src/pages/Register.tsx`

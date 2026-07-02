@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Lightdash is an open-source business intelligence tool (Looker alternative) that connects to dbt projects to enable self-service analytics. It's a TypeScript monorepo built with modern web technologies.
 
+> **This is the Smartico fork.** All Smartico-specific context — fork deltas, embedded-mode behavior, BigQuery per-user override, per-tab AI, cache integration, and the upstream-rebase playbook — lives in **`.cursor/rules/smartico-fork.mdc`**. **Read it before doing Smartico work, and keep it updated as the fork evolves.** Do **not** add Smartico-specific notes to this CLAUDE.md — put them in `.cursor/rules/smartico-fork.mdc` so both Claude Code and Cursor stay in sync.
+
 ## Formula Package Development
 
 The `packages/formula/` package contains a Peggy-based parser that compiles Google Sheets-like formulas to SQL for each warehouse dialect (Postgres, BigQuery, Snowflake, DuckDB).

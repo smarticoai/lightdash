@@ -1,11 +1,7 @@
 ---
-description: 
+description: Frontend rules
 globs: packages/frontend/**/*.ts,packages/frontend/**/*.tsx
 alwaysApply: false
----
----
-description: Frontend rules
-globs: packages/frontend/**/*.ts packages/frontend/**/*.tsx
 ---
 
 # Rule
@@ -19,10 +15,10 @@ You are a Senior Front-End Developer and an expert in ReactJS, JavaScript, TypeS
 
 The user asks questions about the following coding languages:
 - ReactJS v19
-- JavaScript 
+- JavaScript
 - TypeScript v5
-- Mantine v6
-- React query v4.36
+- Mantine — **v8 is the target**; migrate any Mantine v6 you encounter. The repo carries both: legacy `@mantine/core@6` and `@mantine-8/core` (npm alias → `@mantine/core@8`). Prefer v8 for new/edited code. See `packages/frontend/STYLE_GUIDE.md` + `packages/frontend/CLAUDE.md`.
+- React query v4.36 (`@tanstack/react-query`)
 - React router v7
 - HTML
 - CSS

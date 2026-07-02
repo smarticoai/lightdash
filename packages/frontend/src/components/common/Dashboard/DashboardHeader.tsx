@@ -71,6 +71,7 @@ import useApp from '../../../providers/App/useApp';
 import { type TilePreAggregateStatus } from '../../../providers/Dashboard/types';
 import useTracking from '../../../providers/Tracking/useTracking';
 import { EventName } from '../../../types/Events';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 import AddTileButton from '../../DashboardTiles/AddTileButton';
 import MantineIcon from '../MantineIcon';
 import DashboardUpdateModal from '../modal/DashboardUpdateModal';
@@ -680,12 +681,14 @@ const DashboardHeader = memo(
                                 </Tooltip>
                             )}
 
-                        {userCanExportData && !isFullscreen && (
-                            <ShareLinkButton
-                                url={`${window.location.href}`}
-                                label="Copy link to the dashboard"
-                            />
-                        )}
+                        {userCanExportData &&
+                            !isFullscreen &&
+                            !smrIsEmbeddedMode() && (
+                                <ShareLinkButton
+                                    url={`${window.location.href}`}
+                                    label="Copy link to the dashboard"
+                                />
+                            )}
 
                         {!isFullscreen && (
                             <Menu
