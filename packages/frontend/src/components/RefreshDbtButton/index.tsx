@@ -19,6 +19,7 @@ import { useAbilityContext } from '../../providers/Ability/useAbilityContext';
 import useActiveJob from '../../providers/ActiveJob/useActiveJob';
 import useTracking from '../../providers/Tracking/useTracking';
 import { EventName } from '../../types/Events';
+import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
 import MantineIcon from '../common/MantineIcon';
 
 const RefreshDbtButton: FC<{
@@ -62,6 +63,9 @@ const RefreshDbtButton: FC<{
             }
         }
     }, [activeJob, activeJob?.jobStatus]);
+
+    // SMR: never expose dbt refresh to embedded users.
+    if (smrIsEmbeddedMode()) return null;
 
     if (
         ability?.cannot('manage', 'Job') ||

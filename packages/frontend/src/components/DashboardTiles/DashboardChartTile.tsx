@@ -68,7 +68,8 @@ import React, {
     type FC,
     type RefObject,
 } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
+import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
 import { v4 as uuid4 } from 'uuid';
 import { useProjectColorPalette } from '../../hooks/appearance/useProjectColorPalette';
 import { type EChartsReact } from '../EChartsReactWrapper';
@@ -601,6 +602,7 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = memo(
 
         const { dashboardUuid } = useParams<{ dashboardUuid: string }>();
         const projectUuid = useProjectUuid();
+        const navigate = useNavigate();
         const { canViewExplore, canViewUnderlyingData, canDrillInto } =
             useContextMenuPermissions({ minimal: false });
 
@@ -854,9 +856,18 @@ const DashboardChartTileMain: FC<DashboardChartTileMainProps> = memo(
                         `?` + chartSearch + `&fromDashboard=${dashboardUuid}`,
                 });
 
-                window.open(`/share/${shareUrl.nanoid}`, '_blank');
+                // SMR: in Smartico embedded mode navigate client-side so the SPA
+                // keeps window._smr_is_embedded (set from the URL hash in index.html,
+                // only on full page loads). Opening a new tab / full navigation would
+                // drop the embed flag and expose the full un-embedded app (navbar,
+                // Tables, Save chart, SQL runner, Refresh dbt).
+                if (smrIsEmbeddedMode()) {
+                    void navigate(`/share/${shareUrl.nanoid}`);
+                } else {
+                    window.open(`/share/${shareUrl.nanoid}`, '_blank');
+                }
             },
-            [createShareUrl, dashboardUuid],
+            [createShareUrl, dashboardUuid, navigate],
         );
 
         const [dashboardTileFilterOptions, setDashboardTileFilterOptions] =

@@ -1636,10 +1636,11 @@ describe('Project member permissions', () => {
                     ),
                 ).toEqual(false);
             });
-            it('cannot Explore', () => {
+            // SMR: viewers CAN use Explore ("Explore from here" in embedded mode).
+            it('can Explore', () => {
                 expect(
                     ability.can('manage', subject('Explore', { projectUuid })),
-                ).toEqual(false);
+                ).toEqual(true);
             });
             it('cannot view underlying data', () => {
                 expect(

@@ -52,6 +52,7 @@ import LoadingSkeleton from '../ExploreTree/LoadingSkeleton';
 import { ItemDetailProvider } from '../ExploreTree/TableTree/ItemDetailProvider';
 import WarningsHoverCardContent from '../WarningsHoverCardContent';
 import { useIsGitProject } from '../WriteBackModal/hooks';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 import { VisualizationConfigPortalId } from './constants';
 
 interface ExplorePanelProps {
@@ -164,12 +165,15 @@ const ExplorePanel: FC<ExplorePanelProps> = memo(({ onBack }) => {
 
     const breadcrumbs = useMemo(() => {
         if (!explore) return [];
-        const items = onBack
-            ? [
-                  { title: 'Tables', onClick: onBack },
-                  { title: explore.label, active: true },
-              ]
-            : [{ title: explore.label, active: true }];
+        // SMR: hide the "Tables" crumb in embedded mode so users can't navigate
+        // to the full table list of the project.
+        const items =
+            onBack && !smrIsEmbeddedMode()
+                ? [
+                      { title: 'Tables', onClick: onBack },
+                      { title: explore.label, active: true },
+                  ]
+                : [{ title: explore.label, active: true }];
         return items;
     }, [onBack, explore]);
 

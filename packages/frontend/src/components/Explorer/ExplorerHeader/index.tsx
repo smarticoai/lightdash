@@ -24,6 +24,7 @@ import { useServerFeatureFlag } from '../../../hooks/useServerOrClientFeatureFla
 import { Can } from '../../../providers/Ability';
 import { useAbilityContext } from '../../../providers/Ability/useAbilityContext';
 import useApp from '../../../providers/App/useApp';
+import { smrIsEmbeddedMode } from '../../../utils/smarticoUtils';
 import MantineIcon from '../../common/MantineIcon';
 import ShareShortLinkButton from '../../common/ShareShortLinkButton';
 import TimeZonePicker from '../../common/TimeZonePicker';
@@ -205,7 +206,7 @@ const ExplorerHeader: FC = memo(() => {
 
                 <RefreshButton size="xs" />
 
-                {!savedChart && !isEmbedded && (
+                {!savedChart && !isEmbedded && !smrIsEmbeddedMode() && (
                     <Tooltip
                         disabled={buttonDisabledMessage === null}
                         withinPortal
@@ -219,18 +220,22 @@ const ExplorerHeader: FC = memo(() => {
                         </div>
                     </Tooltip>
                 )}
-                <Can
-                    I="update"
-                    this={subject('Explore', {
-                        organizationUuid: user.data?.organizationUuid,
-                        projectUuid,
-                    })}
-                >
-                    <ShareShortLinkButton
-                        disabled={!isValidQuery}
-                        url={urlToShare}
-                    />
-                </Can>
+                {/* SMR: hide the share-short-link button in embedded mode so
+                    embedded users can't mint links to the full un-embedded app. */}
+                {!smrIsEmbeddedMode() && (
+                    <Can
+                        I="update"
+                        this={subject('Explore', {
+                            organizationUuid: user.data?.organizationUuid,
+                            projectUuid,
+                        })}
+                    >
+                        <ShareShortLinkButton
+                            disabled={!isValidQuery}
+                            url={urlToShare}
+                        />
+                    </Can>
+                )}
             </Group>
         </Group>
     );

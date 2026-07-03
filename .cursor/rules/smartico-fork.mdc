@@ -23,6 +23,12 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
 - Embedded UI behavior:
     - `packages/frontend/src/components/common/Page/Page.tsx`
     - `packages/frontend/src/components/NavBar/MainNavBarContent.tsx`
+    - Embedded "Explore from here" enablement (hide explore chrome + keep nav inside the iframe), all gated by `smrIsEmbeddedMode()`:
+        - `packages/frontend/src/components/DashboardTiles/DashboardChartTile.tsx` (`handleCreateShareUrl` navigates client-side via react-router `navigate('/share/…')` in embedded instead of `window.open(_blank)` — a full nav / new tab drops `window._smr_is_embedded`, which `index.html` sets only from the `#token=` hash on page load, and would expose the full un-embedded app)
+        - `packages/frontend/src/components/Explorer/ExplorePanel/index.tsx` (hide "Tables" breadcrumb)
+        - `packages/frontend/src/components/Explorer/ExplorerHeader/index.tsx` (hide Save chart + ShareShortLink)
+        - `packages/frontend/src/components/RefreshDbtButton/index.tsx` (return null in embedded)
+        - `packages/frontend/src/components/Explorer/index.tsx` (hide whole SqlCard → also hides "Open in SQL Runner" + raw SQL/table/db names)
     - `packages/frontend/src/components/common/Dashboard/ShareLinkButton.tsx` (unused fork variant — dead code; the header uses the generic `components/common/ShareLinkButton.tsx`)
     - `packages/frontend/src/components/common/Dashboard/DashboardHeader.tsx` (copy-link button gated with `!smrIsEmbeddedMode()` so it hides in embedded mode; also the AI-analysis entry noted below)
     - `packages/frontend/src/components/common/PageHeader/DashboardInfoOverlay.tsx`
@@ -80,6 +86,13 @@ Each dashboard save creates new `dashboard_tabs` rows per version while **reusin
 - Embedded mode injects JWT into frontend API calls via `_smr_token` and `JWT` header.
 - Backend auth allows Smartico JWT header flow in API middleware.
 - Embedded mode hides some Lightdash UI controls and legal/support elements.
+- `viewer` role can use Explore (fork delta). Community `viewer` has **no** Explore ability; `manage:Explore` starts at `interactive_viewer`. Smartico embedded users are all org-role `viewer` (single shared org/project; their JWT wraps a PAT → they log in as a real `viewer` user). To enable embedded "Explore from here" without the rest of the `interactive_viewer` bundle, `manage:Explore` was added to the `viewer` role in **three** places that must stay in sync (SMR-marked):
+    - `packages/common/src/authorization/organizationMemberAbility.ts` (`viewer()` — the one that actually applies, perms come from org role)
+    - `packages/common/src/authorization/projectMemberAbility.ts` (`viewer()`)
+    - `packages/common/src/authorization/roleToScopeMapping.ts` (`VIEWER` `BASE_ROLE_SCOPES`)
+    - test flipped: `projectMemberAbility.test.ts` "viewer … can Explore"; `roleToScopeParity.test.ts` enforces the ability↔scope sync.
+    - Still blocked for `viewer`: underlying data (`UnderlyingData`), SQL runner (`manage:SqlRunner`), dbt refresh (`manage:Job`+`manage:CompileProject`), scheduled deliveries, Google Sheets.
+    - **Data isolation on the explore path** rides entirely on the per-user BigQuery override `applySmrBigQueryProjectIdOverride` in `AsyncQueryService.prepareMetricQueryAsyncQueryArgs` (fires for `executeAsyncMetricQuery`, the "Explore from here" path). Requires every external user to have `bq_project_id` set, else it falls back to the shared `SMR_BQ_PROJECT`.
 - Currency placeholder replacement is applied recursively in API responses (`{cur}` -> `_smr_currency`).
 - BigQuery table SQL/database can be rewritten per user using `bq_project_id` and `SMR_BQ_PROJECT`.
 - Async query cache service is wired through `ServiceRepository`.

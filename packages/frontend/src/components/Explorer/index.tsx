@@ -36,6 +36,7 @@ import { useExplore } from '../../hooks/useExplore';
 import { useExplorerQuery } from '../../hooks/useExplorerQuery';
 import { useProjectUuid } from '../../hooks/useProjectUuid';
 import { Can } from '../../providers/Ability';
+import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
 import ScreenshotReadyIndicator from '../common/ScreenshotReadyIndicator';
 import { DrillDownModal } from '../MetricQueryData/DrillDownModal';
 import MetricQueryDataProvider from '../MetricQueryData/MetricQueryDataProvider';
@@ -256,7 +257,12 @@ const Explorer: FC<{ hideHeader?: boolean }> = memo(
                             projectUuid,
                         })}
                     >
-                        {!!projectUuid && <SqlCard projectUuid={projectUuid} />}
+                        {/* SMR: hide the SQL card in embedded mode so raw
+                            table/database names and "Open in SQL Runner" are not
+                            exposed to embedded end-users. */}
+                        {!!projectUuid && !smrIsEmbeddedMode() && (
+                            <SqlCard projectUuid={projectUuid} />
+                        )}
                     </Can>
                 </Stack>
 

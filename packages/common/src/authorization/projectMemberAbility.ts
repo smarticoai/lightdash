@@ -82,6 +82,14 @@ export const projectMemberAbilities: Record<
                 $elemMatch: { userUuid: member.userUuid },
             },
         });
+        // SMR-START: allow viewers to use Explore ("Explore from here" in
+        // Smartico embedded mode). Kept in sync with organizationMemberAbility.
+        // Grants ONLY Explore; underlying data / SQL runner / dbt refresh stay
+        // interactive_viewer+. Data isolation via per-user BigQuery override.
+        can('manage', 'Explore', {
+            projectUuid: member.projectUuid,
+        });
+        // SMR-END
     },
     interactive_viewer(member, { can }) {
         projectMemberAbilities.viewer(member, { can });
