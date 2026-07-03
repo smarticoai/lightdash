@@ -184,6 +184,20 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             fullScreen
             headerActions={
                 <Group gap="xs">
+                    <Select
+                        size="xs"
+                        w={180}
+                        value={language}
+                        onChange={handleLanguageChange}
+                        data={AI_ANALYSIS_LANGUAGES.map((lang) => ({
+                            value: lang,
+                            label: lang,
+                        }))}
+                        allowDeselect={false}
+                        checkIconPosition="right"
+                        comboboxProps={{ withinPortal: true }}
+                        aria-label="Analysis language"
+                    />
                     <ActionIcon
                         variant={panelSide === 'left' ? 'filled' : 'default'}
                         onClick={() => setPanelSide('left')}
@@ -222,22 +236,6 @@ const DashboardAiAnalysisModal: FC<Props> = ({
         >
             <Box className={classes.panel}>
                 <Box className={classes.mainArea}>
-                    <Group className={classes.toolbar} justify="flex-start">
-                        <Select
-                            size="xs"
-                            w={200}
-                            value={language}
-                            onChange={handleLanguageChange}
-                            data={AI_ANALYSIS_LANGUAGES.map((lang) => ({
-                                value: lang,
-                                label: lang,
-                            }))}
-                            allowDeselect={false}
-                            checkIconPosition="right"
-                            comboboxProps={{ withinPortal: true }}
-                            aria-label="Analysis language"
-                        />
-                    </Group>
                     {showCenteredLoading ? (
                         <Center className={classes.loadingArea}>
                             <Stack align="center" gap="xs">
