@@ -6,6 +6,7 @@ import {
     Group,
     Loader,
     ScrollArea,
+    Select,
     Stack,
     Text,
 } from '@mantine-8/core';
@@ -30,6 +31,44 @@ type Props = {
     getActiveTabCapturePayload: () => Record<string, unknown>;
 };
 
+// Languages the analysis can be generated in. The selected value is sent to the
+// backend as-is and injected into the AI prompt ("respond in <language>").
+const AI_ANALYSIS_LANGUAGES = [
+    'Chinese (Traditional)',
+    'Czech',
+    'English',
+    'French',
+    'Japanese',
+    'Portuguese (Brazil)',
+    'Russian',
+    'Slovak',
+    'Spanish',
+    'Turkish',
+    'Ukrainian',
+] as const;
+
+const DEFAULT_AI_ANALYSIS_LANGUAGE = 'English';
+
+// Persisted across dashboards/screens so the user's language sticks.
+const AI_ANALYSIS_LANGUAGE_STORAGE_KEY = 'smr_ai_analysis_language';
+
+const readStoredLanguage = (): string => {
+    try {
+        const stored = window.localStorage.getItem(
+            AI_ANALYSIS_LANGUAGE_STORAGE_KEY,
+        );
+        if (
+            stored &&
+            (AI_ANALYSIS_LANGUAGES as readonly string[]).includes(stored)
+        ) {
+            return stored;
+        }
+    } catch {
+        // localStorage may be unavailable (private mode) — fall back to default.
+    }
+    return DEFAULT_AI_ANALYSIS_LANGUAGE;
+};
+
 const DashboardAiAnalysisModal: FC<Props> = ({
     opened,
     onClose,
@@ -41,6 +80,7 @@ const DashboardAiAnalysisModal: FC<Props> = ({
     const [streamError, setStreamError] = useState<string | null>(null);
     const [isStreaming, setIsStreaming] = useState(false);
     const [panelSide, setPanelSide] = useState<'left' | 'right'>('right');
+    const [language, setLanguage] = useState<string>(() => readStoredLanguage());
     const abortRef = useRef<AbortController | null>(null);
     const getPayloadRef = useRef(getActiveTabCapturePayload);
     getPayloadRef.current = getActiveTabCapturePayload;
@@ -73,7 +113,9 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             try {
                 const res = await lightdashApiStream({
                     method: 'POST',
-                    url: `/projects/${projectUuid}/dashboards/${dashboardUuid}/active-tab/ai-analysis/stream`,
+                    url: `/projects/${projectUuid}/dashboards/${dashboardUuid}/active-tab/ai-analysis/stream?language=${encodeURIComponent(
+                        language,
+                    )}`,
                     body: JSON.stringify(payload),
                     signal: ac.signal,
                 });
@@ -110,11 +152,24 @@ const DashboardAiAnalysisModal: FC<Props> = ({
             cancelled = true;
             ac.abort();
         };
-    }, [opened, projectUuid, dashboardUuid]);
+    }, [opened, projectUuid, dashboardUuid, language]);
 
     const handleClose = () => {
         abortRef.current?.abort();
         onClose();
+    };
+
+    const handleLanguageChange = (value: string | null) => {
+        if (!value) return;
+        setLanguage(value);
+        try {
+            window.localStorage.setItem(
+                AI_ANALYSIS_LANGUAGE_STORAGE_KEY,
+                value,
+            );
+        } catch {
+            // localStorage may be unavailable (private mode) — ignore.
+        }
     };
 
     const showCenteredLoading =
@@ -167,6 +222,22 @@ const DashboardAiAnalysisModal: FC<Props> = ({
         >
             <Box className={classes.panel}>
                 <Box className={classes.mainArea}>
+                    <Group className={classes.toolbar} justify="flex-start">
+                        <Select
+                            size="xs"
+                            w={200}
+                            value={language}
+                            onChange={handleLanguageChange}
+                            data={AI_ANALYSIS_LANGUAGES.map((lang) => ({
+                                value: lang,
+                                label: lang,
+                            }))}
+                            allowDeselect={false}
+                            checkIconPosition="right"
+                            comboboxProps={{ withinPortal: true }}
+                            aria-label="Analysis language"
+                        />
+                    </Group>
                     {showCenteredLoading ? (
                         <Center className={classes.loadingArea}>
                             <Stack align="center" gap="xs">

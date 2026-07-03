@@ -44,6 +44,12 @@
     pointer-events: none;
 }
 
+.toolbar {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--mantine-color-ldGray-2);
+    flex-shrink: 0;
+}
+
 .panelBody {
     flex: 1;
     min-height: 0;

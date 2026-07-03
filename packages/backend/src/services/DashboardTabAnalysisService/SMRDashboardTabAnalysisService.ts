@@ -143,6 +143,7 @@ export class DashboardTabAnalysisService extends BaseService {
         projectUuid: string,
         dashboardUuid: string,
         payload: unknown,
+        language: string | undefined,
         res: Response,
     ): Promise<void> {
         const geminiConfig =
@@ -210,9 +211,15 @@ export class DashboardTabAnalysisService extends BaseService {
             DashboardTabAnalysisService.normalizePayloadForCache(payload);
         const inputMessage = JSON.stringify(normalizedPayloadForCache);
         const userMessage = JSON.stringify(normalizedPayloadForCache, null, 2);
+        const resolvedLanguage =
+            typeof language === 'string' && language.trim()
+                ? language.trim()
+                : 'English';
         const systemPrompt = `${tabConfig.aiAnalysisPrompt}
 
-Use markdown formatting where it improves readability. Apply bold, italic, and underline when it meaningfully emphasizes important points.`;
+Use markdown formatting where it improves readability. Apply bold, italic, and underline when it meaningfully emphasizes important points.
+
+Write the entire response in ${resolvedLanguage}. All headings, prose, and bullet points must be in ${resolvedLanguage}, regardless of the language of the data or the instructions above. Keep metric names, numbers, and proper nouns unchanged.`;
         const cacheKey = DashboardTabAnalysisService.getCacheKey({
             dashboardUuid,
             projectUuid,

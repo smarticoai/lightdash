@@ -25,10 +25,12 @@ const BASE_ROLE_SCOPES = {
         'view:Tags',
         'manage:ExportCsv',
 
-        // SMR: viewers can use Explore ("Explore from here" in embedded mode).
-        // Must stay in sync with the viewer() grant in projectMemberAbility.ts
-        // and organizationMemberAbility.ts (enforced by roleToScopeParity test).
+        // SMR: viewers can use Explore + view underlying data / drill-into
+        // (embedded mode). Must stay in sync with the viewer() grants in
+        // projectMemberAbility.ts and organizationMemberAbility.ts (enforced by
+        // roleToScopeParity test).
         'manage:Explore',
+        'view:UnderlyingData',
 
         // Org-context view scopes — every member-or-above can see the
         // org's own metadata + the list of fellow members. Granted by

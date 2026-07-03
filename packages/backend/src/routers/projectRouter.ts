@@ -375,6 +375,10 @@ projectRouter.post(
         try {
             const projectUuid = getObjectValue(req.params, 'projectUuid');
             const dashboardUuid = getObjectValue(req.params, 'dashboardUuid');
+            const language =
+                typeof req.query.language === 'string'
+                    ? req.query.language
+                    : undefined;
             await req.services
                 .getDashboardTabAnalysisService()
                 .streamActiveTabAnalysis(
@@ -382,6 +386,7 @@ projectRouter.post(
                     projectUuid,
                     dashboardUuid,
                     req.body,
+                    language,
                     res,
                 );
         } catch (e) {

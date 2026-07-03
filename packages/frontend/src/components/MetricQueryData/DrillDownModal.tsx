@@ -19,9 +19,10 @@ import {
 import { Button } from '@mantine-8/core';
 import { IconArrowBarToDown, IconExternalLink } from '@tabler/icons-react';
 import { useCallback, useMemo, useState, type FC } from 'react';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { v4 as uuidv4 } from 'uuid';
 import { getExplorerUrlFromCreateSavedChartVersion } from '../../hooks/useExplorerRoute';
+import { smrIsEmbeddedMode } from '../../utils/smarticoUtils';
 import FieldSelect from '../common/FieldSelect';
 import MantineIcon from '../common/MantineIcon';
 import MantineModal from '../common/MantineModal';
@@ -176,6 +177,7 @@ const drillDownExploreUrl = ({
 
 export const DrillDownModal: FC = () => {
     const { projectUuid } = useParams<{ projectUuid: string }>();
+    const navigate = useNavigate();
 
     const [selectedDimension, setSelectedDimension] =
         useState<CompiledDimension>();
@@ -237,16 +239,34 @@ export const DrillDownModal: FC = () => {
             size="md"
             icon={IconArrowBarToDown}
             actions={
-                <Button
-                    component="a"
-                    target="_blank"
-                    href={url}
-                    leftSection={<MantineIcon icon={IconExternalLink} />}
-                    disabled={!selectedDimension}
-                    onClick={() => setTimeout(onClose, 500)}
-                >
-                    Open in new tab
-                </Button>
+                // SMR: in embedded mode navigate client-side (same window) so the
+                // SPA keeps window._smr_is_embedded and lands on the embedded-locked
+                // Explore screen. A new tab / full-nav anchor would drop the embed
+                // flag (set only from the URL hash on page load) and expose the full
+                // un-embedded app.
+                smrIsEmbeddedMode() ? (
+                    <Button
+                        leftSection={<MantineIcon icon={IconExternalLink} />}
+                        disabled={!selectedDimension || !url}
+                        onClick={() => {
+                            if (url) void navigate(url);
+                            setTimeout(onClose, 500);
+                        }}
+                    >
+                        Open
+                    </Button>
+                ) : (
+                    <Button
+                        component="a"
+                        target="_blank"
+                        href={url}
+                        leftSection={<MantineIcon icon={IconExternalLink} />}
+                        disabled={!selectedDimension}
+                        onClick={() => setTimeout(onClose, 500)}
+                    >
+                        Open in new tab
+                    </Button>
+                )
             }
         >
             <FieldSelect

@@ -82,11 +82,15 @@ export const projectMemberAbilities: Record<
                 $elemMatch: { userUuid: member.userUuid },
             },
         });
-        // SMR-START: allow viewers to use Explore ("Explore from here" in
-        // Smartico embedded mode). Kept in sync with organizationMemberAbility.
-        // Grants ONLY Explore; underlying data / SQL runner / dbt refresh stay
-        // interactive_viewer+. Data isolation via per-user BigQuery override.
+        // SMR-START: allow viewers to use Explore + view underlying data /
+        // drill-into (Smartico embedded mode). Kept in sync with
+        // organizationMemberAbility. Grants ONLY these two; SQL runner / dbt
+        // refresh stay interactive_viewer+. Data isolation via per-user
+        // BigQuery override (explore + underlying data query paths).
         can('manage', 'Explore', {
+            projectUuid: member.projectUuid,
+        });
+        can('view', 'UnderlyingData', {
             projectUuid: member.projectUuid,
         });
         // SMR-END

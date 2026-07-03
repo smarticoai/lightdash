@@ -105,12 +105,17 @@ export const applyOrganizationMemberStaticAbilities: Record<
             organizationUuid: member.organizationUuid,
             userUuid: member.userUuid,
         });
-        // SMR-START: allow viewers to use Explore ("Explore from here" in
-        // Smartico embedded mode). This grants ONLY Explore — underlying data,
-        // SQL runner, dbt refresh, scheduled deliveries, etc. remain
-        // interactive_viewer+. Data isolation is enforced downstream by the
-        // per-user BigQuery bq_project_id override in AsyncQueryService.
+        // SMR-START: allow viewers to use Explore + view underlying data /
+        // drill-into ("Explore from here" and "View underlying data" in Smartico
+        // embedded mode). Grants ONLY these two — SQL runner, dbt refresh,
+        // scheduled deliveries, etc. remain interactive_viewer+. Cross-brand
+        // isolation is enforced downstream by the per-user BigQuery bq_project_id
+        // override in AsyncQueryService (applies to both explore and underlying
+        // data query paths).
         can('manage', 'Explore', {
+            organizationUuid: member.organizationUuid,
+        });
+        can('view', 'UnderlyingData', {
             organizationUuid: member.organizationUuid,
         });
         // SMR-END

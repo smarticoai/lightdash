@@ -1642,13 +1642,14 @@ describe('Project member permissions', () => {
                     ability.can('manage', subject('Explore', { projectUuid })),
                 ).toEqual(true);
             });
-            it('cannot view underlying data', () => {
+            // SMR: viewers CAN view underlying data / drill-into (embedded mode).
+            it('can view underlying data', () => {
                 expect(
                     ability.can(
                         'view',
                         subject('UnderlyingData', { projectUuid }),
                     ),
-                ).toEqual(false);
+                ).toEqual(true);
             });
 
             describe('JobStatus', () => {
