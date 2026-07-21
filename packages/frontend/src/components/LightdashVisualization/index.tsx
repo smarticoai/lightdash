@@ -1,6 +1,6 @@
 import { assertUnreachable, ChartType } from '@lightdash/common';
 import { Anchor, Skeleton, Text } from '@mantine-8/core';
-import { IconChartBarOff } from '@tabler/icons-react';
+import { IconChartBarOff, IconTable } from '@tabler/icons-react';
 import {
     forwardRef,
     Fragment,
@@ -13,7 +13,7 @@ import {
     type FC,
 } from 'react';
 import { EmptyState } from '../common/EmptyState';
-import MantineIcon from '../common/MantineIcon';
+import MantineIcon, { type MantineIconProps } from '../common/MantineIcon';
 import SuboptimalState from '../common/SuboptimalState/SuboptimalState';
 import CustomVisualization from '../CustomVisualization';
 import FunnelChart from '../FunnelChart';
@@ -76,32 +76,21 @@ function useDeferredVisibility(enabled: boolean) {
 
 /**
  * SMR: replaces the default "No results" empty state with the chart's own copy.
+ * Uses the `description` slot of SuboptimalState so it matches the styling of
+ * "This query ran successfully but returned no results".
  * Still signals screenshot readiness so headless exports don't wait for a chart
  * that will never render.
  */
 const SmrNoResultsState: FC<{
     message: string;
+    icon: MantineIconProps['icon'];
     onScreenshotReady?: () => void;
-}> = ({ message, onScreenshotReady }) => {
+}> = ({ message, icon, onScreenshotReady }) => {
     useEffect(() => {
         onScreenshotReady?.();
     }, [onScreenshotReady]);
 
-    return (
-        <EmptyState
-            icon={
-                <MantineIcon
-                    color="ldGray.5"
-                    size="xxl"
-                    icon={IconChartBarOff}
-                />
-            }
-            h="100%"
-            w="100%"
-            justify="center"
-            title={message}
-        />
-    );
+    return <SuboptimalState icon={icon} description={message} />;
 };
 
 interface LightdashVisualizationProps {
@@ -209,9 +198,21 @@ const LightdashVisualization = memo(
                         ref={ref}
                         className={className}
                         data-testid={props['data-testid']}
+                        style={{
+                            width: '100%',
+                            height: '100%',
+                            minHeight: 'inherit',
+                            display: 'flex',
+                            flexDirection: 'column',
+                        }}
                     >
                         <SmrNoResultsState
                             message={smarticoNoResultsMessage}
+                            icon={
+                                visualizationConfig.chartType === ChartType.TABLE
+                                    ? IconTable
+                                    : IconChartBarOff
+                            }
                             onScreenshotReady={onScreenshotReady}
                         />
                     </div>
