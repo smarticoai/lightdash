@@ -144,6 +144,7 @@ export const spaceEntry: SpaceTable['base'] = {
 };
 export const savedChartEntry: SavedChartTable['base'] = {
     saved_query_id: 0,
+    smartico_no_results_message: null,
     saved_query_uuid: '123',
     space_id: 0,
     name: 'chart name',

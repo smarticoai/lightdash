@@ -373,6 +373,7 @@ const ValidDashboardChartTile: FC<{
                 columnOrder={chart.tableConfig.columnOrder}
                 pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}
                 savedChartUuid={chart.uuid}
+                smarticoNoResultsMessage={chart.smarticoNoResultsMessage}
                 dashboardFilters={dashboardFilters}
                 invalidateCache={invalidateCache}
                 colorPalette={colorPalette}
@@ -516,6 +517,7 @@ const ValidDashboardChartTileMinimal: FC<{
             columnOrder={chart.tableConfig.columnOrder}
             pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}
             savedChartUuid={chart.uuid}
+            smarticoNoResultsMessage={chart.smarticoNoResultsMessage}
             dashboardFilters={dashboardFilters}
             colorPalette={colorPalette}
             setEchartsRef={setEchartsRef}

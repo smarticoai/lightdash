@@ -137,6 +137,7 @@ export const dashboard: Dashboard = {
 
 export const chart: SavedChart = {
     uuid: 'chart_uuid',
+    smarticoNoResultsMessage: null,
     projectUuid: dashboard.projectUuid,
     name: 'chart name',
     slug: 'chart-name',

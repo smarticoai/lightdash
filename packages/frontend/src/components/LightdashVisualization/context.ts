@@ -59,6 +59,8 @@ type VisualizationContext = {
     isTouchDevice: boolean;
     // Resolved timezone for formatting (undefined when EnableTimezoneSupport flag is off)
     resolvedTimezone?: string;
+    // SMR: chart-level override for the "No results" empty state
+    smarticoNoResultsMessage?: string | null;
 };
 
 const Context = createContext<VisualizationContext | undefined>(undefined);

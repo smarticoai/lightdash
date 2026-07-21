@@ -80,6 +80,7 @@ const updateSavedQuery = async (
             description: data.description,
             spaceUuid: data.spaceUuid,
             colorPaletteUuid: data.colorPaletteUuid,
+            smarticoNoResultsMessage: data.smarticoNoResultsMessage, // SMR
         }),
     });
 };
@@ -283,7 +284,13 @@ export const useUpdateMutation = (
     return useMutation<
         SavedChart,
         ApiError,
-        Pick<UpdateSavedChart, 'name' | 'description' | 'colorPaletteUuid'>
+        Pick<
+            UpdateSavedChart,
+            | 'name'
+            | 'description'
+            | 'colorPaletteUuid'
+            | 'smarticoNoResultsMessage'
+        >
     >(
         (data) => {
             if (savedQueryUuid) {

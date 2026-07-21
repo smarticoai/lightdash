@@ -855,6 +855,11 @@ export type SavedChart = {
     name: string;
     /** Optional description of what this chart displays */
     description?: string;
+    /**
+     * SMR: custom message shown instead of the default "No results" empty state
+     * when the chart's query returns zero rows. `null` keeps the default copy.
+     */
+    smarticoNoResultsMessage: string | null;
     /** The explore/table name this chart queries from */
     tableName: string;
     /** The query configuration defining what data to fetch */
@@ -961,12 +966,21 @@ export type CreateSavedChartVersion = Omit<
     | 'access'
     | 'slug'
     | 'verification'
+    // SMR: chart-level setting, not part of a chart version
+    | 'smarticoNoResultsMessage'
 > &
     // For Charts created within a dashboard
     Partial<Pick<SavedChart, 'dashboardUuid' | 'dashboardName'>>;
 
 export type UpdateSavedChart = Partial<
-    Pick<SavedChart, 'name' | 'description' | 'spaceUuid' | 'colorPaletteUuid'>
+    Pick<
+        SavedChart,
+        | 'name'
+        | 'description'
+        | 'spaceUuid'
+        | 'colorPaletteUuid'
+        | 'smarticoNoResultsMessage'
+    >
 >;
 
 export type UpdateMultipleSavedChart = Pick<

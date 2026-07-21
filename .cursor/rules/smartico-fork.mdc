@@ -11,6 +11,7 @@ This repository tracks community Lightdash through `upstream/main` and carries S
 
 ALTER TABLE public.dashboard_tabs ADD smartico_enable_ai_analysis boolean NULL;
 ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
+ALTER TABLE public.saved_queries ADD smartico_no_results_message text NULL;
 
 ## Where Smartico logic lives
 
@@ -71,6 +72,16 @@ ALTER TABLE public.dashboard_tabs ADD smartico_ai_analysis_prompt varchar NULL;
     - `packages/frontend/src/providers/Dashboard/types.ts` (`DashboardTileCaptureSnapshot`, including SQL chart `underlyingTable`)
     - `packages/frontend/src/utils/dashboardActiveTabCapture.ts`
     - `packages/frontend/src/utils/dashboardAiAnalysisPlain.ts` (markdown sanitizer; may be unused)
+- Per-chart "no results" message (`saved_queries.smartico_no_results_message`):
+    - `packages/common/src/types/savedCharts.ts` (`SavedChart.smarticoNoResultsMessage: string | null`, added to `UpdateSavedChart`, omitted from `CreateSavedChartVersion` — it is chart-level, not version-level)
+    - `packages/backend/src/database/entities/savedCharts.ts` (`DbSavedChart` + `SavedChartTable` update `Pick` — omitting it from the update `Pick` makes Knex reject the write)
+    - `packages/backend/src/models/SavedChartModel.ts` (`DbSavedChartDetails`, `get()` select + mapping, `update()`); the summary/exposure/trash selects deliberately do **not** carry it
+    - `packages/frontend/src/hooks/useSavedQuery.ts` (`updateSavedQuery` hand-rolls the PATCH body — the field must be listed there *and* in the `useUpdateMutation` `Pick`)
+    - `packages/frontend/src/components/common/modal/ChartUpdateModal.tsx` ("Message for no results" textarea; empty string is sent as `null` to clear it)
+    - `packages/frontend/src/components/LightdashVisualization/VisualizationProvider.tsx` + `context.ts` (prop → context)
+    - `packages/frontend/src/components/LightdashVisualization/index.tsx` (`SmrNoResultsState` short-circuits every chart type when the query is `READY` with 0 rows; still calls `onScreenshotReady` so headless exports don't hang)
+    - Threaded from `DashboardChartTile.tsx` (both providers), `Explorer/VisualizationCard/VisualizationCard.tsx`, `pages/MinimalSavedExplorer.tsx`, `ee/features/embed/EmbedChart/components/EmbedChart.tsx`
+    - Backend mocks that construct `SavedChart`/`DbSavedChart` need the field: `DashboardModel.mock.ts`, `DashboardService.mock.ts`, `PromoteService.mock.ts`, `RenameService/rename.mock.ts`
 - Build/runtime deltas:
     - `dockerfile`
     - `.smr`

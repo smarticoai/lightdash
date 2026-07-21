@@ -55,6 +55,7 @@ export type SavedChartTable = Knex.CompositeTableType<
             | 'space_id'
             | 'name'
             | 'description'
+            | 'smartico_no_results_message'
             | 'last_version_chart_kind'
             | 'last_version_updated_at'
             | 'last_version_updated_by_user_uuid'
@@ -77,6 +78,7 @@ export type DbSavedChart = {
     name: string;
     created_at: Date;
     description: string | undefined;
+    smartico_no_results_message: string | null;
     last_version_chart_kind: ChartKind;
     last_version_updated_at: Date;
     last_version_updated_by_user_uuid: string | undefined;

@@ -126,6 +126,7 @@ export const chartWithCustomMetric = {
     resolvedColorPalette: getDefaultResolvedColorPalette(),
     slug: 'min-customer-id-1',
     verification: null,
+    smarticoNoResultsMessage: null,
 } as SavedChartDAO;
 
 export const expectedRenamedChartWithCustomMetric = {
@@ -237,6 +238,7 @@ export const expectedRenamedChartWithCustomMetric = {
     resolvedColorPalette: getDefaultResolvedColorPalette(),
     slug: 'min-customer-id-1',
     verification: null,
+    smarticoNoResultsMessage: null,
 } as SavedChartDAO;
 
 // TO replace order_status with orders_order_type
@@ -454,6 +456,7 @@ export const chartMocked = {
     resolvedColorPalette: getDefaultResolvedColorPalette(),
     slug: 'custom-metric-filter',
     verification: null,
+    smarticoNoResultsMessage: null,
 } as SavedChartDAO;
 
 export const expectedRenamedChartMocked = {
@@ -672,6 +675,7 @@ export const expectedRenamedChartMocked = {
     resolvedColorPalette: getDefaultResolvedColorPalette(),
     slug: 'custom-metric-filter',
     verification: null,
+    smarticoNoResultsMessage: null,
 } as SavedChartDAO;
 
 export const chartWithCustomMetricWithSimilarName = {
@@ -776,4 +780,5 @@ export const chartWithCustomMetricWithSimilarName = {
     resolvedColorPalette: getDefaultResolvedColorPalette(),
     slug: 'min-customer-id-1',
     verification: null,
+    smarticoNoResultsMessage: null,
 } as SavedChartDAO;

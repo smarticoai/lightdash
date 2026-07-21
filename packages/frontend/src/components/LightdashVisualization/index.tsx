@@ -10,6 +10,7 @@ import {
     useEffect,
     useRef,
     useState,
+    type FC,
 } from 'react';
 import { EmptyState } from '../common/EmptyState';
 import MantineIcon from '../common/MantineIcon';
@@ -73,6 +74,36 @@ function useDeferredVisibility(enabled: boolean) {
     return { sentinelRef, isVisible };
 }
 
+/**
+ * SMR: replaces the default "No results" empty state with the chart's own copy.
+ * Still signals screenshot readiness so headless exports don't wait for a chart
+ * that will never render.
+ */
+const SmrNoResultsState: FC<{
+    message: string;
+    onScreenshotReady?: () => void;
+}> = ({ message, onScreenshotReady }) => {
+    useEffect(() => {
+        onScreenshotReady?.();
+    }, [onScreenshotReady]);
+
+    return (
+        <EmptyState
+            icon={
+                <MantineIcon
+                    color="ldGray.5"
+                    size="xxl"
+                    icon={IconChartBarOff}
+                />
+            }
+            h="100%"
+            w="100%"
+            justify="center"
+            title={message}
+        />
+    );
+};
+
 interface LightdashVisualizationProps {
     isDashboard?: boolean;
     tileUuid?: string;
@@ -97,8 +128,14 @@ const LightdashVisualization = memo(
             },
             ref,
         ) => {
-            const { visualizationConfig, minimal, apiErrorDetail } =
-                useVisualizationContext();
+            const {
+                visualizationConfig,
+                minimal,
+                apiErrorDetail,
+                resultsData,
+                isLoading,
+                smarticoNoResultsMessage,
+            } = useVisualizationContext();
 
             const { sentinelRef, isVisible } = useDeferredVisibility(
                 isDashboard && !minimal,
@@ -156,6 +193,31 @@ const LightdashVisualization = memo(
                     </div>
                 );
             }
+
+            // SMR-START: chart-level override for the "No results" empty state
+            // `totalResults` is only defined once the first page has come back,
+            // so this can't fire while the query is still pending or idle.
+            const hasNoResults =
+                !isLoading &&
+                resultsData !== undefined &&
+                resultsData.totalResults === 0 &&
+                resultsData.rows.length === 0;
+
+            if (smarticoNoResultsMessage && hasNoResults) {
+                return (
+                    <div
+                        ref={ref}
+                        className={className}
+                        data-testid={props['data-testid']}
+                    >
+                        <SmrNoResultsState
+                            message={smarticoNoResultsMessage}
+                            onScreenshotReady={onScreenshotReady}
+                        />
+                    </div>
+                );
+            }
+            // SMR-END
 
             // Render chart content based on type
             let chartContent: React.ReactNode;

@@ -86,6 +86,8 @@ export type VisualizationProviderProps = {
     isDashboard?: boolean;
     isEditMode?: boolean;
     dateZoom?: DateZoom;
+    /** SMR: chart-level override for the "No results" empty state */
+    smarticoNoResultsMessage?: string | null;
 };
 
 const VisualizationProvider: FC<
@@ -118,6 +120,7 @@ const VisualizationProvider: FC<
     isDashboard,
     isEditMode,
     dateZoom,
+    smarticoNoResultsMessage,
 }) => {
     const itemsMap = useMemo(() => {
         return resultsData?.fields;
@@ -369,6 +372,7 @@ const VisualizationProvider: FC<
         isEditMode,
         isTouchDevice,
         resolvedTimezone: lastValidResultsData?.resolvedTimezone,
+        smarticoNoResultsMessage,
     };
 
     switch (chartConfig.type) {

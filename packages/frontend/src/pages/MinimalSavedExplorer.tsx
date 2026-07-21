@@ -113,6 +113,7 @@ const MinimalExplorerContent = memo(() => {
                 columnOrder={savedChart.tableConfig.columnOrder}
                 pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}
                 savedChartUuid={savedChart.uuid}
+                smarticoNoResultsMessage={savedChart.smarticoNoResultsMessage}
                 colorPalette={savedChart.colorPalette}
                 parameters={query.data?.usedParametersValues}
                 containerWidth={containerWidth}

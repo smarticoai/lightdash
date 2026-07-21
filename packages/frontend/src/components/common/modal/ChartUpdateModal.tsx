@@ -19,7 +19,10 @@ interface ChartUpdateModalProps extends Pick<ModalProps, 'opened' | 'onClose'> {
     onConfirm?: () => void;
 }
 
-type FormState = Pick<SavedChart, 'name' | 'description'>;
+type FormState = Pick<SavedChart, 'name' | 'description'> & {
+    // SMR: empty string means "use the default no-results copy"
+    smarticoNoResultsMessage: string;
+};
 
 const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
     opened,
@@ -42,6 +45,7 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
         initialValues: {
             name: '',
             description: '',
+            smarticoNoResultsMessage: '',
         },
     });
 
@@ -52,6 +56,7 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
         setValues({
             name: chart.name,
             description: chart.description,
+            smarticoNoResultsMessage: chart.smarticoNoResultsMessage ?? '',
         });
     }, [chart, setValues]);
 
@@ -63,6 +68,9 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
         await mutateAsync({
             name: data.name,
             description: data.description,
+            // SMR: null clears the override and restores the default copy
+            smarticoNoResultsMessage:
+                data.smarticoNoResultsMessage.trim() || null,
         });
         onConfirm?.();
     });
@@ -106,6 +114,18 @@ const ChartUpdateModal: FC<ChartUpdateModalProps> = ({
                         maxRows={3}
                         {...form.getInputProps('description')}
                     />
+
+                    {/* SMR-START: custom empty-results copy */}
+                    <Textarea
+                        label="Message for no results"
+                        description="Shown instead of the default “No results” message when this chart returns no rows"
+                        placeholder="eg. No VIPs to watch today — check back tomorrow"
+                        disabled={isUpdating}
+                        autosize
+                        maxRows={3}
+                        {...form.getInputProps('smarticoNoResultsMessage')}
+                    />
+                    {/* SMR-END */}
                 </Stack>
             </form>
         </MantineModal>

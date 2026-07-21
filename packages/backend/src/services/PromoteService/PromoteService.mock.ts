@@ -137,6 +137,7 @@ export const promotedChart: PromotedChart = {
     chart: {
         uuid: 'promoted-chart-uuid',
         projectUuid: promotedProjectUuid,
+        smarticoNoResultsMessage: null,
         name: 'apple chart',
         description: '',
         tableName: 'orders',

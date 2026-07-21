@@ -50,6 +50,7 @@ const MinimalChartContent = memo(() => {
             columnOrder={savedChart.tableConfig.columnOrder}
             pivotTableMaxColumnLimit={health.data.pivotTable.maxColumnLimit}
             savedChartUuid={savedChart.uuid}
+            smarticoNoResultsMessage={savedChart.smarticoNoResultsMessage}
             colorPalette={savedChart.colorPalette}
             parameters={query.data?.usedParametersValues}
         >

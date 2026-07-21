@@ -94,6 +94,7 @@ type DbSavedChartDetails = {
     saved_query_uuid: string;
     name: string;
     description: string | undefined;
+    smartico_no_results_message: string | null;
     saved_queries_version_id: number;
     explore_name: string;
     filters: AnyType;
@@ -761,6 +762,8 @@ export class SavedChartModel {
             .update({
                 name: data.name,
                 description: data.description,
+                // SMR: custom empty-results copy, editable from the Update Chart modal
+                smartico_no_results_message: data.smarticoNoResultsMessage,
                 space_id: (
                     await SpaceModel.getSpaceIdAndName(
                         this.database,
@@ -995,6 +998,7 @@ export class SavedChartModel {
                         `${SavedChartsTableName}.saved_query_uuid`,
                         `${SavedChartsTableName}.name`,
                         `${SavedChartsTableName}.description`,
+                        `${SavedChartsTableName}.smartico_no_results_message`,
                         `${SavedChartsTableName}.dashboard_uuid`,
                         `${SavedChartsTableName}.slug`,
                         `${DashboardsTableName}.name as dashboardName`,
@@ -1217,6 +1221,8 @@ export class SavedChartModel {
                     projectUuid: savedQuery.project_uuid,
                     name: savedQuery.name,
                     description: savedQuery.description,
+                    smarticoNoResultsMessage:
+                        savedQuery.smartico_no_results_message,
                     tableName: savedQuery.explore_name,
                     updatedAt: savedQuery.created_at,
                     updatedByUser: {
