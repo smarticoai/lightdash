@@ -43,48 +43,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tar \
     libsystemd0
 
-# Installing multiple versions of dbt
-# SMR: Only install dbt 1.9+ to reduce build time
-# dbt 1.9 is the default for Smartico
-RUN python3 -m venv /usr/local/dbt1.9 \
-    && /usr/local/dbt1.9/bin/pip install \
-    "dbt-core~=1.9.0" \
-    "dbt-postgres~=1.9.0" \
-    "dbt-redshift~=1.9.0" \
-    "dbt-snowflake~=1.9.0" \
-    "dbt-bigquery~=1.9.0" \
-    "dbt-databricks~=1.9.0" \
-    "dbt-trino~=1.9.0" \
-    "dbt-clickhouse~=1.9.0" \
-    "dbt-athena~=1.9.0" \
-    "dbt-duckdb~=1.9.0" \
-    && ln -s /usr/local/dbt1.9/bin/dbt /usr/local/bin/dbt1.9 \
-    && python3 -m venv /usr/local/dbt1.10 \
-    && /usr/local/dbt1.10/bin/pip install \
-    "dbt-core~=1.10.0" \
-    "dbt-postgres~=1.10.0" \
-    "dbt-redshift~=1.10.0" \
-    "dbt-snowflake~=1.10.0" \
-    "dbt-bigquery~=1.10.0" \
-    "dbt-databricks~=1.10.0" \
+# Installing dbt
+# SMR: Only install dbt 1.12 to reduce build time and image size
+# dbt 1.12 is the default for Smartico. Older version commands (dbt1.9 - dbt1.11)
+# are aliased to it in the prod stage so projects pinned to them keep working.
+RUN python3 -m venv /usr/local/dbt1.12 \
+    && /usr/local/dbt1.12/bin/pip install --no-cache-dir \
+    "dbt-core~=1.12.0" \
+    "dbt-postgres~=1.11.0" \
+    "dbt-redshift~=1.11.0" \
+    "dbt-snowflake~=1.12.0" \
+    "dbt-bigquery~=1.12.0" \
+    "dbt-databricks~=1.12.0" \
     "dbt-trino~=1.10.0" \
-    "dbt-clickhouse~=1.9.0" \
-    "dbt-athena~=1.10.0" \
-    "dbt-duckdb~=1.10.0" \
-    && ln -s /usr/local/dbt1.10/bin/dbt /usr/local/bin/dbt1.10 \
-    && python3 -m venv /usr/local/dbt1.11 \
-    && /usr/local/dbt1.11/bin/pip install \
-    "dbt-core~=1.11.0" \
-    "dbt-postgres~=1.10.0" \
-    "dbt-redshift~=1.10.0" \
-    "dbt-snowflake~=1.11.0" \
-    "dbt-bigquery~=1.11.0" \
-    "dbt-databricks~=1.11.0" \
-    "dbt-trino~=1.10.0" \
-    "dbt-clickhouse~=1.9.0" \
-    "dbt-athena~=1.10.0" \
-    "dbt-duckdb~=1.10.0" \
-    && ln -s /usr/local/dbt1.11/bin/dbt /usr/local/bin/dbt1.11
+    "dbt-clickhouse~=1.10.0" \
+    "dbt-athena~=1.11.0" \
+    "dbt-duckdb~=1.11.0" \
+    && ln -s /usr/local/dbt1.12/bin/dbt /usr/local/bin/dbt1.12
 
 # -----------------------------
 # Stage 1: stop here for dev environment
@@ -305,21 +280,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# COPY --from=prod-builder  /usr/local/dbt1.4 /usr/local/dbt1.4
-# COPY --from=prod-builder  /usr/local/dbt1.5 /usr/local/dbt1.5
-# COPY --from=prod-builder  /usr/local/dbt1.6 /usr/local/dbt1.6
-# COPY --from=prod-builder  /usr/local/dbt1.7 /usr/local/dbt1.7
-# COPY --from=prod-builder  /usr/local/dbt1.8 /usr/local/dbt1.8
-COPY --from=prod-builder  /usr/local/dbt1.9 /usr/local/dbt1.9
-COPY --from=prod-builder  /usr/local/dbt1.10 /usr/local/dbt1.10
-COPY --from=prod-builder  /usr/local/dbt1.11 /usr/local/dbt1.11
+COPY --from=prod-builder  /usr/local/dbt1.12 /usr/local/dbt1.12
 COPY --from=build-final /usr/app /usr/app
 
-# SMR: Only link dbt 1.9+ versions since we only install those
-RUN ln -s /usr/local/dbt1.9/bin/dbt /usr/local/bin/dbt1.9 \
-    && ln -s /usr/local/dbt1.10/bin/dbt /usr/local/bin/dbt1.10 \
-    && ln -s /usr/local/dbt1.11/bin/dbt /usr/local/bin/dbt1.11 \
-    && ln -s /usr/local/dbt1.9/bin/dbt /usr/local/bin/dbt
+# SMR: Only dbt 1.12 is installed; every other supported version command resolves to it
+RUN ln -s /usr/local/dbt1.12/bin/dbt /usr/local/bin/dbt \
+    && for v in 1.5 1.6 1.7 1.8 1.9 1.10 1.11 1.12; do \
+    ln -sf /usr/local/dbt1.12/bin/dbt /usr/local/bin/dbt$v; \
+    done
 
 
 # Run backend

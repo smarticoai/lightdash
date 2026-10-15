@@ -109,7 +109,7 @@ Each dashboard save creates new `dashboard_tabs` rows per version while **reusin
 - BigQuery table SQL/database can be rewritten per user using `bq_project_id` and `SMR_BQ_PROJECT`.
 - Async query cache service is wired through `ServiceRepository`.
 - Per-tab AI: `dashboard_tabs.smartico_enable_ai_analysis` and `smartico_ai_analysis_prompt` are part of **versioned** dashboard state; inserts/updates must include them on new versions. UI edits persist via dashboard PATCH (including the tab-modal **Update** / **Add** path that calls `handleSaveTabEdit`). Streaming analysis uses the **latest** stored prompt for the tab UUID. `GEMINI_API_KEY` (or configured env) required for Gemini. The AI Analysis modal has a **language dropdown** (11 languages) at the top: selection is persisted in `localStorage['smr_ai_analysis_language']` (sticks across dashboards/screens), sent as the `?language=` query param on the stream request, and injected into the system prompt server-side (`resolvedLanguage`). Language is part of `systemPrompt`, so the response cache keys per-language automatically.
-- Docker image is optimized for dbt `1.9+` only.
+- Docker image (`dockerfile`) installs dbt `1.12` only (default `dbt` binary). `dbt1.5`–`dbt1.11` commands are symlinks to the 1.12 binary so projects pinned to older versions still run (on 1.12). `dockerfile-prs` is untouched and still installs multiple versions.
 
 ## Review findings (important)
 
