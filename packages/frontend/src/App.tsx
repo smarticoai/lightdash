@@ -23,13 +23,18 @@ import SchedulerJobsProvider from './providers/SchedulerJobs/SchedulerJobsProvid
 import ThirdPartyProvider from './providers/ThirdPartyServicesProvider';
 import TrackingProvider from './providers/Tracking/TrackingProvider';
 import Routes from './Routes';
+import { smrIsEmbeddedMode } from './utils/smarticoUtils';
 
 // const isMobile =
 //     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
 //         navigator.userAgent,
 //     ) || window.innerWidth < 768;
 
-const isMobile = window.innerWidth < 768;
+// SMR-START: the BO iframe always gets the desktop routes. The mobile routes show MobileNavBar
+// (logo -> home, menu -> spaces / dashboards / charts), which would let an embedded user leave the
+// dashboard. The width is read once, at load, so a narrow BO window at that moment kept it for good.
+const isMobile = !smrIsEmbeddedMode() && window.innerWidth < 768;
+// SMR-END
 
 const isMinimalPage = window.location.pathname.startsWith('/minimal');
 

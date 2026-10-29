@@ -23,6 +23,8 @@ ALTER TABLE public.saved_queries ADD smartico_no_results_message text NULL;
     - `packages/backend/src/App.ts`
 - Embedded UI behavior:
     - `packages/frontend/src/components/common/Page/Page.tsx`
+    - `packages/frontend/src/App.tsx` (`isMobile` is false in embedded mode: the mobile routes put `MobileNavBar` — logo → home, menu → spaces / dashboards / charts — over every page, and the width is read once at load, so a BO iframe narrower than 768 px stayed mobile and let the user leave the dashboard)
+    - `packages/frontend/src/MobileRoutes.tsx` (`MobileNavBar` returns null in embedded mode without navbar, same rule as the desktop `NavBar`)
     - `packages/frontend/src/components/NavBar/MainNavBarContent.tsx`
     - Embedded "Explore from here" enablement (hide explore chrome + keep nav inside the iframe), all gated by `smrIsEmbeddedMode()`:
         - `packages/frontend/src/components/DashboardTiles/DashboardChartTile.tsx` (`handleCreateShareUrl` navigates client-side via react-router `navigate('/share/…')` in embedded instead of `window.open(_blank)` — a full nav / new tab drops `window._smr_is_embedded`, which `index.html` sets only from the `#token=` hash on page load, and would expose the full un-embedded app)

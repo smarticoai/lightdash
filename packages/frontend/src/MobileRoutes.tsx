@@ -55,6 +55,7 @@ import Projects from './pages/Projects';
 import ShareRedirect from './pages/ShareRedirect';
 import { TrackPage } from './providers/Tracking/TrackingProvider';
 import Logo from './svgs/logo-icon.svg?react';
+import { smrIsEmbeddedMode, smrWithNavbar } from './utils/smarticoUtils';
 import { PageName } from './types/Events';
 
 const RedirectToResource: FC = () => {
@@ -102,6 +103,12 @@ export const MobileNavBar: FC = () => {
         const { globalStyles, ...themeWithoutGlobalStyles } = fullDarkTheme;
         return themeWithoutGlobalStyles;
     }, []);
+
+    // SMR-START: same rule as the desktop NavBar; App.tsx already keeps embedded pages off these routes
+    if (smrIsEmbeddedMode() && !smrWithNavbar()) {
+        return null;
+    }
+    // SMR-END
 
     return (
         <MantineProvider theme={darkTheme}>
